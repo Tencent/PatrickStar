@@ -22,17 +22,19 @@ class SingletonMeta(type):
         return cls._instances[cls]
 
 class HybridPSManager(metaclass = SingletonMeta):
-  def init(self, gpu_info, cpu_info):
-    """
-    知道所有设备的使用情况，来指导payload的迁移
-    singleton类，被所有进程访问
-    """
+  def __init__(self):
     mp_manager = Manager()
+    self._is_init_ = mp_manager.Value('_is_init_', False)
     self.gpu_max_mem_list = mp_manager.list([])
     self.cpu_max_mem_list = mp_manager.list([])
     self.gpu_used_mem_list = mp_manager.list([])
     self.cpu_used_mem_list = mp_manager.list([])
 
+  def init(self, gpu_info, cpu_info):
+    """
+    知道所有设备的使用情况，来指导payload的迁移
+    singleton类，被所有进程访问
+    """
     for item in gpu_info:
       self.gpu_max_mem_list.append(item)
       self.gpu_used_mem_list.append(0)
@@ -40,7 +42,20 @@ class HybridPSManager(metaclass = SingletonMeta):
     for item in cpu_info:
       self.cpu_max_mem_list.append(item)
       self.cpu_used_mem_list.append(0)
+    self._is_init_.value = True
 
+  def reset(self, gpu_info, cpu_info):
+    mp_manager = Manager()
+    self._is_init_ = mp_manager.Value('_is_init_', False)
+    self.gpu_max_mem_list = mp_manager.list([])
+    self.cpu_max_mem_list = mp_manager.list([])
+    self.gpu_used_mem_list = mp_manager.list([])
+    self.cpu_used_mem_list = mp_manager.list([])
+    self.init(gpu_info, cpu_info)
+    
+  def is_init(self):
+    return self._is_init_.value
+  
   def visit(self):
     for idx, value in enumerate(self.gpu_used_mem_list):
       print(f"GPU:{idx} used mem {value}")
@@ -61,7 +76,7 @@ class HybridPSManager(metaclass = SingletonMeta):
   def delete(self, device_type, index, size):
     if index is None:
       index = 0
-      
+
     if device_type == "cpu":
       self.cpu_used_mem_list[index] -= size
     elif device_type == "cuda":

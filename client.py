@@ -37,7 +37,15 @@ class Chunk(object):
     for info in self.tensor_infos:
       print(f"tensor in chunk start {info.start}, end {info.start + info.size}")
 
+  def move_to_gpu(self):
+    if self.device.type == 'gpu':
+      return
+    self.payload = self.payload.to(torch.cuda.current_device())
 
+  def move_to_cpu(self):
+    if self.device.type == 'cpu':
+      return
+    self.payload = self.payload.cpu()
 ######### HybridPS #############
 
 class HybridPSClient(object):
@@ -112,16 +120,29 @@ class HybridPSClient(object):
     #   yield self.payload.narrow()
     pass
 
-  def swap_out(self):
+  def free_cpu(self, size):
     """
-    The device has to allocate memory for more important tensor.
-    The payload should migrate to the other device.
-    需要和全局调度器通信来决定迁移到哪
-    由于一个process可以看到一块cpu和一块gpu的存储空间
-    swap也仅限于cpu和gpu之间通信
-    未来可以加上gpu p2p
+    给cpu腾出size大小空间。
     """
-    pass
+    acc_free_size = 0
+    for chunk in self.chunk_list:
+      if chunk.device_type == 'cpu':
+        chunk.move_to_gpu()
+        acc_free_size += chunk.capacity
+        if acc_free_size >= size:
+          break
+
+  def free_gpu(self, size):
+    """
+    给gpu腾出size大小空间。
+    """
+    acc_free_size = 0
+    for chunk in self.chunk_list:
+      if chunk.device_type == 'cuda':
+        chunk.move_to_cpu()
+        acc_free_size += chunk.capacity
+        if acc_free_size >= size:
+          break
 
   def allreduce(self, local_tensor):
     """

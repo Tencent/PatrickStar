@@ -10,6 +10,7 @@ manager = HybridPSManager()
 def test_client():
   world_size = dist.get_world_size()
   manager.init([32] * world_size, [64])
+  print("is init manager", HybridPSManager().is_init())
   local_rank = dist.get_rank()
 
   # 申请两个tensor
@@ -43,14 +44,14 @@ def test_client():
 
 def test_mgr_dist():
   # 在两个进程上使用HybridPSClient，测试manager效果
-  manager.init([32, 32], [64])
+  manager.reset([32, 32], [64])
 
   @distributed_test(world_size=2)
   def test_dist_init():
-      assert dist.is_initialized()
-      assert dist.get_world_size() == 2
-      assert dist.get_rank() < 2
-      print("pass test_init")
+    assert dist.is_initialized()
+    assert dist.get_world_size() == 2
+    assert dist.get_rank() < 2
+    print("pass test_init")
   
   #测试mgr正确更新
   def test_mgr_update():
@@ -82,4 +83,5 @@ def test_mgr_dist():
 
 if __name__ == "__main__":
   test_client()
+  print("is init manager", HybridPSManager().is_init())
   test_mgr_dist()
