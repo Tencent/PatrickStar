@@ -69,17 +69,21 @@ class HybridPSClient(object):
     for elem in shape:
       numel *= elem
     
-    # 根据当前client所在设备为参考，使用manager调度获得一个最佳的device
-    device = self.ps_manager.schedule(numel, self.index)
-    print(f'client new_tensor on {device}')
     if len(self.chunk_list) == 0:
+      # 根据当前client所在设备为参考，使用manager调度获得一个最佳的device
+      chunk_size = max(self.default_chunk_size, numel)
+      device = self.ps_manager.schedule(chunk_size, self.index)
       self.chunk_list.append(Chunk(device_type = device,
-                                   capacity = max(self.default_chunk_size, numel)))
+                                   capacity = chunk_size))
     dest = self.chunk_list[-1].allocate(numel)
     if dest is None:
+      chunk_size = max(self.default_chunk_size, numel)
+      device = self.ps_manager.schedule(chunk_size, self.index)
       self.chunk_list.append(Chunk(device_type = device,
-                                   capacity = max(self.default_chunk_size, numel)))
+                                   capacity = chunk_size))
       dest = self.chunk_list[-1].allocate(numel)
+    
+    print(f'client new_tensor on {device}')
     return dest.view(shape)
 
   def register_tensor(self, src_tensor):
