@@ -75,6 +75,7 @@ class HybridPSClient(object):
       device = self.ps_manager.schedule(chunk_size, self.index)
       self.chunk_list.append(Chunk(device_type = device,
                                    capacity = chunk_size))
+      self.ps_manager.add(device.type, device.index, chunk_size)
     dest = self.chunk_list[-1].allocate(numel)
     if dest is None:
       chunk_size = max(self.default_chunk_size, numel)
@@ -82,7 +83,8 @@ class HybridPSClient(object):
       self.chunk_list.append(Chunk(device_type = device,
                                    capacity = chunk_size))
       dest = self.chunk_list[-1].allocate(numel)
-    
+      self.ps_manager.add(device.type, device.index, chunk_size)
+      
     print(f'client new_tensor on {device}')
     return dest.view(shape)
 

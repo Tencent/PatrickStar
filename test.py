@@ -59,23 +59,23 @@ def test_mgr_dist():
     @distributed_test(world_size=2)
     def test_add():
       local_rank = dist.get_rank()
-      manager.add("gpu", local_rank, (local_rank+1) * 10)
-      manager.add("gpu", local_rank, (local_rank+1) * 22)
+      manager.add("cuda", local_rank, (local_rank+1) * 10)
+      manager.add("cuda", local_rank, (local_rank+1) * 22)
 
     @distributed_test(world_size=2)
     def test_delete():
       local_rank = dist.get_rank()
       if local_rank == 0:
-        manager.delete("gpu", local_rank, 10)
+        manager.delete("cuda", local_rank, 10)
 
     test_add()
-    assert(manager.used_mem("gpu", 0) == 32)
-    assert(manager.used_mem("gpu", 1) == 64)
+    assert(manager.used_mem("cuda", 0) == 32)
+    assert(manager.used_mem("cuda", 1) == 64)
     assert(manager.used_mem("cpu", 0) == 0)
   
     test_delete()
-    assert(manager.used_mem("gpu", 0) == 22)
-    assert(manager.used_mem("gpu", 1) == 64)
+    assert(manager.used_mem("cuda", 0) == 22)
+    assert(manager.used_mem("cuda", 1) == 64)
 
   test_dist_init()
   test_mgr_update()

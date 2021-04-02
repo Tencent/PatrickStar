@@ -48,17 +48,23 @@ class HybridPSManager(metaclass = SingletonMeta):
       print(f"CPU:{idx} used mem {value}")
 
   def add(self, device_type, index, size):
+    if index is None:
+      index = 0
+    
     if device_type == "cpu":
       self.cpu_used_mem_list[index] += size
-    elif device_type == "gpu":
+    elif device_type == "cuda":
       self.gpu_used_mem_list[index] += size
     else:
       raise f"device type {device_type} is not supported"
 
   def delete(self, device_type, index, size):
+    if index is None:
+      index = 0
+      
     if device_type == "cpu":
       self.cpu_used_mem_list[index] -= size
-    elif device_type == "gpu":
+    elif device_type == "cuda":
       self.gpu_used_mem_list[index] -= size
     else:
       raise f"device type {device_type} is not supported"
@@ -75,22 +81,20 @@ class HybridPSManager(metaclass = SingletonMeta):
     找到一个设备，可以分配size大小存储空间
     """
     if self.avaiable_mem("cpu", refer_dev_idx) >= size:
-      self.add("cpu", 0, size)
       return torch.device("cpu")
-    elif self.avaiable_mem("gpu", refer_dev_idx) >= size:
-      self.add("gpu", refer_dev_idx, size)
+    elif self.avaiable_mem("cuda", refer_dev_idx) >= size:
       return torch.device(f"cuda:{refer_dev_idx}")
     else:
       for idx in range(self.gpu_num()):
         if idx == refer_dev_idx:
           pass
-        if self.avaiable_mem("gpu", idx) >= size:
-          self.add("gpu", idx, size)
+        if self.avaiable_mem("cuda", idx) >= size:
+          self.add("cuda", idx, size)
           return torch.device(f"cuda:{idx}")
     raise f"HybridPSManager can not find {size} space"
 
   def avaiable_mem(self, device_type, index):
-    if device_type == "gpu":
+    if device_type == "cuda":
       return self.gpu_max_mem_list[index] - self.gpu_used_mem_list[index]
     elif device_type == "cpu":
        return self.cpu_max_mem_list[index] - self.cpu_used_mem_list[index]
@@ -104,13 +108,13 @@ class HybridPSManager(metaclass = SingletonMeta):
   def used_mem(self, device_type, index):
     if device_type == "cpu":
       return self.cpu_used_mem_list[index]
-    elif device_type == "gpu":
+    elif device_type == "cuda":
       return self.gpu_used_mem_list[index]
   
   def max_mem(self, device_type, index):
     if device_type == "cpu":
       return self.cpu_max_mem_list[index]
-    elif device_type == "gpu":
+    elif device_type == "cuda":
       return self.cpu_max_mem_list[index]
 
 if __name__ == "__main__":
