@@ -141,8 +141,6 @@ class HybridPSClient(object):
     # 初始化ps_tensor空间
     if param.ps_tensor is None:
       param.ps_tensor = self.new_tensor(param.shape, self.ps_id)
-    
-    # 需要索引这个param，怎么索引呢？
 
     # 拷贝param数据到ds_tensor上
     one_dim_param = param.contiguous().view(-1)
@@ -194,8 +192,6 @@ class HybridPSClient(object):
       print(f'client move_to_gpu {chunk_id} again')
       self.chunk_list[chunk_id].move(self.params_dict, device)
 
-
-
   def free_cpu(self, size):
     """
     给cpu腾出size大小空间。
@@ -226,7 +222,7 @@ class HybridPSClient(object):
     """
     pass
 
-  def broadcast(self, local_tensor):
+  def broadcast(self, local_tensor : torch.Tensor):
     """
     必须所有process同时执行，规约后的payload存储在哪由调度器决定
     """

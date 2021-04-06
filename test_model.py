@@ -15,6 +15,9 @@ class SimpleModel(torch.nn.Module):
     def __init__(self, hidden_dim, empty_grad=False):
         super(SimpleModel, self).__init__()
         self.linear = torch.nn.Linear(hidden_dim, hidden_dim)
+        self.linear2 = torch.nn.Linear(hidden_dim, hidden_dim)
+        self.linear3 = torch.nn.Linear(hidden_dim, hidden_dim)
+        self.linear4 = torch.nn.Linear(hidden_dim, hidden_dim)
         if empty_grad:
             self.layers2 = torch.nn.ModuleList([torch.nn.Linear(hidden_dim, hidden_dim)])
         self.cross_entropy_loss = torch.nn.CrossEntropyLoss()
@@ -22,6 +25,9 @@ class SimpleModel(torch.nn.Module):
     def forward(self, x, y):
         hidden_dim = x
         hidden_dim = self.linear(hidden_dim)
+        hidden_dim = self.linear2(hidden_dim)
+        hidden_dim = self.linear3(hidden_dim)
+        hidden_dim = self.linear4(hidden_dim)
         return self.cross_entropy_loss(hidden_dim, y)
 
 def get_data_loader(model, total_samples, hidden_dim, device):
@@ -44,13 +50,17 @@ def print0(msg):
 def print_params(tag, model):
     # if torch.distributed.get_rank() == 0:
     for n, p in model.named_parameters():
-        print0(f"tag: {tag}, n: {n}, p: {p}, grad: {p.grad}")
+        print0(f"tag: {tag}, n: {n}, p: {p}, p: {p.device}, grad: {p.grad}")
         print0(f"tag: {tag}, n: {n}, p.ps_tensor: {p.ps_tensor}, {p.ps_tensor.device}")
 
 
+############# HOOKS ####################
 
 def pre_sub_module_forward_function(sub_module):
     print(f'pre_sub_module_forward_function, access HybridPS get param')
+    for param in sub_module.parameters(recurse = True):
+        param.data = param.ps_tensor.data.to(param.device)
+
 
 def _register_hooks_recursively(module, count=[0]):
     my_count = count[0]
@@ -72,6 +82,8 @@ def _register_hooks_recursively(module, count=[0]):
 def setup_zero_stage3_hooks(module):
     _register_hooks_recursively(module)
 
+
+############ UNITESTS #################
 
 manager = HybridPSManager()
 
@@ -103,25 +115,24 @@ def test_register_module():
                           default_chunk_size = 20)
     
     client.register_module(model)
-    print_params('pre-train', model)
+    # print_params('pre-train', model)
 
-    client.visit()
-    client.chunk_move(0, torch.device('cuda'))
-    print_params('pre-train-move-1', model)
+    # client.chunk_move(0, torch.device('cuda'))
+    # print_params('pre-train-move-1', model)
 
-    client.chunk_move(0, torch.device('cpu'))
-    print_params('pre-train-move-2', model)
+    # client.chunk_move(0, torch.device('cpu'))
+    # print_params('pre-train-move-2', model)
     
-    # for n, batch in enumerate(data_loader):
-    #     optimizer.zero_grad()
-    #     loss = model(batch[0], batch[1])
-    #     # if torch.distributed.get_rank() == 0:
-    #     print("LOSS:", loss.item())
-    #     # model.backward(loss)
-    #     loss.backward()
-    #     # model.step()
-    #     optimizer.step()
-    #     print_params('step={}'.format(n), model)
-    #     if n == 5: break
+    for n, batch in enumerate(data_loader):
+        optimizer.zero_grad()
+        loss = model(batch[0], batch[1])
+        # if torch.distributed.get_rank() == 0:
+        print("LOSS:", loss.item())
+        # model.backward(loss)
+        loss.backward()
+        # model.step()
+        optimizer.step()
+        print_params('step={}'.format(n), model)
+        if n == 5: break
 
 test_register_module()
