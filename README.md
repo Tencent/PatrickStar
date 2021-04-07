@@ -31,14 +31,22 @@ HybridPS是管理Param，AccGrad和OS的一种分布式存储模块，
 它所分配的内存空间一个异构的设备的集合中，最典型的应用就是但机多卡GPU服务器，
 设备集合包括一块CPU和多块GPU。
 
-Chunk是内存管理的最小单位，他是一块连续的内存，可以坐落在CPU或者任何一块GPU之上。
+Chunk是内存管理的最小单位，它是一块连续的内存，可以坐落在CPU或者任何一块GPU之上。
 Chunk不宜过大，这样会导致内存碎片。Chunk也不宜过小，这样数据传输效率很低，也许512 MB是一个好选择。
-当计算设备需要用一个Chunk的数据时，这个Chunk不在本地，则需要通过通信方式从远程设备上获取。
+当计算设备需要用一个Chunk的数据时，这个Chunk不在本地，则需要通过通信方式从远程设备上获取，
+通信方式包括CPU-GPU之间拷贝，和GPU之间的collective通信。
 获取的数据存在本地设备，计算之后丢弃，因此本地设备需要有一块缓存，来存储临时的Chunk，比如2个Chunk。
 
 因为GPU显存资源更加宝贵，我们需要决定哪个chunk存在显存上，这就需要一个Cache规则。
 GPU显存使用具有类似潮汐性质，在正向反向传播计算时，由于activation存在，GPU可供HybridPS存储很少。
 当Optimizer更新时，由于activation都释放掉了，GPU显存几乎可以全部供HybridPS使用。
+
+在正反向计算过程中，需要将数据offload到cpu上。在step计算过程中，需要将数据offload到gpu上。
+
+如果一个Chunk中的param被一个设备访问，则这个Chunk需要被拷贝(Copy)或者移动(Move)到设备上。
+移动和拷贝不同，移动会释放原来设备内存，拷贝则会保留两份。
+如果一个Chunk被设备访问，如果设备内存不够，需要换出一个Chunk。
+哪个Chunk会被换出呢？首先这个Chunk内的所有tensor不被需要，然后根据时间戳来决定。
 
 HybridPS由Manager和Client两部分组成。
 [PyTorch DDP](https://pytorch.org/tutorials/intermediate/ddp_tutorial.html)的数据并行方案中，

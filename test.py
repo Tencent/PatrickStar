@@ -3,13 +3,14 @@ from client import HybridPSClient
 import torch
 import torch.distributed as dist
 from common import distributed_test
+import time
 
 manager = HybridPSManager()
 
 @distributed_test(world_size=1)
 def test_client():
   world_size = dist.get_world_size()
-  manager.init([32] * world_size, [64])
+  manager.init(gpu_info = [32] * world_size, cpu_info = [64])
   print("is init manager", HybridPSManager().is_init())
   local_rank = dist.get_rank()
 
@@ -19,7 +20,7 @@ def test_client():
 
   # 用一个HybridPSClient来管理这两个tensor
   # GPU Chunk 40, 20
-  client = HybridPSClient(index = local_rank, 
+  client = HybridPSClient(gpu_index = local_rank, 
                           default_chunk_size = 20)
 
   client.register_tensor(param1)
@@ -42,28 +43,28 @@ def test_client():
     except_flag = True
   assert(except_flag)
 
+world_size = 2
 def test_mgr_dist():
-  # 在两个进程上使用HybridPSClient，测试manager效果
-  manager.reset([32, 32], [64])
-
-  @distributed_test(world_size=2)
+  @distributed_test(world_size=world_size)
   def test_dist_init():
     assert dist.is_initialized()
-    assert dist.get_world_size() == 2
+    assert dist.get_world_size() == world_size
     assert dist.get_rank() < 2
     print("pass test_init")
   
   #测试mgr正确更新
   def test_mgr_update():
+    # 在两个进程上使用HybridPSClient，测试manager效果
     manager = HybridPSManager()
+    manager.reset([32, 32], [64])
 
-    @distributed_test(world_size=2)
+    @distributed_test(world_size=world_size)
     def test_add():
       local_rank = dist.get_rank()
       manager.add("cuda", local_rank, (local_rank+1) * 10)
       manager.add("cuda", local_rank, (local_rank+1) * 22)
 
-    @distributed_test(world_size=2)
+    @distributed_test(world_size=world_size)
     def test_delete():
       local_rank = dist.get_rank()
       if local_rank == 0:
@@ -73,15 +74,18 @@ def test_mgr_dist():
     assert(manager.used_mem("cuda", 0) == 32)
     assert(manager.used_mem("cuda", 1) == 64)
     assert(manager.used_mem("cpu", 0) == 0)
-  
+    time.sleep(2)
     test_delete()
     assert(manager.used_mem("cuda", 0) == 22)
     assert(manager.used_mem("cuda", 1) == 64)
+    print("pass test_mgr_update")
 
   test_dist_init()
+  time.sleep(2)
   test_mgr_update()
 
 if __name__ == "__main__":
   test_client()
   print("is init manager", HybridPSManager().is_init())
+  time.sleep(2)
   test_mgr_dist()

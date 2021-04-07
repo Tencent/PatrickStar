@@ -215,6 +215,7 @@ manager = HybridPSManager()
 @distributed_test(world_size=1)
 def test_register_module():
     world_size = dist.get_world_size()
+    # 测试用例中GPU显存32，CPU内存64
     manager.init([32] * world_size, [64])
     print("is init manager", HybridPSManager().is_init())
     local_rank = dist.get_rank()

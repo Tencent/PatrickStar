@@ -91,11 +91,14 @@ class HybridPSManager(metaclass = SingletonMeta):
     """
     pass
 
-  def schedule(self, size, refer_dev_idx):
+  def schedule(self, size : int, refer_dev_idx: int):
     """
     找到一个设备，可以分配size大小存储空间
+    refer_dev_idx, 调用进程管理的gpu编号
     """
-    if self.avaiable_mem("cpu", refer_dev_idx) >= size:
+    a = self.avaiable_mem("cpu", 0)
+    print(f"cpu mem size {a} vs {size}")
+    if self.avaiable_mem("cpu", 0) >= size:
       return torch.device("cpu")
     elif self.avaiable_mem("cuda", refer_dev_idx) >= size:
       return torch.device(f"cuda:{refer_dev_idx}")
@@ -106,7 +109,8 @@ class HybridPSManager(metaclass = SingletonMeta):
         if self.avaiable_mem("cuda", idx) >= size:
           self.add("cuda", idx, size)
           return torch.device(f"cuda:{idx}")
-    raise f"HybridPSManager can not find {size} space"
+    print(f"HybridPSManager can not find {size} space")
+    raise EnvironmentError
 
   def avaiable_mem(self, device_type, index):
     if device_type == "cuda":
