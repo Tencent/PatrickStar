@@ -1,8 +1,22 @@
 import torch
 from torch.multiprocessing import Process, Manager
+from enum import Enum
 
 from manager import HybridPSManager
 from typing import Dict
+
+class PSChunkStatus(Enum):
+  # Chunk只在cpu上
+  CPU_ONLY = 1
+
+  # Chunk只在gpu上
+  GPU_ONLY = 2
+
+  # Chunk复制两份，分别在cpu和gpu上
+  CPU_GPU = 3
+
+  # chunk的本体是在远程GPU上, release全部删除
+  FROM_REMOTE_GPU = 4
 
 ############ CHUNK ###################
 
@@ -20,6 +34,7 @@ class Chunk(object):
     """
     Chunk是数据迁移的最小单位，
     它用一段连续的内存来存储张量
+    Chunk可以有三种状态，只在CPU，只在GPU，CPU和GPU各有一份副本
     TODO(jiaruifang) 释放tensor带来的碎片问题，尚未实现存储空间的释放
     TODO(jiaruifang) capacity单位不是Byte而是可以存储float的个数
     """
@@ -28,7 +43,7 @@ class Chunk(object):
     self.device_type : torch.device = device_type
     self.payload = torch.zeros(capacity, dtype = torch.float, device = device_type)
     self.tensor_infos = []
-      
+
   def allocate(self, size : int, ps_id : int = None):
     """
     分配大小为size的连续存储空间，ps_id用于记录chunk存储tensor在Module中的位置
@@ -62,7 +77,7 @@ class Chunk(object):
     for info in self.tensor_infos:
       param = param_dict[info.ps_id]
       size = param.ps_numel
-      param.ps_tensor =  self.payload.narrow(0, start, size)
+      param.ps_tensor =  self.payload.narrow(0, start, size).view(param.ps_shape)
       start += size
     self.device_type = target_device
 
@@ -95,6 +110,33 @@ class HybridPSClient(object):
     self.module = None
     self.ps_id = 0
     self.params_dict = {}
+    self.dict_param_id_chunk_id = {}
+
+    self.cuda_buffered_chunk_size = 1
+    self.cuda_buffered_chunk_list = []
+
+  def access(self, param : torch.nn.Parameter):
+    """
+    访问一个module中的tensor，返回有正确数据的param
+    找到param对应的chunk，然后决定是否移动chunk到本地设备
+    """
+    if not self.is_ps_param(param):
+      raise "access a param not ps_tensor through HybridPS API"
+
+    if param.original_device != param.ps_tensor.device:
+      ps_id = param.ps_id
+      print(f"access ps_id {ps_id}")
+      chunk_id = self.dict_param_id_chunk_id[ps_id]
+      self.chunk_move(chunk_id, param.original_device)
+      assert param.original_device == param.ps_tensor.device
+      param.data = param.ps_tensor.data
+
+  def release(self, param : torch.nn.Parameter):
+    """
+    要不要把chunk迁移到cpu，如果它在gpu上的话，与access最后一句话冲突
+    """
+    pass
+    # param.data = torch.ones(1).half().to(param.original_device)
 
   def new_tensor(self, shape : torch.Size, ps_id : int = None):
     """
@@ -104,12 +146,14 @@ class HybridPSClient(object):
     for elem in shape:
       numel *= elem
     
+    chunk_id = 0
     if len(self.chunk_list) == 0:
       # 根据当前client所在设备为参考，使用manager调度获得一个最佳的device
       chunk_size = max(self.default_chunk_size, numel)
       device = self.ps_manager.schedule(chunk_size, self.gpu_index)
       self.chunk_list.append(Chunk(device_type = device,
                                    capacity = chunk_size))
+      chunk_id = len(self.chunk_list) - 1
       self.ps_manager.add(device.type, device.index, chunk_size)
     dest = self.chunk_list[-1].allocate(numel, ps_id)
     if dest is None:
@@ -118,10 +162,12 @@ class HybridPSClient(object):
       self.chunk_list.append(Chunk(device_type = device,
                                    capacity = chunk_size))
       dest = self.chunk_list[-1].allocate(numel, ps_id)
+      chunk_id = len(self.chunk_list) - 1
       self.ps_manager.add(device.type, device.index, chunk_size)
 
-    print(f'client new_tensor on')
-
+    print(f'client new_tensor on chunk {chunk_id}')
+    if ps_id is not None:
+      self.dict_param_id_chunk_id[ps_id] = chunk_id
     return dest.view(shape)
 
   @staticmethod
@@ -133,10 +179,11 @@ class HybridPSClient(object):
     param.ps_numel = param.numel()
     param.ps_shape = param.shape
     param.ps_tensor = None
+    param.original_device = param.device
 
     # 如果ps_tensor已经存在了，则将param删除
     if param.ps_tensor is not None:
-      param.data = torch.ones(1).half().to(param.device)
+      param.data = torch.ones(1).half().to(param.original_device)
 
     # 初始化ps_tensor空间
     if param.ps_tensor is None:
@@ -147,7 +194,7 @@ class HybridPSClient(object):
     param.ps_tensor.copy_(one_dim_param.view(param.ps_shape))
     
     # 将原来数据删除
-    param.data = torch.ones(1).half().to(param.device)
+    param.data = torch.ones(1).half().to(param.original_device)
     
     # 注册到Client类中
     self.params_dict[self.ps_id] = param
@@ -187,9 +234,8 @@ class HybridPSClient(object):
     测试函数，将chunk_id的chunk移动到gpu上
     需要对对应param重新赋值
     """
-    print(f'client move_to_gpu {chunk_id}')
     if self.chunk_list[chunk_id].device_type != device:
-      print(f'client move_to_gpu {chunk_id} again')
+      print(f'client chunk_move {chunk_id} from {self.chunk_list[chunk_id].device_type} to {device}')
       self.chunk_list[chunk_id].move(self.params_dict, device)
 
   def free_cpu(self, size):

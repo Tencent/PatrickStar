@@ -31,6 +31,15 @@ HybridPS是管理Param，AccGrad和OS的一种分布式存储模块，
 它所分配的内存空间一个异构的设备的集合中，最典型的应用就是但机多卡GPU服务器，
 设备集合包括一块CPU和多块GPU。
 
+Chunk是内存管理的最小单位，他是一块连续的内存，可以坐落在CPU或者任何一块GPU之上。
+Chunk不宜过大，这样会导致内存碎片。Chunk也不宜过小，这样数据传输效率很低，也许512 MB是一个好选择。
+当计算设备需要用一个Chunk的数据时，这个Chunk不在本地，则需要通过通信方式从远程设备上获取。
+获取的数据存在本地设备，计算之后丢弃，因此本地设备需要有一块缓存，来存储临时的Chunk，比如2个Chunk。
+
+因为GPU显存资源更加宝贵，我们需要决定哪个chunk存在显存上，这就需要一个Cache规则。
+GPU显存使用具有类似潮汐性质，在正向反向传播计算时，由于activation存在，GPU可供HybridPS存储很少。
+当Optimizer更新时，由于activation都释放掉了，GPU显存几乎可以全部供HybridPS使用。
+
 HybridPS由Manager和Client两部分组成。
 [PyTorch DDP](https://pytorch.org/tutorials/intermediate/ddp_tutorial.html)的数据并行方案中，
 每一个进程负责一块GPU卡的计算。
@@ -39,9 +48,10 @@ HybridPS由Manager和Client两部分组成。
 Manager是一个Singleton被所有计算进程共享的全局数据结构。
 
 Client支持的方法
-1. register_tensor(tensor)，将一个pytorch tensor的底层存储接管到HybridPS中。
-2. new_tensor(shape)，新申请一个空间被HybridPS管理的张量。
-3. swap_out()，主动让贤，因为这个设备上需要分配非HybridPS管理的内存，HybridPS需要将自己管理的存储空间迁移到其他设备。
+1. register_module(module)，将一个pytorch Module的Param (FP16)和Grad (FP16)存储由HybridPS接管。
+2. register_optim(optim)，讲一个优化器的底层空间(P FP32, G FP32, M FP32, V FP32)有HybridPS接管。
+3. access(param)，让param存储在计算设备上，param/grad计算设备是GPU，opti计算设备是cpu
+4. release(param)，param不用了，可以被迁移了
 4. allreduce/broadcast(local_tensor)，local_tensor每个进程拥有的本地tensor，allreduce结果是一个被Hybrid管理的张量。
 
 Manager支持的方法
