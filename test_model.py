@@ -54,6 +54,12 @@ def print_params(tag, model):
         print0(f"tag: {tag}, n: {n}, p: {p}, p: {p.device}, grad: {p.grad}")
         print0(f"tag: {tag}, n: {n}, p.ps_tensor: {p.ps_tensor}, {p.ps_tensor.device}")
 
+def print_grads(tag, model):
+    # if torch.distributed.get_rank() == 0:
+    for n, p in model.named_parameters():
+        print0(f"tag: {tag}, n: {n}, p: {p}, p: {p.device}, grad: {p.grad}")
+        print0(f"tag: {tag}, n: {n}, p.ps_tensor: {p.ps_tensor}, {p.ps_tensor.device}")
+
 
 ############# HOOKS ####################
 
@@ -217,7 +223,7 @@ def test_register_module():
     world_size = dist.get_world_size()
     # 测试用例中GPU显存32，CPU内存64
     manager.init([256] * world_size, [1024])
-    logging.log(logging.DEBUG, "is init manager", HybridPSManager().is_init())
+    logging.log(logging.DEBUG, "is init manager {HybridPSManager().is_init()}")
     local_rank = dist.get_rank()
 
     hidden_dim = 4
@@ -250,6 +256,8 @@ def test_register_module():
     
     for n, p in model.named_parameters():
         assert p.compute_device.type == 'cuda'
+
+    print_params('pre-train'.format(n), model)
 
     for n, batch in enumerate(data_loader):
         optimizer.zero_grad()
