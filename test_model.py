@@ -52,13 +52,13 @@ def print_params(tag, model):
     # if torch.distributed.get_rank() == 0:
     for n, p in model.named_parameters():
         print0(f"tag: {tag}, n: {n}, p: {p}, p: {p.device}, grad: {p.grad}")
-        print0(f"tag: {tag}, n: {n}, p.ps_tensor: {p.ps_tensor}, {p.ps_tensor.device}")
+        print0(f"tag: {tag}, n: {n}, p.ps_data_tensor: {p.ps_data_tensor}, {p.ps_data_tensor.device}")
 
 def print_grads(tag, model):
     # if torch.distributed.get_rank() == 0:
     for n, p in model.named_parameters():
         print0(f"tag: {tag}, n: {n}, p: {p}, p: {p.device}, grad: {p.grad}")
-        print0(f"tag: {tag}, n: {n}, p.ps_tensor: {p.ps_tensor}, {p.ps_tensor.device}")
+        print0(f"tag: {tag}, n: {n}, p.ps_data_tensor: {p.ps_data_tensor}, {p.ps_data_tensor.device}")
 
 
 ############# HOOKS ####################
@@ -129,13 +129,12 @@ def _apply_to_tensors_only(module, functional, backward_function, outputs):
 
 # 必须具备重复调用，第二次无效的能力 fetch submodule
 def pre_sub_module_forward_function(sub_module, client):
-    logging.log(logging.DEBUG, f'{sub_module.__class__} pre_sub_module_forward_function, access HybridPS get param')
+    logging.log(logging.DEBUG, f'{sub_module.__class__.__name__} pre_sub_module_forward_function, access HybridPS get param')
     for param in sub_module.parameters(recurse = True):
         # TODO(jiaruifang)以chunk方式访问
-        # param.data = param.ps_tensor.data.to(param.device)
-        # print(f'param is originally on {param.compute_device}, ps_tensor on {param.ps_tensor.device}, {param.data.data_ptr()}')
-        client.access(param)
-        param.data = param.ps_tensor.data
+        # param.data = param.ps_data_tensor.data.to(param.device)
+        # print(f'param is originally on {param.compute_device}, ps_data_tensor on {param.ps_data_tensor.device}, {param.data.data_ptr()}')
+        client.access_data(param)
         # print(f'param is now on {param.data.device} {param.data.data_ptr()}')
         # pass
 
@@ -143,14 +142,14 @@ def pre_sub_module_forward_function(sub_module, client):
 def post_sub_module_forward_function(sub_module, client):
     logging.log(logging.DEBUG, f'{sub_module.__class__} post_sub_module_forward_function, access HybridPS get param')
     for param in sub_module.parameters(recurse = True):
-        client.release(param)
+        client.release_data(param)
 
 def pre_sub_module_backward_function(sub_module, client):
     # TODO(jiaruifang) backward前处理逻辑
     logging.log(logging.DEBUG, f'Before sub module backward function {sub_module.__class__.__name__} allgather')
     for param in sub_module.parameters(recurse = True):
-        client.access(param)
-        param.data = param.ps_tensor.data
+        client.access_data(param)
+        param.data = param.ps_data_tensor.data
     
 # release param of submodule
 def post_sub_module_backward_function(sub_module):

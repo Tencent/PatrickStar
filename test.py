@@ -24,8 +24,8 @@ def test_client():
   client = HybridPSClient(gpu_index = local_rank, 
                           default_chunk_size = 20)
 
-  client.register_tensor(param1)
-  client.register_tensor(param2)
+  client.register_param(param1)
+  client.register_param(param2)
 
   assert param1.device == torch.device('cpu')
   assert param2.device == torch.device('cpu')
@@ -33,7 +33,7 @@ def test_client():
   # 申请第三个tensor，此时cpu内存不足，被放在gpu上
   # GPU Chunk 40, 20 CPU Chunk 20
   param3 = torch.randn(20, device = torch.device('cpu'))
-  client.register_tensor(param3)
+  client.register_param(param3)
   assert param3.device == torch.device('cuda:0')
 
   # 申请第四个tensor, 需要chunk size=20大小, GPU没有空间了，会跑出异常
@@ -102,24 +102,25 @@ def test_migrate():
     # 交给HybridPS管理，会先被分在cpu上
     client = HybridPSClient(gpu_index = local_rank, 
                             default_chunk_size = 40)
-    client.register_tensor(param1)
-    client.register_tensor(param2)
+    client.register_param(param1)
+    client.register_param(param2)
 
-    assert client.is_ps_param(param1) and param1.ps_id == 0
+    # print(param1.ps_data_id, )
+    assert client.is_ps_param(param1) and param1.ps_data_id == 0 and param1.ps_grad_id == 1
     assert param1.device.type == 'cpu'
     assert param2.device.type == 'cpu'
 
     # 访问param
-    client.access(param1)
+    client.access_data(param1)
     assert param1.device.type == 'cuda'
-    client.access(param2)
+    client.access_data(param2)
     assert param2.device.type == 'cuda'
-    assert param1.ps_chunk_id == param2.ps_chunk_id
+    # assert param1.ps_data_chunk_id == param2.ps_data_chunk_id
 
     # chunk 2 放在gpu上, gpu空间只能容纳一个chunk
     param3 = torch.randn(20, device = torch.device('cuda:0'))
-    client.register_tensor(param3)
-    client.chunk_move(param3.ps_chunk_id, torch.device('cuda:0'))
+    client.register_param(param3)
+    client.chunk_move(param3.ps_data_chunk_id, torch.device('cuda:0'))
 
     assert param3.device.type == 'cuda'
 
