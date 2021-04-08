@@ -4,6 +4,7 @@ import torch
 import torch.distributed as dist
 from common import distributed_test
 import time
+import logging
 
 manager = HybridPSManager()
 
@@ -119,7 +120,7 @@ def test_migrate():
     param3 = torch.randn(20, device = torch.device('cuda:0'))
     client.register_tensor(param3)
     client.chunk_move(param3.ps_chunk_id, torch.device('cuda:0'))
-    print(param3.device)
+
     assert param3.device.type == 'cuda'
 
     client.visit()
@@ -127,8 +128,11 @@ def test_migrate():
   test_access()
 
 if __name__ == "__main__":
-  test_client()
-  time.sleep(2)
-  test_mgr_dist()
-  time.sleep(2)
+  # test_client()
+  # time.sleep(2)
+  # test_mgr_dist()
+  # time.sleep(3)
+  logging.basicConfig(format='%(asctime)s,%(msecs)d %(levelname)-8s [%(filename)s:%(lineno)d] %(message)s',
+    datefmt='%Y-%m-%d:%H:%M:%S',
+    level=logging.DEBUG)
   test_migrate()

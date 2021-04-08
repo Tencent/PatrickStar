@@ -5,6 +5,7 @@ import os
 from manager import HybridPSManager
 from typing import Dict
 import datetime
+import logging
 
 class PSChunkStatus(Enum):
   # Chunk只在cpu上
@@ -63,8 +64,8 @@ class Chunk(object):
 
     self.device = self.ps_manager.schedule(capacity, self.cuda_idx)
     if self.device.type == 'cuda' and self.device.index > torch.cuda.device_count():
-      print("Warning: When init a Chunk, the assigned cuda device idx is larger than available cuda count")
-      print("Set cuda index to 0")
+      logging.log(logging.WARNING, "When init a Chunk, the assigned cuda device idx is larger than available cuda count")
+      logging.log(logging.WARNING, "Set cuda index to 0")
       self.device = torch.cuda.current_device()
 
     self.payload = torch.zeros(capacity, dtype = torch.float, device = self.device)
@@ -105,7 +106,6 @@ class Chunk(object):
     """
     if self.device == target_device:
       return
-    print(f'chunk move from {self.device} to {target_device}')
     self.payload = self.payload.to(target_device)
     self.ps_manager.add(target_device.type, target_device.index, self.capacity)
     self.ps_manager.delete(self.device.type, self.device.index, self.capacity)
@@ -141,6 +141,7 @@ class HybridPSClient(object):
       2. 细粒度调度，HybridPSClient包含若干chunk
     """
     # index of gpu
+    self.pid = os.getpid()
     self.gpu_index = gpu_index
     self.data_type = data_type
 
@@ -161,17 +162,21 @@ class HybridPSClient(object):
     """
     # param.compute_device上腾出足够的空间
     ps_manager = HybridPSManager()
+    if ps_manager.max_mem(target_device.type, target_device.index) < size:
+      logging.log(logging.ERROR, f"{target_device} has not enough space for {size} elements")
+      raise RuntimeError
     while True:
       available_mem = ps_manager.available_mem(target_device.type, target_device.index)
       if available_mem >= size:
         break
-      err = f"available memory {available_mem} is less than chunk's capacity {size}"
-      print(err)
+      err = f"pid {self.pid}, available memory {available_mem} is less than chunk's capacity {size}"
+      logging.log(logging.DEBUG, err)
 
-      # move out哪个chunk应该考虑时间戳
+      # TODO(jiaruifang) move out哪个chunk应该考虑时间戳
       for idx, chunk in enumerate(self.chunk_list):
         if chunk.device == target_device:
           self.chunk_move(idx, torch.device('cpu') if target_device.type == 'cuda' else torch.device('cuda:0'))
+          break
 
   def access(self, param : torch.nn.Parameter):
     """
@@ -185,8 +190,7 @@ class HybridPSClient(object):
     chunk_id = self.dict_param_id_chunk_id[param.ps_id]
     if param.compute_device != param.ps_tensor.device:
       ps_id = param.ps_id
-      print(f"access ps_id {ps_id}")
-      
+      self.prepare_device(param.compute_device, self.chunk_list[chunk_id].capacity)
       self.chunk_move(chunk_id, param.compute_device)
       assert param.compute_device == param.ps_tensor.device
     
@@ -222,7 +226,7 @@ class HybridPSClient(object):
       dest = self.chunk_list[-1].allocate(numel, ps_id)
       chunk_id = len(self.chunk_list) - 1
 
-    print(f'client new_tensor on chunk {chunk_id}')
+    logging.log(logging.DEBUG, f'pid {self.pid}, allocates a tensor on chunk {chunk_id}')
     if ps_id is not None:
       self.dict_param_id_chunk_id[ps_id] = chunk_id
     return dest.view(shape), chunk_id
@@ -281,11 +285,6 @@ class HybridPSClient(object):
     if self.is_ps_param(src_tensor):
       return
     self._convert_to_ps_param(src_tensor)
-    # shape = src_tensor.size()
-    # dest = self.new_tensor(shape, ps_id)
-    # #TODO(jiaruifang) 梯度怎么办?
-    # dest.data.copy_(src_tensor.data)
-    # src_tensor.data = dest.data
 
   def visit(self):
     for idx, chunk in enumerate(self.chunk_list):
@@ -298,8 +297,7 @@ class HybridPSClient(object):
     需要对对应param重新赋值
     """
     if self.chunk_list[chunk_id].device != device:
-      self.prepare_device(device, self.chunk_list[chunk_id].capacity)
-      print(f'client chunk_move {chunk_id} from {self.chunk_list[chunk_id].device} to {device}')
+      logging.log(logging.DEBUG, f'pid {self.pid} move chunk {chunk_id} from {self.chunk_list[chunk_id].device} to {device}')
       self.chunk_list[chunk_id].move(self.params_dict, device)
 
   def allreduce(self, local_tensor):

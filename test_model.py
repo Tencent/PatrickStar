@@ -10,6 +10,7 @@ import torch.distributed as dist
 
 from manager import HybridPSManager
 from client import HybridPSClient
+import logging
 
 class SimpleModel(torch.nn.Module):
     def __init__(self, hidden_dim, empty_grad=False):
@@ -63,14 +64,14 @@ class PreBackwardFunction(torch.autograd.Function):
         ctx.module = module
         ctx.pre_backward_function = pre_backward_function
         module.applied_pre_backward = False
-        print(f"After Forward: {ctx.module.__class__.__name__}")
+        logging.log(logging.DEBUG, f"After Forward: {ctx.module.__class__.__name__}")
         # why detach?detach后给下一层作为输入，似乎没有用，fwd输出都会用backward作为反向
         outputs = outputs.detach()
         return outputs
 
     @staticmethod
     def backward(ctx, *args):
-        print(f"Before Backward: {ctx.module.__class__.__name__}")
+        logging.log(logging.DEBUG, f"Before Backward: {ctx.module.__class__.__name__}")
         ctx.pre_backward_function(ctx.module)
         return (None, None) + args
 
@@ -98,11 +99,10 @@ class PostBackwardFunction(torch.autograd.Function):
         ctx.module.ds_grads_remaining = ctx.module.ds_grads_remaining - 1
         if ctx.module.ds_grads_remaining == 0:
             ctx.pre_backward_function(ctx.module)
-            print(f"After Backward: {ctx.module.__class__.__name__}")
+            logging.log(logging.DEBUG, f"After Backward: {ctx.module.__class__.__name__}")
         # why (None, None) as first two returns
         else:
-            print(f"After Backward: {ctx.module.__class__.__name__} None, None")
-        print('output args', args)
+            logging.log(logging.DEBUG, f"After Backward: {ctx.module.__class__.__name__} None, None")
         return (None, None) + args
 
 #apply torch.autograd.Function that calls a backward_function to tensors in output
@@ -123,11 +123,11 @@ def _apply_to_tensors_only(module, functional, backward_function, outputs):
 
 # 必须具备重复调用，第二次无效的能力 fetch submodule
 def pre_sub_module_forward_function(sub_module, client):
-    print(f'{sub_module.__class__} pre_sub_module_forward_function, access HybridPS get param')
+    logging.log(logging.DEBUG, f'{sub_module.__class__} pre_sub_module_forward_function, access HybridPS get param')
     for param in sub_module.parameters(recurse = True):
         # TODO(jiaruifang)以chunk方式访问
         # param.data = param.ps_tensor.data.to(param.device)
-        # print(f'param is originally on {param.original_device}, ps_tensor on {param.ps_tensor.device}, {param.data.data_ptr()}')
+        # print(f'param is originally on {param.compute_device}, ps_tensor on {param.ps_tensor.device}, {param.data.data_ptr()}')
         client.access(param)
         param.data = param.ps_tensor.data
         # print(f'param is now on {param.data.device} {param.data.data_ptr()}')
@@ -135,13 +135,13 @@ def pre_sub_module_forward_function(sub_module, client):
 
 # release submodule
 def post_sub_module_forward_function(sub_module, client):
-    print(f'{sub_module.__class__} post_sub_module_forward_function, access HybridPS get param')
+    logging.log(logging.DEBUG, f'{sub_module.__class__} post_sub_module_forward_function, access HybridPS get param')
     for param in sub_module.parameters(recurse = True):
         client.release(param)
 
 def pre_sub_module_backward_function(sub_module, client):
     # TODO(jiaruifang) backward前处理逻辑
-    print(f'Before sub module backward function {sub_module.__class__.__name__} allgather')
+    logging.log(logging.DEBUG, f'Before sub module backward function {sub_module.__class__.__name__} allgather')
     for param in sub_module.parameters(recurse = True):
         client.access(param)
         param.data = param.ps_tensor.data
@@ -149,7 +149,7 @@ def pre_sub_module_backward_function(sub_module, client):
 # release param of submodule
 def post_sub_module_backward_function(sub_module):
     #TODO(jiaruifang) backward后处理逻辑
-    print(
+    logging.log(logging.DEBUG,
         f"After sub module backward function {sub_module.__class__.__name__} before release")
         
 def _register_hooks_recursively(module, client, count=[0]):
@@ -161,7 +161,7 @@ def _register_hooks_recursively(module, client, count=[0]):
     my_count = count[0]
     module.id = my_count
 
-    print(f"{module.__class__} : {module.id}")
+    logging.log(logging.DEBUG, f"{module.__class__} : {module.id}")
 
     for child in module.children():
         count[0] = count[0] + 1
@@ -216,10 +216,9 @@ manager = HybridPSManager()
 def test_register_module():
     world_size = dist.get_world_size()
     # 测试用例中GPU显存32，CPU内存64
-    manager.init([32] * world_size, [64])
-    print("is init manager", HybridPSManager().is_init())
+    manager.init([256] * world_size, [1024])
+    logging.log(logging.DEBUG, "is init manager", HybridPSManager().is_init())
     local_rank = dist.get_rank()
-
 
     hidden_dim = 4
 
@@ -250,7 +249,7 @@ def test_register_module():
     # print_params('pre-train-move-2', model)
     
     for n, p in model.named_parameters():
-        assert p.original_device.type == 'cuda'
+        assert p.compute_device.type == 'cuda'
 
     for n, batch in enumerate(data_loader):
         optimizer.zero_grad()
@@ -260,8 +259,12 @@ def test_register_module():
         # model.backward(loss)
         loss.backward()
         # model.step()
+
         optimizer.step()
         print_params('step={}'.format(n), model)
         if n == 5: break
 
+logging.basicConfig(format='%(asctime)s,%(msecs)d %(levelname)-8s [%(filename)s:%(lineno)d] %(message)s',
+    datefmt='%Y-%m-%d:%H:%M:%S',
+    level=logging.DEBUG)
 test_register_module()

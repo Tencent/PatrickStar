@@ -104,7 +104,6 @@ class HybridPSManager(metaclass = SingletonMeta):
     找到一个设备，可以分配size大小存储空间
     refer_dev_idx, 调用进程管理的gpu编号
     """
-    a = self.available_mem("cpu", 0)
     if self.available_mem("cpu", 0) >= size:
       return torch.device("cpu")
     elif self.available_mem("cuda", refer_dev_idx) >= size:
@@ -139,6 +138,7 @@ class HybridPSManager(metaclass = SingletonMeta):
       return self.gpu_used_mem_list[index]
   
   def max_mem(self, device_type, index):
+    index = 0 if index is None else index
     if device_type == "cpu":
       return self.cpu_max_mem_list[index]
     elif device_type == "cuda":
