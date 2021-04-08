@@ -38,7 +38,7 @@ def test_client():
   # 申请第四个tensor, 需要chunk size=20大小, GPU没有空间了，会跑出异常
   except_flag = False
   try:
-    param4 = client.new_tensor((1, 5))
+    param4, _ = client.new_tensor((1, 5))
   except:
     except_flag = True
   assert(except_flag)
@@ -84,8 +84,51 @@ def test_mgr_dist():
   time.sleep(2)
   test_mgr_update()
 
+def test_migrate():
+  @distributed_test(world_size=1)
+  def test_access():
+    if not torch.cuda.is_available():
+      print('cuda is not available in test_access')
+
+    local_rank = dist.get_rank()
+    manager = HybridPSManager()
+    manager.reset(gpu_info=[40], cpu_info=[200])
+
+     # 申请两个tensor, 他们放在一个chunk中，计算设备在cuda上
+    param1 = torch.randn(20, device = torch.device('cuda:0'))
+    param2 = torch.randn(20, device = torch.device('cuda:0'))
+
+    # 交给HybridPS管理，会先被分在cpu上
+    client = HybridPSClient(gpu_index = local_rank, 
+                            default_chunk_size = 40)
+    client.register_tensor(param1)
+    client.register_tensor(param2)
+
+    assert client.is_ps_param(param1) and param1.ps_id == 0
+    assert param1.device.type == 'cpu'
+    assert param2.device.type == 'cpu'
+
+    # 访问param
+    client.access(param1)
+    assert param1.device.type == 'cuda'
+    client.access(param2)
+    assert param2.device.type == 'cuda'
+    assert param1.ps_chunk_id == param2.ps_chunk_id
+
+    # chunk 2 放在gpu上, gpu空间只能容纳一个chunk
+    param3 = torch.randn(20, device = torch.device('cuda:0'))
+    client.register_tensor(param3)
+    client.chunk_move(param3.ps_chunk_id, torch.device('cuda:0'))
+    print(param3.device)
+    assert param3.device.type == 'cuda'
+
+    client.visit()
+    print("[PASS] test_migrate - test_access")
+  test_access()
+
 if __name__ == "__main__":
   test_client()
-  print("is init manager", HybridPSManager().is_init())
   time.sleep(2)
   test_mgr_dist()
+  time.sleep(2)
+  test_migrate()

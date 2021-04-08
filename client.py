@@ -1,7 +1,7 @@
 import torch
 from torch.multiprocessing import Process, Manager
 from enum import Enum
-
+import os
 from manager import HybridPSManager
 from typing import Dict
 import datetime
@@ -49,6 +49,8 @@ class Chunk(object):
     TODO(jiaruifang) 释放tensor带来的碎片问题，尚未实现存储空间的释放
     TODO(jiaruifang) capacity单位不是Byte而是可以存储float的个数
     """
+    self.pid = os.getpid()
+
     self.capacity = capacity
     self.offset = 0
 
@@ -61,7 +63,7 @@ class Chunk(object):
 
     self.device = self.ps_manager.schedule(capacity, self.cuda_idx)
     if self.device.type == 'cuda' and self.device.index > torch.cuda.device_count():
-      print("Warning: scheduled cuda device idx is larger than avaiable cuda count")
+      print("Warning: When init a Chunk, the assigned cuda device idx is larger than available cuda count")
       print("Set cuda index to 0")
       self.device = torch.cuda.current_device()
 
@@ -98,18 +100,22 @@ class Chunk(object):
           param_dict : Dict[int, torch.nn.Parameter], 
           target_device : torch.device):
     """
-    将这个chunk移动到device上
+    将这个chunk移动到device上，
+    先要在target_device腾出空间
     """
     if self.device == target_device:
       return
     print(f'chunk move from {self.device} to {target_device}')
     self.payload = self.payload.to(target_device)
+    self.ps_manager.add(target_device.type, target_device.index, self.capacity)
+    self.ps_manager.delete(self.device.type, self.device.index, self.capacity)
     # 将参数指针重新定位到新的设备上
     start = 0
     for info in self.tensor_infos:
       param = param_dict[info.ps_id]
       size = param.ps_numel
       param.ps_tensor =  self.payload.narrow(0, start, size).view(param.ps_shape)
+      param.data = param.ps_tensor.data
       start += size
     self.device = target_device
     self.touch()
@@ -119,6 +125,7 @@ class Chunk(object):
       if info.status == PSTensorStatus.IN_USE:
         return False
       return True
+
 ######### HybridPS #############
 
 class HybridPSClient(object):
@@ -148,10 +155,29 @@ class HybridPSClient(object):
     self.cuda_buffered_chunk_size = 1
     self.cuda_buffered_chunk_list = []
 
+  def prepare_device(self, target_device : torch.device, size : int):
+    """
+    TODO(jiaruifang)目前只考虑单GPU的情况
+    """
+    # param.compute_device上腾出足够的空间
+    ps_manager = HybridPSManager()
+    while True:
+      available_mem = ps_manager.available_mem(target_device.type, target_device.index)
+      if available_mem >= size:
+        break
+      err = f"available memory {available_mem} is less than chunk's capacity {size}"
+      print(err)
+
+      # move out哪个chunk应该考虑时间戳
+      for idx, chunk in enumerate(self.chunk_list):
+        if chunk.device == target_device:
+          self.chunk_move(idx, torch.device('cpu') if target_device.type == 'cuda' else torch.device('cuda:0'))
+
   def access(self, param : torch.nn.Parameter):
     """
     访问一个module中的tensor，返回有正确数据的param
     找到param对应的chunk，然后决定是否移动chunk到本地设备
+    移动之前要给设备腾出足够空间
     """
     if not self.is_ps_param(param):
       raise "access a param not ps_tensor through HybridPS API"
@@ -160,6 +186,7 @@ class HybridPSClient(object):
     if param.compute_device != param.ps_tensor.device:
       ps_id = param.ps_id
       print(f"access ps_id {ps_id}")
+      
       self.chunk_move(chunk_id, param.compute_device)
       assert param.compute_device == param.ps_tensor.device
     
@@ -198,7 +225,7 @@ class HybridPSClient(object):
     print(f'client new_tensor on chunk {chunk_id}')
     if ps_id is not None:
       self.dict_param_id_chunk_id[ps_id] = chunk_id
-    return dest.view(shape)
+    return dest.view(shape), chunk_id
 
   @staticmethod
   def is_ps_param(parameter : torch.nn.Parameter):
@@ -219,15 +246,16 @@ class HybridPSClient(object):
 
     # 初始化ps_tensor空间
     if param.ps_tensor is None:
-      param.ps_tensor = self.new_tensor(param.shape, self.ps_id)
+      param.ps_tensor, param.ps_chunk_id = self.new_tensor(param.shape, self.ps_id)
 
     # 拷贝param数据到ds_tensor上
     one_dim_param = param.contiguous().view(-1)
     param.ps_tensor.copy_(one_dim_param.view(param.ps_shape))
     
-    # 将原来数据删除
-    param.data = torch.ones(1).half().to(param.compute_device)
-    
+    # 将原来数据删除，并指向payload空间
+    # param.data = torch.ones(1).half().to(param.compute_device)
+    param.data = param.ps_tensor
+
     # 注册到Client类中
     self.params_dict[self.ps_id] = param
     self.ps_id += 1
@@ -246,15 +274,18 @@ class HybridPSClient(object):
 
   def register_tensor(self, src_tensor : torch.Tensor):
     """
-    @deprated
+    @deprecated, used for debug
     Register a tensor to HybridPSClient's payload.
     Tensors are flatten and concated in a contigous memory space.
     """
-    shape = src_tensor.size()
-    dest = self.new_tensor(shape)
-    #TODO(jiaruifang) 梯度怎么办?
-    dest.data.copy_(src_tensor.data)
-    src_tensor.data = dest.data
+    if self.is_ps_param(src_tensor):
+      return
+    self._convert_to_ps_param(src_tensor)
+    # shape = src_tensor.size()
+    # dest = self.new_tensor(shape, ps_id)
+    # #TODO(jiaruifang) 梯度怎么办?
+    # dest.data.copy_(src_tensor.data)
+    # src_tensor.data = dest.data
 
   def visit(self):
     for idx, chunk in enumerate(self.chunk_list):
@@ -267,32 +298,9 @@ class HybridPSClient(object):
     需要对对应param重新赋值
     """
     if self.chunk_list[chunk_id].device != device:
+      self.prepare_device(device, self.chunk_list[chunk_id].capacity)
       print(f'client chunk_move {chunk_id} from {self.chunk_list[chunk_id].device} to {device}')
       self.chunk_list[chunk_id].move(self.params_dict, device)
-
-  def free_cpu(self, size):
-    """
-    给cpu腾出size大小空间。
-    """
-    acc_free_size = 0
-    for chunk in self.chunk_list:
-      if chunk.device.type == 'cpu':
-        chunk.move_to_gpu()
-        acc_free_size += chunk.capacity
-        if acc_free_size >= size:
-          break
-
-  def free_gpu(self, size):
-    """
-    给gpu腾出size大小空间。
-    """
-    acc_free_size = 0
-    for chunk in self.chunk_list:
-      if chunk.device == 'cuda':
-        chunk.move_to_cpu()
-        acc_free_size += chunk.capacity
-        if acc_free_size >= size:
-          break
 
   def allreduce(self, local_tensor):
     """

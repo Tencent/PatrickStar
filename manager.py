@@ -22,6 +22,12 @@ class SingletonMeta(type):
         return cls._instances[cls]
 
 class HybridPSManager(metaclass = SingletonMeta):
+  """
+  知道所有设备的使用情况，来指导payload的迁移
+  singleton类，被所有进程访问
+  拥有所有chunk信息的overview picture
+  """
+
   def __init__(self):
     mp_manager = Manager()
     self._is_init_ = mp_manager.Value('_is_init_', False)
@@ -31,10 +37,6 @@ class HybridPSManager(metaclass = SingletonMeta):
     self.cpu_used_mem_list = mp_manager.list([])
 
   def init(self, gpu_info, cpu_info):
-    """
-    知道所有设备的使用情况，来指导payload的迁移
-    singleton类，被所有进程访问
-    """
     for item in gpu_info:
       self.gpu_max_mem_list.append(item)
       self.gpu_used_mem_list.append(0)
@@ -62,7 +64,10 @@ class HybridPSManager(metaclass = SingletonMeta):
     for idx, value in enumerate(self.cpu_used_mem_list):
       print(f"CPU:{idx} used mem {value}")
 
-  def add(self, device_type, index, size):
+  def add(self, device_type : str, index : int, size : int):
+    """
+    登记，设备device_type:index增加size大小内存使用
+    """
     if index is None:
       index = 0
     
@@ -74,6 +79,9 @@ class HybridPSManager(metaclass = SingletonMeta):
       raise f"device type {device_type} is not supported"
 
   def delete(self, device_type, index, size):
+    """
+    checkout，设备device_type:index减少size大小内存使用
+    """
     if index is None:
       index = 0
 
@@ -96,27 +104,27 @@ class HybridPSManager(metaclass = SingletonMeta):
     找到一个设备，可以分配size大小存储空间
     refer_dev_idx, 调用进程管理的gpu编号
     """
-    a = self.avaiable_mem("cpu", 0)
-    print(f"cpu mem size {a} vs {size}")
-    if self.avaiable_mem("cpu", 0) >= size:
+    a = self.available_mem("cpu", 0)
+    if self.available_mem("cpu", 0) >= size:
       return torch.device("cpu")
-    elif self.avaiable_mem("cuda", refer_dev_idx) >= size:
+    elif self.available_mem("cuda", refer_dev_idx) >= size:
       return torch.device(f"cuda:{refer_dev_idx}")
     else:
       for idx in range(self.gpu_num()):
         if idx == refer_dev_idx:
           pass
-        if self.avaiable_mem("cuda", idx) >= size:
+        if self.available_mem("cuda", idx) >= size:
           self.add("cuda", idx, size)
           return torch.device(f"cuda:{idx}")
     print(f"HybridPSManager can not find {size} space")
-    raise EnvironmentError
+    raise RuntimeError
 
-  def avaiable_mem(self, device_type, index):
+  def available_mem(self, device_type, index):
+    index = 0 if index is None else index
     if device_type == "cuda":
       return self.gpu_max_mem_list[index] - self.gpu_used_mem_list[index]
     elif device_type == "cpu":
-       return self.cpu_max_mem_list[index] - self.cpu_used_mem_list[index]
+      return self.cpu_max_mem_list[index] - self.cpu_used_mem_list[index]
   
   def gpu_num(self):
     return len(self.gpu_max_mem_list)
