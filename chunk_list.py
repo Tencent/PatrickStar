@@ -113,6 +113,8 @@ class ChunkList(object):
           break
 
     if moved_size < still_need_size:
+      for id, chunk in self.generate():
+        chunk.visit()
       print(f"still need {still_need_size}, but device {target_device} has not enough space for item.")
       raise RuntimeError 
     

@@ -106,7 +106,7 @@ class Chunk(object):
     展示Chunk内所有tensor信息
     """
     for info in self.tensor_info_list.generate_in_sorted_order():
-      print(f"tensor in chunk start {info.start}, \
+      print(f"tensor in chunk {self.chunk_id} device {self.device} start {info.start}, \
         end {info.start + info.size}, tensor_id {info.tensor_id}, status {info.status}")
 
   def move(self,

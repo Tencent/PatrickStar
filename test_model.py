@@ -133,19 +133,20 @@ def _apply_to_tensors_only(module, functional, backward_function, outputs):
 # 必须具备重复调用，第二次无效的能力 fetch submodule
 def pre_sub_module_forward_function(sub_module, client):
     logging.log(logging.DEBUG, f'{sub_module.__class__.__name__} pre_sub_module_forward_function, access HybridPS get param')
-    for param in sub_module.parameters(recurse = True):
+    for param in sub_module.parameters(recurse = False):
         client.access_data(param)
 
 # release submodule
 def post_sub_module_forward_function(sub_module, client):
     logging.log(logging.DEBUG, f'{sub_module.__class__.__name__} post_sub_module_forward_function, access HybridPS get param')
-    for param in sub_module.parameters(recurse = True):
+    for param in sub_module.parameters(recurse = False):
         client.release_data(param)
 
 def pre_sub_module_backward_function(sub_module, client):
     # TODO(jiaruifang) backward前处理逻辑
     logging.log(logging.DEBUG, f'Before sub module backward function {sub_module.__class__.__name__} allgather')
-    for param in sub_module.parameters(recurse = True):
+    # TODO
+    for param in sub_module.parameters(recurse = False):
         client.access_data(param)
         client.access_grad(param)
     
@@ -154,7 +155,8 @@ def post_sub_module_backward_function(sub_module, client):
     #TODO(jiaruifang) backward后处理逻辑
     logging.log(logging.DEBUG,
         f"After sub module backward function {sub_module.__class__.__name__} before release")
-    for param in sub_module.parameters(recurse = True):
+    # TODO(jiaruifang) recurse
+    for param in sub_module.parameters(recurse = False):
         client.release_data(param)
         client.release_grad(param)
 
@@ -222,7 +224,8 @@ manager = HybridPSManager()
 def test_register_module():
     world_size = dist.get_world_size()
     # 测试用例中GPU显存32，CPU内存64
-    manager.init([80] * world_size, [256])
+    # 两个chunk，足够一个存data另一个存grad
+    manager.init([40] * world_size, [256])
     logging.log(logging.DEBUG, f"is init manager {HybridPSManager().is_init()}")
     local_rank = dist.get_rank()
 
@@ -246,19 +249,11 @@ def test_register_module():
     
     client.register_module(model)
     setup_zero_stage3_hooks(model, client)
-    # print_params('pre-train', model)
-
-    # client.chunk_move(0, torch.device('cuda'))
-    # print_params('pre-train-move-1', model)
-
-    # client.chunk_move(0, torch.device('cpu'))
-    # print_params('pre-train-move-2', model)
     
     for n, p in model.named_parameters():
         assert p.compute_device.type == 'cuda'
     
     release_grad(model, client)
-    # print_params('pre-train'.format(n), model)
 
     for n, batch in enumerate(data_loader):
         optimizer.zero_grad()
@@ -269,7 +264,7 @@ def test_register_module():
         loss.backward()
         # model.step()
 
-        optimizer.step()
+        # optimizer.step()
         release_grad(model, client)
         # print_params('step={}'.format(n), model)
         if n == 5: break

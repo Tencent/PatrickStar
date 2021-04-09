@@ -22,8 +22,9 @@ class HybridPSClient(object):
       1. 充分利用cpu和gpu内存
       2. 细粒度调度，HybridPSClient包含若干chunk
     """
-    # index of gpu
     self.pid = os.getpid()
+    
+    # index of gpu
     self.gpu_index = gpu_index
     self.data_type = data_type
 
@@ -106,8 +107,6 @@ class HybridPSClient(object):
       param.grad = param.ps_grad_tensor.data
       self.chunk_list[chunk_id].tensor_info_list.set_status(param.ps_grad_id, PSTensorStatus.COMPUTE)
 
-    
-
   def access_data(self, param : torch.nn.Parameter):
     self.access(param, AccessType.DATA)
 
@@ -125,8 +124,6 @@ class HybridPSClient(object):
     elif access_type == AccessType.GRAD:
       chunk_id = self.dict_tensor_id_chunk_id[param.ps_grad_id]
       self.chunk_list[chunk_id].tensor_info_list.set_status(param.ps_grad_id, PSTensorStatus.HOLD)
-
-    
 
   def release_data(self, param : torch.nn.Parameter):
     self.release(param, AccessType.DATA)
@@ -161,6 +158,42 @@ class HybridPSClient(object):
     self.ps_id = self.ps_id + 1
     return self.ps_id 
 
+  def is_ps_data(self, parameter : torch.nn.Parameter):
+    return hasattr(parameter, 'ps_data_id')
+
+  def is_ps_grad(self, parameter : torch.nn.Parameter):
+    return hasattr(parameter, 'ps_grad_id')
+
+  def _convert_to_ps_data(self, param : torch.nn.Parameter):
+    if self.is_ps_param(param):
+      logging.debug('param has already been a ps param')
+      return
+    param.ps_data_id = self.generate_id()
+    param.ps_data_tensor = None
+
+    # 初始化ps_data_tensor空间，并向其拷贝数据
+    param.ps_data_tensor, param.ps_data_chunk_id = self.new_tensor(param.shape, param.ps_data_id)
+    one_dim_param = param.data.contiguous().view(-1)
+    param.ps_data_tensor.copy_(one_dim_param.view(param.ps_shape))
+    param.data = param.ps_data_tensor.data
+    self.param_data_dict[param.ps_data_id] = param
+
+  def _convert_to_ps_grad(self, param : torch.nn.Parameter):
+    if self.is_ps_grad(param):
+      logging.debug('param has already been a ps grad')
+      return
+
+    param.ps_grad_id = self.generate_id()
+    param.ps_grad_tesnor = None
+
+    # 初始化ps_grad_tensor空间，并向其拷贝数据
+    param.ps_grad_tensor, param.ps_gard_chunk_id = self.new_tensor(param.shape, param.ps_grad_id)
+    if param.grad is not None:
+      one_dim_grad = param.grad.contiguous().view(-1)
+      param.ps_grad_tesnor.copy_(one_dim_grad.view(param.ps_shape))
+      param.grad = param.ps_grad_tesnor.data
+    self.param_grad_dict[param.ps_grad_id] = param
+
   def _convert_to_ps_param(self, param : torch.nn.Parameter):
     """
     为param的data和grad分配空间
@@ -172,44 +205,26 @@ class HybridPSClient(object):
     param.ps_numel = param.numel()
     param.ps_shape = param.shape
     
-    param.ps_data_id = self.generate_id()
-    param.ps_data_tensor = None
-
-    param.ps_grad_id = self.generate_id()
-    param.ps_grad_tesnor = None
-
     # param所在的计算设备，计算现在指FWD，BWD，step
     param.compute_device = param.device
-
-    # 初始化ps_data_tensor空间，并向其拷贝数据
-    param.ps_data_tensor, param.ps_data_chunk_id = self.new_tensor(param.shape, param.ps_data_id)
-    one_dim_param = param.data.contiguous().view(-1)
-    param.ps_data_tensor.copy_(one_dim_param.view(param.ps_shape))
-    param.data = param.ps_data_tensor.data
-
-    # 初始化ps_grad_tensor空间，并向其拷贝数据
-    param.ps_grad_tensor, param.ps_gard_chunk_id = self.new_tensor(param.shape, param.ps_grad_id)
-    if param.grad is not None:
-      one_dim_grad = param.grad.contiguous().view(-1)
-      param.ps_grad_tesnor.copy_(one_dim_grad.view(param.ps_shape))
-      param.grad = param.ps_grad_tesnor.data
-
-    # 注册到Client类中, tensor id -> param
-    self.param_data_dict[param.ps_data_id] = param
-    self.param_grad_dict[param.ps_grad_id] = param
 
   def register_module(self, module : torch.nn.Module):
     """
     将模型每个layer的param由HybridPS管理
+    grad内存应该分配在一起
+    data内存应该分配在一起
     """
     if module is not None:
       assert isinstance(module, torch.nn.Module)
       self.module = module
       for param in module.parameters(recurse=True):
-          if self.is_ps_param(param):
-            logging.debug('param has already been a ps param')
-            continue
           self._convert_to_ps_param(param)
+      
+      for param in module.parameters(recurse=True):
+          self._convert_to_ps_data(param)
+      
+      for param in module.parameters(recurse=True):
+          self._convert_to_ps_grad(param)
 
   def register_param(self, src_param : torch.nn.Parameter):
     """
