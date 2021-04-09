@@ -1,149 +1,14 @@
 import torch
-from torch.multiprocessing import Process, Manager
-from enum import Enum
 import os
 from manager import HybridPSManager
 from typing import Dict
 import datetime
 import logging
+from torch.multiprocessing import Process, Manager
 
-class AccessType(Enum):
-  DATA = 1
-  GRAD = 2
-
-class PSChunkStatus(Enum):
-  # Chunk只在cpu上
-  CPU_ONLY = 1
-
-  # Chunk只在gpu上
-  GPU_ONLY = 2
-
-  # Chunk复制两份，分别在cpu和gpu上
-  CPU_GPU = 3
-
-  # chunk的本体是在远程GPU上, release全部删除
-  FROM_REMOTE_GPU = 4
-
-class PSTensorStatus(Enum):
-  # 在拷贝中
-  DATA_ON_FLY = 1
-  GRAD_ON_FLY = 2
-
-  DATA_IN_USE = 3
-  GRAD_IN_USE = 4
-  
-  DATA_HOLD = 5
-  GRAD_HOLD = 6
-  FREE = 7
-############ CHUNK ###################
-
-class TensorInfo(object):
-  """
-  记录chunk内存存储tensor的属性
-  """
-  def __init__(self, start : int, size : int, tensor_id : int, status : PSTensorStatus):
-    self.start = start
-    self.size = size
-    self.tensor_id = tensor_id
-    self.status = status
-    
-class Chunk(object):
-  def __init__(self, capacity : int = 100):
-    """
-    Chunk是数据迁移的最小单位，
-    它用一段连续的内存来存储张量
-    Chunk可以有三种状态，只在CPU，只在GPU，CPU和GPU各有一份副本
-    TODO(jiaruifang) 释放tensor带来的碎片问题，尚未实现存储空间的释放
-    TODO(jiaruifang) capacity单位不是Byte而是可以存储float的个数
-    """
-    self.pid = os.getpid()
-
-    self.capacity = capacity
-    self.offset = 0
-
-    # 由调度决定分配在CPU还是GPU上
-    self.ps_manager = HybridPSManager()
-    if self.ps_manager.is_init() is False:
-      raise "init Manager first before init a Chunk"
-    
-    self.cuda_idx = torch.cuda.current_device()
-
-    self.device = self.ps_manager.schedule(capacity, self.cuda_idx)
-    if self.device.type == 'cuda' and self.device.index > torch.cuda.device_count():
-      logging.log(logging.WARNING, "When init a Chunk, the assigned cuda device idx is larger than available cuda count")
-      logging.log(logging.WARNING, "Set cuda index to 0")
-      self.device = torch.cuda.current_device()
-
-    self.payload = torch.zeros(capacity, dtype = torch.float, device = self.device)
-    self.ps_manager.add(self.device.type, self.device.index, capacity)
-
-    self.tensor_infos = []
-    self.timestamp = datetime.datetime.now().timestamp()
-
-  def touch(self):
-    self.timestamp = datetime.datetime.now().timestamp()
-
-  def allocate(self, size : int, tensor_id : int = None):
-    """
-    分配大小为size的连续存储空间，tensor_id用于记录chunk存储tensor在Module中的位置
-    """
-    if self.capacity - self.offset < size:
-      return None
-    dest = self.payload.narrow(0, self.offset, size)
-    self.tensor_infos.append(TensorInfo(self.offset, size, tensor_id, PSTensorStatus.FREE))
-    self.offset += size
-    self.touch()
-    return dest
-  
-  def visit(self):
-    """
-    展示Chunk内所有tensor信息
-    """
-    for info in self.tensor_infos:
-      print(f"tensor in chunk start {info.start}, \
-        end {info.start + info.size}, tensor_id {info.tensor_id}, status {info.status}")
-
-  def move(self,
-          param_data_dict : Dict[int, torch.nn.Parameter], 
-          param_grad_dict : Dict[int, torch.nn.Parameter], 
-          target_device : torch.device):
-    """
-    将这个chunk移动到device上，
-    先要在target_device腾出空间
-    """
-    logging.debug(f'move this chunk to {target_device}')
-    if self.device == target_device:
-      return
-    self.payload = self.payload.to(target_device)
-    self.ps_manager.add(target_device.type, target_device.index, self.capacity)
-    self.ps_manager.delete(self.device.type, self.device.index, self.capacity)
-    # 将参数指针重新定位到新的设备上
-    start = 0
-    for info in self.tensor_infos:
-      tensor_id = info.tensor_id
-      if tensor_id in param_data_dict.keys():
-        logging.debug(f'chunk moves data tensor {tensor_id} to {target_device}')
-        param = param_data_dict[tensor_id]
-        size = param.ps_numel
-        param.ps_data_tensor =  self.payload.narrow(0, start, size).view(param.ps_shape)
-        param.data = param.ps_data_tensor
-      elif tensor_id in param_grad_dict.keys():
-        logging.debug(f'chunk moves grad tensor {tensor_id}')
-        param = param_grad_dict[tensor_id]
-        size = param.ps_numel
-        param.ps_grad_tensor =  self.payload.narrow(0, start, size).view(param.ps_shape)
-        param.grad = param.ps_grad_tensor
-      start += size
-    self.device = target_device
-    self.touch()
-
-  def is_free():
-    for info in self.tensor_infos:
-      if info.status != PSTensorStatus.FREE:
-        return False
-      return True
-
-######### HybridPS #############
+from const import AccessType, PSChunkStatus, PSTensorStatus
+from chunk import TensorInfo, Chunk
+from chunk_list import ChunkList
 
 class HybridPSClient(object):
   def __init__(self,
@@ -162,7 +27,7 @@ class HybridPSClient(object):
     self.gpu_index = gpu_index
     self.data_type = data_type
 
-    self.chunk_list = []
+    self.chunk_list = ChunkList(default_chunk_size)
     self.default_chunk_size = default_chunk_size
 
     self.module = None
@@ -170,9 +35,6 @@ class HybridPSClient(object):
     self.param_data_dict = {}
     self.param_grad_dict = {}
     self.dict_tensor_id_chunk_id = {}
-
-    self.cuda_buffered_chunk_size = 1
-    self.cuda_buffered_chunk_list = []
 
   def prepare_device(self, target_device : torch.device, size : int):
     """
@@ -192,7 +54,7 @@ class HybridPSClient(object):
       logging.log(logging.DEBUG, err)
 
       # TODO(jiaruifang) move out哪个chunk应该考虑时间戳
-      for idx, chunk in enumerate(self.chunk_list):
+      for idx, chunk in self.chunk_list.generate():
         if chunk.device == target_device:
           self.chunk_move(idx, torch.device('cpu') if target_device.type == 'cuda' else torch.device('cuda:0'))
           break
@@ -206,24 +68,19 @@ class HybridPSClient(object):
     if not self.is_ps_param(param):
       raise "access a param not ps_data_tensor through HybridPS API"
     
-    logging.debug('access')
     # tensor_id to chunk_id
     if access_type == AccessType.DATA:
       chunk_id = self.dict_tensor_id_chunk_id[param.ps_data_id]
-      current_device = param.data.device
-      logging.debug(f'access, tensor id {param.ps_data_id}, chunk id {chunk_id} current device {current_device}, while target {param.compute_device}')
+      current_device = param.ps_data_tensor.device
     elif access_type == AccessType.GRAD:
       chunk_id = self.dict_tensor_id_chunk_id[param.ps_grad_id]
-      current_device = param.grad.device
+      current_device = param.ps_grad_tensor.device
     else:
       raise RuntimeError
 
     if param.compute_device != current_device:
-      logging.debug('begin chunk move')
       self.prepare_device(param.compute_device, self.chunk_list[chunk_id].capacity)
       self.chunk_move(chunk_id, param.compute_device)
-
-    self.visit()
 
     if access_type == AccessType.DATA:
       current_device = param.data.device
@@ -232,7 +89,6 @@ class HybridPSClient(object):
     else:
       raise RuntimeError
 
-    logging.debug(f'current dev {current_device}, compute dev {param.compute_device}')
     assert current_device == param.compute_device
 
     self.chunk_list[chunk_id].touch()
@@ -280,21 +136,22 @@ class HybridPSClient(object):
     for elem in shape:
       numel *= elem
     
-    chunk_id = 0
-    if len(self.chunk_list) == 0:
-      # 根据当前client所在设备为参考，使用manager调度获得一个最佳的device
-      chunk_size = max(self.default_chunk_size, numel)
-      self.chunk_list.append(Chunk(capacity = chunk_size))
-      chunk_id = len(self.chunk_list) - 1
+    # chunk_id = 0
+    # if len(self.chunk_list) == 0:
+    #   # 根据当前client所在设备为参考，使用manager调度获得一个最佳的device
+    #   chunk_size = max(self.default_chunk_size, numel)
+    #   self.chunk_list.append(Chunk(capacity = chunk_size))
+    #   chunk_id = len(self.chunk_list) - 1
       
-    dest = self.chunk_list[-1].allocate(numel, tensor_id)
-    chunk_id = len(self.chunk_list) - 1
-    if dest is None:
-      chunk_size = max(self.default_chunk_size, numel)
-      self.chunk_list.append(Chunk(capacity = chunk_size))
-      dest = self.chunk_list[-1].allocate(numel, tensor_id)
-      chunk_id = len(self.chunk_list) - 1
+    # dest = self.chunk_list[-1].allocate(numel, tensor_id)
+    # chunk_id = len(self.chunk_list) - 1
+    # if dest is None:
+    #   chunk_size = max(self.default_chunk_size, numel)
+    #   self.chunk_list.append(Chunk(capacity = chunk_size))
+    #   dest = self.chunk_list[-1].allocate(numel, tensor_id)
+    #   chunk_id = len(self.chunk_list) - 1
 
+    chunk_id, dest = self.chunk_list.allocate(numel, tensor_id)
     logging.log(logging.DEBUG, f'pid {self.pid}, allocates a tensor on chunk {chunk_id}')
     if tensor_id is not None:
       self.dict_tensor_id_chunk_id[tensor_id] = chunk_id
@@ -364,9 +221,10 @@ class HybridPSClient(object):
     self._convert_to_ps_param(src_param)
 
   def visit(self):
-    for idx, chunk in enumerate(self.chunk_list):
+    for idx, chunk in self.chunk_list.generate():
       print(f"chunk {idx} on device {chunk.device}")
       chunk.visit()
+
 
   def chunk_move(self, chunk_id : int, device : torch.device):
     """

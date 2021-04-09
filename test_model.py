@@ -131,16 +131,13 @@ def _apply_to_tensors_only(module, functional, backward_function, outputs):
 def pre_sub_module_forward_function(sub_module, client):
     logging.log(logging.DEBUG, f'{sub_module.__class__.__name__} pre_sub_module_forward_function, access HybridPS get param')
     for param in sub_module.parameters(recurse = True):
-        # TODO(jiaruifang)以chunk方式访问
-        # param.data = param.ps_data_tensor.data.to(param.device)
-        # print(f'param is originally on {param.compute_device}, ps_data_tensor on {param.ps_data_tensor.device}, {param.data.data_ptr()}')
         client.access_data(param)
         # print(f'param is now on {param.data.device} {param.data.data_ptr()}')
         # pass
 
 # release submodule
 def post_sub_module_forward_function(sub_module, client):
-    logging.log(logging.DEBUG, f'{sub_module.__class__} post_sub_module_forward_function, access HybridPS get param')
+    logging.log(logging.DEBUG, f'{sub_module.__class__.__name__} post_sub_module_forward_function, access HybridPS get param')
     for param in sub_module.parameters(recurse = True):
         client.release_data(param)
 
@@ -149,14 +146,18 @@ def pre_sub_module_backward_function(sub_module, client):
     logging.log(logging.DEBUG, f'Before sub module backward function {sub_module.__class__.__name__} allgather')
     for param in sub_module.parameters(recurse = True):
         client.access_data(param)
-        param.data = param.ps_data_tensor.data
+        client.access_grad(param)
+        # param.data = param.ps_data_tensor.data
     
 # release param of submodule
-def post_sub_module_backward_function(sub_module):
+def post_sub_module_backward_function(sub_module, client):
     #TODO(jiaruifang) backward后处理逻辑
     logging.log(logging.DEBUG,
         f"After sub module backward function {sub_module.__class__.__name__} before release")
-        
+    for param in sub_module.parameters(recurse = True):
+        client.release_data(param)
+        client.release_grad(param)
+
 def _register_hooks_recursively(module, client, count=[0]):
     """
     DFS方式递归注册hook，father module会在children module访问后被访问一次
@@ -196,7 +197,7 @@ def _register_hooks_recursively(module, client, count=[0]):
 
         def _run_after_backward_function(sub_module):
             if sub_module.ds_grads_remaining == 0:
-                post_sub_module_backward_function(sub_module)
+                post_sub_module_backward_function(sub_module, client)
 
         return _apply_to_tensors_only(module,
                                         PostBackwardFunction,
@@ -256,7 +257,7 @@ def test_register_module():
     for n, p in model.named_parameters():
         assert p.compute_device.type == 'cuda'
 
-    print_params('pre-train'.format(n), model)
+    # print_params('pre-train'.format(n), model)
 
     for n, batch in enumerate(data_loader):
         optimizer.zero_grad()
@@ -268,10 +269,12 @@ def test_register_module():
         # model.step()
 
         optimizer.step()
-        print_params('step={}'.format(n), model)
+        # print_params('step={}'.format(n), model)
         if n == 5: break
 
 logging.basicConfig(format='%(asctime)s,%(msecs)d %(levelname)-8s [%(filename)s:%(lineno)d] %(message)s',
     datefmt='%Y-%m-%d:%H:%M:%S',
     level=logging.DEBUG)
+
+torch.manual_seed(0)
 test_register_module()
