@@ -47,6 +47,9 @@ def get_data_loader(model, total_samples, hidden_dim, device):
 def print0(msg):
     print(msg, flush=True)
 
+def release_grad(model, client):
+    for n, p in model.named_parameters():
+        client.release_grad(p)
 
 def print_params(tag, model):
     # if torch.distributed.get_rank() == 0:
@@ -132,8 +135,6 @@ def pre_sub_module_forward_function(sub_module, client):
     logging.log(logging.DEBUG, f'{sub_module.__class__.__name__} pre_sub_module_forward_function, access HybridPS get param')
     for param in sub_module.parameters(recurse = True):
         client.access_data(param)
-        # print(f'param is now on {param.data.device} {param.data.data_ptr()}')
-        # pass
 
 # release submodule
 def post_sub_module_forward_function(sub_module, client):
@@ -147,7 +148,6 @@ def pre_sub_module_backward_function(sub_module, client):
     for param in sub_module.parameters(recurse = True):
         client.access_data(param)
         client.access_grad(param)
-        # param.data = param.ps_data_tensor.data
     
 # release param of submodule
 def post_sub_module_backward_function(sub_module, client):
@@ -222,8 +222,8 @@ manager = HybridPSManager()
 def test_register_module():
     world_size = dist.get_world_size()
     # 测试用例中GPU显存32，CPU内存64
-    manager.init([256] * world_size, [1024])
-    logging.log(logging.DEBUG, "is init manager {HybridPSManager().is_init()}")
+    manager.init([80] * world_size, [256])
+    logging.log(logging.DEBUG, f"is init manager {HybridPSManager().is_init()}")
     local_rank = dist.get_rank()
 
     hidden_dim = 4
@@ -256,7 +256,8 @@ def test_register_module():
     
     for n, p in model.named_parameters():
         assert p.compute_device.type == 'cuda'
-
+    
+    release_grad(model, client)
     # print_params('pre-train'.format(n), model)
 
     for n, batch in enumerate(data_loader):
@@ -269,6 +270,7 @@ def test_register_module():
         # model.step()
 
         optimizer.step()
+        release_grad(model, client)
         # print_params('step={}'.format(n), model)
         if n == 5: break
 

@@ -3,12 +3,14 @@ import sys
 from manager import HybridPSManager
 import logging
 import torch
+from const import PSChunkStatus
+from typing import List
 
 class ChunkList(object):
   """
   添加, O(1)
   删除, O(1)
-  查找，找到chunk timestamp最新的O(N)
+  查找，遍历，查找有足够空闲碎片的chunk O(M, N), M tensor数量，N chunk数量
   索引，dict实现复杂度O(1)
   """
   def __init__(self, default_chunk_size : int):
@@ -22,9 +24,8 @@ class ChunkList(object):
     只有没有find_available_chunk失败才调用new_chunk
     """
     chunk_id = self.id
-    self.chunk_id_to_chunk_dict[chunk_id] = Chunk(capacity = chunk_size)
+    self.chunk_id_to_chunk_dict[chunk_id] = Chunk(capacity = chunk_size, chunk_id = chunk_id)
     self.id = self.id + 1
-    logging.debug(f'new chunk with id {chunk_id}')
     return chunk_id, self.chunk_id_to_chunk_dict[chunk_id]
   
   def delete_chunk(self, chunk_id : int):
@@ -56,11 +57,13 @@ class ChunkList(object):
     for chunk_id, chunk in self.chunk_id_to_chunk_dict.items():
       ret = chunk.try_allocate(size, tensor_id)
       if ret is not None:
+        logging.debug(f'allocate with old chunk {chunk_id}')
         return chunk_id, ret
     # need allocate a new chunk
     chunk_id, chunk = self.new_chunk(max(size, self.default_chunk_size))
     ret = chunk.try_allocate(size, tensor_id)
     assert ret is not None
+    logging.debug(f'allocate with new chunk {chunk_id}')
     return chunk_id, ret
 
   def __getitem__(self, chunk_id : int):
@@ -79,6 +82,42 @@ class ChunkList(object):
     for chunk_id, chunk in self.chunk_id_to_chunk_dict.items():
       yield chunk_id, chunk
 
+  def make_room(self, size: int, target_device : torch.device)->List:
+    """
+    为target device腾出size大小，需要移动出那些chunk
+    返回一个chunk_id list
+    """
+    # 先找到可以free chunk
+    free_chunk_id_list = []
+    freed_size = 0
+    for chunk_id, chunk in self.chunk_id_to_chunk_dict.items():
+      if chunk.device == target_device and chunk.get_status() == PSChunkStatus.FREE:
+        free_chunk_id_list.append(chunk_id)
+        freed_size += chunk.capacity
+
+    for idx in free_chunk_id_list:
+      self.delete_chunk(idx)
+    
+    if freed_size >= size:
+      return
+
+    still_need_size = size - freed_size
+    moved_size = 0
+    moved_list = []
+    for chunk_id, chunk in self.chunk_id_to_chunk_dict.items():
+      if chunk.device == target_device and chunk.get_status() == PSChunkStatus.HOLD:
+        moved_size += chunk.capacity
+        moved_list.append(chunk_id)
+
+        if moved_size >= still_need_size:
+          break
+
+    if moved_size < still_need_size:
+      print(f"still need {still_need_size}, but device {target_device} has not enough space for item.")
+      raise RuntimeError 
+    
+    return moved_list
+
 if __name__ == "__main__":
   logging.basicConfig(format='%(asctime)s,%(msecs)d %(levelname)-8s [%(filename)s:%(lineno)d] %(message)s',
     datefmt='%Y-%m-%d:%H:%M:%S',
@@ -87,8 +126,6 @@ if __name__ == "__main__":
   manager.reset([32, 32], [1024])
 
   chunk_list  = ChunkList(default_chunk_size = 128)
-  # 新分配一个chunk
-  # chunk_list.new_chunk(128)
   # 之前分配的chunk中尝试分配10空间
   chunk_id = chunk_list.least_used_chunk()
   assert chunk_id == 0

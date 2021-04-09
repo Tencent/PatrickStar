@@ -36,28 +36,33 @@ class HybridPSClient(object):
     self.param_grad_dict = {}
     self.dict_tensor_id_chunk_id = {}
 
-  def prepare_device(self, target_device : torch.device, size : int):
+  def prepare_device(self, target_device : torch.device, need_size : int):
     """
+    让target device做好分配need_size大小空间的准备
+    具体操作是找到
     TODO(jiaruifang)目前只考虑单GPU的情况
     """
-    logging.debug(f'prepare_device {target_device}')
-    # param.compute_device上腾出足够的空间
+    logging.log(logging.DEBUG, f'prepare_device target device {target_device} need size {need_size}')
     ps_manager = HybridPSManager()
-    if ps_manager.max_mem(target_device.type, target_device.index) < size:
-      logging.log(logging.ERROR, f"{target_device} has not enough space for {size} elements")
+    if ps_manager.max_mem(target_device.type, target_device.index) < need_size:
+      logging.log(logging.ERROR, f"{target_device} has not enough space for {need_size} elements")
       raise RuntimeError
-    while True:
-      available_mem = ps_manager.available_mem(target_device.type, target_device.index)
-      if available_mem >= size:
-        break
-      err = f"pid {self.pid}, available memory {available_mem} is less than chunk's capacity {size}"
-      logging.log(logging.DEBUG, err)
 
-      # TODO(jiaruifang) move out哪个chunk应该考虑时间戳
-      for idx, chunk in self.chunk_list.generate():
-        if chunk.device == target_device:
-          self.chunk_move(idx, torch.device('cpu') if target_device.type == 'cuda' else torch.device('cuda:0'))
-          break
+    extra_size = need_size - ps_manager.available_mem(target_device.type, target_device.index)
+    # 不需要新分配
+    if extra_size <= 0:
+      return
+    
+    logging.log(logging.DEBUG, f'the device {target_device} has no enough free space, extra size is {extra_size}')
+    # 需要在target_device上腾出空间
+    moved_list = self.chunk_list.make_room(extra_size, target_device)
+
+    # TODO(jiaruifang)只考虑单卡情况，新设备只有gpu和cpu
+    new_device = torch.device('cpu') if target_device.type == 'cuda' else torch.device('cuda:0')
+    logging.log(logging.DEBUG, f'moved list is {moved_list}')
+    # 把他们移动到新设备上
+    for idx in moved_list:
+      self.chunk_move(idx, new_device)
 
   def access(self, param : torch.nn.Parameter, access_type : AccessType):
     """
@@ -93,12 +98,15 @@ class HybridPSClient(object):
 
     self.chunk_list[chunk_id].touch()
 
+    # 访问之后应该更新chunk tensor_infos的状态
     if access_type == AccessType.DATA:
       param.data = param.ps_data_tensor.data
-      param.status = PSTensorStatus.DATA_IN_USE
+      self.chunk_list[chunk_id].tensor_info_list.set_status(param.ps_data_id, PSTensorStatus.COMPUTE)
     elif access_type == AccessType.GRAD:
       param.grad = param.ps_grad_tensor.data
-      param.status = PSTensorStatus.GRAD_IN_USE
+      self.chunk_list[chunk_id].tensor_info_list.set_status(param.ps_grad_id, PSTensorStatus.COMPUTE)
+
+    
 
   def access_data(self, param : torch.nn.Parameter):
     self.access(param, AccessType.DATA)
@@ -112,10 +120,13 @@ class HybridPSClient(object):
     TODO(jiaruifang)释放内存 or 只是不再计算设备的hold
     """
     if access_type == AccessType.DATA:
-      param.status = PSTensorStatus.DATA_HOLD
+      chunk_id = self.dict_tensor_id_chunk_id[param.ps_data_id]
+      self.chunk_list[chunk_id].tensor_info_list.set_status(param.ps_data_id, PSTensorStatus.HOLD)
     elif access_type == AccessType.GRAD:
-      param.grad = param.ps_grad_tensor.data
-      param.status = PSTensorStatus.GRAD_HOLD
+      chunk_id = self.dict_tensor_id_chunk_id[param.ps_grad_id]
+      self.chunk_list[chunk_id].tensor_info_list.set_status(param.ps_grad_id, PSTensorStatus.HOLD)
+
+    
 
   def release_data(self, param : torch.nn.Parameter):
     self.release(param, AccessType.DATA)
@@ -136,23 +147,8 @@ class HybridPSClient(object):
     for elem in shape:
       numel *= elem
     
-    # chunk_id = 0
-    # if len(self.chunk_list) == 0:
-    #   # 根据当前client所在设备为参考，使用manager调度获得一个最佳的device
-    #   chunk_size = max(self.default_chunk_size, numel)
-    #   self.chunk_list.append(Chunk(capacity = chunk_size))
-    #   chunk_id = len(self.chunk_list) - 1
-      
-    # dest = self.chunk_list[-1].allocate(numel, tensor_id)
-    # chunk_id = len(self.chunk_list) - 1
-    # if dest is None:
-    #   chunk_size = max(self.default_chunk_size, numel)
-    #   self.chunk_list.append(Chunk(capacity = chunk_size))
-    #   dest = self.chunk_list[-1].allocate(numel, tensor_id)
-    #   chunk_id = len(self.chunk_list) - 1
-
     chunk_id, dest = self.chunk_list.allocate(numel, tensor_id)
-    logging.log(logging.DEBUG, f'pid {self.pid}, allocates a tensor on chunk {chunk_id}')
+    logging.log(logging.DEBUG, f'pid {self.pid}, allocates a tensor {shape} on chunk {chunk_id}')
     if tensor_id is not None:
       self.dict_tensor_id_chunk_id[tensor_id] = chunk_id
     return dest.view(shape), chunk_id
@@ -169,6 +165,10 @@ class HybridPSClient(object):
     """
     为param的data和grad分配空间
     """
+    if self.is_ps_param(param):
+      logging.debug('param has already been a ps param')
+      return
+
     param.ps_numel = param.numel()
     param.ps_shape = param.shape
     
@@ -207,6 +207,7 @@ class HybridPSClient(object):
       self.module = module
       for param in module.parameters(recurse=True):
           if self.is_ps_param(param):
+            logging.debug('param has already been a ps param')
             continue
           self._convert_to_ps_param(param)
 
@@ -217,12 +218,13 @@ class HybridPSClient(object):
     Tensors (data, grad) in Param are flatten and concated in a contigous memory space.
     """
     if self.is_ps_param(src_param):
+      logging.debug('param has already been a ps param')
       return
     self._convert_to_ps_param(src_param)
 
   def visit(self):
     for idx, chunk in self.chunk_list.generate():
-      print(f"chunk {idx} on device {chunk.device}")
+      print(f"chunk {idx} on device {chunk.device} {chunk.get_status()}")
       chunk.visit()
 
 

@@ -11,7 +11,7 @@ manager = HybridPSManager()
 @distributed_test(world_size=1)
 def test_client():
   world_size = dist.get_world_size()
-  manager.init(gpu_info = [32] * world_size, cpu_info = [64])
+  manager.init(gpu_info = [32*2] * world_size, cpu_info = [64*2])
   print("is init manager", HybridPSManager().is_init())
   local_rank = dist.get_rank()
 
@@ -75,7 +75,7 @@ def test_mgr_dist():
     assert(manager.used_mem("cuda", 0) == 32)
     assert(manager.used_mem("cuda", 1) == 64)
     assert(manager.used_mem("cpu", 0) == 0)
-    time.sleep(2)
+    time.sleep(3)
     test_delete()
     assert(manager.used_mem("cuda", 0) == 22)
     assert(manager.used_mem("cuda", 1) == 64)
@@ -93,7 +93,7 @@ def test_migrate():
 
     local_rank = dist.get_rank()
     manager = HybridPSManager()
-    manager.reset(gpu_info=[40], cpu_info=[200])
+    manager.reset(gpu_info=[80], cpu_info=[200])
 
      # 申请两个tensor, 他们放在一个chunk中，计算设备在cuda上
     param1 = torch.randn(20, device = torch.device('cuda:0'))
@@ -125,12 +125,57 @@ def test_migrate():
     assert param3.device.type == 'cuda'
 
     client.visit()
+
+    client.release_data(param1)
+    client.release_data(param2)
+    client.visit()
     print("[PASS] test_migrate - test_access")
-  test_access()
+
+  @distributed_test(world_size=1)
+  def test_make_room():
+    if not torch.cuda.is_available():
+      print('cuda is not available in test_access')
+
+    local_rank = dist.get_rank()
+    manager = HybridPSManager()
+    manager.reset(gpu_info=[80], cpu_info=[200])
+
+     # 申请两个tensor, 他们放在一个chunk中，计算设备在cuda上
+    param1 = torch.randn(20, device = torch.device('cuda:0'))
+    param2 = torch.randn(20, device = torch.device('cuda:0'))
+
+    # 交给HybridPS管理，会先被分在cpu上, 占据了2个chunk
+    client = HybridPSClient(gpu_index = local_rank, 
+                            default_chunk_size = 40)
+    client.register_param(param1)
+    client.register_param(param2)
+
+    client.visit()
+
+    # 访问param，两个chunk被move到gpu上
+    client.access_data(param1)
+    client.access_grad(param1)
+    client.access_data(param2)
+    client.access_grad(param2)
+
+    # gpu上空出一个chunk
+    client.release_data(param1)
+    client.release_grad(param1)
+
+    param3 = torch.randn(24, device = torch.device('cuda:0'))
+    client.register_param(param3)
+    client.access_data(param3)
+    #需要移动gpu chunk 1 from gpu -> cpu
+    client.visit()
+    print("[PASS] test_migrate - test_make_room")
+
+  # test_access()
+  test_make_room()
+  
 
 if __name__ == "__main__":
   # test_client()
-  # time.sleep(2)
+  # time.sleep(3)
   # test_mgr_dist()
   # time.sleep(3)
   logging.basicConfig(format='%(asctime)s,%(msecs)d %(levelname)-8s [%(filename)s:%(lineno)d] %(message)s',
