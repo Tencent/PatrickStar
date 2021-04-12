@@ -11,82 +11,8 @@
 # permissions and limitations under the License.
 # See the AUTHORS file for names of contributors.
 
-import os
-import json
-import argparse
 import torch
-import deepspeed
-from torch.utils.data import SequentialSampler
-import torch.optim as optim
-from common import distributed_test
-import torch.distributed as dist
-
-from manager import HybridPSManager
-from client import HybridPSClient
 import logging
-from cpu_adam import CPUAdam
-
-
-class SimpleModel(torch.nn.Module):
-    def __init__(self, hidden_dim, empty_grad=False):
-        super(SimpleModel, self).__init__()
-        self.linear = torch.nn.Linear(hidden_dim, hidden_dim)
-        self.linear2 = torch.nn.Linear(hidden_dim, hidden_dim)
-        self.linear3 = torch.nn.Linear(hidden_dim, hidden_dim)
-        self.linear4 = torch.nn.Linear(hidden_dim, hidden_dim)
-        if empty_grad:
-            self.layers2 = torch.nn.ModuleList([torch.nn.Linear(hidden_dim, hidden_dim)])
-        self.cross_entropy_loss = torch.nn.CrossEntropyLoss()
-
-    def forward(self, x, y):
-        hidden_dim = x
-        hidden_dim = self.linear(hidden_dim)
-        hidden_dim = self.linear2(hidden_dim)
-        hidden_dim = self.linear3(hidden_dim)
-        hidden_dim = self.linear4(hidden_dim)
-        return self.cross_entropy_loss(hidden_dim, y)
-
-
-def get_data_loader(model, total_samples, hidden_dim, device):
-    batch_size = 4  #model.train_micro_batch_size_per_gpu()
-    train_data = torch.randn(total_samples, hidden_dim, device=device, dtype=torch.float)
-    train_label = torch.empty(total_samples,
-                              dtype=torch.long,
-                              device=device).random_(hidden_dim)
-    train_dataset = torch.utils.data.TensorDataset(train_data, train_label)
-    sampler = SequentialSampler(train_dataset)
-    train_loader = torch.utils.data.DataLoader(train_dataset,
-                                               batch_size=batch_size,
-                                               sampler=sampler)
-    return train_loader
-
-
-def print0(msg):
-    print(msg, flush=True)
-
-
-def release_grad(model, client):
-    for n, p in model.named_parameters():
-        client.release_grad(p)
-
-
-def print_params(tag, model):
-    # if torch.distributed.get_rank() == 0:
-    for n, p in model.named_parameters():
-        print0(f"tag: {tag}, n: {n}, p: {p}, p: {p.device}, grad: {p.grad}")
-        print0(
-            f"tag: {tag}, n: {n}, p.ps_data_tensor: {p.ps_data_tensor}, {p.ps_data_tensor.device}"
-        )
-
-
-def print_grads(tag, model):
-    # if torch.distributed.get_rank() == 0:
-    for n, p in model.named_parameters():
-        print0(f"tag: {tag}, n: {n}, p: {p}, p: {p.device}, grad: {p.grad}")
-        print0(
-            f"tag: {tag}, n: {n}, p.ps_data_tensor: {p.ps_data_tensor}, {p.ps_data_tensor.device}"
-        )
-
 
 ############# HOOKS ####################
 
@@ -98,14 +24,16 @@ class PreBackwardFunction(torch.autograd.Function):
         ctx.module = module
         ctx.pre_backward_function = pre_backward_function
         module.applied_pre_backward = False
-        logging.log(logging.DEBUG, f"After Forward: {ctx.module.__class__.__name__}")
+        logging.log(logging.DEBUG,
+                    f"After Forward: {ctx.module.__class__.__name__}")
         # why detach?detach后给下一层作为输入，似乎没有用，fwd输出都会用backward作为反向
         outputs = outputs.detach()
         return outputs
 
     @staticmethod
     def backward(ctx, *args):
-        logging.log(logging.DEBUG, f"Before Backward: {ctx.module.__class__.__name__}")
+        logging.log(logging.DEBUG,
+                    f"Before Backward: {ctx.module.__class__.__name__}")
         ctx.pre_backward_function(ctx.module)
         return (None, None) + args
 
@@ -138,8 +66,9 @@ class PostBackwardFunction(torch.autograd.Function):
                         f"After Backward: {ctx.module.__class__.__name__}")
         # why (None, None) as first two returns
         else:
-            logging.log(logging.DEBUG,
-                        f"After Backward: {ctx.module.__class__.__name__} None, None")
+            logging.log(
+                logging.DEBUG,
+                f"After Backward: {ctx.module.__class__.__name__} None, None")
         return (None, None) + args
 
 
@@ -148,10 +77,8 @@ def _apply_to_tensors_only(module, functional, backward_function, outputs):
     if type(outputs) is tuple:
         touched_outputs = []
         for output in outputs:
-            touched_output = _apply_to_tensors_only(module,
-                                                    functional,
-                                                    backward_function,
-                                                    output)
+            touched_output = _apply_to_tensors_only(module, functional,
+                                                    backward_function, output)
             touched_outputs.append(touched_output)
         return tuple(touched_outputs)
     elif type(outputs) is torch.Tensor:
@@ -184,7 +111,8 @@ def pre_sub_module_backward_function(sub_module, client):
     # TODO(jiaruifang) backward前处理逻辑
     logging.log(
         logging.DEBUG,
-        f'Before sub module backward function {sub_module.__class__.__name__} allgather')
+        f'Before sub module backward function {sub_module.__class__.__name__} allgather'
+    )
     # TODO
     for param in sub_module.parameters(recurse=False):
         client.access_data(param, torch.device('cuda:0'))
@@ -233,10 +161,8 @@ def _register_hooks_recursively(module, client, count=[0]):
                 pre_sub_module_backward_function(sub_module, client)
                 sub_module.applied_pre_backward = True
 
-        return _apply_to_tensors_only(module,
-                                      PreBackwardFunction,
-                                      _run_before_backward_function,
-                                      output)
+        return _apply_to_tensors_only(module, PreBackwardFunction,
+                                      _run_before_backward_function, output)
 
     def _post_backward_module_hook(module, inputs):
         module.ds_grads_remaining = 0
@@ -245,10 +171,8 @@ def _register_hooks_recursively(module, client, count=[0]):
             if sub_module.ds_grads_remaining == 0:
                 post_sub_module_backward_function(sub_module, client)
 
-        return _apply_to_tensors_only(module,
-                                      PostBackwardFunction,
-                                      _run_after_backward_function,
-                                      inputs)
+        return _apply_to_tensors_only(module, PostBackwardFunction,
+                                      _run_after_backward_function, inputs)
 
     module.register_forward_pre_hook(_pre_forward_module_hook)
     module.register_forward_hook(_post_forward_module_hook)
@@ -259,61 +183,3 @@ def _register_hooks_recursively(module, client, count=[0]):
 
 def setup_hybrid_ps_hooks(module, client):
     _register_hooks_recursively(module, client)
-
-
-############ UNITESTS #################
-
-manager = HybridPSManager()
-
-
-@distributed_test(world_size=1)
-def test_register_module():
-    world_size = dist.get_world_size()
-    # 测试用例中GPU显存32，CPU内存64
-    # 两个chunk，足够一个存data另一个存grad
-    manager.init([40] * world_size, [512])
-    logging.log(logging.DEBUG, f"is init manager {HybridPSManager().is_init()}")
-    local_rank = dist.get_rank()
-
-    hidden_dim = 4
-
-    model = SimpleModel(hidden_dim, empty_grad=False)
-    model.cuda()
-
-    # param's grad is None
-    # 将param和grad用一块自定义的存储空间接管
-
-    data_loader = get_data_loader(model=model,
-                                  total_samples=1000,
-                                  hidden_dim=hidden_dim,
-                                  device=torch.cuda.current_device())
-
-    client = HybridPSClient(gpu_index=local_rank, default_chunk_size=20)
-    optimizer = CPUAdam(client, model.parameters(), lr=0.001)
-
-    client.register_module(model)
-    setup_hybrid_ps_hooks(model, client)
-
-    for n, p in model.named_parameters():
-        assert p.compute_device.type == 'cuda'
-
-    for n, batch in enumerate(data_loader):
-        optimizer.zero_grad()
-        loss = model(batch[0], batch[1])
-        # if torch.distributed.get_rank() == 0:
-        print("LOSS:", loss.item())
-        loss.backward()
-
-        optimizer.step()
-        client.release_all_grad()
-        # print_params('step={}'.format(n), model)
-        if n == 5: break
-
-
-logging.basicConfig(
-    format='%(asctime)s,%(msecs)d %(levelname)-8s [%(filename)s:%(lineno)d] %(message)s',
-    datefmt='%Y-%m-%d:%H:%M:%S',
-    level=logging.DEBUG)
-
-torch.manual_seed(0)
-test_register_module()

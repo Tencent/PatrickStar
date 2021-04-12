@@ -66,14 +66,20 @@ def F_adam(
 
         # Decay the first and second moment running average coefficient
         exp_avg_data.mul_(beta1).add_(param_grad, alpha=1 - beta1)
-        exp_avg_sq_data.mul_(beta2).addcmul_(param_grad, param_grad, value=1 - beta2)
+        exp_avg_sq_data.mul_(beta2).addcmul_(param_grad,
+                                             param_grad,
+                                             value=1 - beta2)
         if amsgrad:
             # Maintains the maximum of all 2nd moment running avg. till now
-            torch.maximum(max_exp_avg_sqs[i], exp_avg_sq, out=max_exp_avg_sqs[i])
+            torch.maximum(max_exp_avg_sqs[i],
+                          exp_avg_sq,
+                          out=max_exp_avg_sqs[i])
             # Use the max. for normalizing running avg. of gradient
-            denom = (max_exp_avg_sqs[i].sqrt() / math.sqrt(bias_correction2)).add_(eps)
+            denom = (max_exp_avg_sqs[i].sqrt() /
+                     math.sqrt(bias_correction2)).add_(eps)
         else:
-            denom = (exp_avg_sq_data.sqrt() / math.sqrt(bias_correction2)).add_(eps)
+            denom = (exp_avg_sq_data.sqrt() /
+                     math.sqrt(bias_correction2)).add_(eps)
 
         step_size = lr / bias_correction1
 
@@ -92,8 +98,7 @@ class CPUAdam(torch.optim.Optimizer):
                  client,
                  params,
                  lr=1e-3,
-                 betas=(0.9,
-                        0.999),
+                 betas=(0.9, 0.999),
                  eps=1e-8,
                  weight_decay=0,
                  amsgrad=False):
@@ -107,11 +112,14 @@ class CPUAdam(torch.optim.Optimizer):
         if not 0.0 <= eps:
             raise ValueError("Invalid epsilon value: {}".format(eps))
         if not 0.0 <= betas[0] < 1.0:
-            raise ValueError("Invalid beta parameter at index 0: {}".format(betas[0]))
+            raise ValueError("Invalid beta parameter at index 0: {}".format(
+                betas[0]))
         if not 0.0 <= betas[1] < 1.0:
-            raise ValueError("Invalid beta parameter at index 1: {}".format(betas[1]))
+            raise ValueError("Invalid beta parameter at index 1: {}".format(
+                betas[1]))
         if not 0.0 <= weight_decay:
-            raise ValueError("Invalid weight_decay value: {}".format(weight_decay))
+            raise ValueError(
+                "Invalid weight_decay value: {}".format(weight_decay))
         defaults = dict(lr=lr,
                         betas=betas,
                         eps=eps,
@@ -187,17 +195,19 @@ class CPUAdam(torch.optim.Optimizer):
                         state['step'] = 0
                         # 被HybridPS管理
                         # Exponential moving average of gradient values
-                        state['exp_avg'] = torch.nn.Parameter(torch.zeros_like(
-                            p,
-                            memory_format=torch.preserve_format,
-                            device=torch.device('cpu')),
-                                                              requires_grad=False)
+                        state['exp_avg'] = torch.nn.Parameter(
+                            torch.zeros_like(
+                                p,
+                                memory_format=torch.preserve_format,
+                                device=torch.device('cpu')),
+                            requires_grad=False)
                         # Exponential moving average of squared gradient values
-                        state['exp_avg_sq'] = torch.nn.Parameter(torch.zeros_like(
-                            p,
-                            memory_format=torch.preserve_format,
-                            device=torch.device('cpu')),
-                                                                 requires_grad=False)
+                        state['exp_avg_sq'] = torch.nn.Parameter(
+                            torch.zeros_like(
+                                p,
+                                memory_format=torch.preserve_format,
+                                device=torch.device('cpu')),
+                            requires_grad=False)
 
                         assert state['exp_avg'].requires_grad is False
                         assert state['exp_avg_sq'].requires_grad is False
@@ -207,8 +217,7 @@ class CPUAdam(torch.optim.Optimizer):
                         if group['amsgrad']:
                             # Maintains max of all exp. moving avg. of sq. grad. values
                             state['max_exp_avg_sq'] = torch.zeros_like(
-                                p,
-                                memory_format=torch.preserve_format)
+                                p, memory_format=torch.preserve_format)
 
                     exp_avgs.append(state['exp_avg'])
                     exp_avg_sqs.append(state['exp_avg_sq'])

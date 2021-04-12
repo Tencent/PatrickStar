@@ -11,12 +11,12 @@
 # permissions and limitations under the License.
 # See the AUTHORS file for names of contributors.
 
-from chunk import Chunk
-import sys
 from manager import HybridPSManager
+from .chunk import Chunk
+from .const import PSChunkStatus
+import sys
 import logging
 import torch
-from const import PSChunkStatus
 from typing import List
 
 
@@ -97,8 +97,7 @@ class ChunkList(object):
         for chunk_id, chunk in self.chunk_id_to_chunk_dict.items():
             yield chunk_id, chunk
 
-    def chunk_to_move_out_for_room_making(self,
-                                          size: int,
+    def chunk_to_move_out_for_room_making(self, size: int,
                                           target_device: torch.device) -> List:
         """
         为target device腾出size大小，找出需要移动出哪些chunk

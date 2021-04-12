@@ -112,6 +112,7 @@ def test_migrate():
         if not torch.cuda.is_available():
             print('cuda is not available in test_access')
 
+        compute_device = torch.device('cuda:0')
         local_rank = dist.get_rank()
         manager = HybridPSManager()
         manager.reset(gpu_info=[80], cpu_info=[200])
@@ -122,8 +123,8 @@ def test_migrate():
 
         # 交给HybridPS管理，会先被分在cpu上
         client = HybridPSClient(gpu_index=local_rank, default_chunk_size=40)
-        client.register_param(param1)
-        client.register_param(param2)
+        client.register_param(param1, compute_device)
+        client.register_param(param2, compute_device)
 
         # print(param1.ps_data_id, )
         assert client.is_ps_param(
@@ -132,9 +133,9 @@ def test_migrate():
         assert param2.device.type == 'cpu'
 
         # 访问param
-        client.access_data(param1)
+        client.access_data(param1, compute_device)
         assert param1.device.type == 'cuda'
-        client.access_data(param2)
+        client.access_data(param2, compute_device)
         assert param2.device.type == 'cuda'
         # assert param1.ps_data_chunk_id == param2.ps_data_chunk_id
 
@@ -156,14 +157,17 @@ def test_migrate():
     def test_chunk_to_move_out_for_room_making():
         if not torch.cuda.is_available():
             print('cuda is not available in test_access')
+        compute_device = torch.device('cuda:0')
 
         local_rank = dist.get_rank()
         manager = HybridPSManager()
         manager.reset(gpu_info=[80], cpu_info=[200])
 
         # 申请两个tensor, 他们放在一个chunk中，计算设备在cuda上
-        param1 = torch.nn.Parameter(torch.randn(20, device=torch.device('cuda:0')))
-        param2 = torch.nn.Parameter(torch.randn(20, device=torch.device('cuda:0')))
+        param1 = torch.nn.Parameter(
+            torch.randn(20, device=torch.device('cuda:0')))
+        param2 = torch.nn.Parameter(
+            torch.randn(20, device=torch.device('cuda:0')))
 
         # 交给HybridPS管理，会先被分在cpu上, 占据了2个chunk
         client = HybridPSClient(gpu_index=local_rank, default_chunk_size=40)
@@ -173,10 +177,10 @@ def test_migrate():
         client.visit()
 
         # 访问param，两个chunk被move到gpu上
-        client.access_data(param1)
-        client.access_grad(param1)
-        client.access_data(param2)
-        client.access_grad(param2)
+        client.access_data(param1, compute_device)
+        client.access_grad(param1, compute_device)
+        client.access_data(param2, compute_device)
+        client.access_grad(param2, compute_device)
 
         # gpu上空出一个chunk
         client.release_data(param1)
@@ -184,7 +188,7 @@ def test_migrate():
 
         param3 = torch.randn(24, device=torch.device('cuda:0'))
         client.register_param(param3)
-        client.access_data(param3)
+        client.access_data(param3, compute_device)
         #需要移动gpu chunk 1 from gpu -> cpu
         client.visit()
         print("[PASS] test_migrate - test_chunk_to_move_out_for_room_making")

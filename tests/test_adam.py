@@ -17,12 +17,13 @@ import argparse
 import torch
 from torch.utils.data import SequentialSampler
 import torch.optim as optim
-from cpu_adam import CPUAdam
-from client import HybridPSClient
-from manager import HybridPSManager
-from hook import setup_hybrid_ps_hooks
 import logging
 import time
+
+from ops import CPUAdam
+from client import HybridPSClient
+from manager import HybridPSManager
+from utils import setup_hybrid_ps_hooks
 
 
 class SimpleModel(torch.nn.Module):
@@ -33,7 +34,8 @@ class SimpleModel(torch.nn.Module):
         self.linear3 = torch.nn.Linear(hidden_dim, hidden_dim)
         self.linear4 = torch.nn.Linear(hidden_dim, hidden_dim)
         if empty_grad:
-            self.layers2 = torch.nn.ModuleList([torch.nn.Linear(hidden_dim, hidden_dim)])
+            self.layers2 = torch.nn.ModuleList(
+                [torch.nn.Linear(hidden_dim, hidden_dim)])
         self.cross_entropy_loss = torch.nn.CrossEntropyLoss()
 
     def forward(self, x, y):
@@ -47,9 +49,11 @@ class SimpleModel(torch.nn.Module):
 
 def get_data_loader(model, total_samples, hidden_dim, device):
     batch_size = 4  #model.train_micro_batch_size_per_gpu()
-    train_data = torch.randn(total_samples, hidden_dim, device=device, dtype=torch.float)
-    train_label = torch.empty(total_samples,
-                              dtype=torch.long,
+    train_data = torch.randn(total_samples,
+                             hidden_dim,
+                             device=device,
+                             dtype=torch.float)
+    train_label = torch.empty(total_samples, dtype=torch.long,
                               device=device).random_(hidden_dim)
     train_dataset = torch.utils.data.TensorDataset(train_data, train_label)
     sampler = SequentialSampler(train_dataset)

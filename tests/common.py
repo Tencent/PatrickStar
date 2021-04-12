@@ -1,3 +1,16 @@
+# Copyright (C) 2021 THL A29 Limited, a Tencent company.
+# All rights reserved.
+# Licensed under the BSD 3-Clause License (the "License"); you may
+# not use this file except in compliance with the License. You may
+# obtain a copy of the License at
+# https://opensource.org/licenses/BSD-3-Clause
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" basis,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
+# implied. See the License for the specific language governing
+# permissions and limitations under the License.
+# See the AUTHORS file for names of contributors.
+
 import os
 import time
 
@@ -54,9 +67,7 @@ def distributed_test(world_size=2, backend='nccl'):
             processes = []
             for local_rank in range(num_procs):
                 p = Process(target=dist_init,
-                            args=(local_rank,
-                                  num_procs,
-                                  *func_args),
+                            args=(local_rank, num_procs, *func_args),
                             kwargs=func_kwargs)
                 p.start()
                 processes.append(p)
@@ -74,15 +85,17 @@ def distributed_test(world_size=2, backend='nccl'):
             for p in processes:
                 p.join(DEEPSPEED_UNIT_WORKER_TIMEOUT)
 
-            failed = [(rank, p) for rank, p in enumerate(processes) if p.exitcode != 0]
+            failed = [(rank, p) for rank, p in enumerate(processes)
+                      if p.exitcode != 0]
             for rank, p in failed:
                 # If it still hasn't terminated, kill it because it hung.
                 if p.exitcode is None:
                     p.terminate()
                     pytest.fail(f'Worker {rank} hung.', pytrace=False)
                 if p.exitcode < 0:
-                    pytest.fail(f'Worker {rank} killed by signal {-p.exitcode}',
-                                pytrace=False)
+                    pytest.fail(
+                        f'Worker {rank} killed by signal {-p.exitcode}',
+                        pytrace=False)
                 if p.exitcode > 0:
                     pytest.fail(f'Worker {rank} exited with code {p.exitcode}',
                                 pytrace=False)
@@ -97,7 +110,8 @@ def distributed_test(world_size=2, backend='nccl'):
                     dist_launcher(procs, *func_args, **func_kwargs)
                     time.sleep(0.5)
             else:
-                raise TypeError(f'world_size must be an integer or a list of integers.')
+                raise TypeError(
+                    f'world_size must be an integer or a list of integers.')
 
         return run_func_decorator
 

@@ -170,6 +170,7 @@ if __name__ == "__main__":
     assert s2.gpu_num() == 2
 
     if id(s1) == id(s2):
-        print("HybridPSManager works, both variables contain the same instance.")
+        print(
+            "HybridPSManager works, both variables contain the same instance.")
     else:
         print("HybridPSManager failed, variables contain different instances.")
