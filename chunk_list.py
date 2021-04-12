@@ -22,11 +22,11 @@ from typing import List
 
 class ChunkList(object):
     """
-  添加, O(1)
-  删除, O(1)
-  查找，遍历，查找有足够空闲碎片的chunk O(M, N), M tensor数量，N chunk数量
-  索引，dict实现复杂度O(1)
-  """
+    添加, O(1)
+    删除, O(1)
+    查找，遍历，查找有足够空闲碎片的chunk O(M, N), M tensor数量，N chunk数量
+    索引，dict实现复杂度O(1)
+    """
     def __init__(self, default_chunk_size: int):
         self.chunk_id_to_chunk_dict = {}
         self.default_chunk_size = default_chunk_size
@@ -34,9 +34,9 @@ class ChunkList(object):
 
     def new_chunk(self, chunk_size: int) -> int:
         """
-    新建一个chunk，返回它的id
-    只有没有find_available_chunk失败才调用new_chunk
-    """
+        新建一个chunk，返回它的id
+        只有没有find_available_chunk失败才调用new_chunk
+        """
         chunk_id = self.id
         self.chunk_id_to_chunk_dict[chunk_id] = Chunk(capacity=chunk_size,
                                                       chunk_id=chunk_id)
@@ -45,15 +45,15 @@ class ChunkList(object):
 
     def delete_chunk(self, chunk_id: int):
         """
-    删除chunk_id对应的chunk
-    """
+        删除chunk_id对应的chunk
+        """
         if chunk_id in self.chunk_id_to_chunk_dict:
             del self.chunk_id_to_chunk_dict[chunk_id]
 
     def least_used_chunk(self) -> int:
         """"
-    返回最近被touch过的chunk
-    """
+        返回最近被touch过的chunk
+        """
         max_value = float('-inf')
         pos = 0
         for chunk_id, chunk in self.chunk_id_to_chunk_dict.items():
@@ -66,9 +66,9 @@ class ChunkList(object):
 
     def allocate(self, size: int, tensor_id: id) -> (int, torch.Tensor):
         """
-    找到chunk_list中可以分配size大小数据的chunk，如果没有则新分配一个
-    返回chunk_id
-    """
+        找到chunk_list中可以分配size大小数据的chunk，如果没有则新分配一个
+        返回chunk_id
+        """
         for chunk_id, chunk in self.chunk_id_to_chunk_dict.items():
             ret = chunk.try_allocate(size, tensor_id)
             if ret is not None:
@@ -83,25 +83,27 @@ class ChunkList(object):
 
     def __getitem__(self, chunk_id: int):
         """
-    索引一个chunk
-    """
+        索引一个chunk
+        """
         return self.chunk_id_to_chunk_dict[chunk_id]
 
     def size(self) -> int:
         """
-    返回chunk的个数
-    """
+        返回chunk的个数
+        """
         return len(self.chunk_id_to_chunk_dict)
 
     def generate(self) -> (int, Chunk):
         for chunk_id, chunk in self.chunk_id_to_chunk_dict.items():
             yield chunk_id, chunk
 
-    def make_room(self, size: int, target_device: torch.device) -> List:
+    def chunk_to_move_out_for_room_making(self,
+                                          size: int,
+                                          target_device: torch.device) -> List:
         """
-    为target device腾出size大小，需要移动出那些chunk
-    返回一个chunk_id list
-    """
+        为target device腾出size大小，找出需要移动出哪些chunk
+        返回一个chunk_id list
+        """
         # 先找到可以free chunk
         free_chunk_id_list = []
         freed_size = 0
@@ -117,6 +119,7 @@ class ChunkList(object):
         if freed_size >= size:
             return
 
+        # 如果还没有腾出足够的空间，则需要moved out hold状态的chunk
         still_need_size = size - freed_size
         moved_size = 0
         moved_list = []
@@ -129,6 +132,7 @@ class ChunkList(object):
                 if moved_size >= still_need_size:
                     break
 
+        # 无法腾出足够空间，抛出异常
         if moved_size < still_need_size:
             for id, chunk in self.generate():
                 chunk.visit()
