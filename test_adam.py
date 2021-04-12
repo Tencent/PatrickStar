@@ -22,6 +22,7 @@ from client import HybridPSClient
 from manager import HybridPSManager
 from hook import setup_hybrid_ps_hooks
 import logging
+import time
 
 
 class SimpleModel(torch.nn.Module):
@@ -88,6 +89,7 @@ def test_simple_model(is_ps: False):
     else:
         optimizer = optim.Adam(model.parameters(), lr=0.001)
 
+    start_time = time.time()
     for n, batch in enumerate(data_loader):
         optimizer.zero_grad()
         loss = model(batch[0], batch[1])
@@ -101,6 +103,9 @@ def test_simple_model(is_ps: False):
         if is_ps:
             client.release_all_grad()
         if n == 5: break
+
+    elapse = time.time() - start_time
+    logging.info(f"is_ps {is_ps} elapse {elapse}")
     return loss_res
 
 
@@ -109,7 +114,7 @@ if __name__ == "__main__":
         format=
         '%(asctime)s,%(msecs)d %(levelname)-8s [%(filename)s:%(lineno)d] %(message)s',
         datefmt='%Y-%m-%d:%H:%M:%S',
-        level=logging.DEBUG)
+        level=logging.INFO)
     torch.manual_seed(0)
     manager = HybridPSManager()
     # 4 layer每层20个elem，最少360内存
