@@ -162,8 +162,8 @@ def test_migrate():
         manager.reset(gpu_info=[80], cpu_info=[200])
 
         # 申请两个tensor, 他们放在一个chunk中，计算设备在cuda上
-        param1 = torch.randn(20, device=torch.device('cuda:0'))
-        param2 = torch.randn(20, device=torch.device('cuda:0'))
+        param1 = torch.nn.Parameter(torch.randn(20, device=torch.device('cuda:0')))
+        param2 = torch.nn.Parameter(torch.randn(20, device=torch.device('cuda:0')))
 
         # 交给HybridPS管理，会先被分在cpu上, 占据了2个chunk
         client = HybridPSClient(gpu_index=local_rank, default_chunk_size=40)

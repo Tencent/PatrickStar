@@ -30,12 +30,12 @@ class HybridPSClient(object):
                  data_type: torch.dtype = torch.float,
                  default_chunk_size: int = 64):
         """
-    管理一个Process的Param, AccGrad, OS数据。
-    每个进程可以访问一个GPU的显存，和cpu的内存
-    功能:
-      1. 充分利用cpu和gpu内存
-      2. 细粒度调度，HybridPSClient包含若干chunk
-    """
+        管理一个Process的Param, AccGrad, OS数据。
+        每个进程可以访问一个GPU的显存，和cpu的内存
+        功能:
+          1. 充分利用cpu和gpu内存
+          2. 细粒度调度，HybridPSClient包含若干chunk
+        """
         self.pid = os.getpid()
 
         # index of gpu
@@ -53,10 +53,10 @@ class HybridPSClient(object):
 
     def prepare_device(self, target_device: torch.device, need_size: int):
         """
-    让target device做好分配need_size大小空间的准备
-    具体操作是找到
-    TODO(jiaruifang)目前只考虑单GPU的情况
-    """
+        让target device做好分配need_size大小空间的准备
+        具体操作是找到
+        TODO(jiaruifang)目前只考虑单GPU的情况
+        """
         logging.log(
             logging.DEBUG,
             f'prepare_device target device {target_device} need size {need_size}')
@@ -90,12 +90,15 @@ class HybridPSClient(object):
         for idx in moved_list:
             self.chunk_move(idx, new_device)
 
-    def access(self, param: torch.nn.Parameter, access_type: AccessType):
+    def access(self,
+               param: torch.nn.Parameter,
+               access_type: AccessType,
+               compute_device: torch.device):
         """
-    访问一个module中的tensor，返回有正确数据的param
-    找到param对应的chunk，然后决定是否移动chunk到本地设备
-    移动之前要给设备腾出足够空间
-    """
+        访问一个module中的tensor，返回有正确数据的param
+        找到param对应的chunk，然后决定是否移动chunk到本地设备
+        移动之前要给设备腾出足够空间
+        """
         if not self.is_ps_param(param):
             raise "access a param not ps_data_tensor through HybridPS API"
 
@@ -109,9 +112,9 @@ class HybridPSClient(object):
         else:
             raise RuntimeError
 
-        if param.compute_device != current_device:
-            self.prepare_device(param.compute_device, self.chunk_list[chunk_id].capacity)
-            self.chunk_move(chunk_id, param.compute_device)
+        if compute_device != current_device:
+            self.prepare_device(compute_device, self.chunk_list[chunk_id].capacity)
+            self.chunk_move(chunk_id, compute_device)
 
         if access_type == AccessType.DATA:
             current_device = param.data.device
@@ -120,7 +123,7 @@ class HybridPSClient(object):
         else:
             raise RuntimeError
 
-        assert current_device == param.compute_device
+        assert current_device == compute_device
 
         self.chunk_list[chunk_id].touch()
 
@@ -136,17 +139,17 @@ class HybridPSClient(object):
                 param.ps_grad_id,
                 PSTensorStatus.COMPUTE)
 
-    def access_data(self, param: torch.nn.Parameter):
-        self.access(param, AccessType.DATA)
+    def access_data(self, param: torch.nn.Parameter, compute_device: torch.device):
+        self.access(param, AccessType.DATA, compute_device)
 
-    def access_grad(self, param: torch.nn.Parameter):
-        self.access(param, AccessType.GRAD)
+    def access_grad(self, param: torch.nn.Parameter, compute_device: torch.device):
+        self.access(param, AccessType.GRAD, compute_device)
 
     def release(self, param: torch.nn.Parameter, access_type: AccessType):
         """
-    这个param的data, grad不再需要放在计算设备，或者不需要hold
-    TODO(jiaruifang)释放内存 or 只是不再计算设备的hold
-    """
+        这个param的data, grad不再需要放在计算设备，或者不需要hold
+        TODO(jiaruifang)释放内存 or 只是不再计算设备的hold
+        """
         if access_type == AccessType.DATA:
             chunk_id = self.dict_tensor_id_chunk_id[param.ps_data_id]
             self.chunk_list[chunk_id].tensor_info_list.set_status(
@@ -166,13 +169,13 @@ class HybridPSClient(object):
 
     def new_tensor(self, shape: torch.Size, tensor_id: int):
         """
-    在PS上新分配shape大小空间, tensor_id是tensor在本进程内唯一标识
-    TODO(jiaruifang) 现在的分配方式很简单，没考虑chunk空间可以释放的情况。
-    只检查最后一个chunk是否有空余，如果没有分配新的chunk
-    这个函数最后要注册tensor_id和chunk_id的对应关系，
-    未来需要用tensor_id来索引chunk_id，chunk_id索引chunk
-    chunk_list顺序递增
-    """
+        在PS上新分配shape大小空间, tensor_id是tensor在本进程内唯一标识
+        TODO(jiaruifang) 现在的分配方式很简单，没考虑chunk空间可以释放的情况。
+        只检查最后一个chunk是否有空余，如果没有分配新的chunk
+        这个函数最后要注册tensor_id和chunk_id的对应关系，
+        未来需要用tensor_id来索引chunk_id，chunk_id索引chunk
+        chunk_list顺序递增
+        """
         numel = 1
         for elem in shape:
             numel *= elem
@@ -230,8 +233,8 @@ class HybridPSClient(object):
 
     def _convert_to_ps_param(self, param: torch.nn.Parameter):
         """
-    为param的data和grad分配空间
-    """
+        为param的data和grad分配空间
+        """
         if self.is_ps_param(param):
             logging.debug('param has already been a ps param')
             return
@@ -244,10 +247,10 @@ class HybridPSClient(object):
 
     def register_module(self, module: torch.nn.Module):
         """
-    将模型每个layer的param由HybridPS管理
-    grad内存应该分配在一起
-    data内存应该分配在一起
-    """
+        将模型每个layer的param由HybridPS管理
+        grad内存应该分配在一起
+        data内存应该分配在一起
+        """
         if module is not None:
             assert isinstance(module, torch.nn.Module)
             self.module = module
@@ -259,23 +262,27 @@ class HybridPSClient(object):
 
             for param in module.parameters(recurse=True):
                 self._convert_to_ps_grad(param)
+        self.release_all_grad()
 
     def register_param(self, src_param: torch.nn.Parameter):
         """
-    @deprecated, used for debug
-    Register a parameter to HybridPSClient's payload.
-    Tensors (data, grad) in Param are flatten and concated in a contigous memory space.
-    """
+        @deprecated, used for debug
+        Register a parameter to HybridPSClient's payload.
+        Tensors (data, grad) in Param are flatten and concated in a contigous memory space.
+        """
         self._convert_to_ps_param(src_param)
         if self.is_ps_data(src_param):
             logging.debug('param has already been a ps data')
         else:
             self._convert_to_ps_data(src_param)
 
-        if self.is_ps_grad(src_param):
-            logging.debug('param has already been a ps grad')
+        if isinstance(src_param, torch.nn.Parameter) and src_param.requires_grad is True:
+            if self.is_ps_grad(src_param):
+                logging.debug('param has already been a ps grad')
+            else:
+                self._convert_to_ps_grad(src_param)
         else:
-            self._convert_to_ps_grad(src_param)
+            logging.debug('param has no grad or not a Parameter')
 
     def visit(self):
         for idx, chunk in self.chunk_list.generate():
@@ -298,6 +305,11 @@ class HybridPSClient(object):
             self.chunk_list[chunk_id].move(self.param_data_dict,
                                            self.param_grad_dict,
                                            device)
+
+    def release_all_grad(self):
+        if self.module is not None:
+            for n, p in self.module.named_parameters():
+                self.release_grad(p)
 
     def allreduce(self, local_tensor):
         """
