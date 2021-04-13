@@ -18,6 +18,7 @@ import torch.distributed as dist
 from common import distributed_test
 import time
 import logging
+from utils import AccessType
 
 manager = HybridPSManager()
 
@@ -203,6 +204,58 @@ def test_migrate():
     test_chunk_to_move_out_for_room_making()
 
 
+def test_fp16():
+    def test_register():
+        manager = HybridPSManager()
+        manager.reset(gpu_info=[80 * 4], cpu_info=[200 * 4])
+
+        # 交给HybridPS管理，会先被分在cpu上, 占据了2个chunk
+        client = HybridPSClient(gpu_index=0, default_chunk_size=40)
+        logging.info('client register param1')
+        param1 = torch.nn.Parameter(torch.randn(10,
+                                                device=torch.device('cuda:0'),
+                                                dtype=torch.half),
+                                    requires_grad=True)
+
+        param1.sum().backward()
+
+        client.register_param(param1)
+
+        assert (param1.dtype == torch.half)
+        assert (param1.grad.dtype == torch.half)
+        assert (client.get_chunk_id(param1, AccessType.GRAD) == 0)
+
+        logging.info('client register param2')
+        param2 = torch.nn.Parameter(torch.randn(10,
+                                                device=torch.device('cuda:0'),
+                                                dtype=torch.float),
+                                    requires_grad=True)
+
+        param2.sum().backward()
+
+        client.register_param(param2)
+
+        assert (param2.dtype == torch.float)
+        assert (param2.grad.dtype == torch.float)
+        assert (client.get_chunk_id(param2, AccessType.GRAD) == 1)
+
+        logging.info('client register param3')
+        param3 = torch.nn.Parameter(torch.randn(10,
+                                                device=torch.device('cuda:0'),
+                                                dtype=torch.half),
+                                    requires_grad=True)
+
+        param3.sum().backward()
+
+        client.register_param(param3)
+
+        assert (param3.dtype == torch.half)
+        assert (param3.grad.dtype == torch.half)
+        assert (client.get_chunk_id(param3, AccessType.GRAD) == 0)
+
+    test_register()
+
+
 if __name__ == "__main__":
     logging.basicConfig(
         format=
@@ -215,3 +268,5 @@ if __name__ == "__main__":
     test_mgr_dist()
     time.sleep(3)
     test_migrate()
+    time.sleep(3)
+    test_fp16()

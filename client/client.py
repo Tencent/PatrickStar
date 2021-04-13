@@ -52,6 +52,15 @@ class HybridPSClient(object):
         self.param_grad_dict = {}
         self.dict_tensor_id_chunk_id = {}
 
+    def get_chunk_id(self, param: torch.nn.Parameter, access_type: AccessType):
+        if access_type == AccessType.DATA:
+            chunk_id = self.dict_tensor_id_chunk_id[param.ps_data_id]
+        elif access_type == AccessType.GRAD:
+            chunk_id = self.dict_tensor_id_chunk_id[param.ps_grad_id]
+        else:
+            raise TypeError("get_chunk_id access type {AccessType} is invalid")
+        return chunk_id
+
     def prepare_device(self, target_device: torch.device, need_bytes: int):
         """
         让target device做好分配need_bytes大小空间的准备
@@ -185,7 +194,8 @@ class HybridPSClient(object):
         chunk_id, dest = self.chunk_list.allocate(numel, data_type, tensor_id)
         logging.log(
             logging.DEBUG,
-            f'pid {self.pid}, allocates a tensor {shape} on chunk {chunk_id}')
+            f'pid {self.pid}, allocates a tensor {shape} of {data_type} data on chunk {chunk_id}'
+        )
         if tensor_id is not None:
             self.dict_tensor_id_chunk_id[tensor_id] = chunk_id
         return dest.view(shape), chunk_id
@@ -225,15 +235,15 @@ class HybridPSClient(object):
             return
 
         param.ps_grad_id = self.generate_id()
-        param.ps_grad_tesnor = None
+        param.ps_grad_tensor = None
 
         # 初始化ps_grad_tensor空间，并向其拷贝数据
         param.ps_grad_tensor, param.ps_gard_chunk_id = self.new_tensor(
             param.shape, param.dtype, param.ps_grad_id)
         if param.grad is not None:
             one_dim_grad = param.grad.contiguous().view(-1)
-            param.ps_grad_tesnor.copy_(one_dim_grad.view(param.ps_shape))
-            param.grad = param.ps_grad_tesnor.data
+            param.ps_grad_tensor.copy_(one_dim_grad.view(param.ps_shape))
+            param.grad = param.ps_grad_tensor.data
         self.param_grad_dict[param.ps_grad_id] = param
 
     def _convert_to_ps_param(self, param: torch.nn.Parameter):
