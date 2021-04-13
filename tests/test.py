@@ -18,6 +18,7 @@ import torch.distributed as dist
 from common import distributed_test
 import time
 import logging
+from utils import AccessType
 
 manager = HybridPSManager()
 
@@ -25,22 +26,25 @@ manager = HybridPSManager()
 @distributed_test(world_size=1)
 def test_client():
     world_size = dist.get_world_size()
-    manager.init(gpu_info=[32 * 2] * world_size, cpu_info=[64 * 2])
+    manager.init(gpu_info=[32 * 4] * world_size, cpu_info=[64 * 4])
     print("is init manager", HybridPSManager().is_init())
     local_rank = dist.get_rank()
 
     # 申请两个tensor
-    param1 = torch.randn(40,
-                         device=torch.cuda.current_device()
-                         if torch.cuda.is_available() else torch.device('cpu'))
-    param2 = torch.randn(15,
-                         device=torch.cuda.current_device()
-                         if torch.cuda.is_available() else torch.device('cpu'))
+    param1 = torch.nn.Parameter(torch.randn(
+        40,
+        device=torch.cuda.current_device()
+        if torch.cuda.is_available() else torch.device('cpu')),
+                                requires_grad=False)
+    param2 = torch.nn.Parameter(torch.randn(
+        15,
+        device=torch.cuda.current_device()
+        if torch.cuda.is_available() else torch.device('cpu')),
+                                requires_grad=False)
 
     # 用一个HybridPSClient来管理这两个tensor
-    # GPU Chunk 40, 20
     client = HybridPSClient(gpu_index=local_rank, default_chunk_size=20)
-
+    # CPU 3* chunk, param1 2*chunk, param2 1*chunk
     client.register_param(param1)
     client.register_param(param2)
 
@@ -49,7 +53,8 @@ def test_client():
 
     # 申请第三个tensor，此时cpu内存不足，被放在gpu上
     # GPU Chunk 40, 20 CPU Chunk 20
-    param3 = torch.randn(20, device=torch.device('cpu'))
+    param3 = torch.nn.Parameter(torch.randn(20, device=torch.device('cpu')),
+                                requires_grad=False)
     client.register_param(param3)
     assert param3.device == torch.device('cuda:0')
 
@@ -62,7 +67,7 @@ def test_client():
     assert (except_flag)
 
 
-world_size = 2
+world_size = 1
 
 
 def test_mgr_dist():
@@ -77,7 +82,7 @@ def test_mgr_dist():
     def test_mgr_update():
         # 在两个进程上使用HybridPSClient，测试manager效果
         manager = HybridPSManager()
-        manager.reset([32, 32], [64])
+        manager.reset([32 * 4, 32 * 4], [64 * 4])
 
         @distributed_test(world_size=world_size)
         def test_add():
@@ -93,12 +98,12 @@ def test_mgr_dist():
 
         test_add()
         assert (manager.used_mem("cuda", 0) == 32)
-        assert (manager.used_mem("cuda", 1) == 64)
+        # assert (manager.used_mem("cuda", 1) == 64)
         assert (manager.used_mem("cpu", 0) == 0)
         time.sleep(3)
         test_delete()
         assert (manager.used_mem("cuda", 0) == 22)
-        assert (manager.used_mem("cuda", 1) == 64)
+        # assert (manager.used_mem("cuda", 1) == 64)
         print("pass test_mgr_update")
 
     test_dist_init()
@@ -115,7 +120,7 @@ def test_migrate():
         compute_device = torch.device('cuda:0')
         local_rank = dist.get_rank()
         manager = HybridPSManager()
-        manager.reset(gpu_info=[80], cpu_info=[200])
+        manager.reset(gpu_info=[80 * 4], cpu_info=[200 * 4])
 
         # 申请两个tensor, 他们放在一个chunk中，计算设备在cuda上
         param1 = torch.randn(20, device=torch.device('cuda:0'))
@@ -161,7 +166,7 @@ def test_migrate():
 
         local_rank = dist.get_rank()
         manager = HybridPSManager()
-        manager.reset(gpu_info=[80], cpu_info=[200])
+        manager.reset(gpu_info=[80 * 4], cpu_info=[200 * 4])
 
         # 申请两个tensor, 他们放在一个chunk中，计算设备在cuda上
         param1 = torch.nn.Parameter(
@@ -171,7 +176,9 @@ def test_migrate():
 
         # 交给HybridPS管理，会先被分在cpu上, 占据了2个chunk
         client = HybridPSClient(gpu_index=local_rank, default_chunk_size=40)
+        logging.info('clien register param1')
         client.register_param(param1)
+        logging.info('clien register param2')
         client.register_param(param2)
 
         client.visit()
@@ -197,14 +204,69 @@ def test_migrate():
     test_chunk_to_move_out_for_room_making()
 
 
+def test_fp16():
+    def test_register():
+        manager = HybridPSManager()
+        manager.reset(gpu_info=[80 * 4], cpu_info=[200 * 4])
+
+        # 交给HybridPS管理，会先被分在cpu上, 占据了2个chunk
+        client = HybridPSClient(gpu_index=0, default_chunk_size=40)
+        logging.info('client register param1')
+        param1 = torch.nn.Parameter(torch.randn(10,
+                                                device=torch.device('cuda:0'),
+                                                dtype=torch.half),
+                                    requires_grad=True)
+
+        param1.sum().backward()
+
+        client.register_param(param1)
+
+        assert (param1.dtype == torch.half)
+        assert (param1.grad.dtype == torch.half)
+        assert (client.get_chunk_id(param1, AccessType.GRAD) == 0)
+
+        logging.info('client register param2')
+        param2 = torch.nn.Parameter(torch.randn(10,
+                                                device=torch.device('cuda:0'),
+                                                dtype=torch.float),
+                                    requires_grad=True)
+
+        param2.sum().backward()
+
+        client.register_param(param2)
+
+        assert (param2.dtype == torch.float)
+        assert (param2.grad.dtype == torch.float)
+        assert (client.get_chunk_id(param2, AccessType.GRAD) == 1)
+
+        logging.info('client register param3')
+        param3 = torch.nn.Parameter(torch.randn(10,
+                                                device=torch.device('cuda:0'),
+                                                dtype=torch.half),
+                                    requires_grad=True)
+
+        param3.sum().backward()
+
+        client.register_param(param3)
+
+        assert (param3.dtype == torch.half)
+        assert (param3.grad.dtype == torch.half)
+        assert (client.get_chunk_id(param3, AccessType.GRAD) == 0)
+
+    test_register()
+
+
 if __name__ == "__main__":
-    # test_client()
-    # time.sleep(3)
-    # test_mgr_dist()
-    # time.sleep(3)
     logging.basicConfig(
         format=
         '%(asctime)s,%(msecs)d %(levelname)-8s [%(filename)s:%(lineno)d] %(message)s',
         datefmt='%Y-%m-%d:%H:%M:%S',
         level=logging.DEBUG)
+
+    test_client()
+    time.sleep(3)
+    test_mgr_dist()
+    time.sleep(3)
     test_migrate()
+    time.sleep(3)
+    test_fp16()

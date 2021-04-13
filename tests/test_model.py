@@ -272,7 +272,7 @@ def test_register_module():
     world_size = dist.get_world_size()
     # 测试用例中GPU显存32，CPU内存64
     # 两个chunk，足够一个存data另一个存grad
-    manager.init([40] * world_size, [512])
+    manager.init([40 * 4] * world_size, [512 * 4])
     logging.log(logging.DEBUG,
                 f"is init manager {HybridPSManager().is_init()}")
     local_rank = dist.get_rank()

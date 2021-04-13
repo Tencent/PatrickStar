@@ -81,8 +81,8 @@ class HybridPSManager(metaclass=SingletonMeta):
 
     def add(self, device_type: str, index: int, size: int):
         """
-    登记，设备device_type:index增加size大小内存使用
-    """
+        登记，设备device_type:index增加size个bytes内存使用
+        """
         if index is None:
             index = 0
 
@@ -95,7 +95,7 @@ class HybridPSManager(metaclass=SingletonMeta):
 
     def delete(self, device_type, index, size):
         """
-    checkout，设备device_type:index减少size大小内存使用
+    checkout，设备device_type:index减少size个bytes内存使用
     """
         if index is None:
             index = 0
@@ -107,18 +107,11 @@ class HybridPSManager(metaclass=SingletonMeta):
         else:
             raise f"device type {device_type} is not supported"
 
-    def migrate_out(self, device_type, index, size):
-        """
-    找到另一个设备
-    返回 device_type和index
-    """
-        pass
-
     def schedule(self, size: int, refer_dev_idx: int):
         """
-    找到一个设备，可以分配size大小存储空间
-    refer_dev_idx, 调用进程管理的gpu编号
-    """
+        找到一个设备，可以分配size个bytes存储空间
+        refer_dev_idx, 调用进程管理的gpu编号
+        """
         if self.available_mem("cpu", 0) >= size:
             return torch.device("cpu")
         elif self.available_mem("cuda", refer_dev_idx) >= size:

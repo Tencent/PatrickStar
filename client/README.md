@@ -1,0 +1,16 @@
+### Client设计
+client负责管理本进程的显存和内存使用。
+系统中多个进程Client管理的内存时互相隔离的，这样避免了client之间进程进程间通信。
+
+client可以register module，也可以register paramter。
+通过param作为key来索引每个Parameter对应的data和grad。
+Parameter的data和grad的内存通过Chunk来管理。
+
+client无法单独管理一个tensor。
+一旦改变的tensor.data的位置，那么这个tensor也就不是原来的tensor了。
+原来tensor指针仍然指向原来的内存。
+如果想让一个tensor被弄成chunked tensor形式，需要将tensor包装成nn.Parameter给PS注册。
+
+每个param还要存储chunked tensor的指针。
+目前ps_param_data和ps_param_grad是chunked tensor的data和grad对应数据的地址。
+使用时将param.data和param.grad指向对应的chunked tensor。
