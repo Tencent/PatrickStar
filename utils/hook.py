@@ -130,6 +130,8 @@ def post_sub_module_backward_function(sub_module, client):
     for param in sub_module.parameters(recurse=False):
         client.release_data(param)
         client.release_grad(param)
+        # FP16 grad (COMPUTE) -> FP32 grad (HOLD) on GPU, FP16 grad (FREE)
+        # FP16 param (COMPUTE) -> (HOLD)
 
 
 def _register_hooks_recursively(module, client, count=[0]):

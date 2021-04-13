@@ -85,6 +85,8 @@ def F_adam(
 
         param.addcdiv_(exp_avg_data, denom, value=-step_size)
 
+        # 彻底删除grad FP32 (COMPUTE) _> grad FP32 (FREE)
+        # param FP32 (COMPUTE) -> param FP16 (HOLD) param FP32 (HOLD)
         client.release_data(param)
         client.release_grad(param)
         client.release_data(exp_avg)

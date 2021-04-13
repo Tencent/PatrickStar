@@ -25,6 +25,10 @@ from client import HybridPSClient
 from manager import HybridPSManager
 from utils import setup_hybrid_ps_hooks
 
+from fp16 import configure_fp16_optimizer
+from fp16 import FP16_Module
+from fp16 import FP16_Optimizer
+
 
 class SimpleModel(torch.nn.Module):
     def __init__(self, hidden_dim, empty_grad=False):
@@ -47,12 +51,16 @@ class SimpleModel(torch.nn.Module):
         return self.cross_entropy_loss(hidden_dim, y)
 
 
-def get_data_loader(model, total_samples, hidden_dim, device):
+def get_data_loader(model,
+                    total_samples,
+                    hidden_dim,
+                    device,
+                    data_type=torch.float):
     batch_size = 4  #model.train_micro_batch_size_per_gpu()
     train_data = torch.randn(total_samples,
                              hidden_dim,
                              device=device,
-                             dtype=torch.float)
+                             dtype=data_type)
     train_label = torch.empty(total_samples, dtype=torch.long,
                               device=device).random_(hidden_dim)
     train_dataset = torch.utils.data.TensorDataset(train_data, train_label)
@@ -69,20 +77,26 @@ def show_optim(optimizer):
             print(p.size())
 
 
-def test_simple_model(is_ps: False):
+def test_simple_model(is_ps: bool = False, is_fp16: bool = False):
     hidden_dim = 4
     device = torch.device('cuda:0')
 
     model = SimpleModel(hidden_dim, empty_grad=False)
     model.cuda()
 
+    if is_fp16:
+        model = FP16_Module(model)
+        # model.half()
+
     if is_ps:
         logging.info('test a simple model with hybrid ps')
 
-    data_loader = get_data_loader(model=model,
-                                  total_samples=1000,
-                                  hidden_dim=hidden_dim,
-                                  device=device)
+    data_loader = get_data_loader(
+        model=model,
+        total_samples=1000,
+        hidden_dim=hidden_dim,
+        device=device,
+        data_type=torch.half if is_fp16 else torch.float)
 
     loss_res = []
     if is_ps:
@@ -93,16 +107,30 @@ def test_simple_model(is_ps: False):
     else:
         optimizer = optim.Adam(model.parameters(), lr=0.001)
 
+    if is_fp16:
+        optimizer = FP16_Optimizer(optimizer)
+        # optimizer = configure_fp16_optimizer(optimizer)
+
     start_time = time.time()
     for n, batch in enumerate(data_loader):
-        optimizer.zero_grad()
         loss = model(batch[0], batch[1])
+
         # if torch.distributed.get_rank() == 0:
         print("LOSS:", loss.item())
         loss_res.append(loss.item())
-        loss.backward()
+
+        if is_fp16:
+            optimizer.zero_grad(set_grads_to_None=True)
+            optimizer.backward(loss, update_master_grads=False)
+        else:
+            optimizer.zero_grad()
+            loss.backward()
 
         optimizer.step()
+
+        if is_fp16:
+            # pass
+            optimizer.update_master_grads()
 
         if is_ps:
             client.release_all_grad()
@@ -131,3 +159,5 @@ if __name__ == "__main__":
 
     for loss, loss_ref in zip(loss_list, loss_ref_list):
         assert loss == loss_ref
+
+    loss_list = test_simple_model(False, True)
