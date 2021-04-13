@@ -16,6 +16,7 @@ import torch
 from .const import PSTensorStatus, PSChunkStatus
 from typing import Dict
 from manager import HybridPSManager
+from .helper import getsizeof
 import datetime
 import logging
 
@@ -53,7 +54,7 @@ class TensorInfoList(object):
 
 
 class Chunk(object):
-    def __init__(self, capacity: int, chunk_id: int):
+    def __init__(self, capacity: int, data_type: torch.dtype, chunk_id: int):
         """
     Chunk是数据迁移的最小单位，
     它用一段连续的内存来存储张量
@@ -63,6 +64,8 @@ class Chunk(object):
         self.pid = os.getpid()
         self.chunk_id = chunk_id
         self.capacity = capacity
+        self.data_type = data_type
+
         # 由调度决定分配在CPU还是GPU上
         self.ps_manager = HybridPSManager()
         if self.ps_manager.is_init() is False:
@@ -70,7 +73,8 @@ class Chunk(object):
 
         self.cuda_idx = torch.cuda.current_device()
 
-        self.device = self.ps_manager.schedule(capacity, self.cuda_idx)
+        self.device = self.ps_manager.schedule(capacity * getsizeof(data_type),
+                                               self.cuda_idx)
         if self.device.type == 'cuda' and self.device.index > torch.cuda.device_count(
         ):
             logging.log(
@@ -81,9 +85,10 @@ class Chunk(object):
             self.device = torch.cuda.current_device()
 
         self.payload = torch.zeros(capacity,
-                                   dtype=torch.float,
+                                   dtype=self.data_type,
                                    device=self.device)
-        self.ps_manager.add(self.device.type, self.device.index, capacity)
+        self.ps_manager.add(self.device.type, self.device.index,
+                            capacity * getsizeof(data_type))
 
         self.tensor_info_list = TensorInfoList()
         self.timestamp = datetime.datetime.now().timestamp()
@@ -94,7 +99,8 @@ class Chunk(object):
     def get_timestamp(self):
         return self.timestamp
 
-    def try_allocate(self, size: int, tensor_id: int) -> torch.Tensor:
+    def try_allocate(self, size: int, data_type: torch.dtype,
+                     tensor_id: int) -> torch.Tensor:
         """
     在chunk的连续payload中找到一个满足size大小的碎片
     采用贪心算法，因为考虑NN参数的分配一般是连续分配，连续释放，没必要设计更复杂的算法
@@ -104,16 +110,17 @@ class Chunk(object):
             start = info.start
             gap = start - prev_end
             if gap >= size:
-                dest = self.allocate(start, size, tensor_id)
+                dest = self.allocate(start, size, data_type, tensor_id)
                 return dest
             prev_end = start + info.size
 
         if self.capacity - prev_end >= size:
-            dest = self.allocate(prev_end, size, tensor_id)
+            dest = self.allocate(prev_end, size, data_type, tensor_id)
             return dest
         return None
 
-    def allocate(self, offset: int, size: int, tensor_id: int = None):
+    def allocate(self, offset: int, size: int, data_type: torch.dtype,
+                 tensor_id: int):
         """
     分配大小为size的连续存储空间，tensor_id用于记录chunk存储tensor在Module中的位置
     """
@@ -145,9 +152,9 @@ class Chunk(object):
             return
         self.payload = self.payload.to(target_device)
         self.ps_manager.add(target_device.type, target_device.index,
-                            self.capacity)
+                            self.capacity * getsizeof(self.data_type))
         self.ps_manager.delete(self.device.type, self.device.index,
-                               self.capacity)
+                               self.capacity * getsizeof(self.data_type))
         # 将参数指针重新定位到新的设备上
         for info in self.tensor_info_list.generate_in_sorted_order():
             tensor_id = info.tensor_id

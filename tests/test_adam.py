@@ -121,8 +121,8 @@ if __name__ == "__main__":
         level=logging.INFO)
     torch.manual_seed(0)
     manager = HybridPSManager()
-    # 4 layer每层20个elem，最少360内存
-    manager.init([40] * 1, [280])
+    # 4 layer每层20个elem(20*4 bytes)，最少360 (360*4 bytes)内存
+    manager.init([40 * 4] * 1, [280 * 4])
 
     loss_ref_list = test_simple_model(False)
 

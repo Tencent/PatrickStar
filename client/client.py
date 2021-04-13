@@ -22,6 +22,7 @@ from torch.multiprocessing import Process, Manager
 from utils import AccessType, PSChunkStatus, PSTensorStatus
 from utils import TensorInfo, Chunk
 from utils import ChunkList
+from utils.helper import getsizeof
 
 
 class HybridPSClient(object):
@@ -51,38 +52,38 @@ class HybridPSClient(object):
         self.param_grad_dict = {}
         self.dict_tensor_id_chunk_id = {}
 
-    def prepare_device(self, target_device: torch.device, need_size: int):
+    def prepare_device(self, target_device: torch.device, need_bytes: int):
         """
-        让target device做好分配need_size大小空间的准备
+        让target device做好分配need_bytes大小空间的准备
         具体操作是找到
         TODO(jiaruifang)目前只考虑单GPU的情况
         """
         logging.log(
             logging.DEBUG,
-            f'prepare_device target device {target_device} need size {need_size}'
+            f'prepare_device target device {target_device} need size {need_bytes}'
         )
         ps_manager = HybridPSManager()
         if ps_manager.max_mem(target_device.type,
-                              target_device.index) < need_size:
+                              target_device.index) < need_bytes:
             logging.log(
                 logging.ERROR,
-                f"{target_device} has not enough space for {need_size} elements"
+                f"{target_device} has not enough space for {need_bytes} elements"
             )
             raise RuntimeError
 
-        extra_size = need_size - ps_manager.available_mem(
+        extra_need_bytes = need_bytes - ps_manager.available_mem(
             target_device.type, target_device.index)
         # 不需要新分配
-        if extra_size <= 0:
+        if extra_need_bytes <= 0:
             return
 
         logging.log(
             logging.DEBUG,
-            f'the device {target_device} has no enough free space, extra size is {extra_size}'
+            f'the device {target_device} has no enough free space, extra size is {extra_need_bytes}'
         )
         # 需要在target_device上腾出空间
         moved_list = self.chunk_list.chunk_to_move_out_for_room_making(
-            extra_size, target_device)
+            extra_need_bytes, target_device)
 
         # TODO(jiaruifang)只考虑单卡情况，新设备只有gpu和cpu
         new_device = torch.device(
@@ -113,8 +114,9 @@ class HybridPSClient(object):
             raise RuntimeError
 
         if compute_device != current_device:
-            self.prepare_device(compute_device,
-                                self.chunk_list[chunk_id].capacity)
+            self.prepare_device(
+                compute_device, self.chunk_list[chunk_id].capacity *
+                getsizeof(self.chunk_list[chunk_id].data_type))
             self.chunk_move(chunk_id, compute_device)
 
         if access_type == AccessType.DATA:
@@ -166,7 +168,8 @@ class HybridPSClient(object):
     def release_grad(self, param: torch.nn.Parameter):
         self.release(param, AccessType.GRAD)
 
-    def new_tensor(self, shape: torch.Size, tensor_id: int):
+    def new_tensor(self, shape: torch.Size, data_type: torch.dtype,
+                   tensor_id: int):
         """
         在PS上新分配shape大小空间, tensor_id是tensor在本进程内唯一标识
         TODO(jiaruifang) 现在的分配方式很简单，没考虑chunk空间可以释放的情况。
@@ -179,7 +182,7 @@ class HybridPSClient(object):
         for elem in shape:
             numel *= elem
 
-        chunk_id, dest = self.chunk_list.allocate(numel, tensor_id)
+        chunk_id, dest = self.chunk_list.allocate(numel, data_type, tensor_id)
         logging.log(
             logging.DEBUG,
             f'pid {self.pid}, allocates a tensor {shape} on chunk {chunk_id}')
@@ -210,7 +213,7 @@ class HybridPSClient(object):
 
         # 初始化ps_data_tensor空间，并向其拷贝数据
         param.ps_data_tensor, param.ps_data_chunk_id = self.new_tensor(
-            param.shape, param.ps_data_id)
+            param.shape, param.dtype, param.ps_data_id)
         one_dim_param = param.data.contiguous().view(-1)
         param.ps_data_tensor.copy_(one_dim_param.view(param.ps_shape))
         param.data = param.ps_data_tensor.data
@@ -226,7 +229,7 @@ class HybridPSClient(object):
 
         # 初始化ps_grad_tensor空间，并向其拷贝数据
         param.ps_grad_tensor, param.ps_gard_chunk_id = self.new_tensor(
-            param.shape, param.ps_grad_id)
+            param.shape, param.dtype, param.ps_grad_id)
         if param.grad is not None:
             one_dim_grad = param.grad.contiguous().view(-1)
             param.ps_grad_tesnor.copy_(one_dim_grad.view(param.ps_shape))

@@ -11,13 +11,13 @@
 # permissions and limitations under the License.
 # See the AUTHORS file for names of contributors.
 
-from manager import HybridPSManager
 from .chunk import Chunk
 from .const import PSChunkStatus
 import sys
 import logging
 import torch
 from typing import List
+from .helper import getsizeof
 
 
 class ChunkList(object):
@@ -32,13 +32,14 @@ class ChunkList(object):
         self.default_chunk_size = default_chunk_size
         self.id = 0
 
-    def new_chunk(self, chunk_size: int) -> int:
+    def new_chunk(self, chunk_size: int, data_type: torch.dtype) -> int:
         """
         新建一个chunk，返回它的id
         只有没有find_available_chunk失败才调用new_chunk
         """
         chunk_id = self.id
         self.chunk_id_to_chunk_dict[chunk_id] = Chunk(capacity=chunk_size,
+                                                      data_type=data_type,
                                                       chunk_id=chunk_id)
         self.id = self.id + 1
         return chunk_id, self.chunk_id_to_chunk_dict[chunk_id]
@@ -64,19 +65,23 @@ class ChunkList(object):
         logging.debug(f'least_used_chunk found chunk id {pos}')
         return pos
 
-    def allocate(self, size: int, tensor_id: id) -> (int, torch.Tensor):
+    def allocate(self, size: int, data_type: torch.dtype,
+                 tensor_id: id) -> (int, torch.Tensor):
         """
         找到chunk_list中可以分配size大小数据的chunk，如果没有则新分配一个
         返回chunk_id
         """
         for chunk_id, chunk in self.chunk_id_to_chunk_dict.items():
-            ret = chunk.try_allocate(size, tensor_id)
+            if data_type != chunk.data_type:
+                continue
+            ret = chunk.try_allocate(size, data_type, tensor_id)
             if ret is not None:
                 logging.debug(f'allocate with old chunk {chunk_id}')
                 return chunk_id, ret
         # need allocate a new chunk
-        chunk_id, chunk = self.new_chunk(max(size, self.default_chunk_size))
-        ret = chunk.try_allocate(size, tensor_id)
+        chunk_id, chunk = self.new_chunk(max(size, self.default_chunk_size),
+                                         data_type)
+        ret = chunk.try_allocate(size, data_type, tensor_id)
         assert ret is not None
         logging.debug(f'allocate with new chunk {chunk_id}')
         return chunk_id, ret
@@ -97,46 +102,45 @@ class ChunkList(object):
         for chunk_id, chunk in self.chunk_id_to_chunk_dict.items():
             yield chunk_id, chunk
 
-    def chunk_to_move_out_for_room_making(self, size: int,
+    def chunk_to_move_out_for_room_making(self, size_in_bytes: int,
                                           target_device: torch.device) -> List:
         """
         为target device腾出size大小，找出需要移动出哪些chunk
         返回一个chunk_id list
         """
-        # 先找到可以free chunk
         free_chunk_id_list = []
-        freed_size = 0
+        freed_bytes = 0
         for chunk_id, chunk in self.chunk_id_to_chunk_dict.items():
             if chunk.device == target_device and chunk.get_status(
             ) == PSChunkStatus.FREE:
                 free_chunk_id_list.append(chunk_id)
-                freed_size += chunk.capacity
+                freed_bytes += chunk.capacity * getsizeof(chunk.data_type)
 
         for idx in free_chunk_id_list:
             self.delete_chunk(idx)
 
-        if freed_size >= size:
+        if freed_bytes >= size_in_bytes:
             return
 
         # 如果还没有腾出足够的空间，则需要moved out hold状态的chunk
-        still_need_size = size - freed_size
-        moved_size = 0
+        still_need_bytes = size_in_bytes - freed_bytes
+        moved_bytes = 0
         moved_list = []
         for chunk_id, chunk in self.chunk_id_to_chunk_dict.items():
             if chunk.device == target_device and chunk.get_status(
             ) == PSChunkStatus.HOLD:
-                moved_size += chunk.capacity
+                moved_bytes += chunk.capacity * getsizeof(chunk.data_type)
                 moved_list.append(chunk_id)
 
-                if moved_size >= still_need_size:
+                if moved_bytes >= still_need_bytes:
                     break
 
         # 无法腾出足够空间，抛出异常
-        if moved_size < still_need_size:
+        if moved_bytes < still_need_bytes:
             for id, chunk in self.generate():
                 chunk.visit()
             print(
-                f"still need {still_need_size}, but device {target_device} has not enough space for item."
+                f"still need {still_need_bytes}, but device {target_device} has not enough space for item."
             )
             raise RuntimeError
 
@@ -144,6 +148,7 @@ class ChunkList(object):
 
 
 if __name__ == "__main__":
+    from manager import HybridPSManager
     logging.basicConfig(
         format=
         '%(asctime)s,%(msecs)d %(levelname)-8s [%(filename)s:%(lineno)d] %(message)s',
@@ -152,20 +157,21 @@ if __name__ == "__main__":
     manager = HybridPSManager()
     manager.reset([32, 32], [1024])
 
+    data_type = torch.float
     chunk_list = ChunkList(default_chunk_size=128)
     # 之前分配的chunk中尝试分配10空间
     chunk_id = chunk_list.least_used_chunk()
     assert chunk_id == 0
 
-    chunk_id, tensor = chunk_list.allocate(10, 0)
+    chunk_id, tensor = chunk_list.allocate(10, data_type, 0)
     assert chunk_id == 0
 
-    chunk_id, tensor = chunk_list.allocate(100, 1)
+    chunk_id, tensor = chunk_list.allocate(100, data_type, 1)
     assert chunk_id == 0
     chunk_id = chunk_list.least_used_chunk()
     chunk_list[chunk_id].visit()
 
-    chunk_id, tensor = chunk_list.allocate(100, 2)
+    chunk_id, tensor = chunk_list.allocate(100, data_type, 2)
     assert (chunk_id == 1)
 
     chunk_id = chunk_list.least_used_chunk()
