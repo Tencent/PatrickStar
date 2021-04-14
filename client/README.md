@@ -14,3 +14,17 @@ client无法单独管理一个tensor。
 每个param还要存储chunked tensor的指针。
 目前ps_param_data和ps_param_grad是chunked tensor的data和grad对应数据的地址。
 使用时将param.data和param.grad指向对应的chunked tensor。
+
+
+#### register_module
+将module所有param接管
+
+#### register_param
+接管param
+_convert_to_ps_data->new_tensor
+似乎这时不应该分配，只要记录shape即可
+
+#### access_param
+访问时按需new_tensor
+
+#### relase_param

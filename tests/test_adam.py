@@ -148,7 +148,7 @@ if __name__ == "__main__":
         format=
         '%(asctime)s,%(msecs)d %(levelname)-8s [%(filename)s:%(lineno)d] %(message)s',
         datefmt='%Y-%m-%d:%H:%M:%S',
-        level=logging.INFO)
+        level=logging.DEBUG)
     torch.manual_seed(0)
     manager = HybridPSManager()
     # 4 layer每层20个elem(20*4 bytes)，最少360 (360*4 bytes)内存

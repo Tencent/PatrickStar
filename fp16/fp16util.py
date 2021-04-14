@@ -184,37 +184,25 @@ def model_grads_to_master_grads(model_params,
         master_params[0].grad.data.copy_(
             _flatten_dense_tensors([p.grad.data for p in model_params]))
     else:
-        for model, master in zip(model_params, master_params):
-            if model.grad is not None:
-                if master.grad is None:
-                    #TODO(jiaruifang) managed by HybridPS，
-                    # 已经在register时候分配好了
-                    if client is None:
+        if client is None:
+            for model, master in zip(model_params, master_params):
+                if model.grad is not None:
+                    if master.grad is None:
                         master.grad = Variable(
                             master.data.new(*master.data.size()))
-            else:
-                master.grad = None
-
-        if client is None:
+                else:
+                    master.grad = None
             model_grads = [p.grad for p in model_params if p.grad is not None]
             master_grads = [
                 p.grad for p in master_params if p.grad is not None
             ]
             _overflow_buf = torch.cuda.IntTensor([0])
             # Fused overflow check + scale for a list of contiguous tensors
-            # TODO(jiaruifang) I found it copys model_grad to master_grad.
+            # NOTE(jiaruifang) I found it copys model_grad to master_grad.
             multi_tensor_applier(amp_C.multi_tensor_scale, _overflow_buf,
                                  [model_grads, master_grads], 1.0)
         else:
-            # 在gpu上计算完毕，只改变grad很危险, master_p和model_p的data先传到cuda上
-            #TODO(jiaruifang)权宜之计
             for model_p, master_p in zip(model_params, master_params):
-                model_p.data = torch.ones(model_p.size(),
-                                          dtype=model_p.dtype,
-                                          device=torch.device('cuda:0'))
-                master_p.data = torch.ones(master_p.size(),
-                                           dtype=master_p.dtype,
-                                           device=torch.device('cuda:0'))
                 client.access_grad(model_p, torch.device('cuda:0'))
                 client.access_grad(master_p, torch.device('cuda:0'))
 
@@ -226,8 +214,8 @@ def model_grads_to_master_grads(model_params,
                 multi_tensor_applier(amp_C.multi_tensor_scale, _overflow_buf,
                                      [model_grad, master_grad], 1.0)
 
-                client.release_grad(model_p)
-                client.release_grad(master_p)
+                client.release_grad(model_p, PSTensorStatus.HOLD)
+                client.release_grad(master_p, PSTensorStatus.HOLD)
 
 
 def master_params_to_model_params(model_params,

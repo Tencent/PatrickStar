@@ -160,6 +160,7 @@ def test_migrate():
 
     @distributed_test(world_size=1)
     def test_chunk_to_move_out_for_room_making():
+        logging.info("start test_chunk_to_move_out_for_room_making")
         if not torch.cuda.is_available():
             print('cuda is not available in test_access')
         compute_device = torch.device('cuda:0')
@@ -185,8 +186,9 @@ def test_migrate():
 
         # 访问param，两个chunk被move到gpu上
         client.access_data(param1, compute_device)
-        client.access_grad(param1, compute_device)
         client.access_data(param2, compute_device)
+        # Note(jiaruifang)避免param和grad在同一个chunk上
+        client.access_grad(param1, compute_device)
         client.access_grad(param2, compute_device)
 
         # gpu上空出一个chunk
@@ -256,6 +258,41 @@ def test_fp16():
     test_register()
 
 
+def test_on_demand_access():
+    def test_register():
+        manager = HybridPSManager()
+        manager.reset(gpu_info=[80 * 4], cpu_info=[200 * 4])
+
+        # 交给HybridPS管理，会先被分在cpu上, 占据了2个chunk
+        client = HybridPSClient(gpu_index=0, default_chunk_size=10)
+        logging.info('client register param1')
+        param1 = torch.nn.Parameter(torch.randn(10,
+                                                device=torch.device('cuda:0'),
+                                                dtype=torch.half),
+                                    requires_grad=True)
+
+        assert param1.grad is None
+        client.register_param(param1)
+
+        assert param1.grad is None
+        assert param1.ps_grad_tensor is None
+        assert param1.ps_grad_id == 1
+        logging.info(param1.ps_grad_id)
+
+        param1.sum().backward()
+        logging.info(param1.grad.data_ptr())
+        assert param1.ps_grad_tensor is None
+        client.access_grad(param1, torch.device('cuda:0'))
+        logging.info(param1.grad.data_ptr())
+        assert param1.ps_grad_tensor is not None
+
+        client.access_grad(param1, torch.device('cpu:0'))
+        logging.info(param1.grad.data_ptr())
+        assert param1.ps_grad_tensor is not None
+
+    test_register()
+
+
 if __name__ == "__main__":
     logging.basicConfig(
         format=
@@ -270,3 +307,5 @@ if __name__ == "__main__":
     test_migrate()
     time.sleep(3)
     test_fp16()
+    time.sleep(3)
+    test_on_demand_access()

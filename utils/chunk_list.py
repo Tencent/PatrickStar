@@ -90,7 +90,7 @@ class ChunkList(object):
         """
         索引一个chunk
         """
-        return self.chunk_id_to_chunk_dict[chunk_id]
+        return self.chunk_id_to_chunk_dict.get(chunk_id)
 
     def size(self) -> int:
         """
