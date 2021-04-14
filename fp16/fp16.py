@@ -35,6 +35,8 @@ from torch._utils import _flatten_dense_tensors, _unflatten_dense_tensors
 from .loss_scaler import DynamicLossScaler, LossScaler
 from .fp16util import model_grads_to_master_grads, master_params_to_model_params, clip_grad_norm
 
+from client import HybridPSClient
+
 from apex.multi_tensor_apply import multi_tensor_applier
 import amp_C
 import logging
@@ -181,9 +183,12 @@ class FP16_Optimizer(object):
                  static_loss_scale=1.0,
                  dynamic_loss_scale=False,
                  dynamic_loss_args=None,
-                 verbose=False):
+                 verbose=False,
+                 client: HybridPSClient = None):
         if not torch.cuda.is_available:
             raise SystemError("Cannot use fp16 without CUDA.")
+
+        self.client = client
 
         self.verbose = verbose
 
@@ -195,6 +200,7 @@ class FP16_Optimizer(object):
         self.fp16_groups = []
         self.fp32_from_fp16_groups = []
         self.fp32_from_fp32_groups = []
+        # TODO(jiaruifang) master_param被HybridPS接管
         for i, param_group in enumerate(self.optimizer.param_groups):
             self.maybe_print(
                 "FP16_Optimizer processing param group {}:".format(i))
@@ -203,13 +209,25 @@ class FP16_Optimizer(object):
             fp32_from_fp16_params_this_group = []
             for i, param in enumerate(param_group['params']):
                 if param.requires_grad:
-                    if param.type() == 'torch.cuda.HalfTensor':
+                    # Note(jiaruifang) param不一定只在gpu上
+                    if param.type() == 'torch.HalfTensor' or param.type(
+                    ) == 'torch.cuda.HalfTensor':
                         self.maybe_print(
                             "FP16_Optimizer received torch.cuda.HalfTensor with {}"
                             .format(param.size()))
                         fp16_params_this_group.append(param)
-                        master_param = param.detach().clone().float()
-                        master_param.requires_grad = True
+
+                        if self.client is None:
+                            master_param = param.detach().clone().float()
+                            master_param.requires_grad = True
+                        else:
+                            master_param = nn.Parameter(
+                                param.detach().clone().float(),
+                                requires_grad=True)
+                            # NOTE(jiaruifang) manage master with hybridPS
+                            logging.info('register master param')
+                            self.client.register_param(master_param)
+
                         # Copythe model parallel flag.
                         # TODO(jiaruifang) remove the following line to pass unitest
                         # master_param.model_parallel = param.model_parallel
@@ -220,7 +238,9 @@ class FP16_Optimizer(object):
                         if param in self.optimizer.state:
                             self.optimizer.state[
                                 master_param] = self.optimizer.state.pop(param)
-                    elif param.type() == 'torch.cuda.FloatTensor':
+                    elif param.type(
+                    ) == 'torch.cuda.FloatTensor' or param.type(
+                    ) == 'torch.FloatTensor':
                         self.maybe_print(
                             "FP16_Optimizer received torch.cuda.FloatTensor with {}"
                             .format(param.size()))
@@ -308,23 +328,29 @@ class FP16_Optimizer(object):
     def _update_scale(self, has_overflow=False):
         self.loss_scaler.update_scale(has_overflow)
 
-    def _master_params_to_model_params(self):
+    def _master_params_to_model_params(self, client: HybridPSClient = None):
         for fp16_group, fp32_from_fp16_group in zip(
                 self.fp16_groups, self.fp32_from_fp16_groups):
-            master_params_to_model_params(fp16_group, fp32_from_fp16_group)
+            master_params_to_model_params(fp16_group,
+                                          fp32_from_fp16_group,
+                                          client=client)
 
-    def _model_params_to_master_params(self):
+    def _model_params_to_master_params(self, client: HybridPSClient = None):
         for fp16_group, fp32_from_fp16_group in zip(
                 self.fp16_groups, self.fp32_from_fp16_groups):
-            master_params_to_model_params(fp32_from_fp16_group, fp16_group)
+            master_params_to_model_params(fp32_from_fp16_group,
+                                          fp16_group,
+                                          client=client)
 
     # To consider:  Integrate distributed with this wrapper by registering a hook on each variable
     # that does the overflow check, gradient copy + downscale, and fp32
     # allreduce in a different stream.
-    def _model_grads_to_master_grads(self):
+    def _model_grads_to_master_grads(self, client: HybridPSClient = None):
         for fp16_group, fp32_from_fp16_group in zip(
                 self.fp16_groups, self.fp32_from_fp16_groups):
-            model_grads_to_master_grads(fp16_group, fp32_from_fp16_group)
+            model_grads_to_master_grads(fp16_group,
+                                        fp32_from_fp16_group,
+                                        client=client)
 
     def _downscale_master(self):
         if self.loss_scale != 1.0:
@@ -465,7 +491,7 @@ class FP16_Optimizer(object):
         else:
             retval = self.optimizer.step()
 
-        self._master_params_to_model_params()
+        self._master_params_to_model_params(self.client)
 
         return retval
 
@@ -560,7 +586,7 @@ class FP16_Optimizer(object):
         # discarding the iteration,  but probably wouldn't improve overall efficiency.
         self.loss_scaler.backward(loss.float(), retain_graph=retain_graph)
         if update_master_grads:
-            self.update_master_grads()
+            self.update_master_grads(self.client)
 
     def update_master_grads(self):
         """
@@ -573,7 +599,7 @@ class FP16_Optimizer(object):
             self._check_overflow()
             if self.overflow:
                 return
-        self._model_grads_to_master_grads()
+        self._model_grads_to_master_grads(self.client)
         self._downscale_master()
 
     def inspect_master_grad_data(self):

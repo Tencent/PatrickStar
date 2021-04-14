@@ -33,8 +33,11 @@ from torch._utils import _flatten_dense_tensors, _unflatten_dense_tensors
 
 from apex.multi_tensor_apply import multi_tensor_applier
 import amp_C
+from client import HybridPSClient
 
 # from megatron import mpu
+import logging
+from utils import PSTensorStatus
 
 
 class tofp16(nn.Module):
@@ -166,8 +169,10 @@ def prep_param_lists(model, flat_master=False):
         return model_params, master_params
 
 
-def model_grads_to_master_grads(model_params, master_params,
-                                flat_master=False):
+def model_grads_to_master_grads(model_params,
+                                master_params,
+                                flat_master=False,
+                                client: HybridPSClient = None):
     """
     Copy model gradients to master gradients.
     Args:
@@ -182,20 +187,53 @@ def model_grads_to_master_grads(model_params, master_params,
         for model, master in zip(model_params, master_params):
             if model.grad is not None:
                 if master.grad is None:
-                    master.grad = Variable(
-                        master.data.new(*master.data.size()))
+                    #TODO(jiaruifang) managed by HybridPS，
+                    # 已经在register时候分配好了
+                    if client is None:
+                        master.grad = Variable(
+                            master.data.new(*master.data.size()))
             else:
                 master.grad = None
-        model_grads = [p.grad for p in model_params if p.grad is not None]
-        master_grads = [p.grad for p in master_params if p.grad is not None]
-        _overflow_buf = torch.cuda.IntTensor([0])
-        multi_tensor_applier(amp_C.multi_tensor_scale, _overflow_buf,
-                             [model_grads, master_grads], 1.0)
+
+        if client is None:
+            model_grads = [p.grad for p in model_params if p.grad is not None]
+            master_grads = [
+                p.grad for p in master_params if p.grad is not None
+            ]
+            _overflow_buf = torch.cuda.IntTensor([0])
+            # Fused overflow check + scale for a list of contiguous tensors
+            # TODO(jiaruifang) I found it copys model_grad to master_grad.
+            multi_tensor_applier(amp_C.multi_tensor_scale, _overflow_buf,
+                                 [model_grads, master_grads], 1.0)
+        else:
+            # 在gpu上计算完毕，只改变grad很危险, master_p和model_p的data先传到cuda上
+            #TODO(jiaruifang)权宜之计
+            for model_p, master_p in zip(model_params, master_params):
+                model_p.data = torch.ones(model_p.size(),
+                                          dtype=model_p.dtype,
+                                          device=torch.device('cuda:0'))
+                master_p.data = torch.ones(master_p.size(),
+                                           dtype=master_p.dtype,
+                                           device=torch.device('cuda:0'))
+                client.access_grad(model_p, torch.device('cuda:0'))
+                client.access_grad(master_p, torch.device('cuda:0'))
+
+                model_grad = [model_p.grad]
+                master_grad = [master_p.grad]
+                _overflow_buf = torch.cuda.IntTensor([0])
+                # Fused overflow check + scale for a list of contiguous tensors
+                # TODO(jiaruifang) I found it copys model_grad to master_grad.
+                multi_tensor_applier(amp_C.multi_tensor_scale, _overflow_buf,
+                                     [model_grad, master_grad], 1.0)
+
+                client.release_grad(model_p)
+                client.release_grad(master_p)
 
 
 def master_params_to_model_params(model_params,
                                   master_params,
-                                  flat_master=False):
+                                  flat_master=False,
+                                  client=None):
     """
     Copy master parameters to model parameters.
     Args:
@@ -203,13 +241,27 @@ def master_params_to_model_params(model_params,
         master_params:  List of FP32 master parameters created by :func:`prep_param_lists`.  If ``master_params`` was created with ``flat_master=True``, ``flat_master=True`` should also be supplied to :func:`master_params_to_model_params`.
     """
     if flat_master:
+        raise NotImplementedError(
+            "master_params_to_model_params flatten is not implemented for HybridPS"
+        )
         for model, master in zip(
                 model_params,
                 _unflatten_dense_tensors(master_params[0].data, model_params)):
             model.data.copy_(master)
     else:
         for model, master in zip(model_params, master_params):
+            # TODO(jiaruing) 简单弄成计算设备在cuda上，可以根据model和master现在
+            # 所在的设备选择计算设备
+            if client is not None:
+                client.access_data(model, torch.device('cuda:0'))
+                client.access_data(master, torch.device('cuda:0'))
+
             model.data.copy_(master.data)
+
+            if client is not None:
+                # FP16 param data被标记成hold
+                client.release_data(model, PSTensorStatus.HOLD)
+                client.release_data(master, PSTensorStatus.HOLD)
 
 
 # Backward compatibility fixes

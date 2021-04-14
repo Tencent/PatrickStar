@@ -136,31 +136,6 @@ class CPUAdam(torch.optim.Optimizer):
             group.setdefault('amsgrad', False)
 
     @torch.no_grad()
-    def warmup(self):
-        """
-      初始化M (exp_avg)，V (exp_avg_sq)的空间，在训练前运行
-      """
-        for group_id, group in enumerate(self.param_groups):
-            for param_id, p in enumerate(group['params']):
-
-                if p.grad is None:
-                    continue
-
-                state = self.state[p]
-                if len(state) == 0:
-                    #print(f'group {group_id} param {param_id} = {p.numel()}')
-                    state['step'] = 0
-                    # gradient momentums
-                    state['exp_avg'] = torch.zeros_like(p.data,
-                                                        dtype=p.dtype,
-                                                        device='cpu')
-                    #memory_format=torch.preserve_format)
-                    # gradient variances
-                    state['exp_avg_sq'] = torch.zeros_like(p.data,
-                                                           dtype=p.dtype,
-                                                           device='cpu')
-
-    @torch.no_grad()
     def step(self, closure=None):
         """Performs a single optimization step.
 

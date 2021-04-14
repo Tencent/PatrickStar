@@ -105,9 +105,13 @@ class HybridPSClient(object):
     def access(self, param: torch.nn.Parameter, access_type: AccessType,
                compute_device: torch.device):
         """
-        访问一个module中的tensor，返回有正确数据的param
-        找到param对应的chunk，然后决定是否移动chunk到本地设备
-        移动之前要给设备腾出足够空间
+        访问一个module中的param的data或者grad，将正确的数据加载
+        找到param对应的chunk。
+        1. 如果chunk存在
+        然后决定是否移动chunk到本地设备，移动之前要给设备腾出足够空间。
+        2. 如果chunk不存在
+        比如grad FP16，在step过程所在的chunk已经被标记为FREE，并被释放掉。
+        需要分配一个新的Chunk
         """
         if not self.is_ps_param(param):
             raise "access a param not ps_data_tensor through HybridPS API"
@@ -128,14 +132,15 @@ class HybridPSClient(object):
                 getsizeof(self.chunk_list[chunk_id].data_type))
             self.chunk_move(chunk_id, compute_device)
 
-        if access_type == AccessType.DATA:
-            current_device = param.data.device
-        elif access_type == AccessType.GRAD:
-            current_device = param.grad.device
-        else:
-            raise RuntimeError
+        # 可能grad的指针并没有到位
+        # if access_type == AccessType.DATA:
+        #     current_device = param.device
+        # elif access_type == AccessType.GRAD:
+        #     current_device = param.grad.device
+        # else:
+        #     raise RuntimeError
 
-        assert current_device == compute_device
+        # assert current_device == compute_device
 
         self.chunk_list[chunk_id].touch()
 
@@ -157,7 +162,10 @@ class HybridPSClient(object):
                     compute_device: torch.device):
         self.access(param, AccessType.GRAD, compute_device)
 
-    def release(self, param: torch.nn.Parameter, access_type: AccessType):
+    def release(self,
+                param: torch.nn.Parameter,
+                access_type: AccessType,
+                reset_to_status: PSTensorStatus = PSTensorStatus.HOLD):
         """
         这个param的data, grad不再需要放在计算设备，或者不需要hold
         TODO(jiaruifang)释放内存 or 只是不再计算设备的hold
@@ -165,17 +173,24 @@ class HybridPSClient(object):
         if access_type == AccessType.DATA:
             chunk_id = self.dict_tensor_id_chunk_id[param.ps_data_id]
             self.chunk_list[chunk_id].tensor_info_list.set_status(
-                param.ps_data_id, PSTensorStatus.HOLD)
+                param.ps_data_id, reset_to_status)
         elif access_type == AccessType.GRAD:
             chunk_id = self.dict_tensor_id_chunk_id[param.ps_grad_id]
             self.chunk_list[chunk_id].tensor_info_list.set_status(
-                param.ps_grad_id, PSTensorStatus.HOLD)
+                param.ps_grad_id, reset_to_status)
 
-    def release_data(self, param: torch.nn.Parameter):
-        self.release(param, AccessType.DATA)
+    def release_data(self,
+                     param: torch.nn.Parameter,
+                     reset_to_status: PSTensorStatus = PSTensorStatus.HOLD):
+        """
+        可以把一个tensor释放成FREE，也可以成HOLD
+        """
+        self.release(param, AccessType.DATA, reset_to_status)
 
-    def release_grad(self, param: torch.nn.Parameter):
-        self.release(param, AccessType.GRAD)
+    def release_grad(self,
+                     param: torch.nn.Parameter,
+                     reset_to_status: PSTensorStatus = PSTensorStatus.HOLD):
+        self.release(param, AccessType.GRAD, reset_to_status)
 
     def new_tensor(self, shape: torch.Size, data_type: torch.dtype,
                    tensor_id: int):

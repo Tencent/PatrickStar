@@ -144,9 +144,9 @@ class Chunk(object):
              param_grad_dict: Dict[int, torch.nn.Parameter],
              target_device: torch.device):
         """
-    将这个chunk移动到device上，
-    先要在target_device腾出空间
-    """
+        将这个chunk移动到device上，
+        先要在target_device腾出空间
+        """
         logging.debug(f'move chunk {self.chunk_id} to {target_device}')
         if self.device == target_device:
             return
@@ -173,7 +173,11 @@ class Chunk(object):
                 param = param_grad_dict[tensor_id]
                 param.ps_grad_tensor = self.payload.narrow(
                     0, start, size).view(param.ps_shape)
-                param.grad = param.ps_grad_tensor
+
+                # Note(jiaruifang)为了保证data和grad在统一设备上
+                # 在移动ps_grad_tensor时，我们不能轻易改变grad指针
+                # param.grad = param.ps_grad_tensor
+                param.grad = None
 
         self.device = target_device
         self.touch()

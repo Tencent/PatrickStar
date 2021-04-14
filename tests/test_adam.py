@@ -108,7 +108,9 @@ def test_simple_model(is_ps: bool = False, is_fp16: bool = False):
         optimizer = optim.Adam(model.parameters(), lr=0.001)
 
     if is_fp16:
-        optimizer = FP16_Optimizer(optimizer)
+        if is_ps:
+            assert (client is not None)
+        optimizer = FP16_Optimizer(optimizer, client=client if is_ps else None)
         # optimizer = configure_fp16_optimizer(optimizer)
 
     start_time = time.time()
@@ -150,7 +152,7 @@ if __name__ == "__main__":
     torch.manual_seed(0)
     manager = HybridPSManager()
     # 4 layer每层20个elem(20*4 bytes)，最少360 (360*4 bytes)内存
-    manager.init([40 * 4] * 1, [280 * 4])
+    manager.init([140 * 4] * 1, [280 * 4])
 
     loss_ref_list = test_simple_model(False)
 
@@ -160,4 +162,13 @@ if __name__ == "__main__":
     for loss, loss_ref in zip(loss_list, loss_ref_list):
         assert loss == loss_ref
 
+    # TODO(jiaruifang) 内存释放干净
+    manager.reset([140 * 4] * 1, [280 * 4])
+    torch.manual_seed(0)
+    loss_ref_list = test_simple_model(True, True)
+
+    torch.manual_seed(0)
     loss_list = test_simple_model(False, True)
+
+    for loss, loss_ref in zip(loss_list, loss_ref_list):
+        assert loss == loss_ref
