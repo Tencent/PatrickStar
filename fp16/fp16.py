@@ -225,7 +225,6 @@ class FP16_Optimizer(object):
                                 param.detach().clone().float(),
                                 requires_grad=True)
                             # NOTE(jiaruifang) manage master with hybridPS
-                            logging.info('register master param')
                             self.client.register_param(master_param)
 
                         # Copythe model parallel flag.
@@ -595,12 +594,14 @@ class FP16_Optimizer(object):
         updated by the optimizer.  :attr:`update_master_grads` only needs to be called if
         ``fp16_optimizer_obj.backward`` was called with ``update_master_grads=False``.
         """
+        logging.info('begin update_master_grads')
         if self.dynamic_loss_scale:
             self._check_overflow()
             if self.overflow:
                 return
         self._model_grads_to_master_grads(self.client)
         self._downscale_master()
+        logging.info('finish update_master_grads')
 
     def inspect_master_grad_data(self):
         """

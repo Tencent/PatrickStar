@@ -13,10 +13,12 @@
 
 import os
 import torch
-from .const import PSTensorStatus, PSChunkStatus
+from client.const import PSTensorStatus, PSChunkStatus
+from client.helper import getsizeof
+
 from typing import Dict
 from manager import HybridPSManager
-from .helper import getsizeof
+
 import datetime
 import logging
 
@@ -35,12 +37,14 @@ class TensorInfo(object):
 
 
 class TensorInfoList(object):
-    def __init__(self):
+    def __init__(self, chunk_id):
+        self.chunk_id = chunk_id
         self.tensor_id_to_info_dict = {}
 
     def add(self, item: TensorInfo):
         logging.debug(
-            f'TensorInfoList add {item.tensor_id} start {item.start}')
+            f'chunk {self.chunk_id} add tensor id {item.tensor_id} start {item.start} size {item.size}'
+        )
         self.tensor_id_to_info_dict[item.tensor_id] = item
 
     def generate_in_sorted_order(self):
@@ -50,17 +54,19 @@ class TensorInfoList(object):
             yield info
 
     def set_status(self, tensor_id: int, status: PSTensorStatus):
+        logging.debug(
+            f'chunk {self.chunk_id} set tensor {tensor_id} to {status}')
         self.tensor_id_to_info_dict[tensor_id].status = status
 
 
 class Chunk(object):
     def __init__(self, capacity: int, data_type: torch.dtype, chunk_id: int):
         """
-    Chunk是数据迁移的最小单位，
-    它用一段连续的内存来存储张量
-    TODO(jiaruifang) 释放tensor带来的碎片问题，尚未实现存储空间的释放
-    TODO(jiaruifang) capacity单位不是Byte而是可以存储float的个数
-    """
+        Chunk是数据迁移的最小单位，
+        它用一段连续的内存来存储张量
+        TODO(jiaruifang) 释放tensor带来的碎片问题，尚未实现存储空间的释放
+        TODO(jiaruifang) capacity单位不是Byte而是可以存储float的个数
+        """
         self.pid = os.getpid()
         self.chunk_id = chunk_id
         self.capacity = capacity
@@ -90,7 +96,7 @@ class Chunk(object):
         self.ps_manager.add(self.device.type, self.device.index,
                             capacity * getsizeof(data_type))
 
-        self.tensor_info_list = TensorInfoList()
+        self.tensor_info_list = TensorInfoList(self.chunk_id)
         self.timestamp = datetime.datetime.now().timestamp()
 
     def touch(self):
@@ -102,15 +108,19 @@ class Chunk(object):
     def try_allocate(self, size: int, data_type: torch.dtype,
                      tensor_id: int) -> torch.Tensor:
         """
-    在chunk的连续payload中找到一个满足size大小的碎片
-    采用贪心算法，因为考虑NN参数的分配一般是连续分配，连续释放，没必要设计更复杂的算法
-    """
+        在chunk的连续payload中找到一个满足size大小的碎片
+        采用贪心算法，因为考虑NN参数的分配一般是连续分配，连续释放，没必要设计更复杂的算法
+        考虑，tensor 状态，free也可以分配
+        """
         prev_end = 0
         for info in self.tensor_info_list.generate_in_sorted_order():
+            status = info.status
+            if status == PSTensorStatus.FREE:
+                continue
             start = info.start
             gap = start - prev_end
             if gap >= size:
-                dest = self.allocate(start, size, data_type, tensor_id)
+                dest = self.allocate(prev_end, size, data_type, tensor_id)
                 return dest
             prev_end = start + info.size
 
@@ -122,8 +132,8 @@ class Chunk(object):
     def allocate(self, offset: int, size: int, data_type: torch.dtype,
                  tensor_id: int):
         """
-    分配大小为size的连续存储空间，tensor_id用于记录chunk存储tensor在Module中的位置
-    """
+        分配大小为size的连续存储空间，tensor_id用于记录chunk存储tensor在Module中的位置
+        """
         dest = self.payload.narrow(0, offset, size)
         self.tensor_info_list.add(
             TensorInfo(offset, size, tensor_id, PSTensorStatus.HOLD))
@@ -132,11 +142,14 @@ class Chunk(object):
 
     def visit(self):
         """
-    展示Chunk内所有tensor信息
-    """
+        展示Chunk内所有tensor信息
+        """
+        logging.error(
+            f'show chunk {self.chunk_id} capacity {self.capacity} dtype {self.data_type} device {self.device}'
+        )
         for info in self.tensor_info_list.generate_in_sorted_order():
-            print(
-                f"tensor in chunk {self.chunk_id} device {self.device} start {info.start}, \
+            logging.error(
+                f"** tensor in chunk {self.chunk_id} device {self.device} start {info.start}, \
         end {info.start + info.size}, tensor_id {info.tensor_id}, status {info.status}"
             )
 

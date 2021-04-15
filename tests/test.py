@@ -18,7 +18,8 @@ import torch.distributed as dist
 from common import distributed_test
 import time
 import logging
-from utils import AccessType
+
+from client.const import AccessType
 
 manager = HybridPSManager()
 
@@ -177,9 +178,9 @@ def test_migrate():
 
         # 交给HybridPS管理，会先被分在cpu上, 占据了2个chunk
         client = HybridPSClient(gpu_index=local_rank, default_chunk_size=40)
-        logging.info('clien register param1')
+        logging.info('client register param1')
         client.register_param(param1)
-        logging.info('clien register param2')
+        logging.info('client register param2')
         client.register_param(param2)
 
         client.visit()
@@ -193,7 +194,7 @@ def test_migrate():
 
         # gpu上空出一个chunk
         client.release_data(param1)
-        client.release_grad(param1)
+        client.release_data(param2)
 
         param3 = torch.randn(24, device=torch.device('cuda:0'))
         client.register_param(param3)

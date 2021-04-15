@@ -12,6 +12,3 @@
 # See the AUTHORS file for names of contributors.
 
 from .hook import setup_hybrid_ps_hooks
-from .chunk_list import ChunkList
-from .chunk import TensorInfo, Chunk
-from .const import AccessType, PSChunkStatus, PSTensorStatus

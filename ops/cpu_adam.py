@@ -18,6 +18,7 @@ from pathlib import Path
 from torch import Tensor
 from typing import List, Optional
 import logging
+from client.const import PSTensorStatus
 
 
 def F_adam(
@@ -37,7 +38,7 @@ def F_adam(
     r"""Functional API that performs Adam algorithm computation.
     See :class:`~torch.optim.Adam` for details.
     """
-    logging.debug('begin compute F_adam')
+    logging.warning('begin compute F_adam')
     for i, param in enumerate(params):
         # HybridPS加载data
         compute_device = torch.device('cpu')
@@ -88,11 +89,11 @@ def F_adam(
         # 彻底删除grad FP32 (COMPUTE) _> grad FP32 (FREE)
         # param FP32 (COMPUTE) -> param FP16 (HOLD) param FP32 (HOLD)
         client.release_data(param)
-        client.release_grad(param)
+        client.release_grad(param, PSTensorStatus.FREE)
         client.release_data(exp_avg)
         client.release_data(exp_avg_sq)
 
-    logging.debug('finish compute F_adam')
+    logging.warning('finish compute F_adam')
 
 
 class CPUAdam(torch.optim.Optimizer):
@@ -157,7 +158,9 @@ class CPUAdam(torch.optim.Optimizer):
             max_exp_avg_sqs = []
             state_steps = []
 
+            #TODO(jiaruifang) params_with_grad没有被赋值，所以F_adam根本没有被执行
             for p in group['params']:
+                # TODO(jiaruifang) fp16不会进来了
                 if p.grad is not None:
                     params_with_grad.append(p)
                     if p.grad.is_sparse:
@@ -188,8 +191,11 @@ class CPUAdam(torch.optim.Optimizer):
 
                         assert state['exp_avg'].requires_grad is False
                         assert state['exp_avg_sq'].requires_grad is False
+                        logging.warning('allcate exp_avg')
                         self.client.register_param(state['exp_avg'])
+                        logging.warning('allcate exp_avg_sq')
                         self.client.register_param(state['exp_avg_sq'])
+                        logging.warning('allcate exp_avg_sq finish')
 
                         if group['amsgrad']:
                             # Maintains max of all exp. moving avg. of sq. grad. values
@@ -206,6 +212,8 @@ class CPUAdam(torch.optim.Optimizer):
                     state['step'] += 1
                     # record the step after step update
                     state_steps.append(state['step'])
+
+            logging.info('info inside cpu adam step')
 
             beta1, beta2 = group['betas']
             F_adam(

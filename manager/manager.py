@@ -51,6 +51,9 @@ class HybridPSManager(metaclass=SingletonMeta):
         self.gpu_used_mem_list = mp_manager.list([])
         self.cpu_used_mem_list = mp_manager.list([])
 
+        self.cpu_mem_usage_curve = []
+        self.gpu_mem_usage_curve = []
+
     def init(self, gpu_info, cpu_info):
         for item in gpu_info:
             self.gpu_max_mem_list.append(item)
@@ -74,10 +77,12 @@ class HybridPSManager(metaclass=SingletonMeta):
         return self._is_init_.value
 
     def visit(self):
-        for idx, value in enumerate(self.gpu_used_mem_list):
-            print(f"GPU:{idx} used mem {value}")
-        for idx, value in enumerate(self.cpu_used_mem_list):
-            print(f"CPU:{idx} used mem {value}")
+        for idx, (used_mem, max_mem) in enumerate(
+                zip(self.gpu_used_mem_list, self.gpu_max_mem_list)):
+            print(f"GPU:{idx} used mem {used_mem} B max mem {max_mem} B")
+        for idx, (used_mem, max_mem) in enumerate(
+                zip(self.cpu_used_mem_list, self.cpu_max_mem_list)):
+            print(f"CPU:{idx} used mem {used_mem} B max mem {max_mem} B")
 
     def add(self, device_type: str, index: int, size: int):
         """
@@ -88,22 +93,30 @@ class HybridPSManager(metaclass=SingletonMeta):
 
         if device_type == "cpu":
             self.cpu_used_mem_list[index] += size
+            self.cpu_mem_usage_curve.append(
+                self.available_mem(device_type, index))
         elif device_type == "cuda":
             self.gpu_used_mem_list[index] += size
+            self.gpu_mem_usage_curve.append(
+                self.available_mem(device_type, index))
         else:
             raise f"device type {device_type} is not supported"
 
     def delete(self, device_type, index, size):
         """
-    checkout，设备device_type:index减少size个bytes内存使用
-    """
+        checkout，设备device_type:index减少size个bytes内存使用
+        """
         if index is None:
             index = 0
 
         if device_type == "cpu":
             self.cpu_used_mem_list[index] -= size
+            self.cpu_mem_usage_curve.append(
+                self.available_mem(device_type, index))
         elif device_type == "cuda":
             self.gpu_used_mem_list[index] -= size
+            self.gpu_mem_usage_curve.append(
+                self.available_mem(device_type, index))
         else:
             raise f"device type {device_type} is not supported"
 
@@ -150,7 +163,7 @@ class HybridPSManager(metaclass=SingletonMeta):
         if device_type == "cpu":
             return self.cpu_max_mem_list[index]
         elif device_type == "cuda":
-            return self.cpu_max_mem_list[index]
+            return self.gpu_max_mem_list[index]
 
 
 if __name__ == "__main__":

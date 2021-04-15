@@ -12,3 +12,6 @@
 # See the AUTHORS file for names of contributors.
 
 from .client import HybridPSClient
+from .chunk_list import ChunkList
+from .chunk_data import TensorInfo, Chunk
+from .const import AccessType, PSChunkStatus, PSTensorStatus

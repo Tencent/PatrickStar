@@ -13,6 +13,7 @@
 
 import torch
 import logging
+from client import PSTensorStatus
 
 ############# HOOKS ####################
 
@@ -90,31 +91,35 @@ def _apply_to_tensors_only(module, functional, backward_function, outputs):
 # 必须具备重复调用，第二次无效的能力 fetch submodule
 def pre_sub_module_forward_function(sub_module, client):
     logging.log(
-        logging.DEBUG,
+        logging.WARNING,
         f'{sub_module.__class__.__name__} pre_sub_module_forward_function, access HybridPS get param'
     )
-    for param in sub_module.parameters(recurse=False):
+    for name, param in sub_module.named_parameters(recurse=False):
+        logging.warning(f'pre FWD {sub_module.id}.{name} access data')
         client.access_data(param, torch.device('cuda:0'))
 
 
 # release submodule
 def post_sub_module_forward_function(sub_module, client):
     logging.log(
-        logging.DEBUG,
+        logging.WARNING,
         f'{sub_module.__class__.__name__} post_sub_module_forward_function, access HybridPS get param'
     )
-    for param in sub_module.parameters(recurse=False):
+    # TODO(jiaruifang) recurse = True释放干净
+    for name, param in sub_module.named_parameters(recurse=False):
+        logging.warning(f'post FWD {sub_module.id}.{name} hold data')
         client.release_data(param)
 
 
 def pre_sub_module_backward_function(sub_module, client):
     # TODO(jiaruifang) backward前处理逻辑
     logging.log(
-        logging.DEBUG,
+        logging.WARNING,
         f'Before sub module backward function {sub_module.__class__.__name__} allgather'
     )
     # TODO
-    for param in sub_module.parameters(recurse=False):
+    for name, param in sub_module.named_parameters(recurse=False):
+        logging.warning(f'pre BWD {sub_module.id}.{name} access data and grad')
         client.access_data(param, torch.device('cuda:0'))
         client.access_grad(param, torch.device('cuda:0'))
 
@@ -123,15 +128,15 @@ def pre_sub_module_backward_function(sub_module, client):
 def post_sub_module_backward_function(sub_module, client):
     #TODO(jiaruifang) backward后处理逻辑
     logging.log(
-        logging.DEBUG,
+        logging.WARNING,
         f"After sub module backward function {sub_module.__class__.__name__} before release"
     )
     # TODO(jiaruifang) recurse
-    for param in sub_module.parameters(recurse=False):
-        client.release_data(param)
+    for name, param in sub_module.named_parameters(recurse=False):
+        logging.warning(
+            f'post BWD {sub_module.id}.{name} free data and hold grad')
+        client.release_data(param, PSTensorStatus.FREE)
         client.release_grad(param)
-        # FP16 grad (COMPUTE) -> FP32 grad (HOLD) on GPU, FP16 grad (FREE)
-        # FP16 param (COMPUTE) -> (HOLD)
 
 
 def _register_hooks_recursively(module, client, count=[0]):
@@ -143,7 +148,7 @@ def _register_hooks_recursively(module, client, count=[0]):
     my_count = count[0]
     module.id = my_count
 
-    logging.log(logging.DEBUG, f"{module.__class__} : {module.id}")
+    # logging.log(logging.DEBUG, f"{module.__class__.__name__} : {module.id}")
 
     for child in module.children():
         count[0] = count[0] + 1
