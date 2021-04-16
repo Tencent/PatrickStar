@@ -38,7 +38,7 @@ def F_adam(
     r"""Functional API that performs Adam algorithm computation.
     See :class:`~torch.optim.Adam` for details.
     """
-    logging.warning('begin compute F_adam')
+    logging.debug('begin compute F_adam')
     for i, param in enumerate(params):
         # HybridPS加载data
         compute_device = torch.device('cpu')
@@ -89,6 +89,7 @@ def F_adam(
         # 彻底删除grad FP32 (COMPUTE) _> grad FP32 (FREE)
         # param FP32 (COMPUTE) -> param FP16 (HOLD) param FP32 (HOLD)
         client.release_data(param)
+        # 相当于zero_grad了，再次使用grad需要reallocate
         client.release_grad(param, PSTensorStatus.FREE)
         client.release_data(exp_avg)
         client.release_data(exp_avg_sq)
@@ -160,13 +161,14 @@ class CPUAdam(torch.optim.Optimizer):
 
             #TODO(jiaruifang) params_with_grad没有被赋值，所以F_adam根本没有被执行
             for p in group['params']:
-                # TODO(jiaruifang) fp16不会进来了
-                if p.grad is not None:
+                # TODO(jiaruifang) fp16不会进如下条件
+                # 对HybridPS，只要执行了release，grad和data是否为None没有意义
+                if p.ps_grad_tensor is not None:
                     params_with_grad.append(p)
-                    if p.grad.is_sparse:
-                        raise RuntimeError(
-                            'Adam does not support sparse gradients, please consider SparseAdam instead'
-                        )
+                    # if p.grad.is_sparse:
+                    #     raise RuntimeError(
+                    #         'Adam does not support sparse gradients, please consider SparseAdam instead'
+                    #     )
                     # grads.append(p.grad)
 
                     state = self.state[p]

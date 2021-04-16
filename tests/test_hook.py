@@ -71,7 +71,7 @@ if __name__ == "__main__":
     manager = HybridPSManager()
     # 4 layer每层20个elem(20*4 bytes)，最少360个elem (360*4 bytes)内存
     # M, V, P FP32 240
-    manager.init([80 * 4] * 1, [180 * 4])
+    manager.init([40 * 4] * 1, [280 * 4])
     torch.manual_seed(0)
     test()
 

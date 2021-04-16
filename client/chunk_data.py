@@ -135,6 +135,8 @@ class Chunk(object):
         分配大小为size的连续存储空间，tensor_id用于记录chunk存储tensor在Module中的位置
         """
         dest = self.payload.narrow(0, offset, size)
+        # 复用内存要清零
+        dest.zero_()
         self.tensor_info_list.add(
             TensorInfo(offset, size, tensor_id, PSTensorStatus.HOLD))
         self.touch()
@@ -160,7 +162,9 @@ class Chunk(object):
         将这个chunk移动到device上，
         先要在target_device腾出空间
         """
-        logging.debug(f'move chunk {self.chunk_id} to {target_device}')
+        logging.debug(
+            f'move chunk {self.chunk_id} from {self.device} to {target_device}'
+        )
         if self.device == target_device:
             return
         self.payload = self.payload.to(target_device)
@@ -179,6 +183,7 @@ class Chunk(object):
                 param = param_data_dict[tensor_id]
                 param.ps_data_tensor = self.payload.narrow(
                     0, start, size).view(param.ps_shape)
+                # 把data原来指向的内存释放
                 param.data = param.ps_data_tensor
             elif tensor_id in param_grad_dict.keys():
                 logging.debug(

@@ -211,10 +211,12 @@ class HybridPSClient(object):
         if access_type == AccessType.DATA:
             self.chunk_list[chunk_id].tensor_info_list.set_status(
                 param.ps_data_id, reset_to_status)
+            # 把data的内存删除
+            param.data = torch.zeros(1, dtype=param.dtype, device=param.device)
         elif access_type == AccessType.GRAD:
             self.chunk_list[chunk_id].tensor_info_list.set_status(
                 param.ps_grad_id, reset_to_status)
-
+            param.grad = None
         #在这里立刻释放，被标记为free的chunks
         self.chunk_list.delete_free_chunks(self.chunk_tensor_index)
 

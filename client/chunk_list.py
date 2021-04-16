@@ -45,6 +45,9 @@ class ChunkList(object):
                                                       data_type=data_type,
                                                       chunk_id=chunk_id)
         self.id = self.id + 1
+        logging.debug(
+            f'allocate with new chunk chunk_id {chunk_id} size {chunk_size} data_type {data_type}'
+        )
         return chunk_id, self.chunk_id_to_chunk_dict[chunk_id]
 
     def delete_chunk(self, chunk_id: int, chunk_tensor_index: dict):
@@ -99,9 +102,6 @@ class ChunkList(object):
                                          data_type)
         ret = chunk.try_allocate(size, data_type, tensor_id)
         assert ret is not None
-        logging.info(
-            f'allocate with new chunk chunk_id {chunk_id} size {size} data_type {data_type} tensor_id {tensor_id}'
-        )
         return chunk_id, ret
 
     def __getitem__(self, chunk_id: int):
@@ -143,24 +143,6 @@ class ChunkList(object):
         先释放cpu，gpu的所有free
         返回一个chunk_id list
         """
-        # free_chunk_id_list = []
-        # freed_bytes = 0
-
-        # # 释放cpu和gpu上所有free chunk，统计目标设备上腾出的空间
-        # for chunk_id, chunk in self.chunk_id_to_chunk_dict.items():
-        #     if chunk.get_status() == PSChunkStatus.FREE:
-        #         free_chunk_id_list.append(chunk_id)
-        #         if chunk.device == target_device:
-        #             freed_bytes += chunk.capacity * getsizeof(chunk.data_type)
-
-        # # 释放free chunks
-        # for idx in free_chunk_id_list:
-        #     self.delete_chunk(idx, chunk_tensor_index)
-
-        # if freed_bytes >= size_in_bytes:
-        #     logging.debug(f'freed bytes {freed_bytes} vs {size_in_bytes}')
-        #     return []
-
         # 如果还没有腾出足够的空间，则需要moved out hold状态的chunk
         still_need_bytes = size_in_bytes
         moved_bytes = 0
@@ -184,6 +166,17 @@ class ChunkList(object):
             raise RuntimeError
 
         return moved_list
+
+    def show_stat(self):
+        cuda_chunk_list = []
+        cpu_chunk_list = []
+        for chunk_id, chunk in self.generate():
+            if chunk.device.type == 'cuda':
+                cuda_chunk_list.append(chunk.capacity)
+            elif chunk.device.type == 'cpu':
+                cpu_chunk_list.append(chunk.capacity)
+        logging.debug(f'cuda_chunk, {cuda_chunk_list}')
+        logging.debug(f'cpu_chunk, {cpu_chunk_list}')
 
 
 if __name__ == "__main__":

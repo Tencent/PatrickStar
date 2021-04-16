@@ -135,8 +135,8 @@ def post_sub_module_backward_function(sub_module, client):
     for name, param in sub_module.named_parameters(recurse=False):
         logging.warning(
             f'post BWD {sub_module.id}.{name} free data and hold grad')
-        client.release_data(param, PSTensorStatus.FREE)
-        client.release_grad(param)
+        client.release_data(param, PSTensorStatus.HOLD)
+        client.release_grad(param, PSTensorStatus.HOLD)
 
 
 def _register_hooks_recursively(module, client, count=[0]):

@@ -93,12 +93,10 @@ class HybridPSManager(metaclass=SingletonMeta):
 
         if device_type == "cpu":
             self.cpu_used_mem_list[index] += size
-            self.cpu_mem_usage_curve.append(
-                self.available_mem(device_type, index))
+            self.cpu_mem_usage_curve.append(self.used_mem(device_type, index))
         elif device_type == "cuda":
             self.gpu_used_mem_list[index] += size
-            self.gpu_mem_usage_curve.append(
-                self.available_mem(device_type, index))
+            self.gpu_mem_usage_curve.append(self.used_mem(device_type, index))
         else:
             raise f"device type {device_type} is not supported"
 
@@ -115,28 +113,27 @@ class HybridPSManager(metaclass=SingletonMeta):
                 self.available_mem(device_type, index))
         elif device_type == "cuda":
             self.gpu_used_mem_list[index] -= size
-            self.gpu_mem_usage_curve.append(
-                self.available_mem(device_type, index))
+            self.gpu_mem_usage_curve.append(self.used_mem(device_type, index))
         else:
             raise f"device type {device_type} is not supported"
 
-    def schedule(self, size: int, refer_dev_idx: int):
+    def schedule(self, size_in_byte: int, refer_dev_idx: int):
         """
-        找到一个设备，可以分配size个bytes存储空间
+        找到一个设备，可以分配size_in_byte个bytes存储空间
         refer_dev_idx, 调用进程管理的gpu编号
         """
-        if self.available_mem("cpu", 0) >= size:
+        if self.available_mem("cpu", 0) >= size_in_byte:
             return torch.device("cpu")
-        elif self.available_mem("cuda", refer_dev_idx) >= size:
+        elif self.available_mem("cuda", refer_dev_idx) >= size_in_byte:
             return torch.device(f"cuda:{refer_dev_idx}")
         else:
             for idx in range(self.gpu_num()):
                 if idx == refer_dev_idx:
                     pass
-                if self.available_mem("cuda", idx) >= size:
-                    self.add("cuda", idx, size)
+                if self.available_mem("cuda", idx) >= size_in_byte:
+                    # self.add("cuda", idx, size_in_byte)
                     return torch.device(f"cuda:{idx}")
-        logging.error(f"HybridPSManager can not find {size} space")
+        logging.error(f"HybridPSManager can not find {size_in_byte} space")
         raise RuntimeError
 
     def available_mem(self, device_type, index):

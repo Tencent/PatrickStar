@@ -29,46 +29,7 @@ from fp16 import configure_fp16_optimizer
 from fp16 import FP16_Module
 from fp16 import FP16_Optimizer
 
-
-class SimpleModel(torch.nn.Module):
-    def __init__(self, hidden_dim, empty_grad=False):
-        super(SimpleModel, self).__init__()
-        self.linear = torch.nn.Linear(hidden_dim, hidden_dim)
-        self.linear2 = torch.nn.Linear(hidden_dim, hidden_dim)
-        self.linear3 = torch.nn.Linear(hidden_dim, hidden_dim)
-        self.linear4 = torch.nn.Linear(hidden_dim, hidden_dim)
-        if empty_grad:
-            self.layers2 = torch.nn.ModuleList(
-                [torch.nn.Linear(hidden_dim, hidden_dim)])
-        self.cross_entropy_loss = torch.nn.CrossEntropyLoss()
-
-    def forward(self, x, y):
-        hidden_dim = x
-        hidden_dim = self.linear(hidden_dim)
-        hidden_dim = self.linear2(hidden_dim)
-        hidden_dim = self.linear3(hidden_dim)
-        hidden_dim = self.linear4(hidden_dim)
-        return self.cross_entropy_loss(hidden_dim, y)
-
-
-def get_data_loader(model,
-                    total_samples,
-                    hidden_dim,
-                    device,
-                    data_type=torch.float):
-    batch_size = 4  #model.train_micro_batch_size_per_gpu()
-    train_data = torch.randn(total_samples,
-                             hidden_dim,
-                             device=device,
-                             dtype=data_type)
-    train_label = torch.empty(total_samples, dtype=torch.long,
-                              device=device).random_(hidden_dim)
-    train_dataset = torch.utils.data.TensorDataset(train_data, train_label)
-    sampler = SequentialSampler(train_dataset)
-    train_loader = torch.utils.data.DataLoader(train_dataset,
-                                               batch_size=batch_size,
-                                               sampler=sampler)
-    return train_loader
+from tests.simple_net import SimpleModel, get_data_loader
 
 
 def show_optim(optimizer):
@@ -135,6 +96,7 @@ def test_simple_model(is_ps: bool = False, is_fp16: bool = False):
         else:
             optimizer.zero_grad()
             loss.backward()
+            pass
 
         # chunk 0和 chunk 1还在compute状态
         logging.info(f'before step {n}')
@@ -147,8 +109,9 @@ def test_simple_model(is_ps: bool = False, is_fp16: bool = False):
             optimizer.update_master_grads()
             logging.info(f'after update_master_grads {n}')
 
-        if is_ps:
-            client.release_all_grad()
+        # it is necessary to get correct results
+        # if is_ps:
+        #     client.release_all_grad()
         if n == 5: break
 
     elapse = time.time() - start_time
@@ -165,20 +128,27 @@ if __name__ == "__main__":
     torch.manual_seed(0)
     manager = HybridPSManager()
     # 4 layer每层20个elem(20*4 bytes)，最少360 (360*4 bytes)内存
-    manager.init([140 * 4] * 1, [280 * 4])
+    # FP16 best profile 100, 220 = 320
+    # TODO(jiaruifang) 80, 240 will failed
+    manager.init([40 * 4] * 1, [280 * 4])
 
-    # loss_ref_list = test_simple_model(False)
+    loss_ref_list = test_simple_model(False)
 
-    # torch.manual_seed(0)
-    # loss_list = test_simple_model(True)
+    torch.manual_seed(0)
+    loss_list = test_simple_model(True)
 
-    # for loss, loss_ref in zip(loss_list, loss_ref_list):
-    #     assert loss == loss_ref
+    print('hybridps', loss_list)
+    print('ref', loss_ref_list)
+    for loss, loss_ref in zip(loss_list, loss_ref_list):
+        assert loss == loss_ref
+
+    # print('gpu usage ', manager.gpu_mem_usage_curve)
+    # print('cpu usgae ', manager.cpu_mem_usage_curve)
 
     # TODO(jiaruifang) 内存释放干净
-    manager.reset([140 * 4] * 1, [280 * 4])
-    torch.manual_seed(0)
-    loss_ref_list = test_simple_model(True, True)
+    # manager.reset([140 * 4] * 1, [280 * 4])
+    # torch.manual_seed(0)
+    # loss_ref_list = test_simple_model(True, True)
 
     # torch.manual_seed(0)
     # loss_list = test_simple_model(False, True)
