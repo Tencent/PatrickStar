@@ -61,11 +61,13 @@ Tensor只有被需要计算时，它所在需要的Chunk内存才被分配出来
 当Tensor不再被需要时，它所在的Chunk内存被释放。
 
 1. Instancely Release
+
 在release tensor之后，检查其所在chunk的状态，如果变成FREE则释放内存。
 这种方式有频繁分配释放内存的开销？
 并不一定，tensor底层内存是PyTorch的CUDACachingMemory管理，并没有真正释放内存。
 
 2. Cached Release
+
 在release tensor之后，检查其所在chunk的状态，如果变成FREE并不释放内存。
 留给下次分配时使用。
 当已分配内存超过一定限制，再释放所有FREE状态的内存。
@@ -91,7 +93,8 @@ step 1
 9. pre-step分配分配param grad FP32(C)，释放grad fp16(B)
 10. post-step释放param grad FP32 (C)
 
-可见，由于hook的特定啊，模型参数的data和grad都是连续分配在一起，局部性可以自动保证。
+我们可以设计一个Chunk和Tensor的最佳映射策略，来达到节省内存和减少通信的方案。
+TODO
 
 ##### FP16 Optimizer
 TODO
@@ -102,14 +105,14 @@ TODO
 参数总大小80个元素。
 
 ##### FP32训练
-至少需要80 *4B *4(P+G+M+V)1280 B的GPU显存。
+至少需要80 \*4B \*4(P+G+M+V)1280 B的GPU显存。
 使用Chunked Tensor方式，
 GPU显存最少需要显存的计算公式是：max(Chunk_size(Pgard_i) + Chunk_size(Pdata_i))为40*4=160B。
-也就是反向传播一层需要的最大内存数目=Param+Grad=40 *4B = 160B。
+也就是反向传播一层需要的最大内存数目=Param+Grad=40 \*4B = 160B。
 使用CPU内存最少为1280 - 160 = 1120B。
 
 ##### FP16训练
-至少需要80 *4B *4(P32+G32+M32+V32) + 80 * 2B * 2(P16 + G16) = 1600 B的显存。
+至少需要80 \*4B \*4(P32+G32+M32+V32) + 80 \* 2B \* 2(P16 + G16) = 1600 B的显存。
 使用Chunked Tensor方式，
 GPU仍然至少需要160B显存。
 使用CPU内存最少为1600 - 160 = 1440B。
