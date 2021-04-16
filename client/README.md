@@ -36,13 +36,13 @@ Chunk底层一段连续的存储空间(如512 MB/1GB)，它被用来存储多个
 一大块内存方式进行跨设备传输，可以充分利用CPU-GPU和GPU-GPU之间的带宽。
 2. 重叠通信和计算。
 传输chunk和其他chunk的计算可以重叠。
-2. 内存复用，节省内存。
+3. 内存复用，节省内存。
 不同生命周期的tensor可以在一个chunk内复用。
 通过这种方式可以避免grad FP32大小空间的分配。
-3. 突破硬件存储空间限制。
+4. 突破硬件存储空间限制。
 我们不在需要CPU内存能够存储全部模型需要的参数，只需要CPU+GPU内存能够存储全部参数。
 
-为了实现以上三点优势，我们对Chunk进行了一下几点设计。
+为了实现以上四点优势，我们对Chunk进行了一下几点设计。
 
 ##### Chunk Status
 Chunk可以有三种状态，分别是COMPUTE，HOLD和FREE。
@@ -78,11 +78,14 @@ Tensor只有被需要计算时，它所在需要的Chunk内存才被分配出来
 2. 注册FP16 optimizer，将param data FP32连续分配。
 
 step 0
+
 3. 反向传播，pre-layer，param grad FP16 (B)连续分配，post-layer释放param data 16(A)
 4. pre-step分配param grad FP32 (C)，释放grad fp16 (B)
 5. 将M，V连续分配 (A,B可以free？)
 6. post-step释放param grad FP32 (C)
+
 step 1
+
 7. 正向传播，pre-layer分配param data FP16 (A), at this moment
 8. 反向传播，pre-layer分配param grad Fp16 (B)，post-layer释放param data 16(A)
 9. pre-step分配分配param grad FP32(C)，释放grad fp16(B)
