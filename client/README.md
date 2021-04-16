@@ -34,6 +34,8 @@ Chunk底层一段连续的存储空间(如512 MB/1GB)，它被用来存储多个
 通过Chunked tensor来存储参数和梯度，可以实现
 1. 高速的数据传输。
 一大块内存方式进行跨设备传输，可以充分利用CPU-GPU和GPU-GPU之间的带宽。
+2. 重叠通信和计算。
+传输chunk和其他chunk的计算可以重叠。
 2. 内存复用，节省内存。
 不同生命周期的tensor可以在一个chunk内复用。
 通过这种方式可以避免grad FP32大小空间的分配。
@@ -73,16 +75,12 @@ Tensor只有被需要计算时，它所在需要的Chunk内存才被分配出来
 下面是一个FP16训练过程，使用client管理内存的流程。
 
 1. 注册模型，param data FP16连续分配(A)。
-* 观察：分配了4个float16 chunk
 2. 注册FP16 optimizer，将param data FP32连续分配。
-* 观察：分配了4个float32 chunk
+
 step 0
 3. 反向传播，pre-layer，param grad FP16 (B)连续分配，post-layer释放param data 16(A)
-* 观察：pre-layer分配1个FP16 chunk给grad，set data tensor to free，这里可以复用，只需要一个额外的chunk分配给第一个fp16 grad
 4. pre-step分配param grad FP32 (C)，释放grad fp16 (B)
-* 观察：在step之前，还有chunk在compute状态，没有被设置为hold
 5. 将M，V连续分配 (A,B可以free？)
-* 观察：FP16 optimizer和cpu_adam冲突了，exp_avg exp_avg_sq不会被分配
 6. post-step释放param grad FP32 (C)
 step 1
 7. 正向传播，pre-layer分配param data FP16 (A), at this moment
@@ -92,18 +90,22 @@ step 1
 
 可见，由于hook的特定啊，模型参数的data和grad都是连续分配在一起，局部性可以自动保证。
 
+##### FP16 Optimizer
+TODO
+设计了一个兼容HybridPS tensor的FP16方案。
+
 #### 效果
 对弈个Simple Model。包含4层Linear，每个linear param data大小16，bias大小4。
 参数总大小80个元素。
 
-###### FP32训练
+##### FP32训练
 至少需要80 *4B *4(P+G+M+V)1280 B的GPU显存。
 使用Chunked Tensor方式，
 GPU显存最少需要显存的计算公式是：max(Chunk_size(Pgard_i) + Chunk_size(Pdata_i))为40*4=160B。
 也就是反向传播一层需要的最大内存数目=Param+Grad=40 *4B = 160B。
 使用CPU内存最少为1280 - 160 = 1120B。
 
-###### FP16训练
+##### FP16训练
 至少需要80 *4B *4(P32+G32+M32+V32) + 80 * 2B * 2(P16 + G16) = 1600 B的显存。
 使用Chunked Tensor方式，
 GPU仍然至少需要160B显存。
