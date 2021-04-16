@@ -152,14 +152,13 @@ class CPUAdam(torch.optim.Optimizer):
 
         for group in self.param_groups:
             params_with_grad = []
-            grads = []
+            # grads = []
             exp_avgs = []
             exp_avg_sqs = []
             state_sums = []
             max_exp_avg_sqs = []
             state_steps = []
 
-            #TODO(jiaruifang) params_with_grad没有被赋值，所以F_adam根本没有被执行
             for p in group['params']:
                 # TODO(jiaruifang) fp16不会进如下条件
                 # 对HybridPS，只要执行了release，grad和data是否为None没有意义
@@ -191,8 +190,6 @@ class CPUAdam(torch.optim.Optimizer):
                                 device=torch.device('cpu')),
                             requires_grad=False)
 
-                        assert state['exp_avg'].requires_grad is False
-                        assert state['exp_avg_sq'].requires_grad is False
                         logging.warning('allcate exp_avg')
                         self.client.register_param(state['exp_avg'])
                         logging.warning('allcate exp_avg_sq')
