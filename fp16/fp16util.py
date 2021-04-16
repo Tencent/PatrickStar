@@ -180,6 +180,10 @@ def model_grads_to_master_grads(model_params,
         master_params:  List of FP32 master parameters created by :func:`prep_param_lists`.  If ``master_params`` was created with ``flat_master=True``, ``flat_master=True`` should also be supplied to :func:`model_grads_to_master_grads`.
     """
     if flat_master:
+        if client is not None:
+            raise NotImplementedError(
+                "not implement flat_master True case in model_grads_to_master_grads"
+            )
         # The flattening may incur one more deep copy than is necessary.
         master_params[0].grad.data.copy_(
             _flatten_dense_tensors([p.grad.data for p in model_params]))
@@ -242,6 +246,7 @@ def master_params_to_model_params(model_params,
         for model, master in zip(model_params, master_params):
             # TODO(jiaruing) 简单弄成计算设备在cuda上，可以根据model和master现在
             # 所在的设备选择计算设备
+            # TODO(jiaruifang) 这个过程可以和FWD计算重叠。
             if client is not None:
                 client.access_data(model, torch.device('cuda:0'))
                 client.access_data(master, torch.device('cuda:0'))

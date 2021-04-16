@@ -137,13 +137,13 @@ class HybridPSClient(object):
             # allocate a new tensor on compute device
             if access_type == AccessType.DATA:
                 param.ps_data_tensor, param.ps_data_chunk_id = self.new_tensor(
-                    param.shape, param.dtype, param.ps_data_id,
+                    param.ps_shape, param.dtype, param.ps_data_id,
                     self.chunk_tensor_index)
                 current_device = param.ps_data_tensor.device
                 chunk_id = param.ps_data_chunk_id
             elif access_type == AccessType.GRAD:
                 param.ps_grad_tensor, param.ps_grad_chunk_id = self.new_tensor(
-                    param.shape, param.dtype, param.ps_grad_id,
+                    param.ps_shape, param.dtype, param.ps_grad_id,
                     self.chunk_tensor_index)
                 current_device = param.ps_grad_tensor.device
                 chunk_id = param.ps_grad_chunk_id
@@ -169,19 +169,30 @@ class HybridPSClient(object):
 
         # 访问之后应该更新chunk tensor_infos的状态
         if access_type == AccessType.DATA:
+            param.data_status = PSTensorStatus.COMPUTE
             param.data = param.ps_data_tensor.data
             self.chunk_list[chunk_id].tensor_info_list.set_status(
                 param.ps_data_id, PSTensorStatus.COMPUTE)
         elif access_type == AccessType.GRAD:
+            param.grad_status = PSTensorStatus.COMPUTE
             # 在gpu上计算完毕，只改变grad很危险, master_p和model_p的data先传到cuda上
             #TODO(jiaruifang)权宜之计，只有在FP16_optimizer中，才出现让grad和data在不同设备的情况。
-            if param.device != param.ps_grad_tensor.device:
-                logging.info(
-                    f'param data is on {param.device}, while move grad to {param.ps_grad_tensor.device}'
+            # if param.device != param.ps_grad_tensor.device:
+            #     logging.warning(
+            #         f'param data is on {param.device}, while move grad to {param.ps_grad_tensor.device}. Reset'
+            #     )
+            #     param.data = torch.zeros(param.ps_shape,
+            #                              dtype=param.dtype,
+            #                              device=param.ps_grad_tensor.device)
+            # 设备相同，但是param是FREE状态，此时设备被设置唯一个dummy data
+            if param.data_status != PSTensorStatus.COMPUTE:
+                logging.warning(
+                    'param data is invalid now. To use its grad, we set data to a new memory space'
                 )
-                param.data = torch.zeros(param.size(),
+                param.data = torch.zeros(param.ps_shape,
                                          dtype=param.dtype,
                                          device=param.ps_grad_tensor.device)
+
             assert param.device == param.ps_grad_tensor.device
             param.grad = param.ps_grad_tensor
             self.chunk_list[chunk_id].tensor_info_list.set_status(
@@ -211,13 +222,16 @@ class HybridPSClient(object):
         if access_type == AccessType.DATA:
             self.chunk_list[chunk_id].tensor_info_list.set_status(
                 param.ps_data_id, reset_to_status)
-            # 把data的内存删除
+            # 把data的内存删除，方式是将它指向一段长度为1的内存
             param.data = torch.zeros(1, dtype=param.dtype, device=param.device)
+            param.data_status = reset_to_status
         elif access_type == AccessType.GRAD:
             self.chunk_list[chunk_id].tensor_info_list.set_status(
                 param.ps_grad_id, reset_to_status)
             param.grad = None
+            param.grad_status = reset_to_status
         #在这里立刻释放，被标记为free的chunks
+        # TODO(jiaruifang)要记得释放每个tensor指向的内存，否则并么有真正释放内存
         self.chunk_list.delete_free_chunks(self.chunk_tensor_index)
 
     def release_data(self,
@@ -274,21 +288,23 @@ class HybridPSClient(object):
         if param.data is not None:
             # 初始化ps_data_tensor空间，并向其拷贝数据
             param.ps_data_tensor, param.ps_data_chunk_id = self.new_tensor(
-                param.shape, param.dtype, param.ps_data_id,
+                param.ps_shape, param.dtype, param.ps_data_id,
                 self.chunk_tensor_index)
             one_dim_param = param.data.contiguous().view(-1)
             param.ps_data_tensor.copy_(one_dim_param.view(param.ps_shape))
             param.data = param.ps_data_tensor.data
+            param.data_status = PSTensorStatus.HOLD
 
     def _convert_to_ps_grad(self, param: torch.nn.Parameter):
         # 初始化ps_grad_tensor空间，并向其拷贝数据
         if param.grad is not None:
             param.ps_grad_tensor, param.ps_gard_chunk_id = self.new_tensor(
-                param.shape, param.dtype, param.ps_grad_id,
+                param.ps_shape, param.dtype, param.ps_grad_id,
                 self.chunk_tensor_index)
             one_dim_grad = param.grad.contiguous().view(-1)
             param.ps_grad_tensor.copy_(one_dim_grad.view(param.ps_shape))
             param.grad = param.ps_grad_tensor.data
+            param.grad_status = PSTensorStatus.HOLD
 
     def _init_ps_param(self, param: torch.nn.Parameter):
         """
@@ -300,6 +316,8 @@ class HybridPSClient(object):
 
         param.ps_numel = param.numel()
         param.ps_shape = param.shape
+        param.data_status = PSTensorStatus.FREE
+        param.grad_status = PSTensorStatus.FREE
 
         if not self.is_ps_data(param):
             param.ps_data_id = self.generate_id()

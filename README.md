@@ -63,9 +63,8 @@ Client支持的方法
 4. allreduce/broadcast(local_tensor)，local_tensor每个进程拥有的本地tensor，allreduce结果是一个被Hybrid管理的张量。
 
 Manager支持的方法
-1. add/remove(dev_info, size)，dev分配/释放了size的空间
+1. add/delete(dev_info, size)，dev分配/释放了size的空间
 2. schedule(size, refer_device)，refer_device的进程需要申请size大小空间，返回一个可用的设备
-
 
 #### 使用场景
 ZeroDP stage1中，对param的分片进行bcast，allreduce，

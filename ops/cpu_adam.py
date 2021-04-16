@@ -165,10 +165,10 @@ class CPUAdam(torch.optim.Optimizer):
                 # 对HybridPS，只要执行了release，grad和data是否为None没有意义
                 if p.ps_grad_tensor is not None:
                     params_with_grad.append(p)
-                    # if p.grad.is_sparse:
-                    #     raise RuntimeError(
-                    #         'Adam does not support sparse gradients, please consider SparseAdam instead'
-                    #     )
+                    if p.ps_grad_tensor.is_sparse:
+                        raise RuntimeError(
+                            'Adam does not support sparse gradients, please consider SparseAdam instead'
+                        )
                     # grads.append(p.grad)
 
                     state = self.state[p]

@@ -110,8 +110,8 @@ def test_simple_model(is_ps: bool = False, is_fp16: bool = False):
             logging.info(f'after update_master_grads {n}')
 
         # it is necessary to get correct results
-        # if is_ps:
-        #     client.release_all_grad()
+        if is_ps:
+            client.release_all_grad()
         if n == 5: break
 
     elapse = time.time() - start_time
@@ -128,30 +128,40 @@ if __name__ == "__main__":
     torch.manual_seed(0)
     manager = HybridPSManager()
     # 4 layer每层20个elem(20*4 bytes)，最少360 (360*4 bytes)内存
-    # FP16 best profile 100, 220 = 320
-    # TODO(jiaruifang) 80, 240 will failed
-    manager.init([40 * 4] * 1, [280 * 4])
+    # gpu内存至少为40，反向传播一层需要的最大内存。
 
-    loss_ref_list = test_simple_model(False)
+    test_cpu_adam = True
+    if test_cpu_adam:
+        manager.init([40 * 4] * 1, [280 * 4])
+        loss_ref_list = test_simple_model(False)
 
-    torch.manual_seed(0)
-    loss_list = test_simple_model(True)
+        torch.manual_seed(0)
+        loss_list = test_simple_model(True)
 
-    print('hybridps', loss_list)
-    print('ref', loss_ref_list)
-    for loss, loss_ref in zip(loss_list, loss_ref_list):
-        assert loss == loss_ref
+        print('hybridps', loss_list)
+        print('ref', loss_ref_list)
+        for loss, loss_ref in zip(loss_list, loss_ref_list):
+            assert loss == loss_ref
 
-    # print('gpu usage ', manager.gpu_mem_usage_curve)
-    # print('cpu usgae ', manager.cpu_mem_usage_curve)
+        print(loss_list)
+        # print('gpu usage ', manager.gpu_mem_usage_curve)
+        # print('cpu usgae ', manager.cpu_mem_usage_curve)
 
-    # TODO(jiaruifang) 内存释放干净
-    # manager.reset([140 * 4] * 1, [280 * 4])
-    # torch.manual_seed(0)
-    # loss_ref_list = test_simple_model(True, True)
+    test_fp16 = False
 
-    # torch.manual_seed(0)
-    # loss_list = test_simple_model(False, True)
+    if test_fp16:
+        # TODO(jiaruifang) 内存释放干净
+        # M, V, G32, P32 = 360
+        # P16 = 80/2=40
+        manager.reset([40 * 4] * 1, [360 * 4])
+        torch.manual_seed(0)
+        loss_list = test_simple_model(True, is_fp16=True)
 
-    # for loss, loss_ref in zip(loss_list, loss_ref_list):
-    #     assert loss == loss_ref
+        torch.manual_seed(0)
+        loss_list_ref = test_simple_model(False, is_fp16=True)
+
+        print(loss_list)
+        print(loss_list_ref)
+
+        for loss, loss_ref in zip(loss_list, loss_list_ref):
+            assert loss == loss_ref

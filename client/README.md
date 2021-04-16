@@ -54,7 +54,7 @@ Tensor也有如上三种状态。
 如果所有tensor是FREE的，则Chunk状态是FREE。
 其他情况（即没有COMPUTE，有一个tensor是HOLD），Chunk状态是HOLD。
 
-##### Lazy Allocation/Free
+##### Lazy Allocation/Release
 Tensor只有被需要计算时，它所在需要的Chunk内存才被分配出来。
 当Tensor不再被需要时，它所在的Chunk内存被释放。
 
@@ -68,7 +68,7 @@ Tensor只有被需要计算时，它所在需要的Chunk内存才被分配出来
 留给下次分配时使用。
 当已分配内存超过一定限制，再释放所有FREE状态的内存。
 
-#### Memory Reuse Stategy
+#####  Memory Reuse
 首先，我们分析DNN训练时候的内存使用Pattern。
 下面是一个FP16训练过程，使用client管理内存的流程。
 
@@ -90,21 +90,21 @@ step 1
 9. pre-step分配分配param grad FP32(C)，释放grad fp16(B)
 10. post-step释放param grad FP32 (C)
 
-#### Locality
-不需要显式地将data和grad分配在一起，局部性可以保证。
+可见，由于hook的特定啊，模型参数的data和grad都是连续分配在一起，局部性可以自动保证。
 
 #### 效果
 对弈个Simple Model。包含4层Linear，每个linear param data大小16，bias大小4。
 参数总大小80个元素。
 
 ###### FP32训练
-按照常规方式，至少需要80 *4B *4(P+G+M+V)1280 B的GPU显存。
+至少需要80 *4B *4(P+G+M+V)1280 B的GPU显存。
 使用Chunked Tensor方式，
-GPU显存最少需要显存的计算公式是：max(layer_i)*3。
-也就是反向传播一层需要的最大内存数目=Param+2*Grad。
-20 * 3 * 4B = 320B显存。
-
-CPU内存最少需要180 * 4B = 720B内存。
-也就是Adam optimizer需要的存储空间M，V和P，还有Grad一层的空间。
+GPU显存最少需要显存的计算公式是：max(Chunk_size(Pgard_i) + Chunk_size(Pdata_i))为40*4=160B。
+也就是反向传播一层需要的最大内存数目=Param+Grad=40 *4B = 160B。
+使用CPU内存最少为1280 - 160 = 1120B。
 
 ###### FP16训练
+至少需要80 *4B *4(P32+G32+M32+V32) + 80 * 2B * 2(P16 + G16) = 1600 B的显存。
+使用Chunked Tensor方式，
+GPU仍然至少需要160B显存。
+使用CPU内存最少为1600 - 160 = 1440B。
