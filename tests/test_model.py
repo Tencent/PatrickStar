@@ -194,6 +194,7 @@ def pre_sub_module_backward_function(sub_module, client):
     for param in sub_module.parameters(recurse=False):
         client.access_data(param, torch.device('cuda:0'))
         client.access_grad(param, torch.device('cuda:0'))
+        param.grad = param.ps_grad_tensor
 
 
 # release param of submodule
@@ -295,9 +296,6 @@ def test_register_module():
 
     client.register_module(model)
     setup_hybrid_ps_hooks(model, client)
-
-    for n, p in model.named_parameters():
-        assert p.compute_device.type == 'cuda'
 
     for n, batch in enumerate(data_loader):
         optimizer.zero_grad()

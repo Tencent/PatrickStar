@@ -191,6 +191,8 @@ def test_migrate():
         # Note(jiaruifang)避免param和grad在同一个chunk上
         client.access_grad(param1, compute_device)
         client.access_grad(param2, compute_device)
+        param1.grad = param1.ps_grad_tensor
+        param2.grad = param2.ps_grad_tensor
 
         # gpu上空出一个chunk
         client.release_data(param1)
@@ -284,11 +286,11 @@ def test_on_demand_access():
         logging.info(param1.grad.data_ptr())
         assert param1.ps_grad_tensor is None
         client.access_grad(param1, torch.device('cuda:0'))
-        logging.info(param1.grad.data_ptr())
+        # logging.info(param1.grad.data_ptr())
         assert param1.ps_grad_tensor is not None
 
         client.access_grad(param1, torch.device('cpu:0'))
-        logging.info(param1.grad.data_ptr())
+        # logging.info(param1.grad.data_ptr())
         assert param1.ps_grad_tensor is not None
 
     test_register()

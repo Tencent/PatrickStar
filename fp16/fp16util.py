@@ -210,8 +210,8 @@ def model_grads_to_master_grads(model_params,
                 client.access_grad(model_p, torch.device('cuda:0'))
                 client.access_grad(master_p, torch.device('cuda:0'))
 
-                model_grad = [model_p.grad]
-                master_grad = [master_p.grad]
+                model_grad = [model_p.ps_grad_tensor]
+                master_grad = [master_p.ps_grad_tensor]
                 _overflow_buf = torch.cuda.IntTensor([0])
                 # Fused overflow check + scale for a list of contiguous tensors
                 # TODO(jiaruifang) I found it copys model_grad to master_grad.

@@ -177,33 +177,33 @@ class HybridPSClient(object):
             param.grad_status = PSTensorStatus.COMPUTE
             # 在gpu上计算完毕，只改变grad很危险, master_p和model_p的data先传到cuda上
             #TODO(jiaruifang)权宜之计，只有在FP16_optimizer中，才出现让grad和data在不同设备的情况。
-            # if param.device != param.ps_grad_tensor.device:
+            # if param.data_status != PSTensorStatus.COMPUTE:
             #     logging.warning(
-            #         f'param data is on {param.device}, while move grad to {param.ps_grad_tensor.device}. Reset'
+            #         'param data is invalid now. To use its grad, we set data to a new memory space'
             #     )
             #     param.data = torch.zeros(param.ps_shape,
             #                              dtype=param.dtype,
             #                              device=param.ps_grad_tensor.device)
-            # 设备相同，但是param是FREE状态，此时设备被设置唯一个dummy data
-            if param.data_status != PSTensorStatus.COMPUTE:
-                logging.warning(
-                    'param data is invalid now. To use its grad, we set data to a new memory space'
-                )
-                param.data = torch.zeros(param.ps_shape,
-                                         dtype=param.dtype,
-                                         device=param.ps_grad_tensor.device)
 
-            assert param.device == param.ps_grad_tensor.device
-            param.grad = param.ps_grad_tensor
+            # assert param.device == param.ps_grad_tensor.device
+            # param.grad = param.ps_grad_tensor
             self.chunk_list[chunk_id].tensor_info_list.set_status(
                 param.ps_grad_id, PSTensorStatus.COMPUTE)
 
     def access_data(self, param: torch.nn.Parameter,
                     compute_device: torch.device):
+        """
+        将param的ps_data_tensor的数据放置到compute_device上
+        """
         self.access(param, AccessType.DATA, compute_device)
 
     def access_grad(self, param: torch.nn.Parameter,
                     compute_device: torch.device):
+        """
+        将param的ps_grad_tensor的数据放置到compute_device上
+        NOTE，并没有正确设置param的grad，此时grad的数据无效。因为grad的设备属性并不自由，需要看data的脸色行事。我们使用grad时候，需要显式设置
+        `param.grad = param.ps_grad_tensore`
+        """
         self.access(param, AccessType.GRAD, compute_device)
 
     def release(self,

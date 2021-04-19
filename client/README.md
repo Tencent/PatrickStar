@@ -93,12 +93,13 @@ step 1
 9. pre-step分配分配param grad FP32(C)，释放grad fp16(B)
 10. post-step释放param grad FP32 (C)
 
-我们可以设计一个Chunk和Tensor的最佳映射策略，来达到节省内存和减少通信的方案。
+##### Tensor和Chunk的映射策略
+我们可以设计一个Chunk和Tensor的最佳映射策略，来达到*节省内存*和*减少通信*的方案。
 TODO
+目前的方案是所有层的data和grad分配是连在一起的。
 
 ##### FP16 Optimizer
-TODO
-设计了一个兼容HybridPS tensor的FP16方案。
+目前HybridPS支持apex的FP16 Optimier。
 
 #### 效果
 对弈个Simple Model。包含4层Linear，每个linear param data大小16，bias大小4。
@@ -109,10 +110,13 @@ TODO
 使用Chunked Tensor方式，
 GPU显存最少需要显存的计算公式是：max(Chunk_size(Pgard_i) + Chunk_size(Pdata_i))为40*4=160B。
 也就是反向传播一层需要的最大内存数目=Param+Grad=40 \*4B = 160B。
-使用CPU内存最少为1280 - 160 = 1120B。
+总体的内存需求不变，使用CPU内存最少为1280 - 160 = 1120B。
 
 ##### FP16训练
+如果用apex的fp16 optimizer训练，
 至少需要80 \*4B \*4(P32+G32+M32+V32) + 80 \* 2B \* 2(P16 + G16) = 1600 B的显存。
 使用Chunked Tensor方式，
-GPU仍然至少需要160B显存。
-使用CPU内存最少为1600 - 160 = 1440B。
+GPU仍然至少需要(2 chunk = 40 * 4B)160B显存。
+使用CPU内存(P32 + M32 + V32 + G32) + 一个FP16 chunk(FP16-FP32转化过程需要一个额外chunk) 最少为320\*4 + 20\*2B = 1320B。
+节省了几乎全部的P16 + G16的显存，大约是全部显存需求的20%。
+总结，在FP16 optimier中使用chunked tensor，不仅可以保证最少的显存使用，还可以节省总体的内存需求。

@@ -122,6 +122,8 @@ def pre_sub_module_backward_function(sub_module, client):
         logging.warning(f'pre BWD {sub_module.id}.{name} access data and grad')
         client.access_data(param, torch.device('cuda:0'))
         client.access_grad(param, torch.device('cuda:0'))
+        # NOTE，此时可以保证data和grad的设备一致，可以自行更改grad
+        param.grad = param.ps_grad_tensor
 
 
 # release param of submodule

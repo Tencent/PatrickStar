@@ -153,7 +153,8 @@ if __name__ == "__main__":
         # TODO(jiaruifang) 内存释放干净
         # M, V, G32, P32 = 360
         # P16 = 80/2=40
-        manager.reset([40 * 4] * 1, [360 * 4])
+        # G16 = 80/2=40
+        manager.reset([40 * 4] * 1, [320 * 4 + 2 * 20])
         torch.manual_seed(0)
         loss_list = test_simple_model(True, is_fp16=True)
 
