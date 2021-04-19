@@ -208,9 +208,7 @@ def model_grads_to_master_grads(model_params,
         else:
             for model_p, master_p in zip(model_params, master_params):
                 client.access_grad(model_p, torch.device('cuda:0'))
-                logging.info('allocate master_p grad')
                 client.access_grad(master_p, torch.device('cuda:0'))
-                logging.info('allocate master_p grad finished')
 
                 model_grad = [model_p.grad]
                 master_grad = [master_p.grad]
