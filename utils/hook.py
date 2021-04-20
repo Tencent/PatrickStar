@@ -91,35 +91,35 @@ def _apply_to_tensors_only(module, functional, backward_function, outputs):
 # 必须具备重复调用，第二次无效的能力 fetch submodule
 def pre_sub_module_forward_function(sub_module, client):
     logging.log(
-        logging.WARNING,
+        logging.DEBUG,
         f'{sub_module.__class__.__name__} pre_sub_module_forward_function, access HybridPS get param'
     )
     for name, param in sub_module.named_parameters(recurse=False):
-        logging.warning(f'pre FWD {sub_module.id}.{name} access data')
+        logging.debug(f'pre FWD {sub_module.id}.{name} access data')
         client.access_data(param, torch.device('cuda:0'))
 
 
 # release submodule
 def post_sub_module_forward_function(sub_module, client):
     logging.log(
-        logging.WARNING,
+        logging.DEBUG,
         f'{sub_module.__class__.__name__} post_sub_module_forward_function, access HybridPS get param'
     )
     # TODO(jiaruifang) recurse = True释放干净
     for name, param in sub_module.named_parameters(recurse=False):
-        logging.warning(f'post FWD {sub_module.id}.{name} hold data')
+        logging.debug(f'post FWD {sub_module.id}.{name} hold data')
         client.release_data(param)
 
 
 def pre_sub_module_backward_function(sub_module, client):
     # TODO(jiaruifang) backward前处理逻辑
     logging.log(
-        logging.WARNING,
+        logging.DEBUG,
         f'Before sub module backward function {sub_module.__class__.__name__} allgather'
     )
     # TODO
     for name, param in sub_module.named_parameters(recurse=False):
-        logging.warning(f'pre BWD {sub_module.id}.{name} access data and grad')
+        logging.debug(f'pre BWD {sub_module.id}.{name} access data and grad')
         client.access_data(param, torch.device('cuda:0'))
         client.access_grad(param, torch.device('cuda:0'))
         # NOTE，此时可以保证data和grad的设备一致，可以自行更改grad
@@ -130,12 +130,12 @@ def pre_sub_module_backward_function(sub_module, client):
 def post_sub_module_backward_function(sub_module, client):
     #TODO(jiaruifang) backward后处理逻辑
     logging.log(
-        logging.WARNING,
+        logging.DEBUG,
         f"After sub module backward function {sub_module.__class__.__name__} before release"
     )
     # TODO(jiaruifang) recurse
     for name, param in sub_module.named_parameters(recurse=False):
-        logging.warning(
+        logging.debug(
             f'post BWD {sub_module.id}.{name} free data and hold grad')
         client.release_data(param, PSTensorStatus.HOLD)
         client.release_grad(param, PSTensorStatus.HOLD)

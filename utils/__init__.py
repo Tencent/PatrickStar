@@ -12,3 +12,4 @@
 # See the AUTHORS file for names of contributors.
 
 from .hook import setup_hybrid_ps_hooks
+from .memory_monitor import see_memory_usage

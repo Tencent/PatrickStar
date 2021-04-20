@@ -193,7 +193,7 @@ class HybridPSClient(object):
         TODO(jiaruifang)释放内存 or 只是不再计算设备的hold
         """
         chunk_id = self.get_chunk_id(param, access_type)
-        logging.info(
+        logging.debug(
             f'release {access_type} chunk_id {chunk_id} to {reset_to_status}')
         if chunk_id is None:
             return
