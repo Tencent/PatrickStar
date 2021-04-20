@@ -46,13 +46,12 @@ def test_reuse():
     manager.reset([32, 32], [1024])
     data_type = torch.float
     chunk_list = ChunkList(default_chunk_size=20)
-    chunk_id, tensor = chunk_list.allocate(16, data_type, 0)
+    param1 = torch.nn.Parameter(torch, zeros(16))
+    chunk_id, tensor = chunk_list.allocate(param1)
     assert chunk_id == 0
 
     chunk_id, tensor = chunk_list.allocate(4, data_type, 1)
     assert chunk_id == 0
-
-    chunk_list[0].tensor_info_list.set_status(0, PSTensorStatus.FREE)
 
     chunk_id, tensor = chunk_list.allocate(16, data_type, 2)
     assert chunk_id == 0

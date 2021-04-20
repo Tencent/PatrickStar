@@ -13,8 +13,8 @@
 
 import os
 import torch
-from client.const import PSTensorStatus, PSChunkStatus
-from client.helper import getsizeof
+from .const import PSTensorStatus, PSChunkStatus, AccessType
+from .helper import getsizeof
 
 from typing import Dict
 from manager import HybridPSManager
@@ -25,27 +25,53 @@ import logging
 
 class TensorInfo(object):
     """
-  记录chunk内存存储tensor的属性,
-  按照start time排序
-  """
-    def __init__(self, start: int, size: int, tensor_id: int,
-                 status: PSTensorStatus):
+    记录chunk内存存储tensor的属性,
+    """
+    def __init__(self, start: int, param: torch.nn.Parameter,
+                 access_type: AccessType):
         self.start = start
-        self.size = size
-        self.tensor_id = tensor_id
-        self.status = status
+        self.param = param
+        self.access_type: AccessType = access_type
+
+    def numel(self):
+        return self.param.ps_shape.numel()
+
+    def tensor_id(self):
+        if self.access_type == AccessType.DATA:
+            return self.param.ps_data_id
+        elif self.access_type == AccessType.GRAD:
+            return self.param.ps_grad_id
+
+    def status(self):
+        if self.access_type == AccessType.DATA:
+            return self.param.data_status
+        elif self.access_type == AccessType.GRAD:
+            return self.param.grad_status
+
+    def delete_tensor(self):
+        if self.access_type == AccessType.DATA:
+            assert self.param.data_status == PSTensorStatus.FREE
+            self.param.ps_data_tensor = torch.zeros(1,
+                                                    dtype=self.param.dtype,
+                                                    device=torch.device('cpu'))
+        elif self.access_type == AccessType.GRAD:
+            assert self.param.grad_status == PSTensorStatus.FREE
+            self.param.ps_grad_tensor = None
 
 
 class TensorInfoList(object):
+    """
+    存储Tensor属性的链表，访问时候需要按照start time排序
+    """
     def __init__(self, chunk_id):
         self.chunk_id = chunk_id
         self.tensor_id_to_info_dict = {}
 
     def add(self, item: TensorInfo):
         logging.debug(
-            f'chunk {self.chunk_id} add tensor id {item.tensor_id} start {item.start} size {item.size}'
+            f'chunk {self.chunk_id} add tensor id {item.tensor_id()} start {item.start} numel {item.numel()}'
         )
-        self.tensor_id_to_info_dict[item.tensor_id] = item
+        self.tensor_id_to_info_dict[item.tensor_id()] = item
 
     def generate_in_sorted_order(self):
         info_list = list(self.tensor_id_to_info_dict.values())
@@ -53,19 +79,12 @@ class TensorInfoList(object):
         for info in info_list:
             yield info
 
-    def set_status(self, tensor_id: int, status: PSTensorStatus):
-        logging.debug(
-            f'chunk {self.chunk_id} set tensor {tensor_id} to {status}')
-        self.tensor_id_to_info_dict[tensor_id].status = status
-
 
 class Chunk(object):
     def __init__(self, capacity: int, data_type: torch.dtype, chunk_id: int):
         """
         Chunk是数据迁移的最小单位，
         它用一段连续的内存来存储张量
-        TODO(jiaruifang) 释放tensor带来的碎片问题，尚未实现存储空间的释放
-        TODO(jiaruifang) capacity单位不是Byte而是可以存储float的个数
         """
         self.pid = os.getpid()
         self.chunk_id = chunk_id
@@ -105,40 +124,40 @@ class Chunk(object):
     def get_timestamp(self):
         return self.timestamp
 
-    def try_allocate(self, size: int, data_type: torch.dtype,
-                     tensor_id: int) -> torch.Tensor:
+    def try_allocate(self, param: torch.nn.Parameter,
+                     access_type: AccessType) -> torch.Tensor:
         """
-        在chunk的连续payload中找到一个满足size大小的碎片
+        在chunk的连续payload中找到一个满足param ps_data_size大小的碎片
         采用贪心算法，因为考虑NN参数的分配一般是连续分配，连续释放，没必要设计更复杂的算法
-        考虑，tensor 状态，free也可以分配
         """
+        numel = param.ps_shape.numel()
+
         prev_end = 0
         for info in self.tensor_info_list.generate_in_sorted_order():
-            status = info.status
+            status = info.status()
             if status == PSTensorStatus.FREE:
                 continue
             start = info.start
             gap = start - prev_end
-            if gap >= size:
-                dest = self.allocate(prev_end, size, data_type, tensor_id)
+            if gap >= numel:
+                dest = self.allocate(prev_end, numel, param, access_type)
                 return dest
-            prev_end = start + info.size
+            prev_end = start + info.numel()
 
-        if self.capacity - prev_end >= size:
-            dest = self.allocate(prev_end, size, data_type, tensor_id)
+        if self.capacity - prev_end >= numel:
+            dest = self.allocate(prev_end, numel, param, access_type)
             return dest
         return None
 
-    def allocate(self, offset: int, size: int, data_type: torch.dtype,
-                 tensor_id: int):
+    def allocate(self, offset: int, numel: int, param: torch.nn.Parameter,
+                 access_type: AccessType):
         """
-        分配大小为size的连续存储空间，tensor_id用于记录chunk存储tensor在Module中的位置
+        分配大小为numel的连续存储空间
         """
-        dest = self.payload.narrow(0, offset, size)
+        dest = self.payload.narrow(0, offset, numel)
         # 复用内存要清零
         dest.zero_()
-        self.tensor_info_list.add(
-            TensorInfo(offset, size, tensor_id, PSTensorStatus.HOLD))
+        self.tensor_info_list.add(TensorInfo(offset, param, access_type))
         self.touch()
         return dest
 
@@ -152,7 +171,7 @@ class Chunk(object):
         for info in self.tensor_info_list.generate_in_sorted_order():
             logging.error(
                 f"** tensor in chunk {self.chunk_id} device {self.device} start {info.start}, \
-        end {info.start + info.size}, tensor_id {info.tensor_id}, status {info.status}"
+        end {info.start + info.numel()}, tensor_id {info.tensor_id()}, status {info.status()}"
             )
 
     def move(self, param_data_dict: Dict[int, torch.nn.Parameter],
@@ -174,9 +193,9 @@ class Chunk(object):
                                self.capacity * getsizeof(self.data_type))
         # 将参数指针重新定位到新的设备上
         for info in self.tensor_info_list.generate_in_sorted_order():
-            tensor_id = info.tensor_id
+            tensor_id = info.tensor_id()
             start = info.start
-            size = info.size
+            size = info.numel()
             if tensor_id in param_data_dict.keys():
                 logging.debug(
                     f'chunk moves data tensor {tensor_id} to {target_device}')
@@ -202,19 +221,40 @@ class Chunk(object):
 
     def get_status(self):
         """
-    Chunk的装填由它存储的tensor决定
-    有一个tensor是COMPUTE，chunk也是COMPUTE
-    所有tensor都是FREE则是free
-    其余情况是HOLD
-    """
+        Chunk的装填由它存储的tensor决定
+        有一个tensor是COMPUTE，chunk也是COMPUTE
+        所有tensor都是FREE则是free
+        其余情况是HOLD
+        """
         free_flag = True
         for info in self.tensor_info_list.generate_in_sorted_order():
-            if info.status == PSTensorStatus.COMPUTE:
+            if info.status() == PSTensorStatus.COMPUTE:
                 return PSChunkStatus.COMPUTE
-            elif info.status != PSTensorStatus.FREE:
+            elif info.status() != PSTensorStatus.FREE:
                 free_flag = False
 
         if free_flag is True:
             return PSChunkStatus.FREE
         else:
             return PSChunkStatus.HOLD
+
+
+if __name__ == "__main__":
+    manager = HybridPSManager()
+    manager.reset([32, 32], [1024])
+
+    from client import HybridPSClient
+    client = HybridPSClient(0, torch.float, 20)
+    chunk = Chunk(20, torch.float, 0)
+    chunk.visit()
+
+    param1 = torch.nn.Parameter(torch.zeros(10))
+    client.register_param(param1)
+    chunk.allocate(0, param1.numel(), param1, AccessType.DATA)
+
+    param2 = torch.nn.Parameter(torch.zeros(10))
+    client.register_param(param2)
+    chunk.allocate(10, param2.numel(), param2, AccessType.DATA)
+
+    param1.data_status = PSChunkStatus.FREE
+    chunk.visit()

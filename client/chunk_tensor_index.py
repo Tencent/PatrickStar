@@ -12,6 +12,7 @@
 # See the AUTHORS file for names of contributors.
 
 from typing import List
+import logging
 
 
 class ChunkTensorIndex(object):
@@ -42,10 +43,15 @@ class ChunkTensorIndex(object):
         del self.dict_tensor_id_chunk_id[tid]
 
     def add_tensor(self, tensor_id, chunk_id):
+        logging.info(
+            f'add_tensor tensor_id {tensor_id} to chunk_id {chunk_id}')
         self.dict_tensor_id_chunk_id[tensor_id] = chunk_id
         self.dict_chunk_id_tensor_id[chunk_id] = tensor_id
 
     def tensor_id_to_chunk_id(self, tensor_id) -> int:
+        logging.info(
+            f'tensor_id_to_chunk_id: access {self.dict_tensor_id_chunk_id} with tensor_id {tensor_id}'
+        )
         return self.dict_tensor_id_chunk_id.get(tensor_id)
 
     def chunk_id_to_tensor_id_list(self, chunk_id):

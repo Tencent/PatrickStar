@@ -53,7 +53,7 @@ def test_client():
     assert param2.device == torch.device('cpu')
 
     # 申请第三个tensor，此时cpu内存不足，被放在gpu上
-    # GPU Chunk 40, 20 CPU Chunk 20
+    # CPU 3XChunk CPU 1XChunk
     param3 = torch.nn.Parameter(torch.randn(20, device=torch.device('cpu')),
                                 requires_grad=False)
     client.register_param(param3)
@@ -61,8 +61,11 @@ def test_client():
 
     # 申请第四个tensor, 需要chunk size=20大小, GPU没有空间了，会跑出异常
     except_flag = False
+    logging.warning('allocate param 4')
     try:
-        param4, _ = client.new_tensor((1, 5))
+        param4 = torch.nn.Parameter(torch.randn(6, device=torch.device('cpu')),
+                                    requires_grad=False)
+        client.register_param(param4)
     except:
         except_flag = True
     assert (except_flag)
@@ -228,6 +231,7 @@ def test_fp16():
 
         assert (param1.dtype == torch.half)
         assert (param1.grad.dtype == torch.half)
+        print(client.get_chunk_id(param1, AccessType.GRAD))
         assert (client.get_chunk_id(param1, AccessType.GRAD) == 0)
 
         logging.info('client register param2')
@@ -303,12 +307,12 @@ if __name__ == "__main__":
         datefmt='%Y-%m-%d:%H:%M:%S',
         level=logging.DEBUG)
 
-    test_client()
-    time.sleep(3)
-    test_mgr_dist()
-    time.sleep(3)
-    test_migrate()
-    time.sleep(3)
+    # test_client()
+    # time.sleep(3)
+    # test_mgr_dist()
+    # time.sleep(3)
+    # test_migrate()
+    # time.sleep(3)
     test_fp16()
     time.sleep(3)
     test_on_demand_access()

@@ -11,10 +11,10 @@
 # permissions and limitations under the License.
 # See the AUTHORS file for names of contributors.
 
-from client.chunk_data import Chunk
-from client.const import PSChunkStatus
-from client.helper import getsizeof
-from client.chunk_tensor_index import ChunkTensorIndex
+from .chunk_data import Chunk
+from .const import PSChunkStatus, AccessType
+from .helper import getsizeof
+from .chunk_tensor_index import ChunkTensorIndex
 from manager import HybridPSManager
 
 import sys
@@ -63,6 +63,9 @@ class ChunkList(object):
             )
             manager.delete(chunk.device.type, chunk.device.index,
                            chunk.capacity * getsizeof(chunk.data_type))
+            # 此处删除chunk的payload，然是在payload上索引的tensor
+            for info in chunk.tensor_info_list.generate_in_sorted_order():
+                info.delete_tensor()
             del self.chunk_id_to_chunk_dict[chunk_id]
         chunk_tensor_index.delete_chunk_id(chunk_id)
 
@@ -80,27 +83,26 @@ class ChunkList(object):
         logging.debug(f'least_used_chunk found chunk id {pos}')
         return pos
 
-    def allocate(self, size: int, data_type: torch.dtype,
-                 tensor_id: id) -> (int, torch.Tensor):
+    def allocate(self, param: torch.nn.Parameter,
+                 access_type: AccessType) -> (int, torch.Tensor):
         """
         找到chunk_list中可以分配size大小数据的chunk，如果没有则新分配一个
         返回chunk_id
         """
         for chunk_id, chunk in self.chunk_id_to_chunk_dict.items():
-            if data_type != chunk.data_type:
+            if param.dtype != chunk.data_type:
                 continue
-            ret = chunk.try_allocate(size, data_type, tensor_id)
+            ret = chunk.try_allocate(param, access_type)
             if ret is not None:
                 logging.debug(f'allocate with old chunk {chunk_id}')
                 return chunk_id, ret
-            else:
-                logging.debug(
-                    f'no existing chunk can hold the tensor {tensor_id} size {size}'
-                )
+
+        logging.debug(f'no existing chunk can hold the tensor size')
         # need allocate a new chunk
-        chunk_id, chunk = self.new_chunk(max(size, self.default_chunk_size),
-                                         data_type)
-        ret = chunk.try_allocate(size, data_type, tensor_id)
+        numel = param.ps_shape.numel()
+        chunk_id, chunk = self.new_chunk(max(numel, self.default_chunk_size),
+                                         param.dtype)
+        ret = chunk.try_allocate(param, access_type)
         assert ret is not None
         return chunk_id, ret
 
