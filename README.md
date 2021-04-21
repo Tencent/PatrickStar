@@ -62,3 +62,51 @@ Manager支持的方法
 ZeroDP stage1中，对param的分片进行bcast，allreduce，
 这其实是HybridTensor是bcastFromMe,allreduceTooMe当底层设备是某个gpu的一种特例。
 stage3的cpu-offload也是allreduceTooMe，bcastFromMe当底层设备是cpu的一种特例。
+
+4个linear层，每层hidden dim = 40，数据个数1600+40 = 1640。
+chunck size 2000.
+硬件设置：
+1.
+*设置：
+`manager.reset([4000 * 4] * 1, [32000 * 4 + 2 * 2000])`
+*内存：
+MA 101.0 KB         Max_MA 123.0 KB         CA 2048.0 KB         Max_CA 2048 KB
+CPU Virtual Memory:  used = 3.91 GB, percent = 25.1%
+*通信：
+CPU-GPU data move elapse 0.0003352165222167969 sec, total elapse 0.1428055763244629 sec, total times 450, total amount 2516.0 KB
+*时间：
+is_ps True elapse 0.3383052349090576 sec
+
+2.
+*设置：
+`manager.reset([40000 * 4] * 1, [32000 * 4 + 2 * 2000])`
+*内存：
+MA 144.0 KB         Max_MA 180.0 KB         CA 2048.0 KB         Max_CA 2048 KB
+CPU Virtual Memory:  used = 3.9 GB, percent = 25.0%
+total elapse 0.1428055763244629 sec, total times 450, total amount 2516.0 KB
+*通信：
+CPU-GPU data move elapse 0.0002455711364746094 sec, total elapse 0.03419327735900879 sec, total times 122, total amount 864.0 KB.
+*时间：
+is_ps True elapse 0.21094560623168945 sec
+
+2.
+*设置：
+`manager.reset([40000 * 4] * 1, [32000 * 4 + 2 * 2000])`
+梯度不设置为free，而是hold
+*内存
+MA 160.0 KB         Max_MA 192.0 KB         CA 2048.0 KB         Max_CA 2048 KB
+CPU Virtual Memory:  used = 3.92 GB, percent = 25.1%
+*通信
+CPU-GPU data move elapse 0.0002434253692626953 sec, total elapse 0.033926963806152344 sec, total times 122, total amount 864.0 KB.
+*时间
+is_ps True elapse 0.20960783958435059
+
+3. 不使用HybridPS
+*时间：
+is_ps False elapse 0.07625579833984375
+*内存:
+MA 232.0 KB         Max_MA 245.5 KB         CA 2048.0 KB         Max_CA 2048 KB
+CPU Virtual Memory:  used = 3.92 GB, percent = 25.1%
+
+目前HybridPS可以显著节省显存。但是内存用量没有变化，延迟显著增加。一部分是CPU-GPU数据移动引起的。另一部分可能是分配释放内存引起的。
+Chunk复用，预取，通信计算重叠是性能优化的方向。

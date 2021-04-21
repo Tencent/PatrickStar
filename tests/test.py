@@ -307,12 +307,12 @@ if __name__ == "__main__":
         datefmt='%Y-%m-%d:%H:%M:%S',
         level=logging.DEBUG)
 
-    # test_client()
-    # time.sleep(3)
-    # test_mgr_dist()
-    # time.sleep(3)
-    # test_migrate()
-    # time.sleep(3)
+    test_client()
+    time.sleep(3)
+    test_mgr_dist()
+    time.sleep(3)
+    test_migrate()
+    time.sleep(3)
     test_fp16()
     time.sleep(3)
     test_on_demand_access()

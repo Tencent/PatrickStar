@@ -318,7 +318,6 @@ class HybridPSClient(object):
 
             for param in module.parameters(recurse=True):
                 self._convert_to_ps_grad(param)
-        # self.release_all_grad()
 
     def register_param(self, src_param: torch.nn.Parameter):
         """

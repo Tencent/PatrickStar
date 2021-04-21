@@ -13,6 +13,43 @@
 
 import torch
 from torch.utils.data import SequentialSampler
+from checkpoint import reset_checkpointed_activations_memory_buffer, checkpoint, init_checkpointed_activations_memory_buffer
+
+
+class SimpleCKPModel(torch.nn.Module):
+    def __init__(self, hidden_dim, empty_grad=False):
+        super(SimpleCKPModel, self).__init__()
+        self.hidden_dim = hidden_dim
+        self.linear1 = torch.nn.Linear(hidden_dim, hidden_dim)
+        self.linear2 = torch.nn.Linear(hidden_dim, hidden_dim)
+        self.linear3 = torch.nn.Linear(hidden_dim, hidden_dim)
+        self.linear4 = torch.nn.Linear(hidden_dim, hidden_dim)
+        self.cross_entropy_loss = torch.nn.CrossEntropyLoss()
+
+    def init_ckp(self, batch_size, data_type: torch.dtype):
+        numel = (self.hidden_dim * batch_size) * 2
+        init_checkpointed_activations_memory_buffer(numel, data_type)
+
+    def _checkpointed_forward(self, x):
+        """Forward method with activation checkpointing."""
+        def custom():
+            def custom_forward(x):
+                x = self.linear1(x)
+                x = self.linear2(x)
+                return x
+
+            return custom_forward
+
+        # Make sure memory is freed.
+        reset_checkpointed_activations_memory_buffer()
+        x = checkpoint(custom(), x)
+        return x
+
+    def forward(self, x, y):
+        x = self._checkpointed_forward(x)
+        x = self.linear3(x)
+        x = self.linear4(x)
+        return self.cross_entropy_loss(x, y)
 
 
 class SimpleModel(torch.nn.Module):
@@ -37,11 +74,11 @@ class SimpleModel(torch.nn.Module):
 
 
 def get_data_loader(model,
+                    batch_size,
                     total_samples,
                     hidden_dim,
                     device,
                     data_type=torch.float):
-    batch_size = 4  #model.train_micro_batch_size_per_gpu()
     train_data = torch.randn(total_samples,
                              hidden_dim,
                              device=device,
