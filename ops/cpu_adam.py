@@ -163,16 +163,16 @@ class CPUAdam(torch.optim.Optimizer):
                         # 被HybridPS管理
                         # Exponential moving average of gradient values
                         state['exp_avg'] = torch.nn.Parameter(
-                            torch.zeros_like(
-                                p,
-                                memory_format=torch.preserve_format,
+                            torch.zeros(
+                                p.ps_shape,
+                                # memory_format=torch.preserve_format,
                                 device=torch.device('cpu')),
                             requires_grad=False)
                         # Exponential moving average of squared gradient values
                         state['exp_avg_sq'] = torch.nn.Parameter(
-                            torch.zeros_like(
-                                p,
-                                memory_format=torch.preserve_format,
+                            torch.zeros(
+                                p.ps_shape,
+                                # memory_format=torch.preserve_format,
                                 device=torch.device('cpu')),
                             requires_grad=False)
 

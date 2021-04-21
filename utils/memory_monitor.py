@@ -28,8 +28,8 @@ def see_memory_usage(message, force=False):
     # python doesn't do real-time garbage collection so do it explicitly to get the correct RAM reports
     gc.collect()
 
-    scale = 1024
-    scale_name = "KB"
+    scale = 1024 * 1024
+    scale_name = "MB"
     # Print message except when distributed but not rank 0
     logging.info(message)
     logging.info(
