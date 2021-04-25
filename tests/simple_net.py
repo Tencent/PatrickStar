@@ -73,8 +73,7 @@ class SimpleModel(torch.nn.Module):
         return self.cross_entropy_loss(hidden_dim, y)
 
 
-def get_data_loader(model,
-                    batch_size,
+def get_data_loader(batch_size,
                     total_samples,
                     hidden_dim,
                     device,

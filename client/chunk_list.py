@@ -67,7 +67,7 @@ class ChunkList(object):
             for info in chunk.tensor_info_list.generate_in_sorted_order():
                 info.delete_tensor()
             del self.chunk_id_to_chunk_dict[chunk_id]
-        chunk_tensor_index.delete_chunk_id(chunk_id)
+            chunk_tensor_index.delete_chunk_id(chunk_id)
 
     def least_used_chunk(self) -> int:
         """"

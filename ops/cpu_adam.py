@@ -36,14 +36,17 @@ def F_adam(client, params: List[torch.nn.Parameter],
         client.access_data(param, compute_device)
         client.access_grad(param, compute_device)
 
-        param_data = param.data
+        param_data = param.ps_data_tensor
         param_grad = param.ps_grad_tensor
 
-        exp_avg = exp_avgs[i]
-        exp_avg_sq = exp_avg_sqs[i]
+        exp_avg_param = exp_avgs[i]
+        exp_avg_sq_param = exp_avg_sqs[i]
 
-        client.access_data(exp_avg, compute_device)
-        client.access_data(exp_avg_sq, compute_device)
+        client.access_data(exp_avg_param, compute_device)
+        client.access_data(exp_avg_sq_param, compute_device)
+
+        exp_avg = exp_avg_param.ps_data_tensor
+        exp_avg_sq = exp_avg_sq_param.ps_data_tensor
 
         step = state_steps[i]
 
@@ -70,17 +73,12 @@ def F_adam(client, params: List[torch.nn.Parameter],
 
         step_size = lr / bias_correction1
 
-        param.addcdiv_(exp_avg, denom, value=-step_size)
+        param.ps_data_tensor.addcdiv_(exp_avg, denom, value=-step_size)
 
-        # 彻底删除grad FP32 (COMPUTE) _> grad FP32 (FREE)
-        # param FP32 (COMPUTE) -> param FP16 (HOLD) param FP32 (HOLD)
         client.release_data(param)
-        # 相当于zero_grad了，再次使用grad需要reallocate
         client.release_grad(param, PSTensorStatus.FREE)
-        client.release_data(exp_avg)
-        client.release_data(exp_avg_sq)
-
-    logging.warning('finish compute F_adam')
+        client.release_data(exp_avg_param)
+        client.release_data(exp_avg_sq_param)
 
 
 class CPUAdam(torch.optim.Optimizer):
@@ -146,8 +144,7 @@ class CPUAdam(torch.optim.Optimizer):
             state_steps = []
 
             for p in group['params']:
-                # TODO(jiaruifang) fp16不会进如下条件
-                # 对HybridPS，只要执行了release，grad和data是否为None没有意义
+                # 对HybridPS，只要执行了release，param原本的grad和data是否为None没有意义，需要用ps_grad_tensor和ps_data_tensor代替
                 if p.ps_grad_tensor is not None:
                     params_with_grad.append(p)
                     if p.ps_grad_tensor.is_sparse:
@@ -165,6 +162,7 @@ class CPUAdam(torch.optim.Optimizer):
                         state['exp_avg'] = torch.nn.Parameter(
                             torch.zeros(
                                 p.ps_shape,
+                                dtype=p.dtype,
                                 # memory_format=torch.preserve_format,
                                 device=torch.device('cpu')),
                             requires_grad=False)
@@ -172,6 +170,7 @@ class CPUAdam(torch.optim.Optimizer):
                         state['exp_avg_sq'] = torch.nn.Parameter(
                             torch.zeros(
                                 p.ps_shape,
+                                dtype=p.dtype,
                                 # memory_format=torch.preserve_format,
                                 device=torch.device('cpu')),
                             requires_grad=False)
@@ -194,8 +193,8 @@ class CPUAdam(torch.optim.Optimizer):
                     state['step'] += 1
                     # record the step after step update
                     state_steps.append(state['step'])
-
-            logging.info('info inside cpu adam step')
+                else:
+                    raise RuntimeError
 
             beta1, beta2 = group['betas']
             F_adam(

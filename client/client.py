@@ -201,9 +201,13 @@ class HybridPSClient(object):
             # 把data的内存删除，方式是将它指向一段长度为1的内存
             param.data = torch.zeros(1, dtype=param.dtype, device=param.device)
             param.data_status = reset_to_status
+            if reset_to_status == PSTensorStatus.FREE:
+                self.chunk_tensor_index.delete_tensor(param.ps_data_id)
         elif access_type == AccessType.GRAD:
             param.grad = None
             param.grad_status = reset_to_status
+            if reset_to_status == PSTensorStatus.FREE:
+                self.chunk_tensor_index.delete_tensor(param.ps_grad_id)
         #在这里立刻释放，被标记为free的chunks
         # TODO(jiaruifang)要记得释放每个tensor指向的内存，否则并么有真正释放内存
         self.chunk_list.delete_free_chunks(self.chunk_tensor_index)

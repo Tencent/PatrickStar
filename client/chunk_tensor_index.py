@@ -17,34 +17,48 @@ import logging
 
 class ChunkTensorIndex(object):
     def __init__(self):
+        # 1-1 dict
         self.dict_tensor_id_chunk_id = {}
+        # 1-N dict
         self.dict_chunk_id_tensor_id = {}
 
     def delete_chunk_id(self, chunk_id):
-        tid_delete_list = []
-        for tid, cid in self.dict_tensor_id_chunk_id.items():
-            if cid == chunk_id:
-                tid_delete_list.append(tid)
-
-        for tid in tid_delete_list:
-            del self.dict_tensor_id_chunk_id[tid]
+        """
+        删除chunk_id对应chunk的索引信息
+        """
+        tid_delete_list = set()
+        # for tid, cid in self.dict_tensor_id_chunk_id.items():
+        #     if cid == chunk_id:
+        #         tid_delete_list.append(tid)
+        for cid, tid_list in self.dict_chunk_id_tensor_id.get(chunk_id):
+            for tid in tid_list:
+                del self.dict_tensor_id_chunk_id[tid]
 
         del self.dict_chunk_id_tensor_id[chunk_id]
 
     def delete_tensor(self, tensor_id):
+        """
+        删除dict_tensor_id_chunk_id对应的tensor_id
+        并没有真正动内存
+        """
         cid_delete_list = []
-        for cid, tid in self.dict_chunk_id_tensor_id.items():
-            if tid == tensor_id:
-                cid_delete_list.append(cid)
+        for cid, tid_list in self.dict_chunk_id_tensor_id.items():
+            if tensor_id in tid_list:
+                tid_list.remove(tensor_id)
+                # if len(tid_list) == 0:
+                #     cid_delete_list.append(cid)
 
-        for cid in cid_delete_list:
-            del self.dict_chunk_id_tensor_id[cid]
+        # for cid in cid_delete_list:
+        #     del self.dict_chunk_id_tensor_id[cid]
 
-        del self.dict_tensor_id_chunk_id[tid]
+        del self.dict_tensor_id_chunk_id[tensor_id]
 
     def add_tensor(self, tensor_id, chunk_id):
+        if chunk_id not in self.dict_chunk_id_tensor_id:
+            self.dict_chunk_id_tensor_id[chunk_id] = list()
+        self.dict_chunk_id_tensor_id[chunk_id].extend([tensor_id])
+
         self.dict_tensor_id_chunk_id[tensor_id] = chunk_id
-        self.dict_chunk_id_tensor_id[chunk_id] = tensor_id
 
     def tensor_id_to_chunk_id(self, tensor_id) -> int:
         return self.dict_tensor_id_chunk_id.get(tensor_id)

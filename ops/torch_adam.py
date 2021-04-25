@@ -32,6 +32,7 @@ def adam(params: List[Tensor], grads: List[Tensor], exp_avgs: List[Tensor],
         grad = grads[i]
         exp_avg = exp_avgs[i]
         exp_avg_sq = exp_avg_sqs[i]
+
         step = state_steps[i]
 
         bias_correction1 = 1 - beta1**step
@@ -139,8 +140,6 @@ class TorchAdam(torch.optim.Optimizer):
             max_exp_avg_sqs = []
             state_steps = []
 
-            param_num = len(group['params'])
-
             for p in group['params']:
                 if p.grad is not None:
                     params_with_grad.append(p)
@@ -175,7 +174,11 @@ class TorchAdam(torch.optim.Optimizer):
                     # record the step after step update
                     state_steps.append(state['step'])
                 else:
-                    logging.warning('p grad is None')
+                    logging.warning(
+                        f'In Torch Adam, visit a param {p.shape} whose grad is None'
+                    )
+                    raise RuntimeError
+
             beta1, beta2 = group['betas']
 
             adam(params_with_grad, grads, exp_avgs, exp_avg_sqs,

@@ -21,6 +21,7 @@ from manager import HybridPSManager
 
 import datetime
 import logging
+import time
 
 
 class TensorInfo(object):
@@ -59,6 +60,11 @@ class TensorInfo(object):
             self.param.ps_grad_tensor = None
 
 
+total_cpu_gpu_move_elapse = 0.0
+total_cpu_gpu_move_time = 0
+total_cpu_gpu_move_amount = 0
+
+
 class TensorInfoList(object):
     """
     存储Tensor属性的链表，访问时候需要按照start time排序
@@ -78,6 +84,9 @@ class TensorInfoList(object):
         info_list.sort(key=lambda x: x.start)
         for info in info_list:
             yield info
+
+    def get_len(self):
+        return len(self.tensor_id_to_info_dict)
 
 
 class Chunk(object):
@@ -174,16 +183,18 @@ class Chunk(object):
         end {info.start + info.numel()}, tensor_id {info.tensor_id()}, status {info.status()}"
             )
 
-    def move(self, param_data_dict: Dict[int, torch.nn.Parameter],
+    def move(self,
+             param_data_dict: Dict[int, torch.nn.Parameter],
              param_grad_dict: Dict[int, torch.nn.Parameter],
-             target_device: torch.device):
+             target_device: torch.device,
+             show_profile=False):
         """
-        将这个chunk移动到device上，
-        先要在target_device腾出空间
+        将这个chunk移动到target_device上。前提条件，target_device已经腾出足够的空间。
         """
         logging.debug(
             f'move chunk {self.chunk_id} from {self.device} to {target_device}'
         )
+        start_time = time.time()
         if self.device == target_device:
             return
         self.payload = self.payload.to(target_device)
@@ -218,6 +229,21 @@ class Chunk(object):
 
         self.device = target_device
         self.touch()
+        finish_time = time.time()
+        elapse = finish_time - start_time
+
+        if show_profile:
+            global total_cpu_gpu_move_elapse
+            global total_cpu_gpu_move_time
+            global total_cpu_gpu_move_amount
+
+            total_cpu_gpu_move_elapse += elapse
+            total_cpu_gpu_move_time += 1
+            total_cpu_gpu_move_amount += self.capacity * getsizeof(
+                self.data_type)
+            logging.info(
+                f'CPU-GPU data move elapse {elapse} sec, total elapse {total_cpu_gpu_move_elapse} sec, total times {total_cpu_gpu_move_time}, total amount {total_cpu_gpu_move_amount/1e3} KB.'
+            )
 
     def get_status(self):
         """
@@ -226,6 +252,9 @@ class Chunk(object):
         所有tensor都是FREE则是free
         其余情况是HOLD
         """
+        if self.tensor_info_list.get_len() == 0:
+            return PSChunkStatus.FREE
+
         free_flag = True
         for info in self.tensor_info_list.generate_in_sorted_order():
             if info.status() == PSTensorStatus.COMPUTE:

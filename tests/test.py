@@ -20,6 +20,7 @@ import time
 import logging
 
 from client.const import AccessType
+from client.const import PSTensorStatus
 
 manager = HybridPSManager()
 
@@ -300,6 +301,43 @@ def test_on_demand_access():
     test_register()
 
 
+def test_tensor_remove():
+    def test_remove():
+        manager = HybridPSManager()
+        manager.reset(gpu_info=[80 * 4], cpu_info=[200 * 4])
+
+        # 交给HybridPS管理，会先被分在cpu上, 占据了2个chunk
+        client = HybridPSClient(gpu_index=0, default_chunk_size=20)
+        logging.info('client register param1')
+        param1 = torch.nn.Parameter(torch.randn(10,
+                                                device=torch.device('cuda:0'),
+                                                dtype=torch.half),
+                                    requires_grad=True)
+
+        client.register_param(param1)
+        client.access_data(param1, torch.device('cuda:0'))
+        client.access_grad(param1, torch.device('cuda:0'))
+
+        print(client.chunk_tensor_index.dict_tensor_id_chunk_id)
+        print(client.chunk_tensor_index.dict_chunk_id_tensor_id)
+
+        client.release_data(param1, PSTensorStatus.HOLD)
+        client.release_grad(param1, PSTensorStatus.FREE)
+
+        print(client.chunk_tensor_index.dict_tensor_id_chunk_id)
+        print(client.chunk_tensor_index.dict_chunk_id_tensor_id)
+
+        client.access_data(param1, torch.device('cuda:0'))
+        client.access_grad(param1, torch.device('cuda:0'))
+
+        assert torch.sum(param1.ps_grad_tensor) == 0.
+
+        print(client.chunk_tensor_index.dict_tensor_id_chunk_id)
+        print(client.chunk_tensor_index.dict_chunk_id_tensor_id)
+
+    test_remove()
+
+
 if __name__ == "__main__":
     logging.basicConfig(
         format=
@@ -316,3 +354,5 @@ if __name__ == "__main__":
     test_fp16()
     time.sleep(3)
     test_on_demand_access()
+    time.sleep(3)
+    test_tensor_remove()

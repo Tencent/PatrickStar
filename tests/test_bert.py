@@ -52,6 +52,36 @@ parser.add_argument('--use_ps',
                     help='using Hybrid PS for training.')
 
 
+def show_grads(model, is_ps, step):
+    print(f'show grads {step}')
+    for name, param in model.named_parameters(recurse=True):
+        print(
+            name,
+            torch.sum(param.grad)
+            if not is_ps else torch.sum(param.ps_grad_tensor))
+
+
+def show_params(model, is_ps, step):
+    print(f'show params {step}')
+    for name, param in model.named_parameters(recurse=True):
+        print(
+            name,
+            torch.sum(param) if not is_ps else torch.sum(param.ps_data_tensor),
+            param.shape, param.requires_grad)
+
+
+def show_grad_hook(grad):
+    print('show grad hook')
+    print(grad)
+
+
+def show_grad_hook(grad):
+    """
+    docstring
+    """
+    print('grad', grad)
+
+
 def test_bert_model(is_ckp: bool = False,
                     is_fp16: bool = False,
                     is_ps: bool = False,
@@ -63,11 +93,17 @@ def test_bert_model(is_ckp: bool = False,
     device = torch.device('cuda:0')
 
     if is_ckp:
-        cfg = BertConfig(gradient_checkpointing=True)
+        cfg = BertConfig(gradient_checkpointing=True,
+                         hidden_dim=hidden_dim,
+                         num_hidden_layers=1)
     else:
-        cfg = BertConfig()
+        # cfg = BertConfig(hidden_dim = hidden_dim, num_hidden_layers = 4)
+        cfg = BertConfig(hidden_dim=hidden_dim)
     model = BertForSequenceClassification(cfg)
     model.cuda()
+    model.train()
+
+    model.classifier.weight.register_hook(show_grad_hook)
 
     see_memory_usage(
         f"ckp {is_ckp} fp16 {is_fp16} ps {is_ps} after model init", force=True)
@@ -78,7 +114,7 @@ def test_bert_model(is_ckp: bool = False,
     data_loader = get_bert_data_loader(
         batch_size=batch_size,
         total_samples=1000,
-        sequence_length=512,
+        sequence_length=sequence_length,
         device=device,
         data_type=torch.half if is_fp16 else torch.float)
 
@@ -86,31 +122,33 @@ def test_bert_model(is_ckp: bool = False,
 
     if is_ps:
         manager = HybridPSManager()
-        manager.init([1024 * 1024 * 1024] * 1, [1024 * 1024 * 1024 * 4 * 4])
+        manager.init([1024 * 1024 * 1024 * 4] * 1,
+                     [1024 * 1024 * 1024 * 4 * 4])
         # chunk 32 M
         client = HybridPSClient(gpu_index=0,
-                                default_chunk_size=1024 * 1024 * 32)
+                                default_chunk_size=1024 * 1024 * 16)
+
         optimizer = CPUAdam(client, model.parameters(), lr=0.001)
+        # optimizer = TorchAdam(model.parameters(), lr=0.001)
         client.register_module(model)
         setup_hybrid_ps_hooks(model, client)
     else:
-        optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+        optimizer = TorchAdam(model.parameters(), lr=0.001)
 
     if is_fp16:
-        if is_ps:
-            assert client is not None
-        optimizer = FP16_Optimizer(optimizer)
+        optimizer = FP16_Optimizer(optimizer, client=client if is_ps else None)
 
     start_time = time.time()
     for n, batch in enumerate(data_loader):
         logging.info(
-            f'input size {batch[0].shape} {batch[0].dtype}, label {batch[1].shape}'
+            f'input sum {torch.sum(batch[0])}, label sum {torch.sum(batch[1])}'
         )
+
         output = model(input_ids=batch[0], labels=batch[1])
         loss = output.loss
-
+        logits = output.logits
         # if torch.distributed.get_rank() == 0:
-        print("LOSS:", loss.item())
+        print(f"LOSS: {loss.item()}")
         loss_res.append(loss.item())
 
         if is_fp16:
@@ -119,6 +157,7 @@ def test_bert_model(is_ckp: bool = False,
         else:
             optimizer.zero_grad()
             loss.backward()
+            # show_grads(model, is_ps, n)
 
         if is_fp16:
             # pass
@@ -133,7 +172,7 @@ def test_bert_model(is_ckp: bool = False,
         if is_ps:
             client.release_all_grad()
 
-        if n == 5: break
+        if n == 2: break
 
     elapse = time.time() - start_time
     logging.info(f"ckp {is_ckp} fp16 {is_fp16} ps {is_ps}  elapse {elapse}")
@@ -162,40 +201,45 @@ if __name__ == "__main__":
     use_ckp = args.use_ckp
     use_fp16 = args.use_fp16
     use_ps = args.use_ps
-
-    # 训练参数，可以自己定义
-    hidden_dim = 768
-    batch_size = 2
-    sequence_length = 1024
-    torch.manual_seed(0)
-    test_bert_model(is_ckp=use_ckp,
-                    is_fp16=use_fp16,
-                    is_ps=use_ps,
-                    batch_size=batch_size,
-                    hidden_dim=hidden_dim,
-                    sequence_length=sequence_length)
-
-    # calculate_mem_need(hidden_dim = hidden_dim, batch_size = batch_size, is_fp16 = use_fp16)
-
     # 检查结果正确性
     res_check = args.res_check
 
+    hidden_dim = 8
+    batch_size = 1
+    sequence_length = 256
+
+    if not res_check:
+        # 训练参数，可以自己定义
+        torch.manual_seed(0)
+        test_bert_model(is_ckp=use_ckp,
+                        is_fp16=use_fp16,
+                        is_ps=use_ps,
+                        batch_size=batch_size,
+                        hidden_dim=hidden_dim,
+                        sequence_length=sequence_length)
+
+    # calculate_mem_need(hidden_dim = hidden_dim, batch_size = batch_size, is_fp16 = use_fp16)
+
     if res_check:
         torch.manual_seed(0)
-        loss_ref_list = test_bert_model(is_ckp=True,
-                                        is_fp16=True,
-                                        hidden_dim=hidden_dim,
-                                        batch_size=batch_size)
+        loss_list = test_bert_model(is_ckp=use_ckp,
+                                    is_fp16=False,
+                                    is_ps=True,
+                                    hidden_dim=hidden_dim,
+                                    batch_size=batch_size,
+                                    sequence_length=sequence_length)
 
         torch.cuda.empty_cache()
-
+        print("*" * 50)
         torch.manual_seed(0)
-        loss_list = test_bert_model(is_ckp=False,
-                                    is_fp16=True,
-                                    hidden_dim=hidden_dim,
-                                    batch_size=batch_size)
+        loss_ref_list = test_bert_model(is_ckp=use_ckp,
+                                        is_fp16=False,
+                                        is_ps=False,
+                                        hidden_dim=hidden_dim,
+                                        batch_size=batch_size,
+                                        sequence_length=sequence_length)
 
-        print('ckp', loss_list)
+        print('ps', loss_list)
         print('ref', loss_ref_list)
         for loss, loss_ref in zip(loss_list, loss_ref_list):
             assert loss == loss_ref
