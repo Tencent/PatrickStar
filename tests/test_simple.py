@@ -42,6 +42,7 @@ def test_simple_model(is_ps: bool = False, is_fp16: bool = False):
     logging.info(f'test a simple model with hybrid ps {is_ps} FP16 {is_fp16}')
 
     hidden_dim = 40
+    batch_size = 4
     device = torch.device('cuda:0')
 
     model = SimpleModel(hidden_dim, empty_grad=False)
@@ -54,7 +55,7 @@ def test_simple_model(is_ps: bool = False, is_fp16: bool = False):
         # model.half()
 
     data_loader = get_data_loader(
-        model=model,
+        batch_size=batch_size,
         total_samples=1000,
         hidden_dim=hidden_dim,
         device=device,
@@ -150,11 +151,11 @@ if __name__ == "__main__":
         loss_list = test_simple_model(True, is_fp16=True)
         see_memory_usage("after HybridPS simple model", force=True)
 
-        # torch.manual_seed(0)
-        # loss_list_ref = test_simple_model(False, is_fp16=True)
+        torch.manual_seed(0)
+        loss_list_ref = test_simple_model(False, is_fp16=True)
 
-        # print('ps loss', loss_list)
-        # print('ref loss', loss_list_ref)
+        print('ps loss', loss_list)
+        print('ref loss', loss_list_ref)
 
-        # for loss, loss_ref in zip(loss_list, loss_list_ref):
-        #     assert loss == loss_ref
+        for loss, loss_ref in zip(loss_list, loss_list_ref):
+            assert loss == loss_ref

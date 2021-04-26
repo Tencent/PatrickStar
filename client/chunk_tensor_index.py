@@ -26,10 +26,9 @@ class ChunkTensorIndex(object):
         """
         删除chunk_id对应chunk的索引信息
         """
-        tid_delete_list = set()
-        # for tid, cid in self.dict_tensor_id_chunk_id.items():
-        #     if cid == chunk_id:
-        #         tid_delete_list.append(tid)
+        # 删除chunk中的tensor
+        if self.dict_chunk_id_tensor_id.get(chunk_id) is None:
+            return
         for cid, tid_list in self.dict_chunk_id_tensor_id.get(chunk_id):
             for tid in tid_list:
                 del self.dict_tensor_id_chunk_id[tid]
@@ -41,15 +40,19 @@ class ChunkTensorIndex(object):
         删除dict_tensor_id_chunk_id对应的tensor_id
         并没有真正动内存
         """
+        # TODO(jiaruifang)删除一个tensor_id并不在dict中
+        # logging.info(f'delete tensor {tensor_id}')
         cid_delete_list = []
         for cid, tid_list in self.dict_chunk_id_tensor_id.items():
+            # logging.info(f'chunk {cid} contains tensor {tid_list}')
             if tensor_id in tid_list:
                 tid_list.remove(tensor_id)
-                # if len(tid_list) == 0:
-                #     cid_delete_list.append(cid)
 
-        # for cid in cid_delete_list:
-        #     del self.dict_chunk_id_tensor_id[cid]
+            if len(tid_list) == 0:
+                cid_delete_list.append(cid)
+
+        for cid in cid_delete_list:
+            del self.dict_chunk_id_tensor_id[cid]
 
         del self.dict_tensor_id_chunk_id[tensor_id]
 

@@ -49,7 +49,7 @@ class TensorInfo(object):
         elif self.access_type == AccessType.GRAD:
             return self.param.grad_status
 
-    def delete_tensor(self):
+    def delete_tensor_memory(self):
         if self.access_type == AccessType.DATA:
             assert self.param.data_status == PSTensorStatus.FREE
             self.param.ps_data_tensor = torch.zeros(1,
@@ -94,6 +94,7 @@ class Chunk(object):
         """
         Chunk是数据迁移的最小单位，
         它用一段连续的内存来存储张量
+        删除tensor，只需要将tensor的status设置为free
         """
         self.pid = os.getpid()
         self.chunk_id = chunk_id
@@ -207,6 +208,9 @@ class Chunk(object):
             tensor_id = info.tensor_id()
             start = info.start
             size = info.numel()
+            if info.status() == PSTensorStatus.FREE:
+                continue
+
             if tensor_id in param_data_dict.keys():
                 logging.debug(
                     f'chunk moves data tensor {tensor_id} to {target_device}')
@@ -226,6 +230,8 @@ class Chunk(object):
                 # 在移动ps_grad_tensor时，我们不能轻易改变grad指针
                 # param.grad = param.ps_grad_tensor
                 param.grad = None
+            else:
+                raise RuntimeError
 
         self.device = target_device
         self.touch()

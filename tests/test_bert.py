@@ -30,6 +30,7 @@ import argparse
 from client import HybridPSClient
 from manager import HybridPSManager
 from utils import setup_hybrid_ps_hooks
+# from utils.zero_hook import HookedModule
 from ops import CPUAdam, TorchAdam
 
 parser = argparse.ArgumentParser(
@@ -70,18 +71,6 @@ def show_params(model, is_ps, step):
             param.shape, param.requires_grad)
 
 
-def show_grad_hook(grad):
-    print('show grad hook')
-    print(grad)
-
-
-def show_grad_hook(grad):
-    """
-    docstring
-    """
-    print('grad', grad)
-
-
 def test_bert_model(is_ckp: bool = False,
                     is_fp16: bool = False,
                     is_ps: bool = False,
@@ -93,17 +82,12 @@ def test_bert_model(is_ckp: bool = False,
     device = torch.device('cuda:0')
 
     if is_ckp:
-        cfg = BertConfig(gradient_checkpointing=True,
-                         hidden_dim=hidden_dim,
-                         num_hidden_layers=1)
+        cfg = BertConfig(gradient_checkpointing=True, hidden_dim=hidden_dim)
     else:
-        # cfg = BertConfig(hidden_dim = hidden_dim, num_hidden_layers = 4)
         cfg = BertConfig(hidden_dim=hidden_dim)
     model = BertForSequenceClassification(cfg)
     model.cuda()
     model.train()
-
-    model.classifier.weight.register_hook(show_grad_hook)
 
     see_memory_usage(
         f"ckp {is_ckp} fp16 {is_fp16} ps {is_ps} after model init", force=True)
@@ -132,6 +116,10 @@ def test_bert_model(is_ckp: bool = False,
         # optimizer = TorchAdam(model.parameters(), lr=0.001)
         client.register_module(model)
         setup_hybrid_ps_hooks(model, client)
+
+        # hook_module = HookedModule(model, client)
+        # hook_module.setup_zero_stage3_hooks()
+        # model = hook_module.module
     else:
         optimizer = TorchAdam(model.parameters(), lr=0.001)
 
@@ -140,10 +128,6 @@ def test_bert_model(is_ckp: bool = False,
 
     start_time = time.time()
     for n, batch in enumerate(data_loader):
-        logging.info(
-            f'input sum {torch.sum(batch[0])}, label sum {torch.sum(batch[1])}'
-        )
-
         output = model(input_ids=batch[0], labels=batch[1])
         loss = output.loss
         logits = output.logits
@@ -157,6 +141,10 @@ def test_bert_model(is_ckp: bool = False,
         else:
             optimizer.zero_grad()
             loss.backward()
+            # if is_ps:
+            #     client.release_grad(model.bert.embeddings.word_embeddings.weight)
+            #     client.release_grad(model.bert.embeddings.position_embeddings.weight)
+            #     client.release_grad(model.bert.embeddings.token_type_embeddings.weight)
             # show_grads(model, is_ps, n)
 
         if is_fp16:
@@ -172,7 +160,7 @@ def test_bert_model(is_ckp: bool = False,
         if is_ps:
             client.release_all_grad()
 
-        if n == 2: break
+        if n == 10: break
 
     elapse = time.time() - start_time
     logging.info(f"ckp {is_ckp} fp16 {is_fp16} ps {is_ps}  elapse {elapse}")
@@ -223,7 +211,7 @@ if __name__ == "__main__":
     if res_check:
         torch.manual_seed(0)
         loss_list = test_bert_model(is_ckp=use_ckp,
-                                    is_fp16=False,
+                                    is_fp16=use_fp16,
                                     is_ps=True,
                                     hidden_dim=hidden_dim,
                                     batch_size=batch_size,
@@ -233,7 +221,7 @@ if __name__ == "__main__":
         print("*" * 50)
         torch.manual_seed(0)
         loss_ref_list = test_bert_model(is_ckp=use_ckp,
-                                        is_fp16=False,
+                                        is_fp16=use_fp16,
                                         is_ps=False,
                                         hidden_dim=hidden_dim,
                                         batch_size=batch_size,
@@ -241,5 +229,7 @@ if __name__ == "__main__":
 
         print('ps', loss_list)
         print('ref', loss_ref_list)
+        import numpy as np
+        print(np.array(loss_list) - np.array(loss_ref_list))
         for loss, loss_ref in zip(loss_list, loss_ref_list):
             assert loss == loss_ref

@@ -63,9 +63,11 @@ class ChunkList(object):
             )
             manager.delete(chunk.device.type, chunk.device.index,
                            chunk.capacity * getsizeof(chunk.data_type))
-            # 此处删除chunk的payload，然是在payload上索引的tensor
+            # 删除tensor的内存
             for info in chunk.tensor_info_list.generate_in_sorted_order():
-                info.delete_tensor()
+                info.delete_tensor_memory()
+
+            # 删除chunk的内存
             del self.chunk_id_to_chunk_dict[chunk_id]
             chunk_tensor_index.delete_chunk_id(chunk_id)
 
@@ -97,13 +99,15 @@ class ChunkList(object):
                 logging.debug(f'allocate with old chunk {chunk_id}')
                 return chunk_id, ret
 
-        logging.debug(f'no existing chunk can hold the tensor size')
         # need allocate a new chunk
         numel = param.ps_shape.numel()
         chunk_id, chunk = self.new_chunk(max(numel, self.default_chunk_size),
                                          param.dtype)
         ret = chunk.try_allocate(param, access_type)
         assert ret is not None
+        logging.debug(
+            f'no existing chunk can hold the tensor size, new chunk {chunk_id}'
+        )
         return chunk_id, ret
 
     def __getitem__(self, chunk_id: int):
@@ -134,6 +138,7 @@ class ChunkList(object):
 
         # 释放free chunks
         for idx in free_chunk_id_list:
+            logging.debug(f'delete free chunk idx {idx}')
             self.delete_chunk(idx, chunk_tensor_index)
 
     def chunk_to_move_out_for_room_making(self, size_in_bytes: int,

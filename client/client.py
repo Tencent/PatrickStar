@@ -197,6 +197,10 @@ class HybridPSClient(object):
             f'release {access_type} chunk_id {chunk_id} to {reset_to_status}')
         if chunk_id is None:
             return
+
+        # 设置grad[grad]_status已经在chunk中删除这个tensor
+        # chunk_tensor_index删除tensor索引，顺便判断是否有chunk需要删除
+        # chunk list判断是否有chunk需要删除
         if access_type == AccessType.DATA:
             # 把data的内存删除，方式是将它指向一段长度为1的内存
             param.data = torch.zeros(1, dtype=param.dtype, device=param.device)

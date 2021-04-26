@@ -314,28 +314,63 @@ def test_tensor_remove():
                                                 dtype=torch.half),
                                     requires_grad=True)
 
+        param2 = torch.nn.Parameter(torch.randn(10,
+                                                device=torch.device('cuda:0'),
+                                                dtype=torch.half),
+                                    requires_grad=True)
+
         client.register_param(param1)
+        client.register_param(param2)
+
         client.access_data(param1, torch.device('cuda:0'))
-        client.access_grad(param1, torch.device('cuda:0'))
+        client.access_data(param2, torch.device('cuda:0'))
 
         print(client.chunk_tensor_index.dict_tensor_id_chunk_id)
         print(client.chunk_tensor_index.dict_chunk_id_tensor_id)
 
-        client.release_data(param1, PSTensorStatus.HOLD)
-        client.release_grad(param1, PSTensorStatus.FREE)
+        # client.release_data(param1, PSTensorStatus.FREE)
+        # client.release_grad(param1, PSTensorStatus.FREE)
 
         print(client.chunk_tensor_index.dict_tensor_id_chunk_id)
         print(client.chunk_tensor_index.dict_chunk_id_tensor_id)
 
-        client.access_data(param1, torch.device('cuda:0'))
         client.access_grad(param1, torch.device('cuda:0'))
+        client.access_grad(param2, torch.device('cuda:0'))
 
         assert torch.sum(param1.ps_grad_tensor) == 0.
 
         print(client.chunk_tensor_index.dict_tensor_id_chunk_id)
         print(client.chunk_tensor_index.dict_chunk_id_tensor_id)
 
+        client.release_grad(param1, PSTensorStatus.FREE)
+        client.release_grad(param2, PSTensorStatus.FREE)
+
+        print(client.chunk_tensor_index.dict_tensor_id_chunk_id)
+        print(client.chunk_tensor_index.dict_chunk_id_tensor_id)
+
+    def test_dict():
+        client = HybridPSClient(gpu_index=0, default_chunk_size=20)
+        # chunk : tensor
+        # 0 : 0
+        # 0 : 1
+        # 0 : 2
+        # 1 : 3
+        client.chunk_tensor_index.dict_tensor_id_chunk_id[0] = 0
+        client.chunk_tensor_index.dict_tensor_id_chunk_id[1] = 0
+        client.chunk_tensor_index.dict_tensor_id_chunk_id[2] = 0
+        client.chunk_tensor_index.dict_tensor_id_chunk_id[3] = 1
+
+        client.chunk_tensor_index.dict_chunk_id_tensor_id[0] = [0, 1, 2]
+        client.chunk_tensor_index.dict_chunk_id_tensor_id[1] = [3]
+
+        client.chunk_tensor_index.delete_tensor(0)
+        client.chunk_tensor_index.delete_tensor(3)
+        client.chunk_tensor_index.delete_chunk_id(1)
+        print(client.chunk_tensor_index.dict_tensor_id_chunk_id)
+        print(client.chunk_tensor_index.dict_chunk_id_tensor_id)
+
     test_remove()
+    # test_dict()
 
 
 if __name__ == "__main__":
@@ -345,14 +380,14 @@ if __name__ == "__main__":
         datefmt='%Y-%m-%d:%H:%M:%S',
         level=logging.DEBUG)
 
-    test_client()
-    time.sleep(3)
-    test_mgr_dist()
-    time.sleep(3)
-    test_migrate()
-    time.sleep(3)
-    test_fp16()
-    time.sleep(3)
-    test_on_demand_access()
-    time.sleep(3)
+    # test_client()
+    # time.sleep(3)
+    # test_mgr_dist()
+    # time.sleep(3)
+    # test_migrate()
+    # time.sleep(3)
+    # test_fp16()
+    # time.sleep(3)
+    # test_on_demand_access()
+    # time.sleep(3)
     test_tensor_remove()

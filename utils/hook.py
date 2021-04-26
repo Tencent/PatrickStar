@@ -67,7 +67,6 @@ class PreBackwardFunction(torch.autograd.Function):
                     f"**After Forward: {ctx.module.__class__.__name__}")
         # why detach?detach后给下一层作为输入，似乎没有用，fwd输出都会用backward作为反向
         outputs = outputs.detach()
-        # outputs = outputs * 1
         return outputs
 
     @staticmethod
@@ -141,7 +140,6 @@ def pre_sub_module_backward_function(sub_module, client, name):
         client.access_data(param, torch.device('cuda:0'))
         client.access_grad(param, torch.device('cuda:0'))
         param.grad = param.ps_grad_tensor
-        assert torch.sum(param.grad) == 0.
 
 
 # release param of submodule
@@ -216,7 +214,6 @@ def _register_hooks_recursively(module, client, count=[0], name=""):
 
     module.register_forward_hook(_pre_backward_module_hook)
     module.register_forward_pre_hook(_post_backward_module_hook)
-    # module.register_full_backward_hook(_post_backward_module_hookv2)
 
 
 def setup_hybrid_ps_hooks(module, client):
