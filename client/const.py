@@ -33,3 +33,4 @@ class PSTensorStatus(Enum):
     HOLD = 2
     # 可以释放
     FREE = 3
+    UNINIT = 4

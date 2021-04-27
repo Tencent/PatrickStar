@@ -13,5 +13,6 @@
 
 from .client import HybridPSClient
 from .chunk_list import ChunkList
-from .chunk_data import TensorInfo, Chunk
+from .chunk_data import Chunk
 from .const import AccessType, PSChunkStatus, PSTensorStatus
+from .chunk_tensor_index import ChunkTensorIndex

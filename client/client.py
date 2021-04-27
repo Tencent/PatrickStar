@@ -20,7 +20,7 @@ import logging
 from torch.multiprocessing import Process, Manager
 
 from .const import AccessType, PSChunkStatus, PSTensorStatus
-from .chunk_data import TensorInfo, Chunk
+from .chunk_data import Chunk
 from .chunk_list import ChunkList
 from .helper import getsizeof
 from .chunk_tensor_index import ChunkTensorIndex
@@ -49,8 +49,6 @@ class HybridPSClient(object):
 
         self.module = None
         self.ps_id = -1
-        self.param_data_dict = {}
-        self.param_grad_dict = {}
 
         self.chunk_tensor_index = ChunkTensorIndex()
 
@@ -298,12 +296,14 @@ class HybridPSClient(object):
 
         if not self.is_ps_data(param):
             param.ps_data_id = self.generate_id()
-            self.param_data_dict[param.ps_data_id] = param
+            # self.param_data_dict[param.ps_data_id] = param
+            # self.chunk_tensor_index.register_tensor(param.ps_data_id, AccessType.DATA, param)
             param.ps_data_tensor = None
 
         if not self.is_ps_grad(param) and param.requires_grad is True:
             param.ps_grad_id = self.generate_id()
-            self.param_grad_dict[param.ps_grad_id] = param
+            # self.param_grad_dict[param.ps_grad_id] = param
+            # self.chunk_tensor_index.register_tensor(param.ps_grad_id, AccessType.GRAD, param)
             param.ps_grad_tensor = None
 
     def register_module(self, module: torch.nn.Module):
@@ -340,7 +340,8 @@ class HybridPSClient(object):
     def visit(self):
         for idx, chunk in self.chunk_list.generate():
             logging.info(
-                f"chunk {idx} on device {chunk.device} {chunk.get_status()}")
+                f"chunk {idx} on device {chunk.device} status {chunk.get_status()}"
+            )
             chunk.visit()
 
     def chunk_move(self, chunk_id: int, device: torch.device):
@@ -356,8 +357,7 @@ class HybridPSClient(object):
                 logging.DEBUG,
                 f'pid {self.pid} move chunk {chunk_id} from {self.chunk_list[chunk_id].device} to {device}'
             )
-            self.chunk_list[chunk_id].move(self.param_data_dict,
-                                           self.param_grad_dict, device)
+            self.chunk_list[chunk_id].move(self.chunk_tensor_index, device)
 
     def release_all_grad(self):
         if self.module is not None:

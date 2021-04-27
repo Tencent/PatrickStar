@@ -13,14 +13,111 @@
 
 from typing import List
 import logging
+import torch
+from .const import AccessType, PSChunkStatus, PSTensorStatus
+# from .chunk_data import Chunk
+
+
+class TensorInfo(object):
+    """
+    记录chunk内存存储tensor的属性,
+    """
+    def __init__(self, chunk_id: int, tensor_id: int, start_offset: int,
+                 numel: int, param: torch.nn.Parameter,
+                 access_type: AccessType):
+        self.tensor_id = tensor_id
+        self.chunk_id = chunk_id
+        self.start_offset = start_offset
+        self.numel = numel
+        self.param = param
+        self.access_type = access_type
+
+    def status(self):
+        if self.access_type == AccessType.DATA:
+            if not hasattr(self.param, 'data_status'):
+                return PSTensorStatus.UNINIT
+            return self.param.data_status
+        elif self.access_type == AccessType.GRAD:
+            if not hasattr(self.param, 'grad_status'):
+                return PSTensorStatus.UNINIT
+            return self.param.grad_status
+
+    def showme(self):
+        logging.info(
+            f'tensor_id {self.tensor_id}, chunk_id {self.chunk_id}, start_offset {self.start_offset}, nueml {self.numel}, status {self.status()}'
+        )
 
 
 class ChunkTensorIndex(object):
     def __init__(self):
-        # 1-1 dict
-        self.dict_tensor_id_chunk_id = {}
-        # 1-N dict
-        self.dict_chunk_id_tensor_id = {}
+        """
+        存储parameter和chunk的检索信息
+        """
+        # 1-1 dict, tensor_id -> TensorInfo
+        self.dict_tensor_id_info: dict[int, TensorInfo] = {}
+        # 1-N dict, chunk_id -> List(tensor_id) in order of start_offset
+        self.dict_chunk_id_tensor_id: dict[int, List[int]] = {}
+        # 1-1 chunk_id -> Chunk
+        self.dict_chunk_id_chunk: dict[int, Chunk] = {}
+
+    def generate_tensor_info_in_order(self, chunk_id):
+        """
+        产生在chunk id的所有tensor，以start_offset位置从小到大排序
+        O(N)
+        """
+        for tensor_id in self.dict_chunk_id_tensor_id.get(chunk_id):
+            yield self.dict_tensor_id_info[tensor_id]
+
+    def _binary_search(self, tensor_id_list, start_offset, start, end):
+        # we need to distinugish whether we should insert
+        # before or after the left boundary.
+        # imagine [0] is the last step of the binary search
+        # and we need to decide where to insert -1
+        if start == end:
+            if self.dict_tensor_id_info[
+                    tensor_id_list[start]].start_offset > start_offset:
+                return start
+            else:
+                return start + 1
+
+        # this occurs if we are moving beyond left\'s boundary
+        # meaning the left boundary is the least position to
+        # find a number greater than val
+        if start > end:
+            return start
+
+        mid = (start + end) // 2
+        mid_start_offset = self.dict_tensor_id_info[
+            tensor_id_list[mid]].start_offset
+        if mid_start_offset < start_offset:
+            return self._binary_search(tensor_id_list, start_offset, mid + 1,
+                                       end)
+        elif mid_start_offset > start_offset:
+            return self._binary_search(tensor_id_list, start_offset, start,
+                                       mid - 1)
+        else:
+            return mid
+
+    def add_tensor(self, chunk_id, tensor_id, start_offset, numel, param,
+                   access_type):
+        """
+        添加一个tensor，注册它所属的chunk_id和start_offset信息
+        需要将chunk_id内的tensor按照start_offset排序
+        二分查找时间复杂度O(logN)
+        """
+        if chunk_id not in self.dict_chunk_id_tensor_id:
+            self.dict_chunk_id_tensor_id[chunk_id] = list()
+
+        tensor_id_list = self.dict_chunk_id_tensor_id[chunk_id]
+        # 二分查找按照start_offset顺序从小到大插入
+        pos = self._binary_search(tensor_id_list, start_offset, 0,
+                                  len(tensor_id_list) - 1)
+        tensor_id_list.insert(pos, tensor_id)
+        self.dict_tensor_id_info[tensor_id] = TensorInfo(
+            chunk_id, tensor_id, start_offset, numel, param, access_type)
+
+    def add_chunk(self, chunk_id: int, chunk):
+        self.dict_chunk_id_chunk[chunk_id] = chunk
 
     def delete_chunk_id(self, chunk_id):
         """
@@ -31,17 +128,15 @@ class ChunkTensorIndex(object):
             return
         for cid, tid_list in self.dict_chunk_id_tensor_id.get(chunk_id):
             for tid in tid_list:
-                del self.dict_tensor_id_chunk_id[tid]
+                del self.dict_tensor_id_info[tid]
 
         del self.dict_chunk_id_tensor_id[chunk_id]
 
     def delete_tensor(self, tensor_id):
         """
-        删除dict_tensor_id_chunk_id对应的tensor_id
+        删除dict_tensor_id_info对应的tensor_id
         并没有真正动内存
         """
-        # TODO(jiaruifang)删除一个tensor_id并不在dict中
-        # logging.info(f'delete tensor {tensor_id}')
         cid_delete_list = []
         for cid, tid_list in self.dict_chunk_id_tensor_id.items():
             # logging.info(f'chunk {cid} contains tensor {tid_list}')
@@ -54,17 +149,30 @@ class ChunkTensorIndex(object):
         for cid in cid_delete_list:
             del self.dict_chunk_id_tensor_id[cid]
 
-        del self.dict_tensor_id_chunk_id[tensor_id]
-
-    def add_tensor(self, tensor_id, chunk_id):
-        if chunk_id not in self.dict_chunk_id_tensor_id:
-            self.dict_chunk_id_tensor_id[chunk_id] = list()
-        self.dict_chunk_id_tensor_id[chunk_id].extend([tensor_id])
-
-        self.dict_tensor_id_chunk_id[tensor_id] = chunk_id
+        del self.dict_tensor_id_info[tensor_id]
 
     def tensor_id_to_chunk_id(self, tensor_id) -> int:
-        return self.dict_tensor_id_chunk_id.get(tensor_id)
+        """
+        tensor_id -> chunk_id
+        """
+        return self.dict_tensor_id_info.get(tensor_id)
 
-    def chunk_id_to_tensor_id_list(self, chunk_id):
-        return self.dict_chunk_id_tensor_id.get(chunk_id)
+    def chunk_status(self, chunk_id) -> PSChunkStatus:
+        """
+        chunk的状态，由它管理的tensor共同决定
+        """
+        if self.dict_chunk_id_tensor_id.get_len() == 0:
+            return PSChunkStatus.FREE
+
+        free_flag = True
+        for _, tensor_id in self.dict_chunk_id_tensor_id.items():
+            info = self.dict_tensor_id_info[tensor_id]
+            if info.status() == PSTensorStatus.COMPUTE:
+                return PSChunkStatus.COMPUTE
+            elif info.status() != PSTensorStatus.FREE:
+                free_flag = False
+
+        if free_flag is True:
+            return PSChunkStatus.FREE
+        else:
+            return PSChunkStatus.HOLD

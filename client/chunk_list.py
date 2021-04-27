@@ -64,8 +64,16 @@ class ChunkList(object):
             manager.delete(chunk.device.type, chunk.device.index,
                            chunk.capacity * getsizeof(chunk.data_type))
             # 删除tensor的内存
-            for info in chunk.tensor_info_list.generate_in_sorted_order():
-                info.delete_tensor_memory()
+            for info in chunk_tensor_index.generate_tensor_info_in_order():
+                param = info.param
+                access_type = info.access_type
+                if access_type == AccessType.DATA:
+                    assert param.data_status == PSTensorStatus.FREE
+                    param.ps_data_tensor = torch.zeros(
+                        1, dtype=self.param.dtype, device=torch.device('cpu'))
+                elif access_type == AccessType.GRAD:
+                    assert param.grad_status == PSTensorStatus.FREE
+                    param.ps_grad_tensor = None
 
             # 删除chunk的内存
             del self.chunk_id_to_chunk_dict[chunk_id]
@@ -132,7 +140,8 @@ class ChunkList(object):
 
         # 释放cpu和gpu上所有free chunk，统计目标设备上腾出的空间
         for chunk_id, chunk in self.chunk_id_to_chunk_dict.items():
-            if chunk.get_status() == PSChunkStatus.FREE:
+            if self.chunk_tensor_index.chunk_status(
+                    chunk_id) == PSChunkStatus.FREE:
                 free_chunk_id_list.append(chunk_id)
                 freed_bytes += chunk.capacity * getsizeof(chunk.data_type)
 
@@ -155,7 +164,7 @@ class ChunkList(object):
         moved_bytes = 0
         moved_list = []
         for chunk_id, chunk in self.chunk_id_to_chunk_dict.items():
-            if chunk.device == target_device and chunk.get_status(
+            if chunk.device == target_device and chunk_tensor_index.chunk_status(
             ) == PSChunkStatus.HOLD:
                 moved_bytes += chunk.capacity * getsizeof(chunk.data_type)
                 moved_list.append(chunk_id)

@@ -11,50 +11,57 @@
 # permissions and limitations under the License.
 # See the AUTHORS file for names of contributors.
 
-from client import ChunkList, PSTensorStatus
+import unittest
+from client import HybridPSClient, ChunkList, PSTensorStatus, AccessType
 import logging
 import torch
 from manager import HybridPSManager
 
 
-def test_basic():
-    manager = HybridPSManager()
-    manager.reset([32, 32], [1024])
-    data_type = torch.float
-    chunk_list = ChunkList(default_chunk_size=128)
-    # 之前分配的chunk中尝试分配10空间
-    chunk_id = chunk_list.least_used_chunk()
-    assert chunk_id == 0
+class TestAccess(unittest.TestCase):
+    def setUp(self):
+        self.default_chunk_size = 20
+        self.client = HybridPSClient(
+            gpu_index=0, default_chunk_size=self.default_chunk_size)
+        self.manager = HybridPSManager()
+        self.manager.init([32, 32], [1024])
+        self.compute_device = torch.device(
+            'cuda') if torch.cuda.is_available() else torch.device('cpu')
 
-    chunk_id, tensor = chunk_list.allocate(10, data_type, 0)
-    assert chunk_id == 0
+    def test_register(self):
+        self.manager.reset([40 * 4], [256 * 4])
+        chunk_list = ChunkList(default_chunk_size=self.default_chunk_size)
 
-    chunk_id, tensor = chunk_list.allocate(100, data_type, 1)
-    assert chunk_id == 0
-    chunk_id = chunk_list.least_used_chunk()
-    chunk_list[chunk_id].visit()
+        param1 = torch.nn.Parameter(torch.zeros(10, dtype=torch.float))
+        assert param1.requires_grad is True
+        self.client.register_param(param1)
+        assert param1.data_status == PSTensorStatus.HOLD
+        assert param1.grad_status == PSTensorStatus.FREE
 
-    chunk_id, tensor = chunk_list.allocate(100, data_type, 2)
-    assert (chunk_id == 1)
+    def test_access(self):
+        self.manager.reset([40 * 4], [256 * 4])
+        param1 = torch.nn.Parameter(torch.zeros(10, dtype=torch.float))
 
-    chunk_id = chunk_list.least_used_chunk()
-    assert chunk_id == 1
+        assert param1.requires_grad is True
+        self.client.register_param(param1)
+        self.client.access_data(param1, self.compute_device)
+        assert param1.data_status == PSTensorStatus.COMPUTE
+        assert param1.grad_status == PSTensorStatus.FREE
+        assert self.client.get_chunk_id(param1, AccessType.DATA) == 0
 
+        self.client.access_grad(param1, self.compute_device)
+        assert param1.data_status == PSTensorStatus.COMPUTE
+        assert param1.grad_status == PSTensorStatus.COMPUTE
+        assert self.client.get_chunk_id(param1, AccessType.GRAD) == 0
 
-def test_reuse():
-    manager = HybridPSManager()
-    manager.reset([32, 32], [1024])
-    data_type = torch.float
-    chunk_list = ChunkList(default_chunk_size=20)
-    param1 = torch.nn.Parameter(torch, zeros(16))
-    chunk_id, tensor = chunk_list.allocate(param1)
-    assert chunk_id == 0
+        param2 = torch.nn.Parameter(torch.zeros(10, dtype=torch.float))
+        self.client.register_param(param2)
+        self.client.release_grad(param1, PSTensorStatus.FREE)
 
-    chunk_id, tensor = chunk_list.allocate(4, data_type, 1)
-    assert chunk_id == 0
+        # 测试复用
+        self.client.access_grad(param2, self.compute_device)
 
-    chunk_id, tensor = chunk_list.allocate(16, data_type, 2)
-    assert chunk_id == 0
+        self.client.visit()
 
 
 if __name__ == "__main__":
@@ -63,8 +70,4 @@ if __name__ == "__main__":
         '%(asctime)s,%(msecs)d %(levelname)-8s [%(filename)s:%(lineno)d] %(message)s',
         datefmt='%Y-%m-%d:%H:%M:%S',
         level=logging.DEBUG)
-    # test_basic()
-    test_reuse()
-
-    # 再分配一个chunk
-    # chunk_list.new_chunk(128)
+    unittest.main()
