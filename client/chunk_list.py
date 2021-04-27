@@ -64,7 +64,8 @@ class ChunkList(object):
             manager.delete(chunk.device.type, chunk.device.index,
                            chunk.capacity * getsizeof(chunk.data_type))
             # 删除tensor的内存
-            for info in chunk_tensor_index.generate_tensor_info_in_order():
+            for info in chunk_tensor_index.generate_tensor_info_in_order(
+                    chunk_id):
                 param = info.param
                 access_type = info.access_type
                 if access_type == AccessType.DATA:
@@ -93,8 +94,8 @@ class ChunkList(object):
         logging.debug(f'least_used_chunk found chunk id {pos}')
         return pos
 
-    def allocate(self, param: torch.nn.Parameter,
-                 access_type: AccessType) -> (int, torch.Tensor):
+    def allocate(self, param: torch.nn.Parameter, access_type: AccessType,
+                 chunk_tensor_index: ChunkTensorIndex) -> (int, torch.Tensor):
         """
         找到chunk_list中可以分配size大小数据的chunk，如果没有则新分配一个
         返回chunk_id
@@ -102,7 +103,7 @@ class ChunkList(object):
         for chunk_id, chunk in self.chunk_id_to_chunk_dict.items():
             if param.dtype != chunk.data_type:
                 continue
-            ret = chunk.try_allocate(param, access_type)
+            ret = chunk.try_allocate(param, access_type, chunk_tensor_index)
             if ret is not None:
                 logging.debug(f'allocate with old chunk {chunk_id}')
                 return chunk_id, ret
@@ -111,10 +112,10 @@ class ChunkList(object):
         numel = param.ps_shape.numel()
         chunk_id, chunk = self.new_chunk(max(numel, self.default_chunk_size),
                                          param.dtype)
-        ret = chunk.try_allocate(param, access_type)
+        ret = chunk.try_allocate(param, access_type, chunk_tensor_index)
         assert ret is not None
         logging.debug(
-            f'no existing chunk can hold the tensor size, new chunk {chunk_id}'
+            f'no existing chunk can hold the tensor numel {numel}, new chunk {chunk_id}'
         )
         return chunk_id, ret
 
@@ -140,10 +141,9 @@ class ChunkList(object):
 
         # 释放cpu和gpu上所有free chunk，统计目标设备上腾出的空间
         for chunk_id, chunk in self.chunk_id_to_chunk_dict.items():
-            if self.chunk_tensor_index.chunk_status(
-                    chunk_id) == PSChunkStatus.FREE:
+            if chunk_tensor_index.chunk_status(chunk_id) == PSChunkStatus.FREE:
                 free_chunk_id_list.append(chunk_id)
-                freed_bytes += chunk.capacity * getsizeof(chunk.data_type)
+                freed_bytes += chunk.get_size()
 
         # 释放free chunks
         for idx in free_chunk_id_list:

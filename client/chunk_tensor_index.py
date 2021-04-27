@@ -60,12 +60,20 @@ class ChunkTensorIndex(object):
         # 1-1 chunk_id -> Chunk
         self.dict_chunk_id_chunk: dict[int, Chunk] = {}
 
+    def show_status(self):
+        """
+        展示每个chunk中tensor的状态
+        """
+        for chunk_id, tensor_info_list in self.dict_chunk_id_tensor_id.items():
+            for tensor_id in tensor_info_list:
+                yield self.dict_tensor_id_info[tensor_id]
+
     def generate_tensor_info_in_order(self, chunk_id):
         """
         产生在chunk id的所有tensor，以start_offset位置从小到大排序
         O(N)
         """
-        for tensor_id in self.dict_chunk_id_tensor_id.get(chunk_id):
+        for tensor_id in self.dict_chunk_id_tensor_id.get(chunk_id, []):
             yield self.dict_tensor_id_info[tensor_id]
 
     def _binary_search(self, tensor_id_list, start_offset, start, end):
@@ -116,9 +124,6 @@ class ChunkTensorIndex(object):
         self.dict_tensor_id_info[tensor_id] = TensorInfo(
             chunk_id, tensor_id, start_offset, numel, param, access_type)
 
-    def add_chunk(self, chunk_id: int, chunk):
-        self.dict_chunk_id_chunk[chunk_id] = chunk
-
     def delete_chunk_id(self, chunk_id):
         """
         删除chunk_id对应chunk的索引信息
@@ -134,12 +139,10 @@ class ChunkTensorIndex(object):
 
     def delete_tensor(self, tensor_id):
         """
-        删除dict_tensor_id_info对应的tensor_id
-        并没有真正动内存
+        删除一个tensor，可能导致一个chunk也被产出，应对内存进行释放
         """
         cid_delete_list = []
         for cid, tid_list in self.dict_chunk_id_tensor_id.items():
-            # logging.info(f'chunk {cid} contains tensor {tid_list}')
             if tensor_id in tid_list:
                 tid_list.remove(tensor_id)
 
@@ -155,17 +158,22 @@ class ChunkTensorIndex(object):
         """
         tensor_id -> chunk_id
         """
-        return self.dict_tensor_id_info.get(tensor_id)
+        # info =
+        info = self.dict_tensor_id_info.get(tensor_id)
+        if info is None:
+            return None
+        else:
+            return info.chunk_id
 
     def chunk_status(self, chunk_id) -> PSChunkStatus:
         """
         chunk的状态，由它管理的tensor共同决定
         """
-        if self.dict_chunk_id_tensor_id.get_len() == 0:
-            return PSChunkStatus.FREE
+        # if len(self.dict_chunk_id_tensor_id[chunk_id]) == 0:
+        #     return PSChunkStatus.FREE
 
         free_flag = True
-        for _, tensor_id in self.dict_chunk_id_tensor_id.items():
+        for tensor_id in self.dict_chunk_id_tensor_id.get(chunk_id, []):
             info = self.dict_tensor_id_info[tensor_id]
             if info.status() == PSTensorStatus.COMPUTE:
                 return PSChunkStatus.COMPUTE

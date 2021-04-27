@@ -27,38 +27,46 @@ class TestAccess(unittest.TestCase):
         self.manager.init([32, 32], [1024])
         self.compute_device = torch.device(
             'cuda') if torch.cuda.is_available() else torch.device('cpu')
+        logging.info('SetUp finished')
 
     def test_register(self):
         self.manager.reset([40 * 4], [256 * 4])
-        chunk_list = ChunkList(default_chunk_size=self.default_chunk_size)
-
-        param1 = torch.nn.Parameter(torch.zeros(10, dtype=torch.float))
+        param1 = torch.nn.Parameter(torch.zeros(23, dtype=torch.float))
         assert param1.requires_grad is True
-        self.client.register_param(param1)
-        assert param1.data_status == PSTensorStatus.HOLD
-        assert param1.grad_status == PSTensorStatus.FREE
+        self.client.visit()
+        # self.client.register_param(param1)
+        # assert param1.data_status == PSTensorStatus.HOLD
+        # assert param1.grad_status == PSTensorStatus.FREE
 
     def test_access(self):
         self.manager.reset([40 * 4], [256 * 4])
         param1 = torch.nn.Parameter(torch.zeros(10, dtype=torch.float))
 
         assert param1.requires_grad is True
+
+        logging.info(f'access param1 data')
         self.client.register_param(param1)
         self.client.access_data(param1, self.compute_device)
         assert param1.data_status == PSTensorStatus.COMPUTE
         assert param1.grad_status == PSTensorStatus.FREE
         assert self.client.get_chunk_id(param1, AccessType.DATA) == 0
 
+        self.client.visit()
+        logging.info(f'access param1 grad')
         self.client.access_grad(param1, self.compute_device)
         assert param1.data_status == PSTensorStatus.COMPUTE
         assert param1.grad_status == PSTensorStatus.COMPUTE
         assert self.client.get_chunk_id(param1, AccessType.GRAD) == 0
 
+        logging.info(f'access param2 data')
         param2 = torch.nn.Parameter(torch.zeros(10, dtype=torch.float))
         self.client.register_param(param2)
+
+        logging.info(f'release param1 grad')
         self.client.release_grad(param1, PSTensorStatus.FREE)
 
         # 测试复用
+        logging.info(f'release param2 grad')
         self.client.access_grad(param2, self.compute_device)
 
         self.client.visit()

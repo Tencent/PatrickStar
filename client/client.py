@@ -130,7 +130,6 @@ class HybridPSClient(object):
         # tensor_id to chunk_id
         chunk_id = self.get_chunk_id(param, access_type)
         if chunk_id is None:
-            # allocate a new tensor on compute device
             if access_type == AccessType.DATA:
                 self.new_data(param, self.chunk_tensor_index)
                 current_device = param.ps_data_tensor.device
@@ -152,9 +151,8 @@ class HybridPSClient(object):
 
         if compute_device != current_device:
             #访问一个free状态的chunk，上面不会分配，此处把它释放了。
-            self.prepare_device(
-                compute_device, self.chunk_list[chunk_id].capacity *
-                getsizeof(self.chunk_list[chunk_id].data_type))
+            self.prepare_device(compute_device,
+                                self.chunk_list[chunk_id].get_size())
             self.chunk_move(chunk_id, compute_device)
 
         self.chunk_list[chunk_id].touch()
@@ -188,7 +186,6 @@ class HybridPSClient(object):
                 reset_to_status: PSTensorStatus = PSTensorStatus.HOLD):
         """
         这个param的data, grad不再需要放在计算设备，或者不需要hold
-        TODO(jiaruifang)释放内存 or 只是不再计算设备的hold
         """
         chunk_id = self.get_chunk_id(param, access_type)
         logging.debug(
@@ -196,7 +193,7 @@ class HybridPSClient(object):
         if chunk_id is None:
             return
 
-        # 设置grad[grad]_status已经在chunk中删除这个tensor
+        # 设置data[grad]_status已经在chunk中删除这个tensor
         # chunk_tensor_index删除tensor索引，顺便判断是否有chunk需要删除
         # chunk list判断是否有chunk需要删除
         if access_type == AccessType.DATA:
@@ -232,8 +229,8 @@ class HybridPSClient(object):
         """
         为param分配data的ps tensor
         """
-        chunk_id, dest = self.chunk_list.allocate(param, AccessType.DATA)
-        chunk_tensor_index.add_tensor(param.ps_data_id, chunk_id)
+        chunk_id, dest = self.chunk_list.allocate(param, AccessType.DATA,
+                                                  chunk_tensor_index)
         param.ps_data_tensor = dest.view(param.ps_shape)
         param.ps_data_chunk_id = chunk_id
         param.data_status = PSChunkStatus.HOLD
@@ -243,8 +240,8 @@ class HybridPSClient(object):
         """
         为param分配grad的ps tensor
         """
-        chunk_id, dest = self.chunk_list.allocate(param, AccessType.GRAD)
-        chunk_tensor_index.add_tensor(param.ps_grad_id, chunk_id)
+        chunk_id, dest = self.chunk_list.allocate(param, AccessType.GRAD,
+                                                  chunk_tensor_index)
         param.ps_grad_tensor = dest.view(param.ps_shape)
         param.ps_grad_chunk_id = chunk_id
         param.grad_status = PSChunkStatus.HOLD
@@ -340,9 +337,9 @@ class HybridPSClient(object):
     def visit(self):
         for idx, chunk in self.chunk_list.generate():
             logging.info(
-                f"chunk {idx} on device {chunk.device} status {chunk.get_status()}"
+                f"chunk {idx} on device {chunk.device} status {self.chunk_tensor_index.chunk_status(idx)}"
             )
-            chunk.visit()
+            chunk.visit(self.chunk_tensor_index)
 
     def chunk_move(self, chunk_id: int, device: torch.device):
         """

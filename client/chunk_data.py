@@ -16,6 +16,7 @@ import torch
 from .const import PSTensorStatus, PSChunkStatus, AccessType
 from .helper import getsizeof
 from .chunk_tensor_index import ChunkTensorIndex
+from .helper import getsizeof
 
 from typing import Dict
 from manager import HybridPSManager
@@ -67,6 +68,9 @@ class Chunk(object):
 
         self.timestamp = datetime.datetime.now().timestamp()
 
+    def get_size(self):
+        return getsizeof(self.data_type) * self.capacity
+
     def touch(self):
         self.timestamp = datetime.datetime.now().timestamp()
 
@@ -74,7 +78,7 @@ class Chunk(object):
         return self.timestamp
 
     def try_allocate(self, param: torch.nn.Parameter, access_type: AccessType,
-                     tensor_chunk_index: ChunkTensorIndex) -> torch.Tensor:
+                     chunk_tensor_index: ChunkTensorIndex) -> torch.Tensor:
         """
         在chunk的连续payload中找到一个满足param ps_data_size大小的碎片
         采用贪心算法，因为考虑NN参数的分配一般是连续分配，连续释放，没必要设计更复杂的算法
@@ -82,26 +86,28 @@ class Chunk(object):
         numel = param.ps_shape.numel()
 
         prev_end = 0
-        for info in self.tensor_chunk_index.generate_tensor_info_in_order(
+        for info in chunk_tensor_index.generate_tensor_info_in_order(
                 self.chunk_id):
-            status = info.status
+            status = info.status()
             if status == PSTensorStatus.FREE:
                 continue
-            start = info.start
+            start = info.start_offset
             gap = start - prev_end
             if gap >= numel:
-                dest = self.allocate(prev_end, numel, param, access_type)
+                dest = self.allocate(prev_end, numel, param, access_type,
+                                     chunk_tensor_index)
                 return dest
-            prev_end = start + info.numel()
+            prev_end = start + info.numel
 
         if self.capacity - prev_end >= numel:
-            dest = self.allocate(prev_end, numel, param, access_type)
+            dest = self.allocate(prev_end, numel, param, access_type,
+                                 chunk_tensor_index)
             return dest
         return None
 
     def allocate(self, offset: int, numel: int, param: torch.nn.Parameter,
                  access_type: AccessType,
-                 tensor_chunk_index: ChunkTensorIndex):
+                 chunk_tensor_index: ChunkTensorIndex):
         """
         分配大小为numel的连续存储空间
         @params
@@ -114,9 +120,11 @@ class Chunk(object):
         dest.zero_()
         # 在param中注册信息
         if access_type == AccessType.DATA:
-            tensor_chunk_list.add_tensor(param.ps_data_id, chunk_id, offset)
+            tensor_id = param.ps_data_id
         elif access_type == AccessType.GRAD:
-            tensor_chunk_list.add_tensor(param.ps_grad_id, chunk_id, offset)
+            tensor_id = param.ps_grad_id
+        chunk_tensor_index.add_tensor(self.chunk_id, tensor_id, offset, numel,
+                                      param, access_type)
         self.touch()
         return dest
 
@@ -127,10 +135,10 @@ class Chunk(object):
         logging.error(
             f'show chunk {self.chunk_id} capacity {self.capacity} dtype {self.data_type} device {self.device}'
         )
-        for info in chunk_tensor_index.generate_tensor_info_in_order():
+        for info in chunk_tensor_index.show_status():
             logging.error(
-                f"** tensor in chunk {self.chunk_id} device {self.device} start {info.start}, \
-        end {info.start + info.numel()}, tensor_id {info.tensor_id()}, status {info.status()}"
+                f"** tensor in chunk {self.chunk_id} device {self.device} start {info.start_offset}, \
+        end {info.start_offset + info.numel}, tensor_id {info.tensor_id}, status {info.status()}"
             )
 
     def move(self,
@@ -162,14 +170,14 @@ class Chunk(object):
             if info.status() == PSTensorStatus.FREE:
                 continue
 
-            if access_type in AccessType.DATA:
+            if access_type == AccessType.DATA:
                 logging.debug(
                     f'chunk moves data tensor {tensor_id} to {target_device}')
                 param.ps_data_tensor = self.payload.narrow(
                     0, start, numel).view(param.ps_shape)
                 # 把data原来指向的内存释放
                 param.data = param.ps_data_tensor
-            elif access_type in AccessType.GRAD:
+            elif access_type == AccessType.GRAD:
                 logging.debug(
                     f'chunk moves grad tensor {tensor_id} to {target_device}')
                 param.ps_grad_tensor = self.payload.narrow(
