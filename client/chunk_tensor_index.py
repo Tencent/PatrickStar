@@ -130,10 +130,10 @@ class ChunkTensorIndex(object):
         """
         # 删除chunk中的tensor
         if self.dict_chunk_id_tensor_id.get(chunk_id) is None:
+            # logging.info(f'delete_chunk_id {chunk_id} does not exist')
             return
-        for cid, tid_list in self.dict_chunk_id_tensor_id.get(chunk_id):
-            for tid in tid_list:
-                del self.dict_tensor_id_info[tid]
+        for tid in self.dict_chunk_id_tensor_id.get(chunk_id, []):
+            del self.dict_tensor_id_info[tid]
 
         del self.dict_chunk_id_tensor_id[chunk_id]
 

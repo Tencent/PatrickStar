@@ -12,7 +12,7 @@
 # See the AUTHORS file for names of contributors.
 
 from .chunk_data import Chunk
-from .const import PSChunkStatus, AccessType
+from .const import PSChunkStatus, AccessType, PSTensorStatus
 from .helper import getsizeof
 from .chunk_tensor_index import ChunkTensorIndex
 from manager import HybridPSManager
@@ -21,6 +21,58 @@ import sys
 import logging
 import torch
 from typing import List
+
+import gc
+import psutil
+
+
+def see_memory_usage(message, force=False):
+    if not force:
+        return
+    if torch.distributed.is_initialized(
+    ) and not torch.distributed.get_rank() == 0:
+        return
+
+    # python doesn't do real-time garbage collection so do it explicitly to get the correct RAM reports
+    gc.collect()
+
+    def get_tensors():
+        for obj in gc.get_objects():
+            try:
+                if torch.is_tensor(obj) or (hasattr(obj, 'data')
+                                            and torch.is_tensor(obj.data)):
+                    tensor = obj
+                else:
+                    continue
+                if tensor.is_cuda:
+                    yield tensor
+            except Exception as e:
+                pass
+                # print('A trivial exception occured: {}'.format(e))
+
+    print('now let us see memory')
+    for tensor in get_tensors():
+        print(f'tensor shape {tensor.shape} {tensor.data_ptr()}')
+    scale = 1  #1024 * 1024
+    scale_name = "B"  #"MB"
+    # Print message except when distributed but not rank 0
+    logging.info(message)
+    logging.info(
+        f"MA {round(torch.cuda.memory_allocated() / scale,2 )} {scale_name} \
+        Max_MA {round(torch.cuda.max_memory_allocated() / scale,2)} {scale_name} \
+        CA {round(torch.cuda.memory_reserved() / scale,2)} {scale_name} \
+        Max_CA {round(torch.cuda.max_memory_reserved() / scale)} {scale_name} "
+    )
+
+    vm_stats = psutil.virtual_memory()
+    used_GB = round(((vm_stats.total - vm_stats.available) / (1024**3)), 2)
+    logging.info(
+        f'CPU Virtual Memory:  used = {used_GB} GB, percent = {vm_stats.percent}%'
+    )
+
+    # get the peak memory to report correct data, so reset the counter for the next call
+    if hasattr(torch.cuda, "reset_peak_memory_stats"):  # pytorch 1.4+
+        torch.cuda.reset_peak_memory_stats()
 
 
 class ChunkList(object):
@@ -71,13 +123,23 @@ class ChunkList(object):
                 if access_type == AccessType.DATA:
                     assert param.data_status == PSTensorStatus.FREE
                     param.ps_data_tensor = torch.zeros(
-                        1, dtype=self.param.dtype, device=torch.device('cpu'))
+                        1, dtype=param.dtype, device=torch.device('cpu'))
+                    param.data = param.ps_data_tensor
                 elif access_type == AccessType.GRAD:
                     assert param.grad_status == PSTensorStatus.FREE
                     param.ps_grad_tensor = None
+                    param.grad = None
 
             # 删除chunk的内存
+            logging.debug(
+                f'delete chunk id {chunk_id} payload of numel {self.chunk_id_to_chunk_dict[chunk_id].payload.numel()} on device {self.chunk_id_to_chunk_dict[chunk_id].device}'
+            )
+
+            # see_memory_usage('berfor delete payload', True)
             del self.chunk_id_to_chunk_dict[chunk_id]
+
+            # see_memory_usage('after delete payload', True)
+            # TODO(jiaruifang) delete tensor时候已经把chunk删除了
             chunk_tensor_index.delete_chunk_id(chunk_id)
 
     def least_used_chunk(self) -> int:

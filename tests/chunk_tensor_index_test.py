@@ -41,22 +41,18 @@ class TestAccess(unittest.TestCase):
     def test_add_tensor(self):
         chunk_tensor_index = ChunkTensorIndex()
         param1 = torch.nn.Parameter(torch.zeros(10))
-        # self.client.register_param(param1)
         chunk_tensor_index.add_tensor(0, 10, 0, param1.numel(), param1,
                                       AccessType.DATA)
 
         param2 = torch.nn.Parameter(torch.zeros(15))
-        # self.client.register_param(param2)
         chunk_tensor_index.add_tensor(0, 11, 20, param2.numel(), param2,
                                       AccessType.DATA)
 
         param3 = torch.nn.Parameter(torch.zeros(5))
-        # self.client.register_param(param2)
         chunk_tensor_index.add_tensor(0, 12, 15, param3.numel(), param3,
                                       AccessType.DATA)
 
         param4 = torch.nn.Parameter(torch.zeros(7))
-        # self.client.register_param(param2)
         chunk_tensor_index.add_tensor(0, 13, 35, param3.numel(), param4,
                                       AccessType.DATA)
 

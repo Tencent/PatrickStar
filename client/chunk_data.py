@@ -135,10 +135,11 @@ class Chunk(object):
         logging.error(
             f'show chunk {self.chunk_id} capacity {self.capacity} dtype {self.data_type} device {self.device}'
         )
-        for info in chunk_tensor_index.show_status():
+        for info in chunk_tensor_index.generate_tensor_info_in_order(
+                self.chunk_id):
+            assert info.chunk_id == self.chunk_id
             logging.error(
-                f"** tensor in chunk {self.chunk_id} device {self.device} start {info.start_offset}, \
-        end {info.start_offset + info.numel}, tensor_id {info.tensor_id}, status {info.status()}"
+                f"** tensor: chunk_id {self.chunk_id}, device {self.device}, start {info.start_offset}, end {info.start_offset + info.numel}, tensor_id {info.tensor_id}, status {info.status()}"
             )
 
     def move(self,
@@ -148,9 +149,9 @@ class Chunk(object):
         """
         将这个chunk移动到target_device上。前提条件，target_device已经腾出足够的空间。
         """
-        logging.debug(
-            f'move chunk {self.chunk_id} from {self.device} to {target_device}'
-        )
+        # logging.info(
+        #     f'move chunk {self.chunk_id} numel {self.payload.numel()} from {self.device} to {target_device}'
+        # )
         start_time = time.time()
         if self.device == target_device:
             return
@@ -167,8 +168,8 @@ class Chunk(object):
             numel = info.numel
             param = info.param
             access_type = info.access_type
-            if info.status() == PSTensorStatus.FREE:
-                continue
+            # if info.status() == PSTensorStatus.FREE:
+            #     continue
 
             if access_type == AccessType.DATA:
                 logging.debug(
