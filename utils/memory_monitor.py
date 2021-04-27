@@ -18,7 +18,7 @@ import torch
 import logging
 
 
-def see_memory_usage(message, force=False):
+def see_memory_usage(message, force=False, scale_name="MB"):
     if not force:
         return
     if torch.distributed.is_initialized(
@@ -28,8 +28,10 @@ def see_memory_usage(message, force=False):
     # python doesn't do real-time garbage collection so do it explicitly to get the correct RAM reports
     gc.collect()
 
-    scale = 1024 * 1024
-    scale_name = "MB"
+    if scale_name == "MB":
+        scale = 1024 * 1024
+    elif scale_name == "B":
+        scale = 1
     # Print message except when distributed but not rank 0
     logging.info(message)
     logging.info(

@@ -44,56 +44,63 @@ class TestAccess(unittest.TestCase):
 
         assert param1.requires_grad is True
 
-        # logging.info(f'access param1 data')
-        # self.client.register_param(param1)
-        # # id = 0
-        # self.client.access_data(param1, self.compute_device)
-        # assert param1.data_status == PSTensorStatus.COMPUTE
-        # assert param1.grad_status == PSTensorStatus.FREE
-        # assert self.client.get_chunk_id(param1, AccessType.DATA) == 0
+        logging.info(f'access param1 data')
+        self.client.register_param(param1)
+        # id = 0
+        self.client.access_data(param1, self.compute_device)
+        assert param1.data_status == PSTensorStatus.COMPUTE
+        assert param1.grad_status == PSTensorStatus.FREE
+        assert self.client.get_chunk_id(param1, AccessType.DATA) == 0
 
-        # logging.info(f'access param1 grad')
-        # # id = 1
-        # self.client.access_grad(param1, self.compute_device)
-        # assert param1.data_status == PSTensorStatus.COMPUTE
-        # assert param1.grad_status == PSTensorStatus.COMPUTE
-        # assert self.client.get_chunk_id(param1, AccessType.GRAD) == 0
+        logging.info(f'access param1 grad')
+        # id = 1
+        self.client.access_grad(param1, self.compute_device)
+        assert param1.data_status == PSTensorStatus.COMPUTE
+        assert param1.grad_status == PSTensorStatus.COMPUTE
+        assert self.client.get_chunk_id(param1, AccessType.GRAD) == 0
 
         logging.info(f'access param2 data')
         param2 = torch.nn.Parameter(torch.zeros(10, dtype=torch.float))
         self.client.register_param(param2)
 
-        # logging.info(f'release param1 grad')
-        # self.client.release_grad(param1, PSTensorStatus.FREE)
+        logging.info(f'release param1 grad')
+        self.client.release_grad(param1, PSTensorStatus.FREE)
 
-        # 测试复用
-        # logging.info(f'release param2 grad')
-        # # id = 3
-        # self.client.access_grad(param2, self.compute_device)
-        # assert self.client.get_chunk_id(param2, AccessType.GRAD) == 0
+        logging.info(f'release param2 grad')
+        # id = 3
+        self.client.access_grad(param2, self.compute_device)
+        assert self.client.get_chunk_id(param2, AccessType.GRAD) == 0
 
+        self.client.visit()
         param2_numel = param2.ps_shape.numel()
         see_memory_usage(f"====before access a chunk of numel {param2_numel}",
-                         force=True)
+                         force=True,
+                         scale_name="B")
 
         a = {0: torch.zeros(self.default_chunk_size)}
         b = a[0].narrow(0, 0, 1)
         a[0] = a[0].to(self.compute_device)
         b = a[0].narrow(0, 0, 1)
-        see_memory_usage(f"====allocate a torch tensor on GPU", force=True)
+        see_memory_usage(f"====allocate a torch tensor on GPU",
+                         force=True,
+                         scale_name="B")
 
         del a[0]
         del b
-        see_memory_usage(f"====release the torch tensor from GPU", force=True)
+        see_memory_usage(f"====release the torch tensor from GPU",
+                         force=True,
+                         scale_name="B")
 
         # 删除chunk内存了
         self.client.access_data(param2, self.compute_device)
         # self.client.visit()
         see_memory_usage(f"====before release a chunk of numel {param2_numel}",
-                         force=True)
+                         force=True,
+                         scale_name="B")
         self.client.release_data(param2, PSTensorStatus.FREE)
         see_memory_usage(f"====after release a chunk of numel {param2_numel}",
-                         force=True)
+                         force=True,
+                         scale_name="B")
         self.client.visit()
 
 
