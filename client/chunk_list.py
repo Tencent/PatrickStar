@@ -193,7 +193,7 @@ class ChunkList(object):
         """
         return len(self.chunk_id_to_chunk_dict)
 
-    def generate(self) -> (int, Chunk):
+    def generate_chunk(self) -> (int, Chunk):
         for chunk_id, chunk in self.chunk_id_to_chunk_dict.items():
             yield chunk_id, chunk
 
@@ -227,7 +227,7 @@ class ChunkList(object):
         moved_list = []
         for chunk_id, chunk in self.chunk_id_to_chunk_dict.items():
             if chunk.device == target_device and chunk_tensor_index.chunk_status(
-            ) == PSChunkStatus.HOLD:
+                    chunk_id) == PSChunkStatus.HOLD:
                 moved_bytes += chunk.capacity * getsizeof(chunk.data_type)
                 moved_list.append(chunk_id)
 
@@ -236,8 +236,8 @@ class ChunkList(object):
 
         # 无法腾出足够空间，抛出异常
         if moved_bytes < still_need_bytes:
-            for id, chunk in self.generate():
-                chunk.visit()
+            for chunk_id, chunk in self.generate_chunk():
+                chunk.visit(chunk_tensor_index)
             logging.error(
                 f"still need {still_need_bytes} bytes, but device {target_device} has not enough space for item."
             )
@@ -248,7 +248,7 @@ class ChunkList(object):
     def show_stat(self):
         cuda_chunk_list = []
         cpu_chunk_list = []
-        for chunk_id, chunk in self.generate():
+        for chunk_id, chunk in self.generate_chunk():
             if chunk.device.type == 'cuda':
                 cuda_chunk_list.append(chunk.capacity)
             elif chunk.device.type == 'cpu':

@@ -27,7 +27,7 @@ from fp16 import FP16_Optimizer
 import time
 import argparse
 
-from client import HybridPSClient
+from client import HybridPSClient, PSTensorStatus
 from manager import HybridPSManager
 from utils import setup_hybrid_ps_hooks
 # from utils.zero_hook import HookedModule
@@ -53,13 +53,9 @@ parser.add_argument('--use_ps',
                     help='using Hybrid PS for training.')
 
 
-def show_grads(model, is_ps, step):
-    print(f'show grads {step}')
+def check_grads_status(model, status):
     for name, param in model.named_parameters(recurse=True):
-        print(
-            name,
-            torch.sum(param.grad)
-            if not is_ps else torch.sum(param.ps_grad_tensor))
+        assert param.grad_status == status, f"{name} {param.ps_shape} {param.grad_status}"
 
 
 def show_params(model, is_ps, step):
@@ -71,21 +67,54 @@ def show_params(model, is_ps, step):
             param.shape, param.requires_grad)
 
 
+def get_model_size(model):
+    numel = 0
+    for name, param in model.named_parameters(recurse=True):
+        numel += param.numel()
+    print(f"model size {numel/1e9} B")
+
+
+def calculate_model_size(config):
+    V = config.vocab_size
+    N = config.num_attention_heads
+    H = config.hidden_size
+    L = config.num_hidden_layers
+    P = config.max_position_embeddings
+    numel = (V + P + (L + 1) * N + 5) * H + (L * N + 1) * (H**2)
+    embedding_numel = H * (V + P + 4)
+    QKV_numel = (H * H + H) * 3
+    MLP_numel = H * (4 * H) + (4 * H) + (4 * H) * H + H
+    print(f"QKV_numel layer {QKV_numel/1e9} B")
+    print(f"MLP_numel layer {MLP_numel/1e9} B")
+    print(f"calcalated model size {numel/1e9} B")
+
+
 def test_bert_model(is_ckp: bool = False,
                     is_fp16: bool = False,
                     is_ps: bool = False,
                     batch_size=32,
                     hidden_dim=768,
-                    sequence_length=1024):
+                    sequence_length=256,
+                    num_layer=12):
     logging.info(f'test a simple model with checkpoit {is_ckp} FP16 {is_fp16}')
+    logging.info(
+        f'batch_size {batch_size}, hidden_dim {hidden_dim} sequence_length {sequence_length}'
+    )
 
     device = torch.device('cuda:0')
 
     if is_ckp:
-        cfg = BertConfig(gradient_checkpointing=True, hidden_dim=hidden_dim)
+        cfg = BertConfig(gradient_checkpointing=True,
+                         hidden_dim=hidden_dim,
+                         max_position_embeddings=sequence_length,
+                         num_hidden_layers=num_layer)
     else:
-        cfg = BertConfig(hidden_dim=hidden_dim)
+        cfg = BertConfig(hidden_dim=hidden_dim,
+                         max_position_embeddings=sequence_length,
+                         num_hidden_layers=num_layer)
     model = BertForSequenceClassification(cfg)
+    get_model_size(model)
+    calculate_model_size(cfg)
     model.cuda()
     model.train()
 
@@ -106,11 +135,10 @@ def test_bert_model(is_ckp: bool = False,
 
     if is_ps:
         manager = HybridPSManager()
-        manager.init([1024 * 1024 * 1024 * 4] * 1,
-                     [1024 * 1024 * 1024 * 4 * 4])
-        # chunk 32 M
+        manager.init([1024 * 1024 * 1024] * 1, [1024 * 1024 * 1024 * 4 * 4])
+        # chunk 16 M elem
         client = HybridPSClient(gpu_index=0,
-                                default_chunk_size=1024 * 1024 * 16)
+                                default_chunk_size=1024 * 1024 * 8)
 
         optimizer = CPUAdam(client, model.parameters(), lr=0.001)
         # optimizer = TorchAdam(model.parameters(), lr=0.001)
@@ -138,14 +166,16 @@ def test_bert_model(is_ckp: bool = False,
         if is_fp16:
             optimizer.zero_grad(set_grads_to_None=True)
             optimizer.backward(loss, update_master_grads=False)
+            if is_ps:
+                client.release_all_grad(PSTensorStatus.FREE)
+                check_grads_status(model, PSTensorStatus.FREE)
         else:
             optimizer.zero_grad()
             loss.backward()
-            # if is_ps:
-            #     client.release_grad(model.bert.embeddings.word_embeddings.weight)
-            #     client.release_grad(model.bert.embeddings.position_embeddings.weight)
-            #     client.release_grad(model.bert.embeddings.token_type_embeddings.weight)
-            # show_grads(model, is_ps, n)
+            # is_ps, 此时grad应该都是HOLD状态
+            if is_ps:
+                client.release_all_grad(PSTensorStatus.HOLD)
+                check_grads_status(model, PSTensorStatus.HOLD)
 
         if is_fp16:
             # pass
@@ -158,7 +188,7 @@ def test_bert_model(is_ckp: bool = False,
             force=True)
 
         if is_ps:
-            client.release_all_grad()
+            client.release_all_grad(PSTensorStatus.FREE)
 
         if n == 10: break
 
@@ -192,9 +222,12 @@ if __name__ == "__main__":
     # 检查结果正确性
     res_check = args.res_check
 
-    hidden_dim = 8
-    batch_size = 1
-    sequence_length = 256
+    # hidden_dim 1024, batch 16, seqence_leng 1024, ckp True.
+    # PS is able to run the training, while PyTorch failed.
+    hidden_dim = 2048
+    batch_size = 2
+    sequence_length = 1024
+    num_layer = 20
 
     if not res_check:
         # 训练参数，可以自己定义
@@ -204,7 +237,8 @@ if __name__ == "__main__":
                         is_ps=use_ps,
                         batch_size=batch_size,
                         hidden_dim=hidden_dim,
-                        sequence_length=sequence_length)
+                        sequence_length=sequence_length,
+                        num_layer=num_layer)
 
     # calculate_mem_need(hidden_dim = hidden_dim, batch_size = batch_size, is_fp16 = use_fp16)
 
@@ -215,7 +249,8 @@ if __name__ == "__main__":
                                     is_ps=True,
                                     hidden_dim=hidden_dim,
                                     batch_size=batch_size,
-                                    sequence_length=sequence_length)
+                                    sequence_length=sequence_length,
+                                    num_layer=num_layer)
 
         torch.cuda.empty_cache()
         print("*" * 50)
@@ -225,7 +260,8 @@ if __name__ == "__main__":
                                         is_ps=False,
                                         hidden_dim=hidden_dim,
                                         batch_size=batch_size,
-                                        sequence_length=sequence_length)
+                                        sequence_length=sequence_length,
+                                        num_layer=num_layer)
 
         print('ps', loss_list)
         print('ref', loss_ref_list)

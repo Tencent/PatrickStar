@@ -362,10 +362,10 @@ class HybridPSClient(object):
             )
             self.chunk_list[chunk_id].move(self.chunk_tensor_index, device)
 
-    def release_all_grad(self):
+    def release_all_grad(self, status):
         if self.module is not None:
             for n, p in self.module.named_parameters():
-                self.release_grad(p, PSTensorStatus.FREE)
+                self.release_grad(p, status)
 
     def allreduce(self, local_tensor):
         """

@@ -593,7 +593,6 @@ class BertEncoder(nn.Module):
 
                     return custom_forward
 
-                logging.info('huggingface is checkpointing!')
                 layer_outputs = torch.utils.checkpoint.checkpoint(
                     create_custom_forward(layer_module),
                     hidden_states,
