@@ -29,9 +29,10 @@ import argparse
 
 from client import HybridPSClient, PSTensorStatus
 from manager import HybridPSManager
-from utils import setup_hybrid_ps_hooks
+from client import setup_hybrid_ps_hooks
 # from utils.zero_hook import HookedModule
 from ops import CPUAdam, TorchAdam
+import utils.global_timer as global_timer
 
 parser = argparse.ArgumentParser(
     description='Checkpointing for Memory Saving.')
@@ -96,7 +97,8 @@ def test_bert_model(is_ckp: bool = False,
                     batch_size=32,
                     hidden_dim=768,
                     sequence_length=256,
-                    num_layer=12):
+                    num_layer=12,
+                    stop_step=2):
     logging.info(f'test a simple model with checkpoit {is_ckp} FP16 {is_fp16}')
     logging.info(
         f'batch_size {batch_size}, hidden_dim {hidden_dim}, sequence_length {sequence_length}, num_layer {num_layer}'
@@ -191,11 +193,11 @@ def test_bert_model(is_ckp: bool = False,
         if is_ps:
             client.release_all_grad(PSTensorStatus.FREE)
 
-        if n == 10: break
+        if n == stop_step: break
 
     elapse = time.time() - start_time
     logging.info(
-        f"ckp {is_ckp} fp16 {is_fp16} ps {is_ps}  elapse {elapse/(n+1)} sec/iter"
+        f"ckp {is_ckp} fp16 {is_fp16} ps {is_ps}  elapse {elapse/(stop_step+1)} sec/iter total elapse {elapse} sec"
     )
     return loss_res
 
@@ -216,15 +218,33 @@ if __name__ == "__main__":
 
     # hidden_dim 1024, batch 16, seqence_leng 1024, ckp True.
     # PS is able to run the training, while PyTorch failed.
-    # hidden_dim = 3072 #2048
-    # batch_size = 2
-    # sequence_length = 1024
-    # num_layer = 60
 
-    hidden_dim = 768
-    batch_size = 8
-    sequence_length = 1024
-    num_layer = 12
+    plan = "B"
+    if plan == "A":
+        # use ckp
+        # HybridPS可以，PyTorch不可以
+        hidden_dim = 3072  #2048
+        batch_size = 2
+        sequence_length = 1024
+        num_layer = 60
+    elif plan == 'B':
+        # HybridPS and Pytorch都可以
+        # Pytorch: 1.2852387428283691 sec
+        # HybridPS: 6.879993915557861 sec
+        # client_prepare_device_elapse 0.0 client_access_elapse 2.211916446685791 client_release_elapse 2.442206859588623
+        # cpu_adam_elapse 3.7840416431427 cpu_adam_f_elapse 3.7840394973754883
+        hidden_dim = 1536
+        batch_size = 2
+        sequence_length = 1024
+        num_layer = 12
+    elif plan == 'C':
+        # use ckp
+        # HybridPS and PyTorch is OK
+        # 没有prepare device开销
+        hidden_dim = 768
+        batch_size = 8
+        sequence_length = 1024
+        num_layer = 12
 
     if not res_check:
         # 训练参数，可以自己定义
@@ -237,6 +257,26 @@ if __name__ == "__main__":
                         sequence_length=sequence_length,
                         num_layer=num_layer)
 
+        client_prepare_device_elapse = global_timer.client_prepare_device_elapse
+        client_access_elapse = global_timer.client_access_elapse
+        client_release_elapse = global_timer.client_release_elapse
+        cpu_adam_elapse = global_timer.cpu_adam_elapse
+        cpu_adam_f_elapse = global_timer.cpu_adam_f_elapse
+
+        client_delete_free_chunks_elapse = global_timer.client_delete_free_chunks_elapse
+
+        logging.info(
+            f'client_prepare_device_elapse {client_prepare_device_elapse} client_access_elapse {client_access_elapse} client_release_elapse {client_release_elapse}'
+        )
+        logging.info(
+            f'cpu_adam_elapse {cpu_adam_elapse} cpu_adam_f_elapse {cpu_adam_f_elapse}'
+        )
+        logging.info(
+            f'client_delete_free_chunks_elapse {client_delete_free_chunks_elapse} memory_delete_elapse {global_timer.memory_delete_elapse} delete_free_chunks_part1 {global_timer.delete_free_chunks_part1}'
+        )
+        logging.info(
+            f'client_access_part1_elapse {global_timer.client_access_part1_elapse}'
+        )
     # calculate_mem_need(hidden_dim = hidden_dim, batch_size = batch_size, is_fp16 = use_fp16)
 
     if res_check:

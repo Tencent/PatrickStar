@@ -208,24 +208,3 @@ class Chunk(object):
             logging.info(
                 f'CPU-GPU data move elapse {elapse} sec, total elapse {total_cpu_gpu_move_elapse} sec, total times {total_cpu_gpu_move_time}, total amount {total_cpu_gpu_move_amount/1e3} KB.'
             )
-
-
-if __name__ == "__main__":
-    manager = HybridPSManager()
-    manager.reset([32, 32], [1024])
-
-    from client import HybridPSClient
-    client = HybridPSClient(0, torch.float, 20)
-    chunk = Chunk(20, torch.float, 0)
-    chunk.visit()
-
-    param1 = torch.nn.Parameter(torch.zeros(10))
-    client.register_param(param1)
-    chunk.allocate(0, param1.numel(), param1, AccessType.DATA)
-
-    param2 = torch.nn.Parameter(torch.zeros(10))
-    client.register_param(param2)
-    chunk.allocate(10, param2.numel(), param2, AccessType.DATA)
-
-    param1.data_status = PSChunkStatus.FREE
-    chunk.visit()

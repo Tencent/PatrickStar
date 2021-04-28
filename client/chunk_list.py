@@ -24,6 +24,8 @@ from typing import List
 
 import gc
 import psutil
+import utils.global_timer as global_timer
+import time
 
 
 def see_memory_usage(message, force=False):
@@ -109,6 +111,7 @@ class ChunkList(object):
         """
         manager = HybridPSManager()
         if chunk_id in self.chunk_id_to_chunk_dict:
+            start_time = time.time()
             chunk = self.chunk_id_to_chunk_dict[chunk_id]
             logging.debug(
                 f'delete chunk id {chunk_id} size {chunk.capacity} type {chunk.data_type}'
@@ -141,6 +144,7 @@ class ChunkList(object):
             # see_memory_usage('after delete payload', True)
             # TODO(jiaruifang) delete tensor时候已经把chunk删除了
             chunk_tensor_index.delete_chunk_id(chunk_id)
+            global_timer.memory_delete_elapse = time.time() - start_time
 
     def least_used_chunk(self) -> int:
         """"
@@ -202,11 +206,13 @@ class ChunkList(object):
         freed_bytes = 0
 
         # 释放cpu和gpu上所有free chunk，统计目标设备上腾出的空间
+        # NOTE(jiaruifang)这个循环很慢
         for chunk_id, chunk in self.chunk_id_to_chunk_dict.items():
             if chunk_tensor_index.chunk_status(chunk_id) == PSChunkStatus.FREE:
                 free_chunk_id_list.append(chunk_id)
                 freed_bytes += chunk.get_size()
 
+        # global_timer.delete_free_chunks_part1 += time.time() - start_time
         # 释放free chunks
         for idx in free_chunk_id_list:
             logging.debug(f'delete free chunk idx {idx}')

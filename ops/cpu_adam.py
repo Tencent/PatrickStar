@@ -19,6 +19,7 @@ from torch import Tensor
 from typing import List, Optional
 import logging
 from client.const import PSTensorStatus
+import utils.global_timer as global_timer
 
 
 def F_adam(client, params: List[torch.nn.Parameter],
@@ -48,6 +49,8 @@ def F_adam(client, params: List[torch.nn.Parameter],
         exp_avg = exp_avg_param.ps_data_tensor
         exp_avg_sq = exp_avg_sq_param.ps_data_tensor
 
+        f_adam_compute_start_time = time.time()
+
         step = state_steps[i]
 
         bias_correction1 = 1 - beta1**step
@@ -74,6 +77,10 @@ def F_adam(client, params: List[torch.nn.Parameter],
         step_size = lr / bias_correction1
 
         param.ps_data_tensor.addcdiv_(exp_avg, denom, value=-step_size)
+
+        f_adam_compute_start_time = time.time()
+        global_timer.cpu_adam_f_elapse += time.time(
+        ) - f_adam_compute_start_time
 
         client.release_data(param)
         client.release_grad(param, PSTensorStatus.FREE)
@@ -129,6 +136,7 @@ class CPUAdam(torch.optim.Optimizer):
             closure (callable, optional): A closure that reevaluates the model
                 and returns the loss.
         """
+        adam_start_time = time.time()
         loss = None
         if closure is not None:
             with torch.enable_grad():
@@ -211,4 +219,5 @@ class CPUAdam(torch.optim.Optimizer):
                 group['lr'],
                 group['weight_decay'],
                 group['eps'])
+        global_timer.cpu_adam_elapse += time.time() - adam_start_time
         return loss

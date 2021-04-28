@@ -13,7 +13,7 @@
 
 import torch
 import logging
-from client import PSTensorStatus
+from .const import PSTensorStatus
 
 
 ############# HOOKS ####################

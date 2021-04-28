@@ -16,6 +16,8 @@ import logging
 import torch
 from .const import AccessType, PSChunkStatus, PSTensorStatus
 # from .chunk_data import Chunk
+import utils.global_timer as global_timer
+import time
 
 
 class TensorInfo(object):
@@ -33,14 +35,18 @@ class TensorInfo(object):
         self.access_type = access_type
 
     def status(self):
+        """
+        访问param中的成员变量很慢
+        """
         if self.access_type == AccessType.DATA:
             if not hasattr(self.param, 'data_status'):
                 return PSTensorStatus.UNINIT
-            return self.param.data_status
+            ret = self.param.data_status
         elif self.access_type == AccessType.GRAD:
             if not hasattr(self.param, 'grad_status'):
                 return PSTensorStatus.UNINIT
-            return self.param.grad_status
+            ret = self.param.grad_status
+        return ret
 
     def showme(self):
         logging.info(
@@ -168,17 +174,35 @@ class ChunkTensorIndex(object):
     def chunk_status(self, chunk_id) -> PSChunkStatus:
         """
         chunk的状态，由它管理的tensor共同决定
+        TODO(jiaruifang)速度很慢，有待优化
         """
         # if len(self.dict_chunk_id_tensor_id[chunk_id]) == 0:
         #     return PSChunkStatus.FREE
 
         free_flag = True
+        # O (logK*V)
         for tensor_id in self.dict_chunk_id_tensor_id.get(chunk_id, []):
+            # start_time = time.time()
             info = self.dict_tensor_id_info[tensor_id]
-            if info.status() == PSTensorStatus.COMPUTE:
+
+            start_time = time.time()
+            # inline status()
+            # 2.575 sec -> 1.676 s
+            # no access to param.data_status/grad_status
+            # 1.676 s  -> 0.94sec
+            # if-else in one line
+            # 0.94sec -> 0.761sec
+            access_type = info.access_type
+            status = info.param.data_status if (
+                access_type == AccessType.DATA) else info.param.grad_status
+
+            if status == PSTensorStatus.COMPUTE:
+                global_timer.delete_free_chunks_part1 += time.time(
+                ) - start_time
                 return PSChunkStatus.COMPUTE
-            elif info.status() != PSTensorStatus.FREE:
+            elif status != PSTensorStatus.FREE:
                 free_flag = False
+            global_timer.delete_free_chunks_part1 += time.time() - start_time
 
         if free_flag is True:
             return PSChunkStatus.FREE

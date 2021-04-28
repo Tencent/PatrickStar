@@ -24,6 +24,8 @@ from .chunk_data import Chunk
 from .chunk_list import ChunkList
 from .helper import getsizeof
 from .chunk_tensor_index import ChunkTensorIndex
+import utils.global_timer as global_timer
+import time
 
 
 class HybridPSClient(object):
@@ -72,6 +74,7 @@ class HybridPSClient(object):
         让target device做分配need_bytes大小空间的准备
         如果空间不足，需要在目标设备上释放或者移动出一些chunk。
         """
+        start_time = time.time()
         logging.log(
             logging.DEBUG,
             f'prepare_device target device {target_device} need size {need_bytes} bytes'
@@ -113,6 +116,9 @@ class HybridPSClient(object):
         for idx in moved_list:
             self.chunk_move(idx, new_device)
 
+        end_time = time.time()
+        global_timer.client_prepare_device_elapse += end_time - start_time
+
     def access(self, param: torch.nn.Parameter, access_type: AccessType,
                compute_device: torch.device):
         """
@@ -124,6 +130,7 @@ class HybridPSClient(object):
         比如grad FP16，在step过程所在的chunk已经被标记为FREE，并被释放掉。
         需要分配一个新的Chunk
         """
+        start_time = time.time()
         if not self.is_ps_param(param):
             raise RuntimeError(
                 "access a param not ps_data_tensor through HybridPS API")
@@ -158,12 +165,18 @@ class HybridPSClient(object):
 
         self.chunk_list[chunk_id].touch()
 
+        sub_start_time_1 = time.time()
         # 访问之后应该更新chunk tensor_infos的状态
+        # TODO(jiaruifang)如何快速更新chunk的状态
         if access_type == AccessType.DATA:
             param.data_status = PSTensorStatus.COMPUTE
             param.data = param.ps_data_tensor
         elif access_type == AccessType.GRAD:
             param.grad_status = PSTensorStatus.COMPUTE
+        global_timer.client_access_part1_elapse += time.time(
+        ) - sub_start_time_1
+
+        global_timer.client_access_elapse += time.time() - start_time
 
     def access_data(self, param: torch.nn.Parameter,
                     compute_device: torch.device):
@@ -188,6 +201,7 @@ class HybridPSClient(object):
         """
         这个param的data, grad不再需要放在计算设备，或者不需要hold
         """
+        start_time = time.time()
         assert isinstance(reset_to_status, PSTensorStatus)
         chunk_id = self.get_chunk_id(param, access_type)
         logging.debug(
@@ -217,7 +231,13 @@ class HybridPSClient(object):
             param.grad = None
         #在这里立刻释放，被标记为free的chunks
         # TODO(jiaruifang)可以在显存不足时，lazy释放
+        client_delete_free_chunks_start_time = time.time()
         self.chunk_list.delete_free_chunks(self.chunk_tensor_index)
+        global_timer.client_delete_free_chunks_elapse += time.time(
+        ) - client_delete_free_chunks_start_time
+
+        global_timer.client_release_elapse += time.time() - start_time
+        # logging.info(f'client_release_elapse {client_release_elapse}')
 
     def release_data(self,
                      param: torch.nn.Parameter,

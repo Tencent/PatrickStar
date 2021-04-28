@@ -16,3 +16,4 @@ from .chunk_list import ChunkList
 from .chunk_data import Chunk
 from .const import AccessType, PSChunkStatus, PSTensorStatus
 from .chunk_tensor_index import ChunkTensorIndex
+from .hook import setup_hybrid_ps_hooks

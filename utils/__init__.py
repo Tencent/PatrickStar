@@ -11,5 +11,5 @@
 # permissions and limitations under the License.
 # See the AUTHORS file for names of contributors.
 
-from .hook import setup_hybrid_ps_hooks
+from .global_timer import *
 from .memory_monitor import see_memory_usage
