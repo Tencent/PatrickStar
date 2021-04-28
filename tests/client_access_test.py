@@ -27,7 +27,7 @@ class TestAccess(unittest.TestCase):
         self.manager = HybridPSManager()
         self.manager.init([32, 32], [1024])
         self.compute_device = torch.device(
-            'cuda') if torch.cuda.is_available() else torch.device('cpu')
+            'cuda:0') if torch.cuda.is_available() else torch.device('cpu')
         logging.info('SetUp finished')
 
     def test_register(self):
@@ -102,6 +102,38 @@ class TestAccess(unittest.TestCase):
                          force=True,
                          scale_name="B")
         self.client.visit()
+
+    def test_room_making(self):
+        self.manager.reset([40 * 4], [256 * 4])
+        param1 = torch.nn.Parameter(torch.zeros(10, dtype=torch.float))
+        param2 = torch.nn.Parameter(torch.zeros(10, dtype=torch.float))
+        param3 = torch.nn.Parameter(torch.zeros(5, dtype=torch.float))
+
+        # 先把显存填满
+        self.client.register_param(param1)
+        self.client.access_data(param1, self.compute_device)
+        self.client.access_grad(param1, self.compute_device)
+        self.client.register_param(param2)
+        self.client.access_data(param2, self.compute_device)
+        self.client.visit()
+        self.client.access_grad(param2, self.compute_device)
+
+        # 把别人挤出去
+        self.client.visit()
+        self.client.register_param(param3)
+        logging.info('==== after register param ===')
+        self.client.visit()
+        self.client.release_data(param2)
+        self.client.release_grad(param2)
+        self.client.access_data(param3, self.compute_device)
+        self.client.access_grad(param3, self.compute_device)
+        logging.info('==== after access_data param ===')
+        self.client.visit()
+
+        assert param2.ps_data_tensor.device == torch.device('cpu')
+        assert param2.ps_grad_tensor.device == torch.device('cpu')
+        assert param3.ps_data_tensor.device == self.compute_device
+        assert param3.ps_grad_tensor.device == self.compute_device
 
 
 if __name__ == "__main__":

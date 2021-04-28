@@ -221,7 +221,7 @@ class ChunkList(object):
         先释放cpu，gpu的所有free
         返回一个chunk_id list
         """
-        # 如果还没有腾出足够的空间，则需要moved out hold状态的chunk
+        # 则需要将hold状态的chunk移出
         still_need_bytes = size_in_bytes
         moved_bytes = 0
         moved_list = []
@@ -233,6 +233,10 @@ class ChunkList(object):
 
                 if moved_bytes >= still_need_bytes:
                     break
+
+            # TODO(jiaruifang)此时不应该有free状态的chunk，因为free在release时候完成了
+            assert chunk_tensor_index.chunk_status(
+                chunk_id) != PSChunkStatus.FREE
 
         # 无法腾出足够空间，抛出异常
         if moved_bytes < still_need_bytes:

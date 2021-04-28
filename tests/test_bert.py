@@ -81,9 +81,10 @@ def calculate_model_size(config):
     L = config.num_hidden_layers
     P = config.max_position_embeddings
     numel = (V + P + (L + 1) * N + 5) * H + (L * N + 1) * (H**2)
-    embedding_numel = H * (V + P + 4)
+    Embedding_numel = H * (V + P + 4)
     QKV_numel = (H * H + H) * 3
     MLP_numel = H * (4 * H) + (4 * H) + (4 * H) * H + H
+    print(f"Embedding_numel layer {Embedding_numel/1e9} B")
     print(f"QKV_numel layer {QKV_numel/1e9} B")
     print(f"MLP_numel layer {MLP_numel/1e9} B")
     print(f"calcalated model size {numel/1e9} B")
@@ -98,7 +99,7 @@ def test_bert_model(is_ckp: bool = False,
                     num_layer=12):
     logging.info(f'test a simple model with checkpoit {is_ckp} FP16 {is_fp16}')
     logging.info(
-        f'batch_size {batch_size}, hidden_dim {hidden_dim} sequence_length {sequence_length}'
+        f'batch_size {batch_size}, hidden_dim {hidden_dim}, sequence_length {sequence_length}, num_layer {num_layer}'
     )
 
     device = torch.device('cuda:0')
@@ -193,20 +194,11 @@ def test_bert_model(is_ckp: bool = False,
         if n == 10: break
 
     elapse = time.time() - start_time
-    logging.info(f"ckp {is_ckp} fp16 {is_fp16} ps {is_ps}  elapse {elapse}")
+    logging.info(
+        f"ckp {is_ckp} fp16 {is_fp16} ps {is_ps}  elapse {elapse/(n+1)} sec/iter"
+    )
     return loss_res
 
-
-# def calculate_mem_need(hidden_dim, batch_size, is_fp16):
-#     data_size = 2 if is_fp16 else 4
-
-#     param_size = (hidden_dim * hidden_dim + hidden_dim) * 4 * data_size
-#     # FWD-only
-#     act_size = (batch_size * hidden_dim) * 4 * data_size
-
-#     # Model paramter + grad + M + V
-#     total_model_size = param_size * (8 if is_fp16 else 4)
-#     logging.info(f"param_size {param_size/1024} KB, total_model_size {total_model_size/1024} KB, act_size {act_size/1024} KB")
 
 if __name__ == "__main__":
     logging.basicConfig(
@@ -224,10 +216,15 @@ if __name__ == "__main__":
 
     # hidden_dim 1024, batch 16, seqence_leng 1024, ckp True.
     # PS is able to run the training, while PyTorch failed.
-    hidden_dim = 2048
-    batch_size = 2
+    # hidden_dim = 3072 #2048
+    # batch_size = 2
+    # sequence_length = 1024
+    # num_layer = 60
+
+    hidden_dim = 768
+    batch_size = 8
     sequence_length = 1024
-    num_layer = 20
+    num_layer = 12
 
     if not res_check:
         # 训练参数，可以自己定义

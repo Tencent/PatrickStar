@@ -101,7 +101,7 @@ TODO
 ##### FP16 Optimizer
 目前HybridPS支持apex的FP16 Optimier。
 
-#### 效果
+##### 效果
 对弈个Simple Model。包含4层Linear，每个linear param data大小16，bias大小4。
 参数总大小80个元素。
 
@@ -120,3 +120,17 @@ GPU仍然至少需要(2 chunk = 40 * 4B)160B显存。
 使用CPU内存(P32 + M32 + V32 + G32) + 一个FP16 chunk(FP16-FP32转化过程需要一个额外chunk) 最少为320\*4 + 20\*2B = 1320B。
 节省了几乎全部的P16 + G16的显存，大约是全部显存需求的20%。
 总结，在FP16 optimier中使用chunked tensor，不仅可以保证最少的显存使用，还可以节省总体的内存需求。
+
+
+## 性能优化
+性能优化方式有二：
+一是，减少CPU-GPU移动的参数数量，这要求我们设计一个聪明的chunk和tensor映射策略，并且设置合适的chunk尺寸。
+二是，重叠通信和计算，这需要异步的access, release接口。
+三是，加速CPU的ADAM计算，让一部分在GPU上，另一部分在CPU上。
+
+#### 撑大模型
+在cuda分配抛出异常时候move out GPU内存？如何catch这个异常？
+
+
+##### 最佳映射
+我们可以在预热阶段安排好chunk-tensor映射关系，根据tensor的唯一id(model name, grad/data)来索引chunk。

@@ -127,8 +127,8 @@ class HybridPSClient(object):
         if not self.is_ps_param(param):
             raise RuntimeError(
                 "access a param not ps_data_tensor through HybridPS API")
-        # tensor_id to chunk_id
         chunk_id = self.get_chunk_id(param, access_type)
+
         if chunk_id is None:
             if access_type == AccessType.DATA:
                 self.new_data(param, self.chunk_tensor_index)
@@ -149,7 +149,8 @@ class HybridPSClient(object):
         else:
             raise RuntimeError
 
-        if compute_device != current_device:
+        # logging.info(f'current_device {current_device} vs compute_device {compute_device}')
+        if compute_device.type != current_device.type:
             #访问一个free状态的chunk，上面不会分配，此处把它释放了。
             self.prepare_device(compute_device,
                                 self.chunk_list[chunk_id].get_size())
@@ -187,6 +188,7 @@ class HybridPSClient(object):
         """
         这个param的data, grad不再需要放在计算设备，或者不需要hold
         """
+        assert isinstance(reset_to_status, PSTensorStatus)
         chunk_id = self.get_chunk_id(param, access_type)
         logging.debug(
             f'release {access_type} chunk_id {chunk_id} to {reset_to_status}')
@@ -214,7 +216,7 @@ class HybridPSClient(object):
                 self.chunk_tensor_index.delete_tensor(param.ps_grad_id)
             param.grad = None
         #在这里立刻释放，被标记为free的chunks
-        # TODO(jiaruifang)要记得释放每个tensor指向的内存，否则并么有真正释放内存
+        # TODO(jiaruifang)可以在显存不足时，lazy释放
         self.chunk_list.delete_free_chunks(self.chunk_tensor_index)
 
     def release_data(self,
@@ -341,7 +343,7 @@ class HybridPSClient(object):
         self._convert_to_ps_grad(src_param)
 
     def visit(self):
-        for idx, chunk in self.chunk_list.generate():
+        for idx, chunk in self.chunk_list.generate_chunk():
             logging.info(
                 f"chunk {idx} on device {chunk.device} status {self.chunk_tensor_index.chunk_status(idx)}"
             )
