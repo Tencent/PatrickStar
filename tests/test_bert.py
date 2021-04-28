@@ -170,8 +170,8 @@ def test_bert_model(is_ckp: bool = False,
             optimizer.zero_grad(set_grads_to_None=True)
             optimizer.backward(loss, update_master_grads=False)
             if is_ps:
-                client.release_all_grad(PSTensorStatus.FREE)
-                check_grads_status(model, PSTensorStatus.FREE)
+                client.release_all_grad(PSTensorStatus.HOLD)
+                check_grads_status(model, PSTensorStatus.HOLD)
         else:
             optimizer.zero_grad()
             loss.backward()
@@ -191,7 +191,7 @@ def test_bert_model(is_ckp: bool = False,
             force=True)
 
         if is_ps:
-            client.release_all_grad(PSTensorStatus.FREE)
+            client.release_all_grad(PSTensorStatus.HOLD)
 
         if n == stop_step: break
 
