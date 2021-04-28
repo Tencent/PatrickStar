@@ -21,9 +21,9 @@ import logging
 import time
 
 from ops import CPUAdam, TorchAdam
-from client import HybridPSClient
+from client import HybridPSClient, setup_hybrid_ps_hooks, PSTensorStatus
 from manager import HybridPSManager
-from utils import setup_hybrid_ps_hooks, see_memory_usage
+from utils import see_memory_usage
 
 from fp16 import configure_fp16_optimizer
 from fp16 import FP16_Module
@@ -89,9 +89,13 @@ def test_simple_model(is_ps: bool = False, is_fp16: bool = False):
         if is_fp16:
             optimizer.zero_grad(set_grads_to_None=True)
             optimizer.backward(loss, update_master_grads=False)
+            if is_ps:
+                client.release_all_grad(PSTensorStatus.FREE)
         else:
             optimizer.zero_grad()
             loss.backward()
+            if is_ps:
+                client.release_all_grad(PSTensorStatus.HOLD)
 
         if is_fp16:
             # pass
@@ -103,7 +107,8 @@ def test_simple_model(is_ps: bool = False, is_fp16: bool = False):
 
         # it is necessary to get correct results
         if is_ps:
-            client.release_all_grad()
+            client.release_all_grad(PSTensorStatus.HOLD)
+
         if n == 5: break
 
     elapse = time.time() - start_time
