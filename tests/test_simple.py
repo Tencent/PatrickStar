@@ -90,7 +90,7 @@ def test_simple_model(is_ps: bool = False, is_fp16: bool = False):
             optimizer.zero_grad(set_grads_to_None=True)
             optimizer.backward(loss, update_master_grads=False)
             if is_ps:
-                client.release_all_grad(PSTensorStatus.FREE)
+                client.release_all_grad(PSTensorStatus.HOLD)
         else:
             optimizer.zero_grad()
             loss.backward()
