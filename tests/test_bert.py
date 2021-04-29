@@ -234,7 +234,7 @@ if __name__ == "__main__":
         # client_prepare_device_elapse 0.0 client_access_elapse 2.211916446685791 client_release_elapse 2.442206859588623
         # cpu_adam_elapse 3.7840416431427 cpu_adam_f_elapse 3.7840394973754883
         hidden_dim = 1536
-        batch_size = 2
+        batch_size = 8
         sequence_length = 1024
         num_layer = 12
     elif plan == 'C':
