@@ -68,6 +68,50 @@ def show_params(model, is_ps, step):
             param.shape, param.requires_grad)
 
 
+def time_profiler():
+    client_prepare_device_elapse = global_timer.client_prepare_device_elapse
+    client_access_elapse = global_timer.client_access_elapse
+    client_release_elapse = global_timer.client_release_elapse
+    cpu_adam_elapse = global_timer.cpu_adam_elapse
+    cpu_adam_f_elapse = global_timer.cpu_adam_f_elapse
+
+    client_delete_free_chunks_elapse = global_timer.client_delete_free_chunks_elapse
+
+    logging.info(f'client access elapse')
+    logging.info(f'* client_access_elapse {client_access_elapse} ')
+    logging.info(
+        f'* client_access_part1_elapse {global_timer.client_access_part1_elapse}'
+    )
+    logging.info(
+        f'* client_access_part2_elapse(prepare_device + chunk_move) {global_timer.client_access_part2_elapse}'
+    )
+    logging.info(
+        f'** client_prepare_device_elapse {client_prepare_device_elapse}')
+    logging.info(
+        f'*** client_prepare_device_manager_elapse {global_timer.client_prepare_device_manager_elapse}'
+    )
+    logging.info(
+        f'*** chunk_to_move_out_for_room_making_elapse {global_timer.chunk_to_move_out_for_room_making_elapse}'
+    )
+
+    logging.info(
+        f'** client_chunk_move_elapse {global_timer.client_chunk_move_elapse}')
+    logging.info(f'** chunk_move_elapse {global_timer.chunk_move_elapse}')
+    logging.info(
+        f'*** cpu_gpu_move_elapse {global_timer.cpu_gpu_move_elapse} sec, times {global_timer.cpu_gpu_move_times}, amount {global_timer.cpu_gpu_move_data_amount/1e6} MB, Bandwidth {global_timer.cpu_gpu_move_data_amount/1e6/(global_timer.cpu_gpu_move_elapse + 1e-10)} MB/s'
+    )
+
+    logging.info(
+        f'* cpu_adam_elapse {cpu_adam_elapse} cpu_adam_f_elapse {cpu_adam_f_elapse}'
+    )
+
+    logging.info(f'client release elapse')
+    logging.info(f'* client_release_elapse {client_release_elapse}')
+    logging.info(
+        f'* client_delete_free_chunks_elapse {client_delete_free_chunks_elapse} memory_delete_elapse {global_timer.memory_delete_elapse} delete_free_chunks_part1 {global_timer.delete_free_chunks_part1}'
+    )
+
+
 def get_model_size(model):
     numel = 0
     for name, param in model.named_parameters(recurse=True):
@@ -89,6 +133,24 @@ def calculate_model_size(config):
     print(f"QKV_numel layer {QKV_numel/1e9} B")
     print(f"MLP_numel layer {MLP_numel/1e9} B")
     print(f"calcalated model size {numel/1e9} B")
+
+
+def calucate_MAC(config, batch_size, sequence_length):
+    B = batch_size
+    S = sequence_length
+    V = config.vocab_size
+    N = config.num_attention_heads
+    H = config.hidden_size
+    L = config.num_hidden_layers
+    P = config.max_position_embeddings
+    cisg_total_macs = 72 * B * S * N * H**2 + 12 * B * N * H * S**2
+    nvidia_total_macs = 96 * B * S * L * H**2 * (1 + S / (6 * H) + V /
+                                                 (16 * L * H))
+
+    print(f'cisg_total_macs total MACs {cisg_total_macs}')
+    print(f'nvidia total MACs {nvidia_total_macs}')
+    print(f'diff csig/nvidia {cisg_total_macs / nvidia_total_macs}')
+    return nvidia_total_macs
 
 
 def test_bert_model(is_ckp: bool = False,
@@ -118,6 +180,9 @@ def test_bert_model(is_ckp: bool = False,
     model = BertForSequenceClassification(cfg)
     get_model_size(model)
     calculate_model_size(cfg)
+
+    total_macs = calucate_MAC(cfg, batch_size, sequence_length)
+
     model.cuda()
     model.train()
 
@@ -138,7 +203,8 @@ def test_bert_model(is_ckp: bool = False,
 
     if is_ps:
         manager = HybridPSManager()
-        manager.init([1024 * 1024 * 1024] * 1, [1024 * 1024 * 1024 * 4 * 4])
+        manager.init([1024 * 1024 * 1024 * 2] * 1,
+                     [1024 * 1024 * 1024 * 4 * 4])
         # chunk 512 MB, good for CPU-GPU bandwidth
         client = HybridPSClient(gpu_index=0,
                                 default_chunk_size=1024 * 1024 * 128)
@@ -199,6 +265,8 @@ def test_bert_model(is_ckp: bool = False,
     logging.info(
         f"ckp {is_ckp} fp16 {is_fp16} ps {is_ps}  elapse {elapse/(stop_step+1)} sec/iter total elapse {elapse} sec"
     )
+    logging.info(f"{total_macs/1e9/ (elapse/(stop_step+1))} GFlops")
+    time_profiler()
     return loss_res
 
 
@@ -223,6 +291,10 @@ if __name__ == "__main__":
     if plan == "A":
         # use ckp
         # HybridPS可以，PyTorch不可以
+        # manager.init([1024 * 1024 * 1024 * 2] * 1, [1024 * 1024 * 1024 * 4 * 4])
+        # client = HybridPSClient(gpu_index=0,
+        #                         default_chunk_size=1024 * 1024 * 128)
+        # 949.234980710749 GFlops (RTX 2060 peak 6.451 TFLOPS)
         hidden_dim = 3072  #2048
         batch_size = 2
         sequence_length = 1024
@@ -256,49 +328,6 @@ if __name__ == "__main__":
                         hidden_dim=hidden_dim,
                         sequence_length=sequence_length,
                         num_layer=num_layer)
-
-        client_prepare_device_elapse = global_timer.client_prepare_device_elapse
-        client_access_elapse = global_timer.client_access_elapse
-        client_release_elapse = global_timer.client_release_elapse
-        cpu_adam_elapse = global_timer.cpu_adam_elapse
-        cpu_adam_f_elapse = global_timer.cpu_adam_f_elapse
-
-        client_delete_free_chunks_elapse = global_timer.client_delete_free_chunks_elapse
-
-        logging.info(f'client access elapse')
-        logging.info(f'* client_access_elapse {client_access_elapse} ')
-        logging.info(
-            f'* client_access_part1_elapse {global_timer.client_access_part1_elapse}'
-        )
-        logging.info(
-            f'* client_access_part2_elapse(prepare_device + chunk_move) {global_timer.client_access_part2_elapse}'
-        )
-        logging.info(
-            f'** client_prepare_device_elapse {client_prepare_device_elapse}')
-        logging.info(
-            f'*** client_prepare_device_manager_elapse {global_timer.client_prepare_device_manager_elapse}'
-        )
-        logging.info(
-            f'*** chunk_to_move_out_for_room_making_elapse {global_timer.chunk_to_move_out_for_room_making_elapse}'
-        )
-
-        logging.info(
-            f'** client_chunk_move_elapse {global_timer.client_chunk_move_elapse}'
-        )
-        logging.info(f'** chunk_move_elapse {global_timer.chunk_move_elapse}')
-        logging.info(
-            f'*** cpu_gpu_move_elapse {global_timer.cpu_gpu_move_elapse} sec, times {global_timer.cpu_gpu_move_times}, amount {global_timer.cpu_gpu_move_data_amount/1e6} MB, Bandwidth {global_timer.cpu_gpu_move_data_amount/1e6/(global_timer.cpu_gpu_move_elapse + 1e-10)} MB/s'
-        )
-
-        logging.info(
-            f'* cpu_adam_elapse {cpu_adam_elapse} cpu_adam_f_elapse {cpu_adam_f_elapse}'
-        )
-
-        logging.info(f'client release elapse')
-        logging.info(f'* client_release_elapse {client_release_elapse}')
-        logging.info(
-            f'* client_delete_free_chunks_elapse {client_delete_free_chunks_elapse} memory_delete_elapse {global_timer.memory_delete_elapse} delete_free_chunks_part1 {global_timer.delete_free_chunks_part1}'
-        )
 
     # calculate_mem_need(hidden_dim = hidden_dim, batch_size = batch_size, is_fp16 = use_fp16)
 

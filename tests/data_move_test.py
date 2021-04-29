@@ -39,7 +39,19 @@ class TestAccess(unittest.TestCase):
             # for i in range(niter):
             buff.to(self.compute_device)
         BWD = size * 4 / t.elapsed / 1e9
-        logging.info(f'size {size * 4/1024} KB, bandwidth {BWD} GB/s')
+        logging.info(f'Copy size {size * 4/1024} KB, bandwidth {BWD} GB/s')
+
+    def _pinned_bandwidth_benchmark(self, size, niter):
+        cpu_buff = torch.empty(size, dtype=torch.float, pin_memory=True)
+        # for i in range(niter):
+        #   buff.append(torch.zeros(size))
+        gpu_buff = torch.zeros(size)
+        with contexttimer.Timer() as t:
+            # for i in range(niter):
+            gpu_buff.copy_(cpu_buff)
+        BWD = size * 4 / t.elapsed / 1e9
+        logging.info(
+            f'Pined-Copy size {size * 4/1024} KB, bandwidth {BWD} GB/s')
 
     def test_bandwidth(self):
         for size in [
@@ -48,6 +60,7 @@ class TestAccess(unittest.TestCase):
                 1024 * 1024 * 32, 1024 * 1204 * 1024
         ]:
             self._bandwidth_benchmark(size, 10)
+            self._pinned_bandwidth_benchmark(size, 10)
 
 
 if __name__ == "__main__":

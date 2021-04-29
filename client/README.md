@@ -126,7 +126,10 @@ GPU仍然至少需要(2 chunk = 40 * 4B)160B显存。
 性能优化方式有二：
 一是，减少CPU-GPU移动的参数数量，这要求我们设计一个聪明的chunk和tensor映射策略，并且设置合适的chunk尺寸。
 二是，重叠通信和计算，这需要异步的access, release接口。
+可以把cpu分配为page-locked的pinned memory。
+把所有的cpu都分配为pinned？似乎只有grad和param需要。
 三是，加速CPU的ADAM计算，让一部分在GPU上，另一部分在CPU上。
+这个方法意义不大，因为对于BERT训练来说，我发现cpu adam时间占比跟小。
 
 #### 撑大模型
 在cuda分配抛出异常时候move out GPU内存？如何catch这个异常？
