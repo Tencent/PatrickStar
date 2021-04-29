@@ -98,7 +98,7 @@ def test_bert_model(is_ckp: bool = False,
                     hidden_dim=768,
                     sequence_length=256,
                     num_layer=12,
-                    stop_step=2):
+                    stop_step=10):
     logging.info(f'test a simple model with checkpoit {is_ckp} FP16 {is_fp16}')
     logging.info(
         f'batch_size {batch_size}, hidden_dim {hidden_dim}, sequence_length {sequence_length}, num_layer {num_layer}'
@@ -138,10 +138,10 @@ def test_bert_model(is_ckp: bool = False,
 
     if is_ps:
         manager = HybridPSManager()
-        manager.init([1024 * 1024 * 512] * 1, [1024 * 1024 * 1024 * 4 * 4])
-        # chunk 16 M elem
+        manager.init([1024 * 1024 * 1024] * 1, [1024 * 1024 * 1024 * 4 * 4])
+        # chunk 512 MB, good for CPU-GPU bandwidth
         client = HybridPSClient(gpu_index=0,
-                                default_chunk_size=1024 * 1024 * 8)
+                                default_chunk_size=1024 * 1024 * 128)
 
         optimizer = CPUAdam(client, model.parameters(), lr=0.001)
         # optimizer = TorchAdam(model.parameters(), lr=0.001)
@@ -190,8 +190,8 @@ def test_bert_model(is_ckp: bool = False,
             f"ckp {is_ckp} fp16 {is_fp16} ps {is_ps}  after step {n}",
             force=True)
 
-        if is_ps:
-            client.release_all_grad(PSTensorStatus.HOLD)
+        # if is_ps:
+        #     client.release_all_grad(PSTensorStatus.HOLD)
 
         if n == stop_step: break
 
@@ -266,12 +266,30 @@ if __name__ == "__main__":
         client_delete_free_chunks_elapse = global_timer.client_delete_free_chunks_elapse
 
         logging.info(f'client access elapse')
-        logging.info(
-            f'* client_prepare_device_elapse {client_prepare_device_elapse} client_access_elapse {client_access_elapse} '
-        )
+        logging.info(f'* client_access_elapse {client_access_elapse} ')
         logging.info(
             f'* client_access_part1_elapse {global_timer.client_access_part1_elapse}'
         )
+        logging.info(
+            f'* client_access_part2_elapse(prepare_device + chunk_move) {global_timer.client_access_part2_elapse}'
+        )
+        logging.info(
+            f'** client_prepare_device_elapse {client_prepare_device_elapse}')
+        logging.info(
+            f'*** client_prepare_device_manager_elapse {global_timer.client_prepare_device_manager_elapse}'
+        )
+        logging.info(
+            f'*** chunk_to_move_out_for_room_making_elapse {global_timer.chunk_to_move_out_for_room_making_elapse}'
+        )
+
+        logging.info(
+            f'** client_chunk_move_elapse {global_timer.client_chunk_move_elapse}'
+        )
+        logging.info(f'** chunk_move_elapse {global_timer.chunk_move_elapse}')
+        logging.info(
+            f'*** cpu_gpu_move_elapse {global_timer.cpu_gpu_move_elapse} sec, times {global_timer.cpu_gpu_move_times}, amount {global_timer.cpu_gpu_move_data_amount/1e6} MB, Bandwidth {global_timer.cpu_gpu_move_data_amount/1e6/(global_timer.cpu_gpu_move_elapse + 1e-10)} MB/s'
+        )
+
         logging.info(
             f'* cpu_adam_elapse {cpu_adam_elapse} cpu_adam_f_elapse {cpu_adam_f_elapse}'
         )

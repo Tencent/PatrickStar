@@ -231,6 +231,7 @@ class ChunkList(object):
         返回一个chunk_id list
         """
         # 则需要将hold状态的chunk移出
+        start_time = time.time()
         still_need_bytes = size_in_bytes
         moved_bytes = 0
         moved_list = []
@@ -255,6 +256,8 @@ class ChunkList(object):
             )
             raise RuntimeError
 
+        global_timer.chunk_to_move_out_for_room_making_elapse = time.time(
+        ) - start_time
         return moved_list
 
     def show_stat(self):

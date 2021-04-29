@@ -44,7 +44,8 @@ class TestAccess(unittest.TestCase):
     def test_bandwidth(self):
         for size in [
                 1024, 32 * 1024, 64 * 1024, 128 * 1024, 512 * 1024,
-                1024 * 1024, 1024 * 1024 * 32, 1024 * 1204 * 1024
+                1024 * 1024, 1024 * 1024 * 8, 1024 * 1024 * 13,
+                1024 * 1024 * 32, 1024 * 1204 * 1024
         ]:
             self._bandwidth_benchmark(size, 10)
 

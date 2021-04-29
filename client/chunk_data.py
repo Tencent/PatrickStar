@@ -24,7 +24,7 @@ from manager import HybridPSManager
 import datetime
 import logging
 import time
-
+import utils.global_timer as global_timer
 total_cpu_gpu_move_elapse = 0.0
 total_cpu_gpu_move_time = 0
 total_cpu_gpu_move_amount = 0
@@ -187,8 +187,8 @@ class Chunk(object):
             numel = info.numel
             param = info.param
             access_type = info.access_type
-            # if info.status() == PSTensorStatus.FREE:
-            #     continue
+            if info.status() == PSTensorStatus.FREE:
+                continue
 
             if access_type == AccessType.DATA:
                 logging.debug(
@@ -212,18 +212,7 @@ class Chunk(object):
 
         self.device = target_device
         self.touch()
-        finish_time = time.time()
-        elapse = finish_time - start_time
 
-        if show_profile:
-            global total_cpu_gpu_move_elapse
-            global total_cpu_gpu_move_time
-            global total_cpu_gpu_move_amount
-
-            total_cpu_gpu_move_elapse += elapse
-            total_cpu_gpu_move_time += 1
-            total_cpu_gpu_move_amount += self.capacity * getsizeof(
-                self.data_type)
-            logging.info(
-                f'CPU-GPU data move elapse {elapse} sec, total elapse {total_cpu_gpu_move_elapse} sec, total times {total_cpu_gpu_move_time}, total amount {total_cpu_gpu_move_amount/1e3} KB.'
-            )
+        global_timer.cpu_gpu_move_elapse += time.time() - start_time
+        global_timer.cpu_gpu_move_times += 1
+        global_timer.cpu_gpu_move_data_amount += self.get_size()

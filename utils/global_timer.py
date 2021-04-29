@@ -20,4 +20,14 @@ cpu_adam_elapse = 0.
 client_delete_free_chunks_elapse = 0.
 memory_delete_elapse = 0.
 delete_free_chunks_part1 = 0.
+client_access_part2_elapse = 0.
 client_access_part1_elapse = 0.
+chunk_move_elapse = 0.
+
+cpu_gpu_move_elapse = 0.
+cpu_gpu_move_times = 0
+cpu_gpu_move_data_amount = 0
+
+client_prepare_device_manager_elapse = 0.
+chunk_to_move_out_for_room_making_elapse = 0.
+client_chunk_move_elapse = 0.

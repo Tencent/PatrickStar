@@ -96,8 +96,12 @@ class HybridPSClient(object):
         logging.debug(
             f'{target_device} (max size {max_mem} B) now available size {available_size} B needs {need_bytes} B'
         )
+        global_timer.client_prepare_device_manager_elapse += time.time(
+        ) - start_time
         # 不需要新分配
         if extra_need_bytes <= 0:
+            global_timer.client_prepare_device_elapse += time.time(
+            ) - start_time
             return
 
         logging.log(
@@ -116,8 +120,7 @@ class HybridPSClient(object):
         for idx in moved_list:
             self.chunk_move(idx, new_device)
 
-        end_time = time.time()
-        global_timer.client_prepare_device_elapse += end_time - start_time
+        global_timer.client_prepare_device_elapse += time.time() - start_time
 
     def access(self, param: torch.nn.Parameter, access_type: AccessType,
                compute_device: torch.device):
@@ -131,6 +134,8 @@ class HybridPSClient(object):
         需要分配一个新的Chunk
         """
         start_time = time.time()
+
+        sub_start_time_1 = time.time()
         if not self.is_ps_param(param):
             raise RuntimeError(
                 "access a param not ps_data_tensor through HybridPS API")
@@ -156,18 +161,32 @@ class HybridPSClient(object):
         else:
             raise RuntimeError
 
+        global_timer.client_access_part1_elapse += time.time(
+        ) - sub_start_time_1
+
         # logging.info(f'current_device {current_device} vs compute_device {compute_device}')
+
+        sub_start_time_2 = time.time()
         if compute_device.type != current_device.type:
             #访问一个free状态的chunk，上面不会分配，此处把它释放了。
+            sub_start_time_2_sub_1 = time.time()
             self.prepare_device(compute_device,
                                 self.chunk_list[chunk_id].get_size())
-            self.chunk_move(chunk_id, compute_device)
+            global_timer.client_prepare_device_elapse += time.time(
+            ) - sub_start_time_2_sub_1
 
-        self.chunk_list[chunk_id].touch()
+            sub_start_time_2_sub_2 = time.time()
+            self.chunk_move(chunk_id, compute_device)
+            global_timer.client_chunk_move_elapse += time.time(
+            ) - sub_start_time_2_sub_2
+
+        global_timer.client_access_part2_elapse += time.time(
+        ) - sub_start_time_1
 
         sub_start_time_1 = time.time()
-        # 访问之后应该更新chunk tensor_infos的状态
-        # TODO(jiaruifang)如何快速更新chunk的状态
+        self.chunk_list[chunk_id].touch()
+
+        # 访问之后应该更新chunk的状态
         if access_type == AccessType.DATA:
             self.chunk_list[chunk_id].update_chunk_status(
                 param.data_status, PSTensorStatus.COMPUTE)
@@ -395,6 +414,7 @@ class HybridPSClient(object):
         将chunk_id的chunk移动到device上
         需要对对应param重新赋值
         """
+        start_time = time.time()
         logging.debug(
             f'chunk_move chunk id {chunk_id} from {self.chunk_list[chunk_id].device} to {device}'
         )
@@ -404,6 +424,7 @@ class HybridPSClient(object):
                 f'pid {self.pid} move chunk {chunk_id} from {self.chunk_list[chunk_id].device} to {device}'
             )
             self.chunk_list[chunk_id].move(self.chunk_tensor_index, device)
+        global_timer.chunk_move_elapse += time.time() - start_time
 
     def release_all_grad(self, status):
         if self.module is not None:
