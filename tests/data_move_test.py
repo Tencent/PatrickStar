@@ -31,36 +31,116 @@ class TestAccess(unittest.TestCase):
             'cuda') if torch.cuda.is_available() else torch.device('cpu')
         logging.info('SetUp finished')
 
-    def _bandwidth_benchmark(self, size, niter):
-        buff = torch.zeros(size)
-        # for i in range(niter):
-        #   buff.append(torch.zeros(size))
-        with contexttimer.Timer() as t:
-            # for i in range(niter):
-            buff.to(self.compute_device)
-        BWD = size * 4 / t.elapsed / 1e9
-        logging.info(f'Copy size {size * 4/1024} KB, bandwidth {BWD} GB/s')
+    def _copy_bandwidth_benchmark(self, size, src_device, target_device):
+        src_buff = torch.ones(size, dtype=torch.float, device=src_device)
+        dest_buff = torch.zeros(size, dtype=torch.float, device=target_device)
 
-    def _pinned_bandwidth_benchmark(self, size, niter):
-        cpu_buff = torch.empty(size, dtype=torch.float, pin_memory=True)
-        # for i in range(niter):
-        #   buff.append(torch.zeros(size))
-        gpu_buff = torch.zeros(size)
         with contexttimer.Timer() as t:
-            # for i in range(niter):
-            gpu_buff.copy_(cpu_buff)
+            dest_buff.copy_(src_buff)
         BWD = size * 4 / t.elapsed / 1e9
         logging.info(
-            f'Pined-Copy size {size * 4/1024} KB, bandwidth {BWD} GB/s')
+            f'Copy {src_device} to {target_device}, size {size * 4/1024} KB, bandwidth {BWD} GB/s'
+        )
+
+    def _inline_copy_bandwidth_benchmark(self, size, src_device,
+                                         target_device):
+        buff = torch.zeros(size, dtype=torch.float, device=src_device)
+        with contexttimer.Timer() as t:
+            buff.to(target_device)
+        BWD = size * 4 / t.elapsed / 1e9
+        logging.info(
+            f'Copy {src_device} to {target_device}, size {size * 4/1024} KB, bandwidth {BWD} GB/s'
+        )
+
+    def _pinned_copy_bandwidth_benchmark(self, size, src_device,
+                                         target_device):
+        src_buff = torch.ones(size, dtype=torch.float, device=src_device)
+        if src_device.type == 'cpu':
+            src_buff = src_buff.pin_memory()
+        dest_buff = torch.zeros(size, dtype=torch.float, device=target_device)
+        if target_device.type == 'cpu':
+            dest_buff = dest_buff.pin_memory()
+
+        with contexttimer.Timer() as t:
+            dest_buff.copy_(src_buff)
+        BWD = size * 4 / t.elapsed / 1e9
+        logging.info(
+            f'Pined-Copy {src_device} to {target_device}, size {size * 4/1024} KB, bandwidth {BWD} GB/s'
+        )
+
+    def _async_copy_bandwidth_benchmark(self, size, src_device, target_device):
+        src_buff = torch.ones(size, dtype=torch.float, device=src_device)
+        if src_device.type == 'cpu':
+            src_buff = src_buff.pin_memory()
+        dest_buff = torch.zeros(size, dtype=torch.float, device=target_device)
+        if target_device.type == 'cpu':
+            dest_buff = dest_buff.pin_memory()
+
+        copy_grad_stream = torch.cuda.Stream()
+        with contexttimer.Timer() as t:
+            with torch.cuda.stream(copy_grad_stream):
+                dest_buff.copy_(src_buff, non_blocking=True)
+            copy_grad_stream.synchronize()
+            torch.cuda.synchronize()
+        res = torch.sum(gpu_buff)
+        assert res.item() == torch.sum(cpu_buff).item()
+        BWD = size * 4 / t.elapsed / 1e9
+        logging.info(
+            f'Async-Copy {src_device} to {target_device}, size {size * 4/1024} KB, bandwidth {BWD} GB/s'
+        )
+
+    def _async_copy_inline_bandwidth_benchmark(self, size, src_device,
+                                               target_device):
+        src_buff = torch.ones(size, dtype=torch.float, device=src_device)
+        if src_device.type == 'cpu':
+            src_buff = src_buff.pin_memory()
+        dest_buff = torch.zeros(size, dtype=torch.float, device=target_device)
+        if target_device.type == 'cpu':
+            dest_buff = dest_buff.pin_memory()
+
+        copy_grad_stream = torch.cuda.Stream()
+        with contexttimer.Timer() as t:
+            with torch.cuda.stream(copy_grad_stream):
+                src_buff.to(target_device, non_blocking=True)
+            copy_grad_stream.synchronize()
+            # torch.cuda.synchronize()
+        res = torch.sum(src_buff)
+        assert res.item() == size
+        BWD = size * 4 / t.elapsed / 1e9
+        logging.info(
+            f'Async-Copy Inline {src_device} to {target_device}, size {size * 4/1024} KB, bandwidth {BWD} GB/s'
+        )
 
     def test_bandwidth(self):
         for size in [
                 1024, 32 * 1024, 64 * 1024, 128 * 1024, 512 * 1024,
                 1024 * 1024, 1024 * 1024 * 8, 1024 * 1024 * 13,
-                1024 * 1024 * 32, 1024 * 1204 * 1024
+                1024 * 1024 * 32
         ]:
-            self._bandwidth_benchmark(size, 10)
-            self._pinned_bandwidth_benchmark(size, 10)
+            self._copy_bandwidth_benchmark(size, torch.device('cpu'),
+                                           torch.device('cuda'))
+            self._copy_bandwidth_benchmark(size, torch.device('cuda'),
+                                           torch.device('cpu'))
+            self._copy_bandwidth_benchmark(size, torch.device('cuda'),
+                                           torch.device('cuda'))
+            self._copy_bandwidth_benchmark(size, torch.device('cpu'),
+                                           torch.device('cpu'))
+
+            self._inline_copy_bandwidth_benchmark(size, torch.device('cpu'),
+                                                  torch.device('cuda'))
+            self._inline_copy_bandwidth_benchmark(size, torch.device('cuda'),
+                                                  torch.device('cpu'))
+
+            self._pinned_copy_bandwidth_benchmark(size, torch.device('cpu'),
+                                                  torch.device('cuda'))
+            self._pinned_copy_bandwidth_benchmark(size, torch.device('cuda'),
+                                                  torch.device('cpu'))
+
+            self._async_copy_inline_bandwidth_benchmark(
+                size, torch.device('cpu'), torch.device('cuda'))
+            self._async_copy_inline_bandwidth_benchmark(
+                size, torch.device('cuda'), torch.device('cpu'))
+            logging.info(f'==========')
 
 
 if __name__ == "__main__":

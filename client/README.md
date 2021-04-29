@@ -137,3 +137,16 @@ GPU仍然至少需要(2 chunk = 40 * 4B)160B显存。
 
 ##### 最佳映射
 我们可以在预热阶段安排好chunk-tensor映射关系，根据tensor的唯一id(model name, grad/data)来索引chunk。
+
+FP16，
+Param的grad和data是应该各自连续，还是应该交错？
+
+各自连续：
+param0, param1, param2, ...
+grad0, grad1, grad2, ...
+
+交错：
+param0, grad0, param1, grad1, param2, grad2, ...
+
+FWD时候会取2x的param数据，反向最大内存需求会降低为1个chunk。
+浪费带宽，节省显存。

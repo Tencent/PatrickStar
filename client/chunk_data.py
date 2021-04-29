@@ -60,9 +60,16 @@ class Chunk(object):
             logging.log(logging.WARNING, "Set cuda index to 0")
             self.device = torch.cuda.current_device()
 
-        self.payload = torch.zeros(capacity,
-                                   dtype=self.data_type,
-                                   device=self.device)
+        if self.device.type == 'cpu':
+            # 用pined_memory有一些效果
+            self.payload = torch.zeros(capacity,
+                                       dtype=self.data_type,
+                                       device=self.device,
+                                       pin_memory=True)
+        else:
+            self.payload = torch.zeros(capacity,
+                                       dtype=self.data_type,
+                                       device=self.device)
         self.ps_manager.add(self.device.type, self.device.index,
                             capacity * getsizeof(data_type))
 
