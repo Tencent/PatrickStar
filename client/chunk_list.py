@@ -267,36 +267,3 @@ class ChunkList(object):
                 cpu_chunk_list.append(chunk.capacity)
         logging.debug(f'cuda_chunk, {cuda_chunk_list}')
         logging.debug(f'cpu_chunk, {cpu_chunk_list}')
-
-
-if __name__ == "__main__":
-    from manager import HybridPSManager
-    logging.basicConfig(
-        format=
-        '%(asctime)s,%(msecs)d %(levelname)-8s [%(filename)s:%(lineno)d] %(message)s',
-        datefmt='%Y-%m-%d:%H:%M:%S',
-        level=logging.DEBUG)
-    manager = HybridPSManager()
-    manager.reset([32, 32], [1024])
-
-    data_type = torch.float
-    chunk_list = ChunkList(default_chunk_size=128)
-    # 之前分配的chunk中尝试分配10空间
-    chunk_id = chunk_list.least_used_chunk()
-    assert chunk_id == 0
-
-    chunk_id, tensor = chunk_list.allocate(10, data_type, 0)
-    assert chunk_id == 0
-
-    chunk_id, tensor = chunk_list.allocate(100, data_type, 1)
-    assert chunk_id == 0
-    chunk_id = chunk_list.least_used_chunk()
-    chunk_list[chunk_id].visit()
-
-    chunk_id, tensor = chunk_list.allocate(100, data_type, 2)
-    assert (chunk_id == 1)
-
-    chunk_id = chunk_list.least_used_chunk()
-    assert chunk_id == 1
-    # 再分配一个chunk
-    # chunk_list.new_chunk(128)
