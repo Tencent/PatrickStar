@@ -173,12 +173,13 @@ class ChunkTensorIndex(object):
 
     def chunk_status(self, chunk_id) -> PSChunkStatus:
         """
+        @depracated 太慢了，被chunk_data的chunk_status代替
         chunk的状态，由它管理的tensor共同决定
         TODO(jiaruifang)速度很慢，有待优化
         """
         # if len(self.dict_chunk_id_tensor_id[chunk_id]) == 0:
         #     return PSChunkStatus.FREE
-
+        raise NotImplementedError
         free_flag = True
         # O (logK*V)
         for tensor_id in self.dict_chunk_id_tensor_id.get(chunk_id, []):

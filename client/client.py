@@ -169,9 +169,13 @@ class HybridPSClient(object):
         # 访问之后应该更新chunk tensor_infos的状态
         # TODO(jiaruifang)如何快速更新chunk的状态
         if access_type == AccessType.DATA:
+            self.chunk_list[chunk_id].update_chunk_status(
+                param.data_status, PSTensorStatus.COMPUTE)
             param.data_status = PSTensorStatus.COMPUTE
             param.data = param.ps_data_tensor
         elif access_type == AccessType.GRAD:
+            self.chunk_list[chunk_id].update_chunk_status(
+                param.grad_status, PSTensorStatus.COMPUTE)
             param.grad_status = PSTensorStatus.COMPUTE
         global_timer.client_access_part1_elapse += time.time(
         ) - sub_start_time_1
@@ -213,6 +217,8 @@ class HybridPSClient(object):
         # chunk_tensor_index删除tensor索引，顺便判断是否有chunk需要删除
         # chunk list判断是否有chunk需要删除
         if access_type == AccessType.DATA:
+            self.chunk_list[chunk_id].update_chunk_status(
+                param.data_status, reset_to_status)
             param.data_status = reset_to_status
             # 把data的内存删除，方式是将它指向一段长度为1的内存
             if reset_to_status == PSTensorStatus.FREE:
@@ -224,11 +230,14 @@ class HybridPSClient(object):
                 self.chunk_tensor_index.delete_tensor(param.ps_data_id)
             param.data = param.ps_data_tensor
         elif access_type == AccessType.GRAD:
+            self.chunk_list[chunk_id].update_chunk_status(
+                param.grad_status, reset_to_status)
             param.grad_status = reset_to_status
             if reset_to_status == PSTensorStatus.FREE:
                 param.ps_grad_tensor = None
                 self.chunk_tensor_index.delete_tensor(param.ps_grad_id)
             param.grad = None
+
         #在这里立刻释放，被标记为free的chunks
         # TODO(jiaruifang)可以在显存不足时，lazy释放
         client_delete_free_chunks_start_time = time.time()
@@ -261,7 +270,9 @@ class HybridPSClient(object):
                                                   chunk_tensor_index)
         param.ps_data_tensor = dest.view(param.ps_shape)
         param.ps_data_chunk_id = chunk_id
-        param.data_status = PSChunkStatus.HOLD
+        self.chunk_list[chunk_id].update_chunk_status(param.data_status,
+                                                      PSTensorStatus.HOLD)
+        param.data_status = PSTensorStatus.HOLD
 
     def new_grad(self, param: torch.nn.Parameter,
                  chunk_tensor_index: ChunkTensorIndex):
@@ -272,7 +283,9 @@ class HybridPSClient(object):
                                                   chunk_tensor_index)
         param.ps_grad_tensor = dest.view(param.ps_shape)
         param.ps_grad_chunk_id = chunk_id
-        param.grad_status = PSChunkStatus.HOLD
+        self.chunk_list[chunk_id].update_chunk_status(param.grad_status,
+                                                      PSTensorStatus.HOLD)
+        param.grad_status = PSTensorStatus.HOLD
 
     @staticmethod
     def is_ps_param(parameter: torch.nn.Parameter):
@@ -295,6 +308,10 @@ class HybridPSClient(object):
             one_dim_param = param.data.contiguous().view(-1)
             param.ps_data_tensor.copy_(one_dim_param.view(param.ps_shape))
             param.data = param.ps_data_tensor
+            chunk_id = self.chunk_tensor_index.tensor_id_to_chunk_id(
+                param.ps_data_id)
+            self.chunk_list[chunk_id].update_chunk_status(
+                param.data_status, PSTensorStatus.HOLD)
             param.data_status = PSTensorStatus.HOLD
 
     def _convert_to_ps_grad(self, param: torch.nn.Parameter):
@@ -304,6 +321,10 @@ class HybridPSClient(object):
             one_dim_grad = param.grad.contiguous().view(-1)
             param.ps_grad_tensor.copy_(one_dim_grad.view(param.ps_shape))
             param.grad = param.ps_grad_tensor
+            chunk_id = self.chunk_tensor_index.tensor_id_to_chunk_id(
+                param.ps_grad_id)
+            self.chunk_list[chunk_id].update_chunk_status(
+                param.grad_status, PSTensorStatus.HOLD)
             param.grad_status = PSTensorStatus.HOLD
 
     def _init_ps_param(self, param: torch.nn.Parameter):
@@ -316,8 +337,8 @@ class HybridPSClient(object):
 
         param.ps_numel = param.numel()
         param.ps_shape = param.shape
-        param.data_status = PSTensorStatus.FREE
-        param.grad_status = PSTensorStatus.FREE
+        param.data_status = PSTensorStatus.UNINIT
+        param.grad_status = PSTensorStatus.UNINIT
 
         if not self.is_ps_data(param):
             param.ps_data_id = self.generate_id()
@@ -365,7 +386,7 @@ class HybridPSClient(object):
     def visit(self):
         for idx, chunk in self.chunk_list.generate_chunk():
             logging.info(
-                f"chunk {idx} on device {chunk.device} status {self.chunk_tensor_index.chunk_status(idx)}"
+                f"chunk {idx} on device {chunk.device} status {chunk.chunk_status()}"
             )
             chunk.visit(self.chunk_tensor_index)
 

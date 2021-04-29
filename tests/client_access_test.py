@@ -36,7 +36,7 @@ class TestAccess(unittest.TestCase):
         assert param1.requires_grad is True
         self.client.register_param(param1)
         assert param1.data_status == PSTensorStatus.HOLD
-        assert param1.grad_status == PSTensorStatus.FREE
+        assert param1.grad_status == PSTensorStatus.UNINIT
 
     def test_access(self):
         self.manager.reset([40 * 4], [256 * 4])
@@ -49,7 +49,7 @@ class TestAccess(unittest.TestCase):
         # id = 0
         self.client.access_data(param1, self.compute_device)
         assert param1.data_status == PSTensorStatus.COMPUTE
-        assert param1.grad_status == PSTensorStatus.FREE
+        assert param1.grad_status == PSTensorStatus.UNINIT
         assert self.client.get_chunk_id(param1, AccessType.DATA) == 0
 
         logging.info(f'access param1 grad')

@@ -128,10 +128,12 @@ class ChunkList(object):
                     param.ps_data_tensor = torch.zeros(
                         1, dtype=param.dtype, device=torch.device('cpu'))
                     param.data = param.ps_data_tensor
+                    chunk.free_cnt -= 1
                 elif access_type == AccessType.GRAD:
                     assert param.grad_status == PSTensorStatus.FREE
                     param.ps_grad_tensor = None
                     param.grad = None
+                    chunk.free_cnt -= 1
 
             # 删除chunk的内存
             logging.debug(
@@ -208,7 +210,8 @@ class ChunkList(object):
         # 释放cpu和gpu上所有free chunk，统计目标设备上腾出的空间
         # NOTE(jiaruifang)这个循环很慢
         for chunk_id, chunk in self.chunk_id_to_chunk_dict.items():
-            if chunk_tensor_index.chunk_status(chunk_id) == PSChunkStatus.FREE:
+            # assert chunk.chunk_status() == chunk_tensor_index.chunk_status(chunk_id), f"{chunk.chunk_status()} vs {chunk_tensor_index.chunk_status(chunk_id)}"
+            if chunk.chunk_status() == PSChunkStatus.FREE:
                 free_chunk_id_list.append(chunk_id)
                 freed_bytes += chunk.get_size()
 
@@ -232,8 +235,8 @@ class ChunkList(object):
         moved_bytes = 0
         moved_list = []
         for chunk_id, chunk in self.chunk_id_to_chunk_dict.items():
-            if chunk.device == target_device and chunk_tensor_index.chunk_status(
-                    chunk_id) == PSChunkStatus.HOLD:
+            if chunk.device == target_device and chunk.chunk_status(
+            ) == PSChunkStatus.HOLD:
                 moved_bytes += chunk.capacity * getsizeof(chunk.data_type)
                 moved_list.append(chunk_id)
 
@@ -241,8 +244,7 @@ class ChunkList(object):
                     break
 
             # TODO(jiaruifang)此时不应该有free状态的chunk，因为free在release时候完成了
-            assert chunk_tensor_index.chunk_status(
-                chunk_id) != PSChunkStatus.FREE
+            assert chunk.chunk_status() != PSChunkStatus.FREE
 
         # 无法腾出足够空间，抛出异常
         if moved_bytes < still_need_bytes:

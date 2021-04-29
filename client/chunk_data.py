@@ -68,6 +68,25 @@ class Chunk(object):
 
         self.timestamp = datetime.datetime.now().timestamp()
 
+        self._status_dict = {
+            PSTensorStatus.COMPUTE: 0,
+            PSTensorStatus.HOLD: 0,
+            PSTensorStatus.FREE: 0,
+            PSTensorStatus.UNINIT: 0
+        }
+
+    def update_chunk_status(self, old_status, new_status):
+        self._status_dict[old_status] -= 1
+        self._status_dict[new_status] += 1
+
+    def chunk_status(self):
+        if self._status_dict[PSTensorStatus.COMPUTE] > 0:
+            return PSChunkStatus.COMPUTE
+        elif self._status_dict[PSTensorStatus.HOLD] > 0:
+            return PSChunkStatus.HOLD
+        else:
+            return PSChunkStatus.FREE
+
     def get_size(self):
         return getsizeof(self.data_type) * self.capacity
 
