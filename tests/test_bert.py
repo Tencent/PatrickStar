@@ -138,7 +138,7 @@ def test_bert_model(is_ckp: bool = False,
 
     if is_ps:
         manager = HybridPSManager()
-        manager.init([1024 * 1024 * 1024] * 1, [1024 * 1024 * 1024 * 4 * 4])
+        manager.init([1024 * 1024 * 512] * 1, [1024 * 1024 * 1024 * 4 * 4])
         # chunk 16 M elem
         client = HybridPSClient(gpu_index=0,
                                 default_chunk_size=1024 * 1024 * 8)
@@ -265,18 +265,23 @@ if __name__ == "__main__":
 
         client_delete_free_chunks_elapse = global_timer.client_delete_free_chunks_elapse
 
+        logging.info(f'client access elapse')
         logging.info(
-            f'client_prepare_device_elapse {client_prepare_device_elapse} client_access_elapse {client_access_elapse} client_release_elapse {client_release_elapse}'
+            f'* client_prepare_device_elapse {client_prepare_device_elapse} client_access_elapse {client_access_elapse} '
         )
         logging.info(
-            f'cpu_adam_elapse {cpu_adam_elapse} cpu_adam_f_elapse {cpu_adam_f_elapse}'
+            f'* client_access_part1_elapse {global_timer.client_access_part1_elapse}'
         )
         logging.info(
-            f'client_delete_free_chunks_elapse {client_delete_free_chunks_elapse} memory_delete_elapse {global_timer.memory_delete_elapse} delete_free_chunks_part1 {global_timer.delete_free_chunks_part1}'
+            f'* cpu_adam_elapse {cpu_adam_elapse} cpu_adam_f_elapse {cpu_adam_f_elapse}'
         )
+
+        logging.info(f'client release elapse')
+        logging.info(f'* client_release_elapse {client_release_elapse}')
         logging.info(
-            f'client_access_part1_elapse {global_timer.client_access_part1_elapse}'
+            f'* client_delete_free_chunks_elapse {client_delete_free_chunks_elapse} memory_delete_elapse {global_timer.memory_delete_elapse} delete_free_chunks_part1 {global_timer.delete_free_chunks_part1}'
         )
+
     # calculate_mem_need(hidden_dim = hidden_dim, batch_size = batch_size, is_fp16 = use_fp16)
 
     if res_check:
