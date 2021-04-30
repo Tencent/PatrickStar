@@ -90,12 +90,12 @@ def test_simple_model(is_ps: bool = False, is_fp16: bool = False):
             optimizer.zero_grad(set_grads_to_None=True)
             optimizer.backward(loss, update_master_grads=False)
             if is_ps:
-                client.release_all_grad(PSTensorStatus.HOLD)
+                client.release_all_data_grad(PSTensorStatus.HOLD)
         else:
             optimizer.zero_grad()
             loss.backward()
             if is_ps:
-                client.release_all_grad(PSTensorStatus.HOLD)
+                client.release_all_data_grad(PSTensorStatus.HOLD)
 
         if is_fp16:
             # pass
@@ -107,7 +107,7 @@ def test_simple_model(is_ps: bool = False, is_fp16: bool = False):
 
         # it is necessary to get correct results
         if is_ps:
-            client.release_all_grad(PSTensorStatus.HOLD)
+            client.release_all_data_grad(PSTensorStatus.HOLD)
 
         if n == 5: break
 

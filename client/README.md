@@ -124,29 +124,60 @@ GPU仍然至少需要(2 chunk = 40 * 4B)160B显存。
 
 ## 性能优化
 性能优化方式有二：
-一是，减少CPU-GPU移动的参数数量，这要求我们设计一个聪明的chunk和tensor映射策略，并且设置合适的chunk尺寸。
+
+### 避免数据移动
+一是，减少CPU-GPU移动的参数数量，
+1. 设计一个聪明的chunk和tensor映射策略
+#### 一、最佳映射
+我们可以在预热阶段安排好chunk-tensor映射关系，之后的迭代根据tensor的唯一id来索引chunk。
+
+##### 1. 布局(Layout)
+Parameter的data和grad张量在chunk上的布局有两种方式。
+
+A. 各自连续：
+data0, data1, data2, ...
+grad0, grad1, grad2, ...
+
+B. 相互交错：
+data0, grad0, data1, grad1, data2, grad2, ...
+
+对于grad和data选择交错方案，因为BWD和adam计算时，data和grad都是成对出现。
+这样坏处是FWD时候需要多分配一倍的内存。浪费内存，但是增加效率。
+
+M，V肯定交错比较好，因为adam计算同时需要M，V，取一个chunk即可搞定。
+
+##### 2. 对齐(Alignment)
+data和grad
+现在移动param的data和grad时候，最后一个chunk会带着M，V的数据
+grad和data都在一个chunk，按照layer对齐。
+
+设置合适的chunk尺寸，可以在预热过程统计参数的分配，设计动态可变的chunk尺寸，保证对齐。
+
+##### 3. Adam计算位置
+FP32：不管计算在CPU上还是GPU上，如果grad和data交错，M和V交错，那么取数据的通信量是一样的。
+FP16: 如果adam计算在CPU上，FP16 data + Fp16 grad GPU->CPU, FP16 param CPU -> GPU
+or FP32。 6x comm.
+
+如果计算在gpu上，
+M，V，P32应该都被挤到CPU上存放。
+FP32 M, FP32 V, FP32 param, CPU->GPU, GPU->CPU. 24xComm.
+
+所以默认还是在cpu上。
+
+可以设计一个贪心策略。
+检查，M，V，data，param的位置。如果它都在CPU，或者GPU则在对应设备上计算。如果它们分别CPU和GPU则在GPU上计算。
+
+#### 二、重叠通信和计算
+
 二是，重叠通信和计算，这需要异步的access, release接口。
 可以把cpu分配为page-locked的pinned memory。
 把所有的cpu都分配为pinned？似乎只有grad和param需要。
+
+#### 三、加速Adam计算
 三是，加速CPU的ADAM计算，让一部分在GPU上，另一部分在CPU上。
 这个方法意义不大，因为对于BERT训练来说，我发现cpu adam时间占比跟小。
 
+
+
 #### 撑大模型
 在cuda分配抛出异常时候move out GPU内存？如何catch这个异常？
-
-
-##### 最佳映射
-我们可以在预热阶段安排好chunk-tensor映射关系，根据tensor的唯一id(model name, grad/data)来索引chunk。
-
-FP16，
-Param的grad和data是应该各自连续，还是应该交错？
-
-各自连续：
-param0, param1, param2, ...
-grad0, grad1, grad2, ...
-
-交错：
-param0, grad0, param1, grad1, param2, grad2, ...
-
-FWD时候会取2x的param数据，反向最大内存需求会降低为1个chunk。
-浪费带宽，节省显存。

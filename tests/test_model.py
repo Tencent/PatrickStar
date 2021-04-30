@@ -305,7 +305,7 @@ def test_register_module():
         loss.backward()
 
         optimizer.step()
-        client.release_all_grad()
+        client.release_all_data_grad()
         # print_params('step={}'.format(n), model)
         if n == 5: break
 

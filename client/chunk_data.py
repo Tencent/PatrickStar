@@ -64,8 +64,7 @@ class Chunk(object):
             # 用pined_memory有一些效果
             self.payload = torch.zeros(capacity,
                                        dtype=self.data_type,
-                                       device=self.device,
-                                       pin_memory=True)
+                                       device=self.device)
         else:
             self.payload = torch.zeros(capacity,
                                        dtype=self.data_type,
@@ -149,7 +148,8 @@ class Chunk(object):
             tensor_id = param.ps_data_id
         elif access_type == AccessType.GRAD:
             tensor_id = param.ps_grad_id
-        assert param.ps_name is not None
+        if not hasattr(param, 'ps_name'):
+            param.ps_name = None
         chunk_tensor_index.add_tensor(self.chunk_id, tensor_id, offset, numel,
                                       param, access_type)
         self.touch()
@@ -176,12 +176,12 @@ class Chunk(object):
         """
         将这个chunk移动到target_device上。前提条件，target_device已经腾出足够的空间。
         """
-        # logging.info(
-        #     f'move chunk {self.chunk_id} numel {self.payload.numel()} from {self.device} to {target_device}'
-        # )
         start_time = time.time()
         if self.device == target_device:
             return
+        # logging.info(
+        #     f'move chunk {self.chunk_id} numel {self.payload.numel()} from {self.device} to {target_device}'
+        # )
         self.payload = self.payload.to(target_device)
         self.ps_manager.add(target_device.type, target_device.index,
                             self.capacity * getsizeof(self.data_type))

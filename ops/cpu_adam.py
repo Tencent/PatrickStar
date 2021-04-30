@@ -33,7 +33,11 @@ def F_adam(client, params: List[torch.nn.Parameter],
     """
     for i, param in enumerate(params):
         # HybridPS加载data
-        compute_device = torch.device('cpu')
+        if param.data.device == exp_avgs[i].ps_data_tensor.device:
+            compute_device = param.data.device
+        else:
+            compute_device = torch.device('cpu:0')
+
         client.access_data(param, compute_device)
         client.access_grad(param, compute_device)
 

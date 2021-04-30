@@ -207,7 +207,7 @@ def test_bert_model(is_ckp: bool = False,
                      [1024 * 1024 * 1024 * 4 * 4])
         # chunk 512 MB, good for CPU-GPU bandwidth
         client = HybridPSClient(gpu_index=0,
-                                default_chunk_size=1024 * 1024 * 32)
+                                default_chunk_size=1024 * 1024 * 128)
 
         optimizer = CPUAdam(client, model.parameters(), lr=0.001)
         # optimizer = TorchAdam(model.parameters(), lr=0.001)
@@ -225,6 +225,7 @@ def test_bert_model(is_ckp: bool = False,
 
     start_time = time.time()
     for n, batch in enumerate(data_loader):
+        step_start_time = time.time()
         output = model(input_ids=batch[0], labels=batch[1])
         loss = output.loss
         logits = output.logits
@@ -235,15 +236,18 @@ def test_bert_model(is_ckp: bool = False,
         if is_fp16:
             optimizer.zero_grad(set_grads_to_None=True)
             optimizer.backward(loss, update_master_grads=False)
+            # TODO(jiaruifang) 前三层embedding没有post-backward hook的触发
+            # 最好有hook可以在每次BWD之后，把所有参数的
+            # 状态更新
             if is_ps:
-                client.release_all_grad(PSTensorStatus.HOLD)
+                client.release_all_data_grad(PSTensorStatus.HOLD)
                 check_grads_status(model, PSTensorStatus.HOLD)
         else:
             optimizer.zero_grad()
             loss.backward()
             # is_ps, 此时grad应该都是HOLD状态
             if is_ps:
-                client.release_all_grad(PSTensorStatus.HOLD)
+                client.release_all_data_grad(PSTensorStatus.HOLD)
                 check_grads_status(model, PSTensorStatus.HOLD)
 
         if is_fp16:
@@ -263,8 +267,11 @@ def test_bert_model(is_ckp: bool = False,
         #         info.showme()
 
         # if is_ps:
-        #     client.release_all_grad(PSTensorStatus.HOLD)
-
+        #     client.release_all_data_grad(PSTensorStatus.HOLD)
+        setp_elapse = time.time() - step_start_time
+        logging.info(
+            f"ckp {is_ckp} fp16 {is_fp16} ps {is_ps}  elapse {setp_elapse}, sec/iter, {total_macs/1e9/setp_elapse} GFlops"
+        )
         if n == stop_step: break
 
     elapse = time.time() - start_time
@@ -293,14 +300,20 @@ if __name__ == "__main__":
     # hidden_dim 1024, batch 16, seqence_leng 1024, ckp True.
     # PS is able to run the training, while PyTorch failed.
 
-    plan = "B"
+    plan = "A"
     if plan == "A":
-        # use ckp
         # HybridPS可以，PyTorch不可以
+        # use_ckp: True, use_fp16: True, adam default on CPU, not interleave data and grad
         # manager.init([1024 * 1024 * 1024 * 2] * 1, [1024 * 1024 * 1024 * 4 * 4])
         # client = HybridPSClient(gpu_index=0,
         #                         default_chunk_size=1024 * 1024 * 128)
         # 949.234980710749 GFlops (RTX 2060 peak 6.451 TFLOPS)
+
+        # use_ckp: True, use_fp16: True, adam default on GPU, interleave data and grad
+        # 39.95365033945278 GFlop, 30% nvidia-smi (adam on GPU)
+        # client = HybridPSClient(gpu_index=0,
+        #                         default_chunk_size=1024 * 1024 * 32)
+
         hidden_dim = 3072  #2048
         batch_size = 2
         sequence_length = 1024

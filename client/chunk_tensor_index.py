@@ -37,7 +37,8 @@ class TensorInfo(object):
         self.start_offset = start_offset
         self.numel = numel
         self.param = param
-        self.tensor_name = f"{param_name}.data" if access_type == AccessType.DATA else f"{param_name}.grad"
+        self.tensor_name = f"{param_name}.data" if (
+            access_type == AccessType.DATA) else f"{param_name}.grad"
         self.access_type = access_type
 
     def status(self):

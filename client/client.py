@@ -351,6 +351,15 @@ class HybridPSClient(object):
             self.chunk_list[chunk_id].update_chunk_status(
                 param.grad_status, PSTensorStatus.HOLD)
             param.grad_status = PSTensorStatus.HOLD
+        # elif param.requires_grad is True:
+        #     # 为了穿插排列grad和data，增加局部性
+        #     self.new_grad(param, self.chunk_tensor_index)
+        #     param.grad = param.ps_grad_tensor
+        #     chunk_id = self.chunk_tensor_index.tensor_id_to_chunk_id(
+        #         param.ps_grad_id)
+        #     self.chunk_list[chunk_id].update_chunk_status(
+        #         param.grad_status, PSTensorStatus.HOLD)
+        #     param.grad_status = PSTensorStatus.HOLD
 
     def _init_ps_param(self, param: torch.nn.Parameter):
         """
@@ -433,7 +442,7 @@ class HybridPSClient(object):
             self.chunk_list[chunk_id].move(self.chunk_tensor_index, device)
         global_timer.chunk_move_elapse += time.time() - start_time
 
-    def release_all_grad(self, status):
+    def release_all_data_grad(self, status):
         if self.module is not None:
             for n, p in self.module.named_parameters():
                 self.release_grad(p, status)
