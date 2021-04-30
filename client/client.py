@@ -53,6 +53,9 @@ class HybridPSClient(object):
         self.ps_id = -1
 
         self.chunk_tensor_index = ChunkTensorIndex()
+        # tensor_id <-> name 映射表，在训练的第二轮通过tensor name找到id，从而
+        # 复用上一轮的chunk分配方案
+        self.dict_tensor_name_to_id = {}
 
     def get_chunk_id(self, param: torch.nn.Parameter, access_type: AccessType):
         """
@@ -139,6 +142,9 @@ class HybridPSClient(object):
         if not self.is_ps_param(param):
             raise RuntimeError(
                 "access a param not ps_data_tensor through HybridPS API")
+
+        # None表示当前chunk中没有id。
+        # 如果之前tensor_id有一个chunk，但是被释放，现在又要重新分配一个chunk_id
         chunk_id = self.get_chunk_id(param, access_type)
 
         if chunk_id is None:
@@ -382,14 +388,15 @@ class HybridPSClient(object):
             self.module = module
 
             # Note(jiaruifang) do we need recurse?
-            for param in module.parameters(recurse=True):
+            for name, param in module.named_parameters(recurse=True):
+                param.ps_name = name
                 self._init_ps_param(param)
 
             # 如果有data和grad数据，要移动给HybridPS
-            for param in module.parameters(recurse=True):
+            for name, param in module.named_parameters(recurse=True):
                 self._convert_to_ps_data(param)
 
-            for param in module.parameters(recurse=True):
+            for name, param in module.named_parameters(recurse=True):
                 self._convert_to_ps_grad(param)
 
     def register_param(self, src_param: torch.nn.Parameter):
@@ -430,6 +437,7 @@ class HybridPSClient(object):
         if self.module is not None:
             for n, p in self.module.named_parameters():
                 self.release_grad(p, status)
+                self.release_data(p, status)
 
     def allreduce(self, local_tensor):
         """

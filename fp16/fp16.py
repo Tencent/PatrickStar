@@ -225,6 +225,7 @@ class FP16_Optimizer(object):
                                 param.detach().clone().float(),
                                 requires_grad=True)
                             # NOTE(jiaruifang) manage master with hybridPS
+                            master_param.ps_name = f'{param.ps_name}.master'
                             self.client.register_param(master_param)
 
                         # Copythe model parallel flag.

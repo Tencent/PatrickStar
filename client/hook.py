@@ -137,6 +137,8 @@ def pre_sub_module_backward_function(sub_module, client, name):
         logging.debug(
             f'pre BWD param {name}.{sub_name} {param.ps_data_tensor.size()} access data and grad'
         )
+        # param_name = f'{name}.{sub_name}'
+        # param.ps_name = param_name
         client.access_data(param, torch.device('cuda:0'))
         client.access_grad(param, torch.device('cuda:0'))
         param.grad = param.ps_grad_tensor
@@ -149,6 +151,8 @@ def post_sub_module_backward_function(sub_module, client, name):
                 f"BWD post {sub_module.id} {sub_module.__class__.__name__}")
     # TODO(jiaruifang) recurse
     for sub_name, param in sub_module.named_parameters(recurse=False):
+        # param_name = f'{name}.{sub_name}'
+        # assert param.ps_name == param_name, 'BWD name {param_name} inconsist with FWD name {param.ps_name}'
         logging.debug(f'post BWD {name}.{sub_name} free data and hold grad')
         client.release_data(param, PSTensorStatus.HOLD)
         client.release_grad(param, PSTensorStatus.HOLD)

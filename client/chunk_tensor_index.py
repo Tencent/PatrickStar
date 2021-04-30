@@ -24,14 +24,20 @@ class TensorInfo(object):
     """
     记录chunk内存存储tensor的属性,
     """
-    def __init__(self, chunk_id: int, tensor_id: int, start_offset: int,
-                 numel: int, param: torch.nn.Parameter,
-                 access_type: AccessType):
+    def __init__(self,
+                 chunk_id: int,
+                 tensor_id: int,
+                 start_offset: int,
+                 numel: int,
+                 param: torch.nn.Parameter,
+                 access_type: AccessType,
+                 param_name=""):
         self.tensor_id = tensor_id
         self.chunk_id = chunk_id
         self.start_offset = start_offset
         self.numel = numel
         self.param = param
+        self.tensor_name = f"{param_name}.data" if access_type == AccessType.DATA else f"{param_name}.grad"
         self.access_type = access_type
 
     def status(self):
@@ -50,7 +56,7 @@ class TensorInfo(object):
 
     def showme(self):
         logging.info(
-            f'tensor_id {self.tensor_id}, chunk_id {self.chunk_id}, start_offset {self.start_offset}, nueml {self.numel}, status {self.status()}'
+            f'tensor_id {self.tensor_id}, name {self.tensor_name}, shape {self.param.ps_shape}, chunk_id {self.chunk_id}, start_offset {self.start_offset}, nueml {self.numel}, status {self.status()}'
         )
 
 
@@ -66,7 +72,7 @@ class ChunkTensorIndex(object):
         # 1-1 chunk_id -> Chunk
         self.dict_chunk_id_chunk: dict[int, Chunk] = {}
 
-    def show_status(self):
+    def generate_all_tensor_info(self):
         """
         展示每个chunk中tensor的状态
         """
@@ -128,7 +134,8 @@ class ChunkTensorIndex(object):
                                   len(tensor_id_list) - 1)
         tensor_id_list.insert(pos, tensor_id)
         self.dict_tensor_id_info[tensor_id] = TensorInfo(
-            chunk_id, tensor_id, start_offset, numel, param, access_type)
+            chunk_id, tensor_id, start_offset, numel, param, access_type,
+            param.ps_name)
 
     def delete_chunk_id(self, chunk_id):
         """

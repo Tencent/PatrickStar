@@ -183,6 +183,8 @@ class CPUAdam(torch.optim.Optimizer):
                                 device=torch.device('cpu')),
                             requires_grad=False)
 
+                        state['exp_avg'].ps_name = f'{p.ps_name}.exp_avg'
+                        state['exp_avg_sq'].ps_name = f'{p.ps_name}.exp_avg_sq'
                         self.client.register_param(state['exp_avg'])
                         self.client.register_param(state['exp_avg_sq'])
 

@@ -149,6 +149,7 @@ class Chunk(object):
             tensor_id = param.ps_data_id
         elif access_type == AccessType.GRAD:
             tensor_id = param.ps_grad_id
+        assert param.ps_name is not None
         chunk_tensor_index.add_tensor(self.chunk_id, tensor_id, offset, numel,
                                       param, access_type)
         self.touch()

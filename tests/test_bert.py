@@ -207,7 +207,7 @@ def test_bert_model(is_ckp: bool = False,
                      [1024 * 1024 * 1024 * 4 * 4])
         # chunk 512 MB, good for CPU-GPU bandwidth
         client = HybridPSClient(gpu_index=0,
-                                default_chunk_size=1024 * 1024 * 128)
+                                default_chunk_size=1024 * 1024 * 32)
 
         optimizer = CPUAdam(client, model.parameters(), lr=0.001)
         # optimizer = TorchAdam(model.parameters(), lr=0.001)
@@ -255,6 +255,12 @@ def test_bert_model(is_ckp: bool = False,
         see_memory_usage(
             f"ckp {is_ckp} fp16 {is_fp16} ps {is_ps}  after step {n}",
             force=True)
+
+        # if is_ps:
+        #     # TODO(jiaruifang) debug info
+        #     logging.info(f'show chunk schema in step {n}')
+        #     for info in client.chunk_tensor_index.generate_all_tensor_info():
+        #         info.showme()
 
         # if is_ps:
         #     client.release_all_grad(PSTensorStatus.HOLD)
