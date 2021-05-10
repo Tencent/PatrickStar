@@ -24,6 +24,7 @@ from .chunk_data import Chunk
 from .chunk_list import ChunkList
 from .helper import getsizeof
 from .chunk_tensor_index import ChunkTensorIndex
+from .chunk_schema_scheduler import ChunkShemaScheduler
 import utils.global_timer as global_timer
 import time
 
@@ -32,7 +33,7 @@ class HybridPSClient(object):
     def __init__(self,
                  gpu_index: int = 0,
                  data_type: torch.dtype = torch.float,
-                 default_chunk_size: int = 64):
+                 default_chunk_size: int = 1024 * 1024):
         """
         管理一个Process的Param, AccGrad, OS数据。
         每个进程可以访问一个GPU的显存，和cpu的内存
@@ -46,166 +47,91 @@ class HybridPSClient(object):
         self.gpu_index = gpu_index
         self.data_type = data_type
 
-        self.chunk_list = ChunkList(default_chunk_size)
-        self.default_chunk_size = default_chunk_size
+        self.chunk_list = ChunkList()
 
         self.module = None
-        self.ps_id = -1
+        self.optimizer = None
 
+        # 解耦chunk和param的tensors
         self.chunk_tensor_index = ChunkTensorIndex()
-        # tensor_id <-> name 映射表，在训练的第二轮通过tensor name找到id，从而
-        # 复用上一轮的chunk分配方案
-        self.dict_tensor_name_to_id = {}
+        self.chunk_schema_scheduler = None
+        self.default_chunk_size = default_chunk_size
+        self._time_profile = True
 
-    def get_chunk_id(self, param: torch.nn.Parameter, access_type: AccessType):
+    def register_model_optimizer(self, model, optimizer):
         """
-        Get chunk id of a tensor (data, grad) of a Parameter.
-        return None indicates the tensor has not been allocated to any chunk.
+        注册模型和优化器，相当于静态图的预处理过程
+        执行chunk schema调取，为每个tensor找到对应的chunk和位置
         """
-        if access_type == AccessType.DATA:
-            chunk_id = self.chunk_tensor_index.tensor_id_to_chunk_id(
-                param.ps_data_id)
-        elif access_type == AccessType.GRAD:
-            chunk_id = self.chunk_tensor_index.tensor_id_to_chunk_id(
-                param.ps_grad_id)
-        else:
-            raise TypeError("get_chunk_id access type {AccessType} is invalid")
-        return chunk_id
+        self.chunk_schema_scheduler = ChunkShemaScheduler(
+            self.default_chunk_size, model, optimizer, self.chunk_list,
+            self.chunk_tensor_index)
+        self.chunk_schema_scheduler.schedule()
 
-    def prepare_device(self, target_device: torch.device, need_bytes: int):
-        """
-        让target device做分配need_bytes大小空间的准备
-        如果空间不足，需要在目标设备上释放或者移动出一些chunk。
-        """
-        start_time = time.time()
-        logging.log(
-            logging.DEBUG,
-            f'prepare_device target device {target_device} need size {need_bytes} bytes'
-        )
-        ps_manager = HybridPSManager()
-        max_mem = ps_manager.max_mem(target_device.type, target_device.index)
-        if max_mem < need_bytes:
-            logging.log(
-                logging.ERROR,
-                f"{target_device} has not enough space for {need_bytes} elements"
-            )
-            # TODO(jiaruifang)可以爆表时候再释放
-            raise RuntimeError
+        # 拷贝模型
+        for name, param in model.named_parameters():
+            # TODO(jiaruifang)设备应该是自适应的
+            self.access_data(param, torch.device('cpu:0'))
+            data_tensor = param.ps_attr.access_tensor(AccessType.DATA)
+            data_tensor.copy_(param.data)
+            self.release_data(param, PSTensorStatus.HOLD)
 
-        available_size = ps_manager.available_mem(target_device.type,
-                                                  target_device.index)
-        extra_need_bytes = need_bytes - available_size
-
-        logging.debug(
-            f'{target_device} (max size {max_mem} B) now available size {available_size} B needs {need_bytes} B'
-        )
-        global_timer.client_prepare_device_manager_elapse += time.time(
-        ) - start_time
-        # 不需要新分配
-        if extra_need_bytes <= 0:
-            global_timer.client_prepare_device_elapse += time.time(
-            ) - start_time
-            return
-
-        logging.log(
-            logging.DEBUG,
-            f'the device {target_device} has no enough free space, extra size is {extra_need_bytes} bytes'
-        )
-        # 需要在target_device上腾出空间
-        moved_list = self.chunk_list.chunk_to_move_out_for_room_making(
-            extra_need_bytes, target_device, self.chunk_tensor_index)
-
-        # TODO(jiaruifang)只考虑单卡情况，新设备只有gpu和cpu
-        new_device = torch.device(
-            'cpu') if target_device.type == 'cuda' else torch.device('cuda:0')
-
-        # 把他们移动到新设备上
-        for idx in moved_list:
-            self.chunk_move(idx, new_device)
-
-        global_timer.client_prepare_device_elapse += time.time() - start_time
+        self.chunk_tensor_index.visit_chunks(self.chunk_list)
 
     def access(self, param: torch.nn.Parameter, access_type: AccessType,
                compute_device: torch.device):
         """
-        访问一个module中的param的data或者grad，将正确的数据加载
-        找到param对应的chunk。
-        1. 如果chunk存在
-        然后决定是否移动chunk到本地设备，移动之前要给设备腾出足够空间。
-        2. 如果chunk不存在
+        访问`nn.Parameter`的data或者grad，让它们参与计算。
+        具体步骤
+        找到param的tensor对应的chunk。
+        1. 如果chunk的payload存在
+        然后决定是否移动chunk到计算设备，移动之前要给计算设备腾出足够空间。
+        2. 如果chunkd的payload不存在
         比如grad FP16，在step过程所在的chunk已经被标记为FREE，并被释放掉。
-        需要分配一个新的Chunk
+        将payload分配到计算设备的内存上，分配前需要给计算设备腾出足够空间。
+
+        异常：一个chunk中两个tensor的计算设备不一致。
         """
-        start_time = time.time()
+        if self._time_profile:
+            start_time = time.time()
 
-        sub_start_time_1 = time.time()
-        if not self.is_ps_param(param):
-            raise RuntimeError(
-                "access a param not ps_data_tensor through HybridPS API")
+        if self._time_profile:
+            chunk_list_access_param_start = time.time()
 
-        # None表示当前chunk中没有id。
-        # 如果之前tensor_id有一个chunk，但是被释放，现在又要重新分配一个chunk_id
-        chunk_id = self.get_chunk_id(param, access_type)
+        if not hasattr(param, 'ps_attr'):
+            raise RuntimeError("access a param without ps_attr")
 
-        if chunk_id is None:
-            if access_type == AccessType.DATA:
-                self.new_data(param, self.chunk_tensor_index)
-                current_device = param.ps_data_tensor.device
-                chunk_id = param.ps_data_chunk_id
-            elif access_type == AccessType.GRAD:
-                self.new_grad(param, self.chunk_tensor_index)
-                current_device = param.ps_grad_tensor.device
-                chunk_id = param.ps_grad_chunk_id
-            else:
-                raise RuntimeError
-            current_device = compute_device
+        # 准备param所在chunk的内存，如果内存不在计算设备上需要分配或者移动
+        chunk_id = self.chunk_tensor_index.get_chunk_id(param, access_type)
+        self.chunk_list.access_chunk(chunk_id, compute_device)
+        # 将param内存定位到chunk上
+        tensor_id = param.ps_attr.get_tensor_id(access_type)
+        info = self.chunk_tensor_index.get_tensor_info(tensor_id)
+        start_offset = info.start_offset
+        numel = info.numel
+        assert numel == param.ps_attr.ps_numel
+        param.ps_attr.set_tensor(
+            self.chunk_list[chunk_id].payload.narrow(0, start_offset, numel),
+            access_type)
 
-        if access_type == AccessType.DATA:
-            current_device = param.ps_data_tensor.device
-        elif access_type == AccessType.GRAD:
-            current_device = param.ps_grad_tensor.device
-        else:
-            raise RuntimeError
+        if self._time_profile:
+            global_timer.chunk_list_access_param_elapse += time.time(
+            ) - chunk_list_access_param_start
 
-        global_timer.client_access_part1_elapse += time.time(
-        ) - sub_start_time_1
+        old_status = param.ps_attr.get_status(access_type)
 
-        # logging.info(f'current_device {current_device} vs compute_device {compute_device}')
+        # 如果是从free状态转换的需要清零
+        if old_status == PSTensorStatus.FREE:
+            param.ps_attr.access_tensor(access_type).zero_()
 
-        sub_start_time_2 = time.time()
-        if compute_device.type != current_device.type:
-            #访问一个free状态的chunk，上面不会分配，此处把它释放了。
-            sub_start_time_2_sub_1 = time.time()
-            self.prepare_device(compute_device,
-                                self.chunk_list[chunk_id].get_size())
-            global_timer.client_prepare_device_elapse += time.time(
-            ) - sub_start_time_2_sub_1
+        # 访问之后应该更新Tensor的状态，chunk的状态随之改变
+        self.chunk_list.update_get_status(chunk_id, old_status,
+                                          PSTensorStatus.COMPUTE)
+        param.ps_attr.set_status(PSTensorStatus.COMPUTE, access_type)
 
-            sub_start_time_2_sub_2 = time.time()
-            self.chunk_move(chunk_id, compute_device)
-            global_timer.client_chunk_move_elapse += time.time(
-            ) - sub_start_time_2_sub_2
-
-        global_timer.client_access_part2_elapse += time.time(
-        ) - sub_start_time_1
-
-        sub_start_time_1 = time.time()
-        self.chunk_list[chunk_id].touch()
-
-        # 访问之后应该更新chunk的状态
-        if access_type == AccessType.DATA:
-            self.chunk_list[chunk_id].update_chunk_status(
-                param.data_status, PSTensorStatus.COMPUTE)
-            param.data_status = PSTensorStatus.COMPUTE
-            param.data = param.ps_data_tensor
-        elif access_type == AccessType.GRAD:
-            self.chunk_list[chunk_id].update_chunk_status(
-                param.grad_status, PSTensorStatus.COMPUTE)
-            param.grad_status = PSTensorStatus.COMPUTE
-        global_timer.client_access_part1_elapse += time.time(
-        ) - sub_start_time_1
-
-        global_timer.client_access_elapse += time.time() - start_time
+        # Note并不设置parameter对应的tensor，因为adam可能直接访问pstensor
+        if self._time_profile:
+            global_timer.client_access_elapse += time.time() - start_time
 
     def access_data(self, param: torch.nn.Parameter,
                     compute_device: torch.device):
@@ -228,50 +154,45 @@ class HybridPSClient(object):
                 access_type: AccessType,
                 reset_to_status: PSTensorStatus = PSTensorStatus.HOLD):
         """
-        这个param的data, grad不再需要放在计算设备，或者不需要hold
+        这个param的data, grad不再需要放在计算设备
+        1. 更新状态
+        首先更新tensor和chunk的状态
+        2. 释放内存
+        在释放Parameter中tensor的内存，释放PSTensor中的内存
+        看看是否有chunk的状态为free，释放chunk内存
         """
-        start_time = time.time()
+        if self._time_profile:
+            start_time = time.time()
+
         assert isinstance(reset_to_status, PSTensorStatus)
-        chunk_id = self.get_chunk_id(param, access_type)
+        assert param.ps_attr.get_status(
+            access_type
+        ) == PSTensorStatus.COMPUTE, "param to be released is not at COMPUTE status"
+
+        chunk_id = self.chunk_tensor_index.get_chunk_id(param, access_type)
         logging.debug(
             f'release {access_type} chunk_id {chunk_id} to {reset_to_status}')
-        if chunk_id is None:
-            return
 
-        # 设置data[grad]_status已经在chunk中删除这个tensor
-        # chunk_tensor_index删除tensor索引，顺便判断是否有chunk需要删除
-        # chunk list判断是否有chunk需要删除
+        # 更新tensor和chunk状态， tensor被设置为free，需要删除内存
+        # 释放tensor的内存，再释放chunk内存
+        self.chunk_list.update_get_status(
+            chunk_id, param.ps_attr.get_status(access_type), reset_to_status)
+        param.ps_attr.set_status(reset_to_status, access_type)
+
+        # 找到需要删除的chunk，先删除chunk关联的tensors
         if access_type == AccessType.DATA:
-            self.chunk_list[chunk_id].update_chunk_status(
-                param.data_status, reset_to_status)
-            param.data_status = reset_to_status
-            # 把data的内存删除，方式是将它指向一段长度为1的内存
-            if reset_to_status == PSTensorStatus.FREE:
-                logging.info(f'delete tensor {param.ps_data_id} data tensor')
-                param.ps_data_tensor = torch.zeros(1,
-                                                   dtype=param.dtype,
-                                                   device=torch.device('cpu'))
-                param.data = param.ps_data_tensor
-                self.chunk_tensor_index.delete_tensor(param.ps_data_id)
-            param.data = param.ps_data_tensor
+            param.data = torch.zeros(1,
+                                     dtype=param.dtype,
+                                     device=torch.device('cpu:0'))
         elif access_type == AccessType.GRAD:
-            self.chunk_list[chunk_id].update_chunk_status(
-                param.grad_status, reset_to_status)
-            param.grad_status = reset_to_status
-            if reset_to_status == PSTensorStatus.FREE:
-                param.ps_grad_tensor = None
-                self.chunk_tensor_index.delete_tensor(param.ps_grad_id)
             param.grad = None
 
-        #在这里立刻释放，被标记为free的chunks
-        # TODO(jiaruifang)可以在显存不足时，lazy释放
-        client_delete_free_chunks_start_time = time.time()
-        self.chunk_list.delete_free_chunks(self.chunk_tensor_index)
-        global_timer.client_delete_free_chunks_elapse += time.time(
-        ) - client_delete_free_chunks_start_time
+        for chunk_id, chunk in self.chunk_list.generate_chunk():
+            if chunk.get_status() == PSChunkStatus.FREE:
+                chunk.release_payload()
 
-        global_timer.client_release_elapse += time.time() - start_time
-        # logging.info(f'client_release_elapse {client_release_elapse}')
+        if self._time_profile:
+            global_timer.client_release_elapse += time.time() - start_time
 
     def release_data(self,
                      param: torch.nn.Parameter,
@@ -286,161 +207,18 @@ class HybridPSClient(object):
                      reset_to_status: PSTensorStatus = PSTensorStatus.HOLD):
         self.release(param, AccessType.GRAD, reset_to_status)
 
-    def new_data(self, param: torch.nn.Parameter,
-                 chunk_tensor_index: ChunkTensorIndex):
+    def reset(self):
         """
-        为param分配data的ps tensor
+        删除chunk_list和chunk_tensor_index
         """
-        chunk_id, dest = self.chunk_list.allocate(param, AccessType.DATA,
-                                                  chunk_tensor_index)
-        param.ps_data_tensor = dest.view(param.ps_shape)
-        param.ps_data_chunk_id = chunk_id
-        self.chunk_list[chunk_id].update_chunk_status(param.data_status,
-                                                      PSTensorStatus.HOLD)
-        param.data_status = PSTensorStatus.HOLD
-
-    def new_grad(self, param: torch.nn.Parameter,
-                 chunk_tensor_index: ChunkTensorIndex):
-        """
-        为param分配grad的ps tensor
-        """
-        chunk_id, dest = self.chunk_list.allocate(param, AccessType.GRAD,
-                                                  chunk_tensor_index)
-        param.ps_grad_tensor = dest.view(param.ps_shape)
-        param.ps_grad_chunk_id = chunk_id
-        self.chunk_list[chunk_id].update_chunk_status(param.grad_status,
-                                                      PSTensorStatus.HOLD)
-        param.grad_status = PSTensorStatus.HOLD
-
-    @staticmethod
-    def is_ps_param(parameter: torch.nn.Parameter):
-        return hasattr(parameter, 'ps_data_id')
-
-    def generate_id(self):
-        self.ps_id = self.ps_id + 1
-        return self.ps_id
-
-    def is_ps_data(self, parameter: torch.nn.Parameter):
-        return hasattr(parameter, 'ps_data_id')
-
-    def is_ps_grad(self, parameter: torch.nn.Parameter):
-        return hasattr(parameter, 'ps_grad_id')
-
-    def _convert_to_ps_data(self, param: torch.nn.Parameter):
-        if param.data is not None:
-            # 初始化ps_data_tensor空间，并向其拷贝数据
-            self.new_data(param, self.chunk_tensor_index)
-            one_dim_param = param.data.contiguous().view(-1)
-            param.ps_data_tensor.copy_(one_dim_param.view(param.ps_shape))
-            param.data = param.ps_data_tensor
-            chunk_id = self.chunk_tensor_index.tensor_id_to_chunk_id(
-                param.ps_data_id)
-            self.chunk_list[chunk_id].update_chunk_status(
-                param.data_status, PSTensorStatus.HOLD)
-            param.data_status = PSTensorStatus.HOLD
-
-    def _convert_to_ps_grad(self, param: torch.nn.Parameter):
-        # 初始化ps_grad_tensor空间，并向其拷贝数据
-        if param.grad is not None:
-            self.new_grad(param, self.chunk_tensor_index)
-            one_dim_grad = param.grad.contiguous().view(-1)
-            param.ps_grad_tensor.copy_(one_dim_grad.view(param.ps_shape))
-            param.grad = param.ps_grad_tensor
-            chunk_id = self.chunk_tensor_index.tensor_id_to_chunk_id(
-                param.ps_grad_id)
-            self.chunk_list[chunk_id].update_chunk_status(
-                param.grad_status, PSTensorStatus.HOLD)
-            param.grad_status = PSTensorStatus.HOLD
-        # elif param.requires_grad is True:
-        #     # 为了穿插排列grad和data，增加局部性
-        #     self.new_grad(param, self.chunk_tensor_index)
-        #     param.grad = param.ps_grad_tensor
-        #     chunk_id = self.chunk_tensor_index.tensor_id_to_chunk_id(
-        #         param.ps_grad_id)
-        #     self.chunk_list[chunk_id].update_chunk_status(
-        #         param.grad_status, PSTensorStatus.HOLD)
-        #     param.grad_status = PSTensorStatus.HOLD
-
-    def _init_ps_param(self, param: torch.nn.Parameter):
-        """
-        在Parameter里面增加shape信息，生成id
-        """
-        if self.is_ps_param(param):
-            logging.debug('param has already been a ps param')
-            return
-
-        param.ps_numel = param.numel()
-        param.ps_shape = param.shape
-        param.data_status = PSTensorStatus.UNINIT
-        param.grad_status = PSTensorStatus.UNINIT
-
-        if not self.is_ps_data(param):
-            param.ps_data_id = self.generate_id()
-            # self.param_data_dict[param.ps_data_id] = param
-            # self.chunk_tensor_index.register_tensor(param.ps_data_id, AccessType.DATA, param)
-            param.ps_data_tensor = None
-
-        if not self.is_ps_grad(param) and param.requires_grad is True:
-            param.ps_grad_id = self.generate_id()
-            # self.param_grad_dict[param.ps_grad_id] = param
-            # self.chunk_tensor_index.register_tensor(param.ps_grad_id, AccessType.GRAD, param)
-            param.ps_grad_tensor = None
-
-    def register_module(self, module: torch.nn.Module):
-        """
-        将模型每个layer的param由HybridPS管理
-        grad内存应该分配在一起
-        data内存应该分配在一起
-        """
-        if module is not None:
-            assert isinstance(module, torch.nn.Module)
-            self.module = module
-
-            # Note(jiaruifang) do we need recurse?
-            for name, param in module.named_parameters(recurse=True):
-                param.ps_name = name
-                self._init_ps_param(param)
-
-            # 如果有data和grad数据，要移动给HybridPS
-            for name, param in module.named_parameters(recurse=True):
-                self._convert_to_ps_data(param)
-
-            for name, param in module.named_parameters(recurse=True):
-                self._convert_to_ps_grad(param)
-
-    def register_param(self, src_param: torch.nn.Parameter):
-        """
-        @deprecated, used for debug
-        Register a parameter to HybridPSClient's payload.
-        Tensors (data, grad) in Param are flatten and concated in a contigous memory space.
-        """
-        self._init_ps_param(src_param)
-        self._convert_to_ps_data(src_param)
-        self._convert_to_ps_grad(src_param)
+        raise NotImplementedError
 
     def visit(self):
         for idx, chunk in self.chunk_list.generate_chunk():
             logging.info(
-                f"chunk {idx} on device {chunk.device} status {chunk.chunk_status()}"
+                f"chunk {idx} on device {chunk.device} status {chunk.get_status()}"
             )
             chunk.visit(self.chunk_tensor_index)
-
-    def chunk_move(self, chunk_id: int, device: torch.device):
-        """
-        将chunk_id的chunk移动到device上
-        需要对对应param重新赋值
-        """
-        start_time = time.time()
-        logging.debug(
-            f'chunk_move chunk id {chunk_id} from {self.chunk_list[chunk_id].device} to {device}'
-        )
-        if self.chunk_list[chunk_id].device != device:
-            logging.log(
-                logging.DEBUG,
-                f'pid {self.pid} move chunk {chunk_id} from {self.chunk_list[chunk_id].device} to {device}'
-            )
-            self.chunk_list[chunk_id].move(self.chunk_tensor_index, device)
-        global_timer.chunk_move_elapse += time.time() - start_time
 
     def release_all_data_grad(self, status):
         if self.module is not None:
@@ -448,14 +226,14 @@ class HybridPSClient(object):
                 self.release_grad(p, status)
                 self.release_data(p, status)
 
-    def allreduce(self, local_tensor):
+    def allreduce(self, param, access_type):
         """
-    必须所有process同时执行，规约后的payload存储在哪(cpu or gpu)由调度器决定
-    """
+        必须所有process同时执行，规约后的payload存储在哪(cpu or gpu)由调度器决定
+        """
         pass
 
-    def broadcast(self, local_tensor: torch.Tensor):
+    def broadcast(self, param, access_type):
         """
-    必须所有process同时执行，规约后的payload存储在哪由调度器决定
-    """
+        必须所有process同时执行，规约后的payload存储在哪由调度器决定
+        """
         pass

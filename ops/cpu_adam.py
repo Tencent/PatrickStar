@@ -18,7 +18,7 @@ from pathlib import Path
 from torch import Tensor
 from typing import List, Optional
 import logging
-from client.const import PSTensorStatus
+from client.const import PSTensorStatus, AccessType
 import utils.global_timer as global_timer
 
 
@@ -33,16 +33,17 @@ def F_adam(client, params: List[torch.nn.Parameter],
     """
     for i, param in enumerate(params):
         # HybridPS加载data
-        if param.data.device == exp_avgs[i].ps_data_tensor.device:
-            compute_device = param.data.device
-        else:
-            compute_device = torch.device('cpu:0')
+        # TODO(jiaruifang)如何判断hold状态tensor的device
+        # if param.data.device == exp_avgs[i].ps_data_tensor.device:
+        #     compute_device = param.data.device
+        # else:
+        #     compute_device = torch.device('cpu:0')
+        compute_device = torch.device('cpu:0')
 
         client.access_data(param, compute_device)
+        param_data = param.ps_attr.access_tensor(AccessType.DATA)
         client.access_grad(param, compute_device)
-
-        param_data = param.ps_data_tensor
-        param_grad = param.ps_grad_tensor
+        param_grad = param.ps_attr.access_tensor(AccessType.GRAD)
 
         exp_avg_param = exp_avgs[i]
         exp_avg_sq_param = exp_avg_sqs[i]
@@ -50,8 +51,8 @@ def F_adam(client, params: List[torch.nn.Parameter],
         client.access_data(exp_avg_param, compute_device)
         client.access_data(exp_avg_sq_param, compute_device)
 
-        exp_avg = exp_avg_param.ps_data_tensor
-        exp_avg_sq = exp_avg_sq_param.ps_data_tensor
+        exp_avg = exp_avg_param.ps_attr.access_tensor(AccessType.DATA)
+        exp_avg_sq = exp_avg_sq_param.ps_attr.access_tensor(AccessType.DATA)
 
         f_adam_compute_start_time = time.time()
 
@@ -80,14 +81,14 @@ def F_adam(client, params: List[torch.nn.Parameter],
 
         step_size = lr / bias_correction1
 
-        param.ps_data_tensor.addcdiv_(exp_avg, denom, value=-step_size)
+        param_data.addcdiv_(exp_avg, denom, value=-step_size)
 
         f_adam_compute_start_time = time.time()
         global_timer.cpu_adam_f_elapse += time.time(
         ) - f_adam_compute_start_time
 
-        client.release_data(param)
         client.release_grad(param, PSTensorStatus.FREE)
+        client.release_data(param)
         client.release_data(exp_avg_param)
         client.release_data(exp_avg_sq_param)
 
@@ -156,46 +157,48 @@ class CPUAdam(torch.optim.Optimizer):
             state_steps = []
 
             for p in group['params']:
-                # 对HybridPS，只要执行了release，param原本的grad和data是否为None没有意义，需要用ps_grad_tensor和ps_data_tensor代替
-                if p.ps_grad_tensor is not None:
+                # 对HybridPS，只要执行了release，param原本的grad和data是否为None没有意义，需要用ps的tensor代替
+                # TODO(jiaruifang)需要access_grad之后才能调用access_tensor
+                # if p.ps_attr.access_tensor(AccessType.GRAD) is not None:
+                if p.requires_grad:
                     params_with_grad.append(p)
-                    if p.ps_grad_tensor.is_sparse:
-                        raise RuntimeError(
-                            'Adam does not support sparse gradients, please consider SparseAdam instead'
-                        )
+                    # if p.ps_attr.access_tensor(AccessType.GRAD).is_sparse:
+                    #     raise RuntimeError(
+                    #         'Adam does not support sparse gradients, please consider SparseAdam instead'
+                    #     )
                     # grads.append(p.grad)
 
                     state = self.state[p]
-                    # Lazy state initialization
-                    if len(state) == 0:
-                        state['step'] = 0
-                        # 被HybridPS管理
-                        # Exponential moving average of gradient values
-                        state['exp_avg'] = torch.nn.Parameter(
-                            torch.zeros(
-                                p.ps_shape,
-                                dtype=p.dtype,
-                                # memory_format=torch.preserve_format,
-                                device=torch.device('cpu')),
-                            requires_grad=False)
-                        # Exponential moving average of squared gradient values
-                        state['exp_avg_sq'] = torch.nn.Parameter(
-                            torch.zeros(
-                                p.ps_shape,
-                                dtype=p.dtype,
-                                # memory_format=torch.preserve_format,
-                                device=torch.device('cpu')),
-                            requires_grad=False)
+                    # # Lazy state initialization
+                    # if len(state) == 0:
+                    #     state['step'] = 0
+                    #     # 被HybridPS管理
+                    #     # Exponential moving average of gradient values
+                    #     state['exp_avg'] = torch.nn.Parameter(
+                    #         torch.zeros(
+                    #             p.ps_shape,
+                    #             dtype=p.dtype,
+                    #             # memory_format=torch.preserve_format,
+                    #             device=torch.device('cpu')),
+                    #         requires_grad=False)
+                    #     # Exponential moving average of squared gradient values
+                    #     state['exp_avg_sq'] = torch.nn.Parameter(
+                    #         torch.zeros(
+                    #             p.ps_shape,
+                    #             dtype=p.dtype,
+                    #             # memory_format=torch.preserve_format,
+                    #             device=torch.device('cpu')),
+                    #         requires_grad=False)
 
-                        state['exp_avg'].ps_name = f'{p.ps_name}.exp_avg'
-                        state['exp_avg_sq'].ps_name = f'{p.ps_name}.exp_avg_sq'
-                        self.client.register_param(state['exp_avg'])
-                        self.client.register_param(state['exp_avg_sq'])
+                    #     state['exp_avg'].ps_name = f'{p.ps_name}.exp_avg'
+                    #     state['exp_avg_sq'].ps_name = f'{p.ps_name}.exp_avg_sq'
+                    #     self.client.register_param(state['exp_avg'])
+                    #     self.client.register_param(state['exp_avg_sq'])
 
-                        if group['amsgrad']:
-                            # Maintains max of all exp. moving avg. of sq. grad. values
-                            state['max_exp_avg_sq'] = torch.zeros_like(
-                                p, memory_format=torch.preserve_format)
+                    #     if group['amsgrad']:
+                    #         # Maintains max of all exp. moving avg. of sq. grad. values
+                    #         state['max_exp_avg_sq'] = torch.zeros_like(
+                    #             p, memory_format=torch.preserve_format)
 
                     exp_avgs.append(state['exp_avg'])
                     exp_avg_sqs.append(state['exp_avg_sq'])
@@ -208,7 +211,7 @@ class CPUAdam(torch.optim.Optimizer):
                     # record the step after step update
                     state_steps.append(state['step'])
                 else:
-                    raise RuntimeError
+                    raise RuntimeError(f"tensor id {p.ps_attr.grad_id()}")
 
             beta1, beta2 = group['betas']
             F_adam(

@@ -21,7 +21,7 @@ client_delete_free_chunks_elapse = 0.
 memory_delete_elapse = 0.
 delete_free_chunks_part1 = 0.
 client_access_part2_elapse = 0.
-client_access_part1_elapse = 0.
+chunk_list_access_param_elapse = 0.
 chunk_move_elapse = 0.
 
 cpu_gpu_move_elapse = 0.

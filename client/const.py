@@ -20,10 +20,14 @@ class AccessType(Enum):
 
 
 class PSChunkStatus(Enum):
-    # Chunk只在cpu上
+    # Chunk内存被分配出来，在计算中
     COMPUTE = 1
+    # Chunk内存被分配出来，持有有意义的数据
     HOLD = 2
+    # Chunk内存被分配出来，持有无意义数据
     FREE = 3
+    # Chunk内存没有被分配出来
+    RELEASED = 4
 
 
 class PSTensorStatus(Enum):

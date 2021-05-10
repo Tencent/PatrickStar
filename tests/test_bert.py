@@ -22,12 +22,11 @@ from checkpoint import checkpoint
 import logging
 import torch
 from utils import see_memory_usage
-from fp16 import FP16_Module
-from fp16 import FP16_Optimizer
+from fp16 import FP16_Module, FP16_Optimizer
 import time
 import argparse
 
-from client import HybridPSClient, PSTensorStatus
+from client import HybridPSClient, PSTensorStatus, AccessType
 from manager import HybridPSManager
 from client import setup_hybrid_ps_hooks
 # from utils.zero_hook import HookedModule
@@ -56,7 +55,8 @@ parser.add_argument('--use_ps',
 
 def check_grads_status(model, status):
     for name, param in model.named_parameters(recurse=True):
-        assert param.grad_status == status, f"{name} {param.ps_shape} {param.grad_status}"
+        param_status = param.ps_attr.get_status(AccessType.GRAD)
+        assert param_status == status, f"{name} {param.ps_attr.ps_shape} {param_status} vs {status}"
 
 
 def show_params(model, is_ps, step):
@@ -80,7 +80,7 @@ def time_profiler():
     logging.info(f'client access elapse')
     logging.info(f'* client_access_elapse {client_access_elapse} ')
     logging.info(
-        f'* client_access_part1_elapse {global_timer.client_access_part1_elapse}'
+        f'* chunk_list_access_param_elapse {global_timer.chunk_list_access_param_elapse}'
     )
     logging.info(
         f'* client_access_part2_elapse(prepare_device + chunk_move) {global_timer.client_access_part2_elapse}'
@@ -203,7 +203,7 @@ def test_bert_model(is_ckp: bool = False,
 
     if is_ps:
         manager = HybridPSManager()
-        manager.init([1024 * 1024 * 1024 * 8] * 1,
+        manager.init([1024 * 1024 * 1024 * 2] * 1,
                      [1024 * 1024 * 1024 * 4 * 4])
         # chunk 512 MB, good for CPU-GPU bandwidth
         client = HybridPSClient(gpu_index=0,
@@ -211,7 +211,6 @@ def test_bert_model(is_ckp: bool = False,
 
         optimizer = CPUAdam(client, model.parameters(), lr=0.001)
         # optimizer = TorchAdam(model.parameters(), lr=0.001)
-        client.register_module(model)
         setup_hybrid_ps_hooks(model, client)
 
         # hook_module = HookedModule(model, client)
@@ -222,6 +221,9 @@ def test_bert_model(is_ckp: bool = False,
 
     if is_fp16:
         optimizer = FP16_Optimizer(optimizer, client=client if is_ps else None)
+
+    if is_ps:
+        client.register_model_optimizer(model, optimizer)
 
     start_time = time.time()
     for n, batch in enumerate(data_loader):
@@ -241,14 +243,14 @@ def test_bert_model(is_ckp: bool = False,
             # 状态更新
             if is_ps:
                 client.release_all_data_grad(PSTensorStatus.HOLD)
-                check_grads_status(model, PSTensorStatus.HOLD)
+                # check_grads_status(model, PSTensorStatus.HOLD)
         else:
             optimizer.zero_grad()
             loss.backward()
             # is_ps, 此时grad应该都是HOLD状态
             if is_ps:
                 client.release_all_data_grad(PSTensorStatus.HOLD)
-                check_grads_status(model, PSTensorStatus.HOLD)
+                # check_grads_status(model, PSTensorStatus.HOLD)
 
         if is_fp16:
             # pass
@@ -300,7 +302,7 @@ if __name__ == "__main__":
     # hidden_dim 1024, batch 16, seqence_leng 1024, ckp True.
     # PS is able to run the training, while PyTorch failed.
 
-    plan = "A"
+    plan = "B"
     if plan == "A":
         # HybridPS可以，PyTorch不可以
         # use_ckp: True, use_fp16: True, adam default on CPU, not interleave data and grad
@@ -314,8 +316,11 @@ if __name__ == "__main__":
         # client = HybridPSClient(gpu_index=0,
         #                         default_chunk_size=1024 * 1024 * 32)
 
+        # 2287.22 Gflops B = 4
+        # 3047.70 Gflops B = 8
+        # 3047.70 Gflops B = 16
         hidden_dim = 3072  #2048
-        batch_size = 2
+        batch_size = 16
         sequence_length = 1024
         num_layer = 60
     elif plan == 'B':
@@ -336,6 +341,14 @@ if __name__ == "__main__":
         batch_size = 8
         sequence_length = 1024
         num_layer = 12
+    elif plan == 'D':
+        # use ckp
+        # HybridPS and PyTorch is OK
+        # 没有prepare device开销
+        hidden_dim = 4096  #2048
+        batch_size = 2
+        sequence_length = 1536
+        num_layer = 120
 
     if not res_check:
         # 训练参数，可以自己定义

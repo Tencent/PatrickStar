@@ -217,16 +217,22 @@ class FP16_Optimizer(object):
                             .format(param.size()))
                         fp16_params_this_group.append(param)
 
-                        if self.client is None:
-                            master_param = param.detach().clone().float()
-                            master_param.requires_grad = True
-                        else:
-                            master_param = nn.Parameter(
-                                param.detach().clone().float(),
-                                requires_grad=True)
-                            # NOTE(jiaruifang) manage master with hybridPS
-                            master_param.ps_name = f'{param.ps_name}.master'
-                            self.client.register_param(master_param)
+                        master_param = param.detach().clone().float()
+                        master_param.requires_grad = True
+
+                        # TODO(jiaruifang)原本逻辑在optimizer动态构建中把fp16 master model param给初始化出来
+                        # 但是采用chunk layout之后，需要一个预处理过程把master model初始化出来
+
+                        # if self.client is None:
+                        #     master_param = param.detach().clone().float()
+                        #     master_param.requires_grad = True
+                        # else:
+                        #     # chunk schema scheduler就不要传入client
+                        #     master_param = nn.Parameter(
+                        #         param.detach().clone().float(),
+                        #         requires_grad=True)
+                        #     # NOTE(jiaruifang) manage master with hybridPS
+                        #     self.client.register_param(master_param)
 
                         # Copythe model parallel flag.
                         # TODO(jiaruifang) remove the following line to pass unitest
@@ -236,11 +242,13 @@ class FP16_Optimizer(object):
                         # Reset existing state dict key to the new master param.
                         # We still need to recast per-param state tensors, if any, to FP32.
                         if param in self.optimizer.state:
+                            # self.maybe_print(f'pop optimizer state dict')
                             self.optimizer.state[
                                 master_param] = self.optimizer.state.pop(param)
                     elif param.type(
                     ) == 'torch.cuda.FloatTensor' or param.type(
                     ) == 'torch.FloatTensor':
+                        raise NotImplementedError
                         self.maybe_print(
                             "FP16_Optimizer received torch.cuda.FloatTensor with {}"
                             .format(param.size()))

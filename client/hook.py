@@ -13,7 +13,7 @@
 
 import torch
 import logging
-from .const import PSTensorStatus
+from .const import PSTensorStatus, AccessType
 
 
 ############# HOOKS ####################
@@ -119,6 +119,7 @@ def pre_sub_module_forward_function(sub_module, client, name):
                 f'FWD pre {sub_module.id} {sub_module.__class__.__name__}')
     for sub_name, param in sub_module.named_parameters(recurse=False):
         client.access_data(param, torch.device('cuda:0'))
+        param.data = param.ps_attr.access_tensor(AccessType.DATA)
 
 
 # release submodule
@@ -129,19 +130,23 @@ def post_sub_module_forward_function(sub_module, client, name):
     for sub_name, param in sub_module.named_parameters(recurse=False):
         logging.debug(f'post FWD {sub_module.id}.{name} hold data')
         client.release_data(param)
+        param.data = torch.zeros(1,
+                                 dtype=param.dtype,
+                                 device=torch.device('cpu:0'))
 
 
 def pre_sub_module_backward_function(sub_module, client, name):
     for sub_name, param in sub_module.named_parameters(recurse=False):
         logging.log(logging.DEBUG, f'BWD pre {name}.{sub_name}')
         logging.debug(
-            f'pre BWD param {name}.{sub_name} {param.ps_data_tensor.size()} access data and grad'
+            f'pre BWD param {name}.{sub_name} {param.ps_attr.access_tensor(AccessType.DATA)} access data and grad'
         )
         # param_name = f'{name}.{sub_name}'
         # param.ps_name = param_name
         client.access_data(param, torch.device('cuda:0'))
         client.access_grad(param, torch.device('cuda:0'))
-        param.grad = param.ps_grad_tensor
+        param.data = param.ps_attr.access_tensor(AccessType.DATA)
+        param.grad = param.ps_attr.access_tensor(AccessType.GRAD)
 
 
 # release param of submodule
@@ -154,8 +159,8 @@ def post_sub_module_backward_function(sub_module, client, name):
         # param_name = f'{name}.{sub_name}'
         # assert param.ps_name == param_name, 'BWD name {param_name} inconsist with FWD name {param.ps_name}'
         logging.debug(f'post BWD {name}.{sub_name} free data and hold grad')
-        client.release_data(param, PSTensorStatus.HOLD)
         client.release_grad(param, PSTensorStatus.HOLD)
+        client.release_data(param, PSTensorStatus.HOLD)
 
 
 def _register_hooks_recursively(module, client, count=[0], name=""):

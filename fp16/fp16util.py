@@ -38,6 +38,7 @@ from client import HybridPSClient
 # from megatron import mpu
 import logging
 from client import PSTensorStatus
+from client import AccessType
 
 
 class tofp16(nn.Module):
@@ -210,8 +211,8 @@ def model_grads_to_master_grads(model_params,
                 client.access_grad(model_p, torch.device('cuda:0'))
                 client.access_grad(master_p, torch.device('cuda:0'))
 
-                model_grad = [model_p.ps_grad_tensor]
-                master_grad = [master_p.ps_grad_tensor]
+                model_grad = [model_p.ps_attr.access_tensor(AccessType.GRAD)]
+                master_grad = [master_p.ps_attr.access_tensor(AccessType.GRAD)]
                 _overflow_buf = torch.cuda.IntTensor([0])
                 # Fused overflow check + scale for a list of contiguous tensors
                 # TODO(jiaruifang) I found it copys model_grad to master_grad.
@@ -220,6 +221,7 @@ def model_grads_to_master_grads(model_params,
 
                 client.release_grad(model_p, PSTensorStatus.FREE)
                 client.release_grad(master_p, PSTensorStatus.HOLD)
+                logging.info('model_grads_to_master_grads with client')
 
 
 def master_params_to_model_params(model_params,
@@ -255,6 +257,7 @@ def master_params_to_model_params(model_params,
                 # FP16 param data被标记成hold
                 client.release_data(model, PSTensorStatus.HOLD)
                 client.release_data(master, PSTensorStatus.HOLD)
+                logging.info('master_params_to_model_params')
 
 
 # Backward compatibility fixes

@@ -41,7 +41,7 @@ def show_optim(optimizer):
 def test_simple_model(is_ps: bool = False, is_fp16: bool = False):
     logging.info(f'test a simple model with hybrid ps {is_ps} FP16 {is_fp16}')
 
-    hidden_dim = 40
+    hidden_dim = 4
     batch_size = 4
     device = torch.device('cuda:0')
 
@@ -63,10 +63,8 @@ def test_simple_model(is_ps: bool = False, is_fp16: bool = False):
 
     loss_res = []
     if is_ps:
-        client = HybridPSClient(gpu_index=0, default_chunk_size=2000)
+        client = HybridPSClient(gpu_index=0, default_chunk_size=20)
         optimizer = CPUAdam(client, model.parameters(), lr=0.001)
-        client.register_module(model)
-        setup_hybrid_ps_hooks(model, client)
     else:
         # optimizer = optim.Adam(model.parameters(), lr=0.001)
         optimizer = TorchAdam(model.parameters(), lr=0.001)
@@ -76,6 +74,10 @@ def test_simple_model(is_ps: bool = False, is_fp16: bool = False):
             assert (client is not None)
         optimizer = FP16_Optimizer(optimizer, client=client if is_ps else None)
         # optimizer = configure_fp16_optimizer(optimizer)
+
+    if is_ps:
+        client.register_model_optimizer(model, optimizer)
+        setup_hybrid_ps_hooks(model, client)
 
     start_time = time.time()
     for n, batch in enumerate(data_loader):
@@ -129,7 +131,8 @@ if __name__ == "__main__":
 
     test_cpu_adam = False
     if test_cpu_adam:
-        manager.init([40 * 4] * 1, [280 * 4])
+        # manager.init([40 * 4] * 1, [280 * 4])
+        manager.init([180 * 4] * 1, [280 * 4])
         loss_ref_list = test_simple_model(False)
 
         torch.manual_seed(0)

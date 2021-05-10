@@ -14,7 +14,6 @@
 from .chunk_data import Chunk
 from .const import PSChunkStatus, AccessType, PSTensorStatus
 from .helper import getsizeof
-from .chunk_tensor_index import ChunkTensorIndex
 from manager import HybridPSManager
 
 import sys
@@ -25,128 +24,154 @@ from typing import List
 import gc
 import psutil
 import utils.global_timer as global_timer
+from utils.memory_monitor import see_memory_usage
 import time
-
-
-def see_memory_usage(message, force=False):
-    if not force:
-        return
-    if torch.distributed.is_initialized(
-    ) and not torch.distributed.get_rank() == 0:
-        return
-
-    # python doesn't do real-time garbage collection so do it explicitly to get the correct RAM reports
-    gc.collect()
-
-    def get_tensors():
-        for obj in gc.get_objects():
-            try:
-                if torch.is_tensor(obj) or (hasattr(obj, 'data')
-                                            and torch.is_tensor(obj.data)):
-                    tensor = obj
-                else:
-                    continue
-                if tensor.is_cuda:
-                    yield tensor
-            except Exception as e:
-                pass
-                # print('A trivial exception occured: {}'.format(e))
-
-    print('now let us see memory')
-    for tensor in get_tensors():
-        print(f'tensor shape {tensor.shape} {tensor.data_ptr()}')
-    scale = 1  #1024 * 1024
-    scale_name = "B"  #"MB"
-    # Print message except when distributed but not rank 0
-    logging.info(message)
-    logging.info(
-        f"MA {round(torch.cuda.memory_allocated() / scale,2 )} {scale_name} \
-        Max_MA {round(torch.cuda.max_memory_allocated() / scale,2)} {scale_name} \
-        CA {round(torch.cuda.memory_reserved() / scale,2)} {scale_name} \
-        Max_CA {round(torch.cuda.max_memory_reserved() / scale)} {scale_name} "
-    )
-
-    vm_stats = psutil.virtual_memory()
-    used_GB = round(((vm_stats.total - vm_stats.available) / (1024**3)), 2)
-    logging.info(
-        f'CPU Virtual Memory:  used = {used_GB} GB, percent = {vm_stats.percent}%'
-    )
-
-    # get the peak memory to report correct data, so reset the counter for the next call
-    if hasattr(torch.cuda, "reset_peak_memory_stats"):  # pytorch 1.4+
-        torch.cuda.reset_peak_memory_stats()
 
 
 class ChunkList(object):
     """
-    添加, O(1)
-    删除, O(1)
-    查找，遍历，查找有足够空闲碎片的chunk O(M, N), M tensor数量，N chunk数量
-    索引，dict实现复杂度O(1)
+    管理一个chunk链表
     """
-    def __init__(self, default_chunk_size: int):
-        self.chunk_id_to_chunk_dict = {}
-        self.default_chunk_size = default_chunk_size
-        self.id = 0
+    def __init__(self):
+        self.chunk_id_to_chunk_dict: dict[int, Chunk] = {}
+        self._time_profile = True
 
-    def new_chunk(self, chunk_size: int, data_type: torch.dtype) -> int:
+    def __getitem__(self, chunk_id: int):
         """
-        新建一个chunk，返回它的id
-        只有没有find_available_chunk失败才调用new_chunk
+        索引一个chunk
         """
-        chunk_id = self.id
-        self.chunk_id_to_chunk_dict[chunk_id] = Chunk(capacity=chunk_size,
-                                                      data_type=data_type,
-                                                      chunk_id=chunk_id)
-        self.id = self.id + 1
+        return self.chunk_id_to_chunk_dict.get(chunk_id)
+
+    def size(self) -> int:
+        """
+        返回chunk的个数
+        """
+        return len(self.chunk_id_to_chunk_dict)
+
+    def access_chunk(self, chunk_id: int, compute_device: torch.device):
+        """
+        如果发现chunk的内存被释放，需要重新分配在compute_device上
+        """
+        chunk = self.chunk_id_to_chunk_dict[chunk_id]
+        chunk_status = chunk.get_status()
+
+        # 如果chunk的内存释放了，需要将它分配出来
+        if chunk_status == PSChunkStatus.RELEASED:
+            # 直接在compute device上腾出空间
+            logging.info(
+                f'access_chunk chunk {chunk_id}, need to allocate {chunk.get_size()} B memory on {compute_device}'
+            )
+            sub_start_time = time.time()
+            self.prepare_device(compute_device, chunk.get_size())
+            global_timer.client_prepare_device_elapse += time.time(
+            ) - sub_start_time
+
+            chunk.allocate_payload(compute_device)
+            return
+        # 如果chunk目前所在的设备和计算设备不一致，
+        # 光chunk的内存move是不够的，还需要param都move
+        # 只有chunk状态是hold的会被移动，而hold状态的chunk中所有tensor都是hold或者free。
+        # 这种tensor的内存都悬空
+        elif chunk.get_device().type != compute_device.type:
+            logging.info(
+                f'access_chunk chunk {chunk_id} prepare {chunk.get_size()} B memory on {compute_device}'
+            )
+            self.prepare_device(compute_device, chunk.get_size())
+            chunk.move(compute_device)
+            assert chunk.get_device(
+            ).type == compute_device.type, f"chunk device {chunk.get_device()} compute device {compute_device}"
+            return
+        else:
+            logging.info(
+                f'access_chunk chunk {chunk_id} directly on {compute_device}')
+
+    def prepare_device(self, target_device: torch.device, need_bytes: int):
+        """
+        让target device做分配need_bytes大小空间的准备
+        如果空间不足，需要在目标设备上释放或者移动出一些chunk。
+        """
+        if self._time_profile:
+            start_time = time.time()
+        logging.log(
+            logging.DEBUG,
+            f'prepare_device target device {target_device} need size {need_bytes} bytes'
+        )
+        ps_manager = HybridPSManager()
+        max_mem = ps_manager.max_mem(target_device.type, target_device.index)
+        if max_mem < need_bytes:
+            logging.log(
+                logging.ERROR,
+                f"{target_device} has not enough space for {need_bytes} elements"
+            )
+            # TODO(jiaruifang)可以爆表时候再释放
+            raise RuntimeError(
+                f"{target_device} has not enough space for {need_bytes} Bytes")
+
+        available_size = ps_manager.available_mem(target_device.type,
+                                                  target_device.index)
+        extra_need_bytes = need_bytes - available_size
+
         logging.debug(
+            f'{target_device} (max size {max_mem} B) now available size {available_size} B needs {need_bytes} B'
+        )
+        # 不需要新分配
+        if extra_need_bytes <= 0:
+            return
+
+        logging.log(
+            logging.DEBUG,
+            f'the device {target_device} has no enough free space, extra size is {extra_need_bytes} bytes'
+        )
+        # 需要在target_device上腾出空间
+        moved_list = self._chunk_to_move_out_for_room_making(
+            extra_need_bytes, target_device)
+
+        # TODO(jiaruifang)只考虑单卡情况，新设备只有gpu和cpu
+        new_device = torch.device(
+            'cpu') if target_device.type == 'cuda' else torch.device('cuda:0')
+
+        # 把他们移动到新设备上
+        for idx in moved_list:
+            self.chunk_move(idx, new_device)
+
+        if self._time_profile:
+            global_timer.client_prepare_device_elapse = time.time(
+            ) - start_time
+
+    def chunk_move(self, chunk_id: int, device: torch.device):
+        """
+        将chunk_id的chunk移动到device上
+        """
+        if self._time_profile:
+            start_time = time.time()
+
+        chunk = self.chunk_id_to_chunk_dict[chunk_id]
+        if chunk.get_device() != device:
+            logging.log(
+                logging.DEBUG,
+                f'move chunk {chunk_id} from {chunk.get_device()} to {device}')
+            chunk.move(device)
+
+        if self._time_profile:
+            global_timer.chunk_move_elapse += time.time() - start_time
+
+    def new_chunk(self, chunk_id: int, chunk_size: int, data_type: torch.dtype,
+                  compute_device: torch.device) -> int:
+        """
+        新建一个chunk，并未初始化内存
+        """
+        if chunk_id in self.chunk_id_to_chunk_dict:
+            raise RuntimeError(
+                f"chunk list new chunk with chunk_id {chunk_id} already existed"
+            )
+        self.chunk_id_to_chunk_dict[chunk_id] = Chunk(
+            capacity=chunk_size,
+            data_type=data_type,
+            chunk_id=chunk_id,
+            compute_device=compute_device)
+        logging.info(
             f'allocate with new chunk chunk_id {chunk_id} size {chunk_size} data_type {data_type}'
         )
-        return chunk_id, self.chunk_id_to_chunk_dict[chunk_id]
-
-    def delete_chunk(self, chunk_id: int, chunk_tensor_index: dict):
-        """
-        删除chunk_id对应的chunk，
-        TODO(jiaruifang)还要删除chunk内的tensors
-        """
-        manager = HybridPSManager()
-        if chunk_id in self.chunk_id_to_chunk_dict:
-            start_time = time.time()
-            chunk = self.chunk_id_to_chunk_dict[chunk_id]
-            logging.debug(
-                f'delete chunk id {chunk_id} size {chunk.capacity} type {chunk.data_type}'
-            )
-            manager.delete(chunk.device.type, chunk.device.index,
-                           chunk.capacity * getsizeof(chunk.data_type))
-            # 删除tensor的内存
-            for info in chunk_tensor_index.generate_tensor_info_in_order(
-                    chunk_id):
-                param = info.param
-                access_type = info.access_type
-                if access_type == AccessType.DATA:
-                    assert param.data_status == PSTensorStatus.FREE
-                    param.ps_data_tensor = torch.zeros(
-                        1, dtype=param.dtype, device=torch.device('cpu'))
-                    param.data = param.ps_data_tensor
-                    chunk.free_cnt -= 1
-                elif access_type == AccessType.GRAD:
-                    assert param.grad_status == PSTensorStatus.FREE
-                    param.ps_grad_tensor = None
-                    param.grad = None
-                    chunk.free_cnt -= 1
-
-            # 删除chunk的内存
-            logging.debug(
-                f'delete chunk id {chunk_id} payload of numel {self.chunk_id_to_chunk_dict[chunk_id].payload.numel()} on device {self.chunk_id_to_chunk_dict[chunk_id].device}'
-            )
-
-            # see_memory_usage('berfor delete payload', True)
-            del self.chunk_id_to_chunk_dict[chunk_id]
-
-            # see_memory_usage('after delete payload', True)
-            # TODO(jiaruifang) delete tensor时候已经把chunk删除了
-            chunk_tensor_index.delete_chunk_id(chunk_id)
-            global_timer.memory_delete_elapse = time.time() - start_time
 
     def least_used_chunk(self) -> int:
         """"
@@ -162,111 +187,92 @@ class ChunkList(object):
         logging.debug(f'least_used_chunk found chunk id {pos}')
         return pos
 
-    def allocate(self, param: torch.nn.Parameter, access_type: AccessType,
-                 chunk_tensor_index: ChunkTensorIndex) -> (int, torch.Tensor):
-        """
-        找到chunk_list中可以分配size大小数据的chunk，如果没有则新分配一个
-        返回chunk_id
-        """
-        for chunk_id, chunk in self.chunk_id_to_chunk_dict.items():
-            if param.dtype != chunk.data_type:
-                continue
-            ret = chunk.try_allocate(param, access_type, chunk_tensor_index)
-            if ret is not None:
-                logging.debug(f'allocate with old chunk {chunk_id}')
-                return chunk_id, ret
-
-        # need allocate a new chunk
-        numel = param.ps_shape.numel()
-        chunk_id, chunk = self.new_chunk(max(numel, self.default_chunk_size),
-                                         param.dtype)
-        ret = chunk.try_allocate(param, access_type, chunk_tensor_index)
-        assert ret is not None
-        logging.debug(
-            f'no existing chunk can hold the tensor numel {numel}, new chunk {chunk_id}'
-        )
-        return chunk_id, ret
-
-    def __getitem__(self, chunk_id: int):
-        """
-        索引一个chunk
-        """
-        return self.chunk_id_to_chunk_dict.get(chunk_id)
-
-    def size(self) -> int:
-        """
-        返回chunk的个数
-        """
-        return len(self.chunk_id_to_chunk_dict)
-
     def generate_chunk(self) -> (int, Chunk):
         for chunk_id, chunk in self.chunk_id_to_chunk_dict.items():
             yield chunk_id, chunk
 
-    def delete_free_chunks(self, chunk_tensor_index: ChunkTensorIndex):
-        free_chunk_id_list = []
-        freed_bytes = 0
+    def _delete_chunk(self, chunk_id: int):
+        """
+        删除chunk_id对应的chunk的payload
+        Note(调用时chunk管理的tensor必须都是free的)
+        """
+        start_time = time.time()
+        manager = HybridPSManager()
+        chunk: Chunk = self.chunk_id_to_chunk_dict[chunk_id]
+        logging.debug(
+            f'delete chunk id {chunk_id} size {chunk.capacity} type {chunk.data_type}'
+        )
+        manager.delete(chunk.get_device().type,
+                       chunk.get_device().index, chunk.get_size())
+        chunk.release_payload()
+        global_timer.memory_delete_elapse = time.time() - start_time
 
+    def delete_free_chunks(self):
+        """
+        试图删除当前不被使用的chunk，即chunk内的tensor都是free状态的chunk
+        """
         # 释放cpu和gpu上所有free chunk，统计目标设备上腾出的空间
-        # NOTE(jiaruifang)这个循环很慢
         for chunk_id, chunk in self.chunk_id_to_chunk_dict.items():
-            # assert chunk.chunk_status() == chunk_tensor_index.chunk_status(chunk_id), f"{chunk.chunk_status()} vs {chunk_tensor_index.chunk_status(chunk_id)}"
-            if chunk.chunk_status() == PSChunkStatus.FREE:
-                free_chunk_id_list.append(chunk_id)
-                freed_bytes += chunk.get_size()
+            # assert chunk.get_status() == chunk_tensor_index.get_status(chunk_id), f"{chunk.get_status()} vs {chunk_tensor_index.get_status(chunk_id)}"
+            if chunk.get_status() == PSChunkStatus.FREE:
+                self._delete_chunk(chunk_id)
 
-        # global_timer.delete_free_chunks_part1 += time.time() - start_time
-        # 释放free chunks
-        for idx in free_chunk_id_list:
-            logging.debug(f'delete free chunk idx {idx}')
-            self.delete_chunk(idx, chunk_tensor_index)
-
-    def chunk_to_move_out_for_room_making(self, size_in_bytes: int,
-                                          target_device: torch.device,
-                                          chunk_tensor_index: ChunkTensorIndex
-                                          ) -> List:
+    def _chunk_to_move_out_for_room_making(
+            self,
+            size_in_bytes: int,
+            target_device: torch.device,
+    ) -> List:
         """
         为target device腾出size大小，找出需要移动出哪些chunk
         先释放cpu，gpu的所有free
         返回一个chunk_id list
         """
         # 则需要将hold状态的chunk移出
-        start_time = time.time()
+        if self._time_profile:
+            start_time = time.time()
         still_need_bytes = size_in_bytes
         moved_bytes = 0
         moved_list = []
+
+        # TODO(jiaruifang)目前贪心地找到应该移动出去的chunk
+        # 不是最优策略？应该按照访问顺序。
         for chunk_id, chunk in self.chunk_id_to_chunk_dict.items():
-            if chunk.device == target_device and chunk.chunk_status(
+            if chunk.get_device() is not None and chunk.get_device(
+            ).type == target_device.type and chunk.get_status(
             ) == PSChunkStatus.HOLD:
-                moved_bytes += chunk.capacity * getsizeof(chunk.data_type)
+                moved_bytes += chunk.get_size()
                 moved_list.append(chunk_id)
 
                 if moved_bytes >= still_need_bytes:
                     break
 
             # TODO(jiaruifang)此时不应该有free状态的chunk，因为free在release时候完成了
-            assert chunk.chunk_status() != PSChunkStatus.FREE
+            assert chunk.get_status() != PSChunkStatus.FREE
 
         # 无法腾出足够空间，抛出异常
         if moved_bytes < still_need_bytes:
-            for chunk_id, chunk in self.generate_chunk():
-                chunk.visit(chunk_tensor_index)
-            logging.error(
+            self.visit()
+            raise RuntimeError(
                 f"still need {still_need_bytes} bytes, but device {target_device} has not enough space for item."
             )
-            raise RuntimeError
 
-        global_timer.chunk_to_move_out_for_room_making_elapse = time.time(
-        ) - start_time
+        if self._time_profile:
+            global_timer.chunk_to_move_out_for_room_making_elapse = time.time(
+            ) - start_time
+
         return moved_list
 
-    def show_stat(self):
-        cuda_chunk_list = []
-        cpu_chunk_list = []
-        for chunk_id, chunk in self.generate_chunk():
-            if chunk.device.type == 'cuda':
-                cuda_chunk_list.append(chunk.capacity)
-            elif chunk.device.type == 'cpu':
-                cpu_chunk_list.append(chunk.capacity)
-        logging.debug(f'cuda_chunk, {cuda_chunk_list}')
-        logging.debug(f'cpu_chunk, {cpu_chunk_list}')
+    def update_get_status(self, chunk_id, old_status, new_status):
+        self.chunk_id_to_chunk_dict[chunk_id].update_get_status(
+            old_status, new_status)
+
+    def visit(self):
+        ps_manager = HybridPSManager()
+        ps_manager.visit()
+        logging.info('* chunk list visit results:')
+        logging.info('** chunk_id, device, size(B), ' 'type, device, status')
+        for chunk_id, chunk in self.chunk_id_to_chunk_dict.items():
+            logging.info(
+                f'** {chunk_id}, {chunk.get_device()}, {chunk.get_size()}, '
+                f'{chunk.data_type}, {chunk.get_device()}, {chunk.get_status()}'
+            )

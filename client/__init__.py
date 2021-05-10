@@ -17,3 +17,5 @@ from .chunk_data import Chunk
 from .const import AccessType, PSChunkStatus, PSTensorStatus
 from .chunk_tensor_index import ChunkTensorIndex
 from .hook import setup_hybrid_ps_hooks
+from .chunk_schema_scheduler import ChunkShemaScheduler
+from .parameter import register_param, PSParameter
