@@ -169,6 +169,8 @@ class CPUAdam(torch.optim.Optimizer):
                     # grads.append(p.grad)
 
                     state = self.state[p]
+                    # 以下逻辑在ChunkSchemaScheduler中
+                    assert len(state) != 0
                     # # Lazy state initialization
                     # if len(state) == 0:
                     #     state['step'] = 0

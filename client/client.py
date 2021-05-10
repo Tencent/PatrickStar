@@ -76,6 +76,15 @@ class HybridPSClient(object):
             data_tensor.copy_(param.data)
             self.release_data(param, PSTensorStatus.HOLD)
 
+        # FP16 master model copy
+        if hasattr(optimizer, 'fp32_from_fp16_groups'):
+            for param_group in optimizer.fp32_from_fp16_groups:
+                for master_param in param_group:
+                    self.access_data(master_param, torch.device('cpu:0'))
+                    master_param.ps_attr.access_tensor(AccessType.DATA).copy_(
+                        master_param.data)
+                    self.release_data(master_param, PSTensorStatus.HOLD)
+
         self.chunk_tensor_index.visit_chunks(self.chunk_list)
 
     def access(self, param: torch.nn.Parameter, access_type: AccessType,

@@ -95,7 +95,7 @@ class ChunkShemaScheduler(object):
             # 收尾
             if acc_cnt > 0:
                 self.chunk_list.new_chunk(chunk_id, acc_cnt, data_type,
-                                          torch.device('cpu:0'))
+                                          torch.device('cuda:0'))
                 chunk_id += 1
                 acc_cnt = 0
 

@@ -58,7 +58,7 @@ class ChunkList(object):
         # 如果chunk的内存释放了，需要将它分配出来
         if chunk_status == PSChunkStatus.RELEASED:
             # 直接在compute device上腾出空间
-            logging.info(
+            logging.debug(
                 f'access_chunk chunk {chunk_id}, need to allocate {chunk.get_size()} B memory on {compute_device}'
             )
             sub_start_time = time.time()
@@ -73,7 +73,7 @@ class ChunkList(object):
         # 只有chunk状态是hold的会被移动，而hold状态的chunk中所有tensor都是hold或者free。
         # 这种tensor的内存都悬空
         elif chunk.get_device().type != compute_device.type:
-            logging.info(
+            logging.debug(
                 f'access_chunk chunk {chunk_id} prepare {chunk.get_size()} B memory on {compute_device}'
             )
             self.prepare_device(compute_device, chunk.get_size())
@@ -82,7 +82,7 @@ class ChunkList(object):
             ).type == compute_device.type, f"chunk device {chunk.get_device()} compute device {compute_device}"
             return
         else:
-            logging.info(
+            logging.debug(
                 f'access_chunk chunk {chunk_id} directly on {compute_device}')
 
     def prepare_device(self, target_device: torch.device, need_bytes: int):

@@ -115,6 +115,7 @@ def test_simple_model(is_ps: bool = False, is_fp16: bool = False):
 
     elapse = time.time() - start_time
     logging.info(f"is_ps {is_ps} elapse {elapse}")
+    logging.info("======================" * 4)
     return loss_res
 
 

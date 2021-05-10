@@ -362,6 +362,7 @@ class FP16_Optimizer(object):
 
     def _downscale_master(self):
         if self.loss_scale != 1.0:
+            raise NotImplementedError
             for group in self.optimizer.param_groups:
                 grads = [p.grad for p in group['params'] if p.grad is not None]
                 _overflow_buf = torch.cuda.IntTensor([0])
@@ -381,6 +382,7 @@ class FP16_Optimizer(object):
             Returns -1 if the most recently computed fp16 gradients overflowed (that is, if ``self.overflow`` is ``True``).
         """
         if not self.overflow:
+            raise NotImplementedError
             fp32_params = []
             for param_group in self.optimizer.param_groups:
                 for param in param_group['params']:

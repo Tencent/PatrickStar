@@ -221,7 +221,6 @@ def model_grads_to_master_grads(model_params,
 
                 client.release_grad(model_p, PSTensorStatus.FREE)
                 client.release_grad(master_p, PSTensorStatus.HOLD)
-                logging.info('model_grads_to_master_grads with client')
 
 
 def master_params_to_model_params(model_params,
@@ -251,13 +250,14 @@ def master_params_to_model_params(model_params,
                 client.access_data(model, torch.device('cuda:0'))
                 client.access_data(master, torch.device('cuda:0'))
 
-            model.data.copy_(master.data)
+                model.ps_attr.access_tensor(AccessType.DATA).copy_(
+                    master.ps_attr.access_tensor(AccessType.DATA))
 
-            if client is not None:
                 # FP16 param data被标记成hold
                 client.release_data(model, PSTensorStatus.HOLD)
                 client.release_data(master, PSTensorStatus.HOLD)
-                logging.info('master_params_to_model_params')
+            else:
+                model.data.copy_(master)
 
 
 # Backward compatibility fixes
