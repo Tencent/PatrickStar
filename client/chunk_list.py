@@ -50,8 +50,16 @@ class ChunkList(object):
 
     def access_chunk(self, chunk_id: int, compute_device: torch.device):
         """
-        如果发现chunk的内存被释放，需要重新分配在compute_device上
+        访问chunk_id，将chunk的内存准备到compute device上。
+        如果chunk在其他设备上，需要移动。
+            TODO(jiaruifang)异步移动，在第一次迭代统计chunk的声明周期。
+            调用本函数时，先执行对chunk_id的同步操作。
+            再发起对下一个chunk_id的预取。
+        如果chunk的内存被释放，需要分配。
         """
+        if self._time_profile:
+            start_time = time.time()
+
         chunk = self.chunk_id_to_chunk_dict[chunk_id]
         chunk_status = chunk.get_status()
 
@@ -61,12 +69,11 @@ class ChunkList(object):
             logging.debug(
                 f'access_chunk chunk {chunk_id}, need to allocate {chunk.get_size()} B memory on {compute_device}'
             )
-            sub_start_time = time.time()
             self.prepare_device(compute_device, chunk.get_size())
-            global_timer.client_prepare_device_elapse += time.time(
-            ) - sub_start_time
 
             chunk.allocate_payload(compute_device)
+            if self._time_profile:
+                global_timer.access_chunk_elapse += time.time() - start_time
             return
         # 如果chunk目前所在的设备和计算设备不一致，
         # 光chunk的内存move是不够的，还需要param都move
@@ -80,6 +87,8 @@ class ChunkList(object):
             chunk.move(compute_device)
             assert chunk.get_device(
             ).type == compute_device.type, f"chunk device {chunk.get_device()} compute device {compute_device}"
+            if self._time_profile:
+                global_timer.access_chunk_elapse += time.time() - start_time
             return
         else:
             logging.debug(
@@ -92,6 +101,7 @@ class ChunkList(object):
         """
         if self._time_profile:
             start_time = time.time()
+
         logging.log(
             logging.DEBUG,
             f'prepare_device target device {target_device} need size {need_bytes} bytes'
@@ -135,7 +145,7 @@ class ChunkList(object):
             self.chunk_move(idx, new_device)
 
         if self._time_profile:
-            global_timer.client_prepare_device_elapse = time.time(
+            global_timer.client_prepare_device_elapse += time.time(
             ) - start_time
 
     def chunk_move(self, chunk_id: int, device: torch.device):
@@ -196,7 +206,8 @@ class ChunkList(object):
         删除chunk_id对应的chunk的payload
         Note(调用时chunk管理的tensor必须都是free的)
         """
-        start_time = time.time()
+        if self._time_profile:
+            start_time = time.time()
         manager = HybridPSManager()
         chunk: Chunk = self.chunk_id_to_chunk_dict[chunk_id]
         logging.debug(
@@ -205,7 +216,8 @@ class ChunkList(object):
         manager.delete(chunk.get_device().type,
                        chunk.get_device().index, chunk.get_size())
         chunk.release_payload()
-        global_timer.memory_delete_elapse = time.time() - start_time
+        if self._time_profile:
+            global_timer.memory_delete_elapse = time.time() - start_time
 
     def delete_free_chunks(self):
         """
@@ -257,9 +269,9 @@ class ChunkList(object):
             )
 
         if self._time_profile:
-            global_timer.chunk_to_move_out_for_room_making_elapse = time.time(
+            global_timer.chunk_to_move_out_for_room_making_elapse += time.time(
             ) - start_time
-
+        logging.info(f'chunk to move out {moved_list}')
         return moved_list
 
     def update_get_status(self, chunk_id, old_status, new_status):

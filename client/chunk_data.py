@@ -64,16 +64,21 @@ class Chunk(object):
         为chunk分配payload，存储在compute_device上。
         NOTE()调用前保证compute有足够大的空间
         """
+        if self._time_profile:
+            start_time = time.time()
         self.payload = torch.zeros(self.capacity,
                                    dtype=self.data_type,
                                    device=device)
         self.ps_manager.add(device.type, device.index, self.get_size())
 
         self.touch()
+        if self._time_profile:
+            global_timer.memory_allocate_elapse = time.time() - start_time
 
     def release_payload(self):
         """
-        此时所有tensor都是free
+        释放负载
+        确保此时所有tensor都是free
         """
         if self._time_profile:
             start_time = time.time()
@@ -140,65 +145,17 @@ class Chunk(object):
         self.touch()
 
         if self._time_profile:
-            global_timer.cpu_gpu_move_elapse += time.time() - start_time
-            global_timer.cpu_gpu_move_times += 1
-            global_timer.cpu_gpu_move_data_amount += self.get_size()
+            if target_device.type == 'cpu':
+                global_timer.cpu_gpu_move_elapse += time.time() - start_time
+                global_timer.cpu_gpu_move_times += 1
+                global_timer.cpu_gpu_move_data_amount += self.get_size()
+            elif target_device.type == 'cuda':
+                global_timer.gpu_cpu_move_elapse += time.time() - start_time
+                global_timer.gpu_cpu_move_times += 1
+                global_timer.gpu_cpu_move_data_amount += self.get_size()
 
     def get_device(self):
         if self.payload is not None:
             return self.payload.device
         else:
             return None
-
-    # def try_allocate(self, param: torch.nn.Parameter, access_type: AccessType,
-    #                  chunk_tensor_index: ChunkTensorIndex) -> torch.Tensor:
-    #     """
-    #     在chunk的连续payload中找到一个满足param ps_data_size大小的碎片
-    #     采用贪心算法，因为考虑NN参数的分配一般是连续分配，连续释放，没必要设计更复杂的算法
-    #     """
-    #     numel = param.ps_shape.numel()
-
-    #     prev_end = 0
-    #     for info in chunk_tensor_index.generate_tensor_info_in_order(
-    #             self.chunk_id):
-    #         status = info.status()
-    #         if status == PSTensorStatus.FREE:
-    #             continue
-    #         start = info.start_offset
-    #         gap = start - prev_end
-    #         if gap >= numel:
-    #             dest = self.allocate(prev_end, numel, param, access_type,
-    #                                  chunk_tensor_index)
-    #             return dest
-    #         prev_end = start + info.numel
-
-    #     if self.capacity - prev_end >= numel:
-    #         dest = self.allocate(prev_end, numel, param, access_type,
-    #                              chunk_tensor_index)
-    #         return dest
-    #     return None
-
-    # def allocate(self, offset: int, numel: int, param: torch.nn.Parameter,
-    #              access_type: AccessType,
-    #              chunk_tensor_index: ChunkTensorIndex) -> torch.Tensor:
-    #     """
-    #     分配大小为numel的tensor
-    #     @params
-    #     offset: 在chunk中的偏移
-    #     numel: 分配tensor的元素个数
-    #     access_type: DATA或者GRAD
-    #     """
-    #     dest = self.payload.narrow(0, offset, numel)
-    #     # 复用内存要清零
-    #     dest.zero_()
-    #     # 在param中注册信息
-    #     if access_type == AccessType.DATA:
-    #         tensor_id = param.ps_data_id
-    #     elif access_type == AccessType.GRAD:
-    #         tensor_id = param.ps_grad_id
-    #     if not hasattr(param, 'ps_name'):
-    #         param.ps_name = None
-    #     chunk_tensor_index.add_tensor(self.chunk_id, tensor_id, offset, numel,
-    #                                   param, access_type)
-    #     self.touch()
-    #     return dest

@@ -104,9 +104,6 @@ class HybridPSClient(object):
         if self._time_profile:
             start_time = time.time()
 
-        if self._time_profile:
-            chunk_list_access_param_start = time.time()
-
         if not hasattr(param, 'ps_attr'):
             raise RuntimeError("access a param without ps_attr")
 
@@ -122,10 +119,6 @@ class HybridPSClient(object):
         param.ps_attr.set_tensor(
             self.chunk_list[chunk_id].payload.narrow(0, start_offset, numel),
             access_type)
-
-        if self._time_profile:
-            global_timer.chunk_list_access_param_elapse += time.time(
-            ) - chunk_list_access_param_start
 
         old_status = param.ps_attr.get_status(access_type)
 
