@@ -127,8 +127,8 @@ class HybridPSClient(object):
             param.ps_attr.access_tensor(access_type).zero_()
 
         # 访问之后应该更新Tensor的状态，chunk的状态随之改变
-        self.chunk_list.update_get_status(chunk_id, old_status,
-                                          PSTensorStatus.COMPUTE)
+        self.chunk_list.update_status(chunk_id, old_status,
+                                      PSTensorStatus.COMPUTE)
         param.ps_attr.set_status(PSTensorStatus.COMPUTE, access_type)
 
         # Note并不设置parameter对应的tensor，因为adam可能直接访问pstensor
@@ -177,8 +177,9 @@ class HybridPSClient(object):
 
         # 更新tensor和chunk状态， tensor被设置为free，需要删除内存
         # 释放tensor的内存，再释放chunk内存
-        self.chunk_list.update_get_status(
-            chunk_id, param.ps_attr.get_status(access_type), reset_to_status)
+        self.chunk_list.update_status(chunk_id,
+                                      param.ps_attr.get_status(access_type),
+                                      reset_to_status)
         param.ps_attr.set_status(reset_to_status, access_type)
 
         # 找到需要删除的chunk，先删除chunk关联的tensors

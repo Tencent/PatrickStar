@@ -271,11 +271,11 @@ class ChunkList(object):
         if self._time_profile:
             global_timer.chunk_to_move_out_for_room_making_elapse += time.time(
             ) - start_time
-        logging.info(f'chunk to move out {moved_list}')
+        logging.debug(f'chunk to move out {moved_list}')
         return moved_list
 
-    def update_get_status(self, chunk_id, old_status, new_status):
-        self.chunk_id_to_chunk_dict[chunk_id].update_get_status(
+    def update_status(self, chunk_id, old_status, new_status):
+        self.chunk_id_to_chunk_dict[chunk_id].update_status(
             old_status, new_status)
 
     def visit(self):
@@ -288,3 +288,4 @@ class ChunkList(object):
                 f'** {chunk_id}, {chunk.get_device()}, {chunk.get_size()}, '
                 f'{chunk.data_type}, {chunk.get_device()}, {chunk.get_status()}'
             )
+            chunk.show_life_cycle()
