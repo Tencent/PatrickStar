@@ -71,7 +71,8 @@ class Chunk(object):
             start_time = time.time()
         self.payload = torch.zeros(self.capacity,
                                    dtype=self.data_type,
-                                   device=device)
+                                   device=device,
+                                   pin_memory=True)
         self.ps_manager.add(device.type, device.index, self.get_size())
 
         self.touch()
@@ -139,7 +140,7 @@ class Chunk(object):
     def get_timestamp(self):
         return self.timestamp
 
-    def move(self, target_device: torch.device):
+    def move(self, target_device: torch.device, copy_stream, is_async=True):
         """
         将这个chunk移动到target_device上。前提条件，target_device已经腾出足够的空间。
         """
@@ -157,7 +158,42 @@ class Chunk(object):
         #TODO(jiaruifang)异步
         self.ps_manager.delete(self.get_device().type,
                                self.get_device().index, self.get_size())
-        self.payload = self.payload.to(target_device)
+        if is_async:
+            if target_device.type == 'cpu':
+                pinned_payload_cpu = torch.ones(self.payload.shape,
+                                                dtype=self.payload.dtype,
+                                                device='cpu:0',
+                                                pin_memory=True)
+                torch.cuda.synchronize()
+                copy_stream.synchronize()
+                with torch.cuda.stream(copy_stream):
+                    pinned_payload_cpu.copy_(self.payload, non_blocking=True)
+                copy_stream.synchronize()
+                torch.cuda.synchronize()
+                self.payload = pinned_payload_cpu
+                # assert self.payload.pin_memory is True
+            elif target_device.type == 'cuda':
+                old_payload = self.payload
+                self.payload = torch.ones(self.payload.shape,
+                                          dtype=self.payload.dtype,
+                                          device='cuda:0')
+                copy_stream.synchronize()
+                # NOTE(jiaruifang) it is necessary
+                torch.cuda.synchronize()
+                copy_stream.synchronize()
+                with torch.cuda.stream(copy_stream):
+                    self.payload.copy_(old_payload, non_blocking=True)
+                copy_stream.synchronize()
+                torch.cuda.synchronize()
+
+                assert (
+                    torch.sum(old_payload.to(target_device) - self.payload)
+                ) < 1e-3, f'old payload sum {torch.sum(old_payload)}, new payload sum {torch.sum(self.payload)}'
+            else:
+                raise RuntimeError
+        else:
+            self.payload = self.payload.to(target_device)
+
         self.ps_manager.add(target_device.type, target_device.index,
                             self.get_size())
         self.touch()

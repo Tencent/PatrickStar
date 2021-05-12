@@ -35,6 +35,7 @@ class ChunkList(object):
     def __init__(self):
         self.chunk_id_to_chunk_dict: dict[int, Chunk] = {}
         self._time_profile = True
+        self.copy_stream = torch.cuda.Stream()
 
     def __getitem__(self, chunk_id: int):
         """
@@ -84,7 +85,7 @@ class ChunkList(object):
                 f'access_chunk chunk {chunk_id} prepare {chunk.get_size()} B memory on {compute_device}'
             )
             self.prepare_device(compute_device, chunk.get_size())
-            chunk.move(compute_device)
+            chunk.move(compute_device, self.copy_stream)
             assert chunk.get_device(
             ).type == compute_device.type, f"chunk device {chunk.get_device()} compute device {compute_device}"
             if self._time_profile:
@@ -160,7 +161,7 @@ class ChunkList(object):
             logging.log(
                 logging.DEBUG,
                 f'move chunk {chunk_id} from {chunk.get_device()} to {device}')
-            chunk.move(device)
+            chunk.move(device, self.copy_stream)
 
         if self._time_profile:
             global_timer.chunk_move_elapse += time.time() - start_time

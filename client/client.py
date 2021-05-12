@@ -116,6 +116,7 @@ class HybridPSClient(object):
         start_offset = info.start_offset
         numel = info.numel
         assert numel == param.ps_attr.ps_numel
+
         param.ps_attr.set_tensor(
             self.chunk_list[chunk_id].payload.narrow(0, start_offset, numel),
             access_type)

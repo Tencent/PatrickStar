@@ -68,50 +68,6 @@ def show_params(model, is_ps, step):
             param.shape, param.requires_grad)
 
 
-def time_profiler():
-    client_prepare_device_elapse = global_timer.client_prepare_device_elapse
-    client_access_elapse = global_timer.client_access_elapse
-    client_release_elapse = global_timer.client_release_elapse
-    cpu_adam_elapse = global_timer.cpu_adam_elapse
-    cpu_adam_f_elapse = global_timer.cpu_adam_f_elapse
-
-    client_delete_free_chunks_elapse = global_timer.client_delete_free_chunks_elapse
-
-    logging.info(f'client access elapse')
-    logging.info(f'* client_access_elapse {client_access_elapse} ')
-    logging.info(
-        f'* chunk_list_access_param_elapse {global_timer.chunk_list_access_param_elapse}'
-    )
-    logging.info(
-        f'* client_access_part2_elapse(prepare_device + chunk_move) {global_timer.client_access_part2_elapse}'
-    )
-    logging.info(
-        f'** client_prepare_device_elapse {client_prepare_device_elapse}')
-    logging.info(
-        f'*** client_prepare_device_manager_elapse {global_timer.client_prepare_device_manager_elapse}'
-    )
-    logging.info(
-        f'*** chunk_to_move_out_for_room_making_elapse {global_timer.chunk_to_move_out_for_room_making_elapse}'
-    )
-
-    logging.info(
-        f'** client_chunk_move_elapse {global_timer.client_chunk_move_elapse}')
-    logging.info(f'** chunk_move_elapse {global_timer.chunk_move_elapse}')
-    logging.info(
-        f'*** cpu_gpu_move_elapse {global_timer.cpu_gpu_move_elapse} sec, times {global_timer.cpu_gpu_move_times}, amount {global_timer.cpu_gpu_move_data_amount/1e6} MB, Bandwidth {global_timer.cpu_gpu_move_data_amount/1e6/(global_timer.cpu_gpu_move_elapse + 1e-10)} MB/s'
-    )
-
-    logging.info(
-        f'* cpu_adam_elapse {cpu_adam_elapse} cpu_adam_f_elapse {cpu_adam_f_elapse}'
-    )
-
-    logging.info(f'client release elapse')
-    logging.info(f'* client_release_elapse {client_release_elapse}')
-    logging.info(
-        f'* client_delete_free_chunks_elapse {client_delete_free_chunks_elapse} memory_delete_elapse {global_timer.memory_delete_elapse} delete_free_chunks_part1 {global_timer.delete_free_chunks_part1}'
-    )
-
-
 def get_model_size(model):
     numel = 0
     for name, param in model.named_parameters(recurse=True):
@@ -203,11 +159,10 @@ def test_bert_model(is_ckp: bool = False,
 
     if is_ps:
         manager = HybridPSManager()
-        manager.init([1024 * 1024 * 1024 * 2] * 1,
-                     [1024 * 1024 * 1024 * 4 * 4])
+        manager.init([1024 * 1024 * 512] * 2, [1024 * 1024 * 1024 * 4 * 4])
         # chunk 512 MB, good for CPU-GPU bandwidth
         client = HybridPSClient(gpu_index=0,
-                                default_chunk_size=1024 * 1024 * 128)
+                                default_chunk_size=1024 * 1024 * 8)
 
         optimizer = CPUAdam(client, model.parameters(), lr=0.001)
         # optimizer = TorchAdam(model.parameters(), lr=0.001)
@@ -232,7 +187,7 @@ def test_bert_model(is_ckp: bool = False,
         loss = output.loss
         logits = output.logits
         # if torch.distributed.get_rank() == 0:
-        print(f"LOSS: {loss.item()}")
+        logging.info(f"LOSS of step {n}: {loss.item()}")
         loss_res.append(loss.item())
 
         if is_fp16:
@@ -280,8 +235,8 @@ def test_bert_model(is_ckp: bool = False,
     logging.info(
         f"ckp {is_ckp} fp16 {is_fp16} ps {is_ps}  elapse {elapse/(stop_step+1)} sec/iter total elapse {elapse} sec"
     )
-    logging.info(f"{total_macs/1e9/ (elapse/(stop_step+1))} GFlops")
-    time_profiler()
+    logging.info(f"{total_macs/1e9/(elapse/(stop_step+1))} GFlops")
+    global_timer.time_profiler()
     return loss_res
 
 
@@ -302,23 +257,12 @@ if __name__ == "__main__":
     # hidden_dim 1024, batch 16, seqence_leng 1024, ckp True.
     # PS is able to run the training, while PyTorch failed.
 
-    plan = "B"
+    plan = "A"
+    if res_check:
+        plan = "B"
     if plan == "A":
         # HybridPS可以，PyTorch不可以
         # use_ckp: True, use_fp16: True, adam default on CPU, not interleave data and grad
-        # manager.init([1024 * 1024 * 1024 * 2] * 1, [1024 * 1024 * 1024 * 4 * 4])
-        # client = HybridPSClient(gpu_index=0,
-        #                         default_chunk_size=1024 * 1024 * 128)
-        # 949.234980710749 GFlops (RTX 2060 peak 6.451 TFLOPS)
-
-        # use_ckp: True, use_fp16: True, adam default on GPU, interleave data and grad
-        # 39.95365033945278 GFlop, 30% nvidia-smi (adam on GPU)
-        # client = HybridPSClient(gpu_index=0,
-        #                         default_chunk_size=1024 * 1024 * 32)
-
-        # 2287.22 Gflops B = 4
-        # 3047.70 Gflops B = 8
-        # 3047.70 Gflops B = 16
         hidden_dim = 3072  #2048
         batch_size = 16
         sequence_length = 1024
@@ -342,9 +286,6 @@ if __name__ == "__main__":
         sequence_length = 1024
         num_layer = 12
     elif plan == 'D':
-        # use ckp
-        # HybridPS and PyTorch is OK
-        # 没有prepare device开销
         hidden_dim = 4096  #2048
         batch_size = 2
         sequence_length = 1536
@@ -353,14 +294,14 @@ if __name__ == "__main__":
     if not res_check:
         # 训练参数，可以自己定义
         torch.manual_seed(0)
-        test_bert_model(is_ckp=use_ckp,
-                        is_fp16=use_fp16,
-                        is_ps=use_ps,
-                        batch_size=batch_size,
-                        hidden_dim=hidden_dim,
-                        sequence_length=sequence_length,
-                        num_layer=num_layer)
-
+        loss_list = test_bert_model(is_ckp=use_ckp,
+                                    is_fp16=use_fp16,
+                                    is_ps=use_ps,
+                                    batch_size=batch_size,
+                                    hidden_dim=hidden_dim,
+                                    sequence_length=sequence_length,
+                                    num_layer=num_layer)
+        print(loss_list)
     # calculate_mem_need(hidden_dim = hidden_dim, batch_size = batch_size, is_fp16 = use_fp16)
 
     if res_check:

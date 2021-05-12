@@ -24,6 +24,7 @@ from ops import CPUAdam, TorchAdam
 from client import HybridPSClient, setup_hybrid_ps_hooks, PSTensorStatus
 from manager import HybridPSManager
 from utils import see_memory_usage
+import utils.global_timer as global_timer
 
 from fp16 import configure_fp16_optimizer
 from fp16 import FP16_Module
@@ -82,6 +83,9 @@ def test_simple_model(is_ps: bool = False, is_fp16: bool = False):
     start_time = time.time()
     for n, batch in enumerate(data_loader):
 
+        if n == 0:
+            global_timer.record_chunk_lifecycle = True
+
         loss = model(batch[0], batch[1])
 
         # if torch.distributed.get_rank() == 0:
@@ -111,11 +115,18 @@ def test_simple_model(is_ps: bool = False, is_fp16: bool = False):
         if is_ps:
             client.release_all_data_grad(PSTensorStatus.HOLD)
 
+        if n == 0:
+            global_timer.record_chunk_lifecycle = False
+
         if n == 5: break
 
     elapse = time.time() - start_time
     logging.info(f"is_ps {is_ps} elapse {elapse}")
     logging.info("======================" * 4)
+    if is_ps:
+        client.chunk_list.visit()
+        global_timer.time_profiler()
+
     return loss_res
 
 

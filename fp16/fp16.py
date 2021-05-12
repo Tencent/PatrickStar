@@ -201,6 +201,7 @@ class FP16_Optimizer(object):
         self.fp32_from_fp16_groups = []
         self.fp32_from_fp32_groups = []
         # TODO(jiaruifang) master_param被HybridPS接管
+        # 需要和fp16的chunk分割方式一样
         for i, param_group in enumerate(self.optimizer.param_groups):
             self.maybe_print(
                 "FP16_Optimizer processing param group {}:".format(i))
@@ -220,29 +221,12 @@ class FP16_Optimizer(object):
                         master_param = param.detach().clone().float()
                         master_param.requires_grad = True
 
-                        # TODO(jiaruifang)原本逻辑在optimizer动态构建中把fp16 master model param给初始化出来
-                        # 但是采用chunk layout之后，需要一个预处理过程把master model初始化出来
-
-                        # if self.client is None:
-                        #     master_param = param.detach().clone().float()
-                        #     master_param.requires_grad = True
-                        # else:
-                        #     # chunk schema scheduler就不要传入client
-                        #     master_param = nn.Parameter(
-                        #         param.detach().clone().float(),
-                        #         requires_grad=True)
-                        #     # NOTE(jiaruifang) manage master with hybridPS
-                        #     self.client.register_param(master_param)
-
-                        # Copythe model parallel flag.
-                        # TODO(jiaruifang) remove the following line to pass unitest
-                        # master_param.model_parallel = param.model_parallel
                         param_group['params'][i] = master_param
                         fp32_from_fp16_params_this_group.append(master_param)
                         # Reset existing state dict key to the new master param.
                         # We still need to recast per-param state tensors, if any, to FP32.
                         if param in self.optimizer.state:
-                            # self.maybe_print(f'pop optimizer state dict')
+                            self.maybe_print(f'pop optimizer state dict')
                             self.optimizer.state[
                                 master_param] = self.optimizer.state.pop(param)
                     elif param.type(
