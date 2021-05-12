@@ -91,6 +91,9 @@ class TestAccess(unittest.TestCase):
 
     def _async_copy_inline_bandwidth_benchmark(self, size, src_device,
                                                target_device):
+        """
+        使用inline方式拷贝，non_blocking=True只有当src_device在pin_memory CPU上时有效
+        """
         src_buff = torch.ones(size, dtype=torch.float, device=src_device)
         if src_device.type == 'cpu':
             src_buff = src_buff.pin_memory()
@@ -117,19 +120,19 @@ class TestAccess(unittest.TestCase):
                 1024 * 1024, 1024 * 1024 * 8, 1024 * 1024 * 13,
                 1024 * 1024 * 32
         ]:
-            self._copy_bandwidth_benchmark(size, torch.device('cpu'),
-                                           torch.device('cuda'))
-            self._copy_bandwidth_benchmark(size, torch.device('cuda'),
-                                           torch.device('cpu'))
-            self._copy_bandwidth_benchmark(size, torch.device('cuda'),
-                                           torch.device('cuda'))
-            self._copy_bandwidth_benchmark(size, torch.device('cpu'),
-                                           torch.device('cpu'))
+            # self._copy_bandwidth_benchmark(size, torch.device('cpu'),
+            #                                torch.device('cuda'))
+            # self._copy_bandwidth_benchmark(size, torch.device('cuda'),
+            #                                torch.device('cpu'))
+            # self._copy_bandwidth_benchmark(size, torch.device('cuda'),
+            #                                torch.device('cuda'))
+            # self._copy_bandwidth_benchmark(size, torch.device('cpu'),
+            #                                torch.device('cpu'))
 
-            self._inline_copy_bandwidth_benchmark(size, torch.device('cpu'),
-                                                  torch.device('cuda'))
-            self._inline_copy_bandwidth_benchmark(size, torch.device('cuda'),
-                                                  torch.device('cpu'))
+            # self._inline_copy_bandwidth_benchmark(size, torch.device('cpu'),
+            #                                       torch.device('cuda'))
+            # self._inline_copy_bandwidth_benchmark(size, torch.device('cuda'),
+            #                                       torch.device('cpu'))
 
             self._pinned_copy_bandwidth_benchmark(size, torch.device('cpu'),
                                                   torch.device('cuda'))

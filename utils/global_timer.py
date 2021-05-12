@@ -15,6 +15,7 @@
 import logging
 record_chunk_lifecycle = False
 lifecycle_moment = 0
+lifecycle_overall_moment = 0
 
 # param访问
 client_access_elapse = 0.

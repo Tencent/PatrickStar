@@ -73,6 +73,7 @@ def get_model_size(model):
     for name, param in model.named_parameters(recurse=True):
         numel += param.numel()
     print(f"model size {numel/1e9} B")
+    return numel
 
 
 def calculate_model_size(config):
@@ -134,9 +135,8 @@ def test_bert_model(is_ckp: bool = False,
                          max_position_embeddings=sequence_length,
                          num_hidden_layers=num_layer)
     model = BertForSequenceClassification(cfg)
-    get_model_size(model)
+    model_numel = get_model_size(model)
     calculate_model_size(cfg)
-
     total_macs = calucate_MAC(cfg, batch_size, sequence_length)
 
     model.cuda()
@@ -159,7 +159,7 @@ def test_bert_model(is_ckp: bool = False,
 
     if is_ps:
         manager = HybridPSManager()
-        manager.init([1024 * 1024 * 512] * 2, [1024 * 1024 * 1024 * 4 * 4])
+        manager.init([1024 * 1024 * 512 * 4] * 2, [1024 * 1024 * 1024 * 4 * 4])
         # chunk 512 MB, good for CPU-GPU bandwidth
         client = HybridPSClient(gpu_index=0,
                                 default_chunk_size=1024 * 1024 * 8)
@@ -177,6 +177,10 @@ def test_bert_model(is_ckp: bool = False,
 
     start_time = time.time()
     for n, batch in enumerate(data_loader):
+        global_timer.lifecycle_moment = 0
+        if n == 0:
+            global_timer.record_chunk_lifecycle = True
+
         step_start_time = time.time()
         output = model(input_ids=batch[0], labels=batch[1])
         loss = output.loss
@@ -212,18 +216,13 @@ def test_bert_model(is_ckp: bool = False,
             f"ckp {is_ckp} fp16 {is_fp16} ps {is_ps}  after step {n}",
             force=True)
 
-        # if is_ps:
-        #     # TODO(jiaruifang) debug info
-        #     logging.info(f'show chunk schema in step {n}')
-        #     for info in client.chunk_tensor_index.generate_all_tensor_info():
-        #         info.showme()
-
-        # if is_ps:
-        #     client.release_all_data_grad(PSTensorStatus.HOLD)
         setp_elapse = time.time() - step_start_time
         logging.info(
             f"ckp {is_ckp} fp16 {is_fp16} ps {is_ps}  elapse {setp_elapse}, sec/iter, {total_macs/1e9/setp_elapse} GFlops"
         )
+        if n == 0:
+            global_timer.record_chunk_lifecycle = False
+            global_timer.lifecycle_overall_moment = global_timer.lifecycle_moment
         if n == stop_step: break
 
     elapse = time.time() - start_time
@@ -231,7 +230,10 @@ def test_bert_model(is_ckp: bool = False,
         f"ckp {is_ckp} fp16 {is_fp16} ps {is_ps}  elapse {elapse/(stop_step+1)} sec/iter total elapse {elapse} sec"
     )
     logging.info(f"{total_macs/1e9/(elapse/(stop_step+1))} GFlops")
-    global_timer.time_profiler()
+    logging.info(f"model numel {model_numel/1e9} B")
+    if is_ps:
+        global_timer.time_profiler()
+
     return loss_res
 
 
@@ -252,7 +254,7 @@ if __name__ == "__main__":
     # hidden_dim 1024, batch 16, seqence_leng 1024, ckp True.
     # PS is able to run the training, while PyTorch failed.
 
-    plan = "B"
+    plan = "A"
     if res_check:
         plan = "B"
     if plan == "A":

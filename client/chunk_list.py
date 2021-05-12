@@ -27,6 +27,8 @@ import utils.global_timer as global_timer
 from utils.memory_monitor import see_memory_usage
 import time
 
+from queue import PriorityQueue
+
 
 class ChunkList(object):
     """
@@ -180,7 +182,7 @@ class ChunkList(object):
             data_type=data_type,
             chunk_id=chunk_id,
             compute_device=compute_device)
-        logging.info(
+        logging.debug(
             f'allocate with new chunk chunk_id {chunk_id} size {chunk_size} data_type {data_type}'
         )
 
@@ -202,23 +204,13 @@ class ChunkList(object):
         for chunk_id, chunk in self.chunk_id_to_chunk_dict.items():
             yield chunk_id, chunk
 
-    def _delete_chunk(self, chunk_id: int):
+    def _delete_chunk(self, chunk: Chunk):
         """
+        @depracated没有被调用
         删除chunk_id对应的chunk的payload
         Note(调用时chunk管理的tensor必须都是free的)
         """
-        if self._time_profile:
-            start_time = time.time()
-        manager = HybridPSManager()
-        chunk: Chunk = self.chunk_id_to_chunk_dict[chunk_id]
-        logging.debug(
-            f'delete chunk id {chunk_id} size {chunk.capacity} type {chunk.data_type}'
-        )
-        manager.delete(chunk.get_device().type,
-                       chunk.get_device().index, chunk.get_size())
         chunk.release_payload()
-        if self._time_profile:
-            global_timer.memory_delete_elapse = time.time() - start_time
 
     def delete_free_chunks(self):
         """
@@ -226,9 +218,15 @@ class ChunkList(object):
         """
         # 释放cpu和gpu上所有free chunk，统计目标设备上腾出的空间
         for chunk_id, chunk in self.chunk_id_to_chunk_dict.items():
-            # assert chunk.get_status() == chunk_tensor_index.get_status(chunk_id), f"{chunk.get_status()} vs {chunk_tensor_index.get_status(chunk_id)}"
             if chunk.get_status() == PSChunkStatus.FREE:
-                self._delete_chunk(chunk_id)
+                self._delete_chunk(chunk)
+
+    def get_next_access_moment(self, chunk: Chunk, current_moment):
+        for mom in chunk.access_moments:
+            if mom >= current_moment:
+                return mom
+
+        return global_timer.lifecycle_overall_moment + chunk.access_moments[0]
 
     def _chunk_to_move_out_for_room_making(
             self,
@@ -249,18 +247,38 @@ class ChunkList(object):
 
         # TODO(jiaruifang)目前贪心地找到应该移动出去的chunk
         # 不是最优策略？应该按照访问顺序。
-        for chunk_id, chunk in self.chunk_id_to_chunk_dict.items():
-            if chunk.get_device() is not None and chunk.get_device(
-            ).type == target_device.type and chunk.get_status(
-            ) == PSChunkStatus.HOLD:
-                moved_bytes += chunk.get_size()
-                moved_list.append(chunk_id)
+        # 找到lifecycle被需要最晚的chunk换出
 
+        # 预热阶段
+        if global_timer.record_chunk_lifecycle is True:
+            for chunk_id, chunk in self.chunk_id_to_chunk_dict.items():
+                if chunk.get_device() is not None and chunk.get_device(
+                ).type == target_device.type and chunk.get_status(
+                ) == PSChunkStatus.HOLD:
+                    moved_bytes += chunk.get_size()
+                    moved_list.append(chunk_id)
+
+                    if moved_bytes >= still_need_bytes:
+                        break
+                assert chunk.get_status() != PSChunkStatus.FREE
+        else:
+            Q = PriorityQueue()
+            for chunk_id, chunk in self.chunk_id_to_chunk_dict.items():
+                if chunk.get_device() is not None and chunk.get_device(
+                ).type == target_device.type and chunk.get_status(
+                ) == PSChunkStatus.HOLD:
+                    next_mom = self.get_next_access_moment(
+                        chunk, global_timer.lifecycle_moment)
+                    # 按照next_mom从大到小排序
+                    Q.put((-next_mom, chunk))
+            assert chunk.get_status() != PSChunkStatus.FREE
+
+            while Q:
+                next_mom, chunk = Q.get()
+                moved_bytes += chunk.get_size()
+                moved_list.append(chunk.chunk_id)
                 if moved_bytes >= still_need_bytes:
                     break
-
-            # TODO(jiaruifang)此时不应该有free状态的chunk，因为free在release时候完成了
-            assert chunk.get_status() != PSChunkStatus.FREE
 
         # 无法腾出足够空间，抛出异常
         if moved_bytes < still_need_bytes:
@@ -272,7 +290,8 @@ class ChunkList(object):
         if self._time_profile:
             global_timer.chunk_to_move_out_for_room_making_elapse += time.time(
             ) - start_time
-        logging.debug(f'chunk to move out {moved_list}')
+        # if global_timer.record_chunk_lifecycle is False:
+        #     logging.info(f'chunk to move out {moved_list} @ momenet {global_timer.lifecycle_moment}')
         return moved_list
 
     def update_status(self, chunk_id, old_status, new_status):

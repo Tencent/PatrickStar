@@ -81,7 +81,7 @@ def test_simple_model(is_ps: bool = False, is_fp16: bool = False):
 
     start_time = time.time()
     for n, batch in enumerate(data_loader):
-
+        global_timer.lifecycle_moment = 0
         if n == 0:
             global_timer.record_chunk_lifecycle = True
 
@@ -116,8 +116,9 @@ def test_simple_model(is_ps: bool = False, is_fp16: bool = False):
 
         if n == 0:
             global_timer.record_chunk_lifecycle = False
+            global_timer.lifecycle_overall_moment = global_timer.lifecycle_moment
 
-        if n == 5: break
+        if n == 2: break
 
     elapse = time.time() - start_time
     logging.info(f"is_ps {is_ps} elapse {elapse}")
@@ -161,11 +162,9 @@ if __name__ == "__main__":
     test_fp16 = True
 
     if test_fp16:
-        # TODO(jiaruifang) 内存释放干净
-        # M, V, G32, P32 = 360
-        # P16 = 80/2=40
-        # G16 = 80/2=40
-        manager.reset([40000 * 4] * 1, [32000 * 4 + 2 * 2000])
+        # hidden_dim = 4
+        # 需要 40和8两个chunk
+        manager.reset([48 * 2 * 4] * 1, [160 * 4 * 2 + 2 * 160])
         torch.manual_seed(0)
         loss_list = test_simple_model(True, is_fp16=True)
         see_memory_usage("after HybridPS simple model", force=True)

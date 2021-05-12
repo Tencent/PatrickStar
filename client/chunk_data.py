@@ -69,10 +69,15 @@ class Chunk(object):
         """
         if self._time_profile:
             start_time = time.time()
-        self.payload = torch.zeros(self.capacity,
-                                   dtype=self.data_type,
-                                   device=device,
-                                   pin_memory=True)
+        if device.type == 'cpu':
+            self.payload = torch.zeros(self.capacity,
+                                       dtype=self.data_type,
+                                       device=device,
+                                       pin_memory=True)
+        else:
+            self.payload = torch.zeros(self.capacity,
+                                       dtype=self.data_type,
+                                       device=device)
         self.ps_manager.add(device.type, device.index, self.get_size())
 
         self.touch()
@@ -84,9 +89,8 @@ class Chunk(object):
         释放负载
         确保此时所有tensor都是free
         """
-        if self._time_profile:
-            start_time = time.time()
-
+        # if self._time_profile:
+        #     start_time = time.time()
         self.ps_manager.delete(self.get_device().type,
                                self.get_device().index, self.get_size())
 
@@ -94,26 +98,12 @@ class Chunk(object):
         del self.payload
         self.payload = None
 
-        if self._time_profile:
-            global_timer.memory_delete_elapse = time.time() - start_time
-
     def update_status(self, old_status, new_status):
         """
         更新chunk内tensor总体状态指标
         """
-        if global_timer.record_chunk_lifecycle:
-            prev_update_status_is_compute = self._status_dict[
-                PSTensorStatus.COMPUTE] > 0
         self._status_dict[old_status] -= 1
         self._status_dict[new_status] += 1
-        if global_timer.record_chunk_lifecycle:
-            after_update_status_is_compute = self._status_dict[
-                PSTensorStatus.COMPUTE] > 0
-            if prev_update_status_is_compute and not after_update_status_is_compute:
-                self.release_moments.append(global_timer.lifecycle_moment)
-            elif not prev_update_status_is_compute and after_update_status_is_compute:
-                self.access_moments.append(global_timer.lifecycle_moment)
-            global_timer.lifecycle_moment += 1
 
     def show_life_cycle(self):
         logging.info(f'access_moments: {self.access_moments}')

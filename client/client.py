@@ -112,6 +112,7 @@ class HybridPSClient(object):
 
         # 准备param所在chunk的内存，如果内存不在计算设备上需要分配或者移动
         chunk_id = self.chunk_tensor_index.get_chunk_id(param, access_type)
+
         self.chunk_list.access_chunk(chunk_id, compute_device)
         # 将param内存定位到chunk上
         tensor_id = param.ps_attr.get_tensor_id(access_type)
@@ -138,6 +139,12 @@ class HybridPSClient(object):
         # Note并不设置parameter对应的tensor，因为adam可能直接访问pstensor
         if self._time_profile:
             global_timer.client_access_elapse += time.time() - start_time
+
+        # 在预热阶段，记录每个chunk被访问位置
+        if global_timer.record_chunk_lifecycle:
+            self.chunk_list[chunk_id].access_moments.append(
+                global_timer.lifecycle_moment)
+        global_timer.lifecycle_moment += 1
 
     def access_data(self, param: torch.nn.Parameter,
                     compute_device: torch.device):
@@ -194,9 +201,14 @@ class HybridPSClient(object):
         elif access_type == AccessType.GRAD:
             param.grad = None
 
-        for chunk_id, chunk in self.chunk_list.generate_chunk():
-            if chunk.get_status() == PSChunkStatus.FREE:
-                chunk.release_payload()
+        if self._time_profile:
+            sub_start_time = time.time()
+
+        # 主要耗时部分, TODO(jiaruifang) lazy release
+        self.chunk_list.delete_free_chunks()
+
+        if self._time_profile:
+            global_timer.memory_delete_elapse += time.time() - sub_start_time
 
         if self._time_profile:
             global_timer.client_release_elapse += time.time() - start_time

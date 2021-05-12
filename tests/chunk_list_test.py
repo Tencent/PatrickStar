@@ -17,6 +17,7 @@ import logging
 import torch
 from manager import HybridPSManager
 from client import PSChunkStatus
+import utils.global_timer as global_timer
 
 
 class TestChunkList(unittest.TestCase):
@@ -53,6 +54,32 @@ class TestChunkList(unittest.TestCase):
         chunk_list.access_chunk(1, self.compute_device)
 
         chunk_list.visit()
+
+    def test_chunk_move_out_order(self):
+        chunk_list = ChunkList()
+        chunk_list.new_chunk(chunk_id=0,
+                             chunk_size=20,
+                             data_type=torch.float,
+                             compute_device=self.compute_device)
+        chunk_list.new_chunk(chunk_id=1,
+                             chunk_size=20,
+                             data_type=torch.float,
+                             compute_device=self.compute_device)
+        chunk_list.new_chunk(chunk_id=2,
+                             chunk_size=20,
+                             data_type=torch.float,
+                             compute_device=self.compute_device)
+
+        chunk_list[0].access_moments = [0, 4]
+        chunk_list[1].access_moments = [1, 5]
+        chunk_list[2].access_moments = [2, 6]
+
+        global_timer.lifecycle_overall_moment = 6
+        res = chunk_list.get_next_access_moment(chunk_list[0], 2)
+        assert res == 4
+
+        res = chunk_list.get_next_access_moment(chunk_list[0], 5)
+        assert res == 6
 
 
 if __name__ == "__main__":

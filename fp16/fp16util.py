@@ -208,19 +208,37 @@ def model_grads_to_master_grads(model_params,
                                  [model_grads, master_grads], 1.0)
         else:
             for model_p, master_p in zip(model_params, master_params):
-                client.access_grad(model_p, torch.device('cuda:0'))
-                client.access_grad(master_p, torch.device('cuda:0'))
+                if False:
+                    # TODO(jiaruifang)放在cpu上更节省带宽，但是计算multi_tensor_applier不允许这样
+                    client.access_grad(model_p, torch.device('cuda:0'))
+                    client.access_grad(master_p, torch.device('cuda:0'))
 
-                model_grad = [model_p.ps_attr.access_tensor(AccessType.GRAD)]
-                master_grad = [master_p.ps_attr.access_tensor(AccessType.GRAD)]
-                _overflow_buf = torch.cuda.IntTensor([0])
-                # Fused overflow check + scale for a list of contiguous tensors
-                # TODO(jiaruifang) I found it copys model_grad to master_grad.
-                multi_tensor_applier(amp_C.multi_tensor_scale, _overflow_buf,
-                                     [model_grad, master_grad], 1.0)
+                    model_grad = [
+                        model_p.ps_attr.access_tensor(AccessType.GRAD)
+                    ]
+                    master_grad = [
+                        master_p.ps_attr.access_tensor(AccessType.GRAD)
+                    ]
+                    _overflow_buf = torch.cuda.IntTensor([0])
+                    # Fused overflow check + scale for a list of contiguous tensors
+                    # TODO(jiaruifang) I found it copys model_grad to master_grad.
+                    multi_tensor_applier(amp_C.multi_tensor_scale,
+                                         _overflow_buf,
+                                         [model_grad, master_grad], 1.0)
 
-                client.release_grad(model_p, PSTensorStatus.FREE)
-                client.release_grad(master_p, PSTensorStatus.HOLD)
+                    client.release_grad(model_p, PSTensorStatus.FREE)
+                    client.release_grad(master_p, PSTensorStatus.HOLD)
+
+                else:
+                    client.access_grad(model_p, torch.device('cpu:0'))
+                    client.access_grad(master_p, torch.device('cpu:0'))
+                    model_p_tensor = model_p.ps_attr.access_tensor(
+                        AccessType.GRAD)
+                    master_p_tensor = master_p.ps_attr.access_tensor(
+                        AccessType.GRAD)
+                    master_p_tensor.copy_(model_p_tensor)
+                    client.release_grad(model_p, PSTensorStatus.FREE)
+                    client.release_grad(master_p, PSTensorStatus.HOLD)
 
 
 def master_params_to_model_params(model_params,
@@ -247,8 +265,13 @@ def master_params_to_model_params(model_params,
             # 所在的设备选择计算设备
             # TODO(jiaruifang) 这个过程可以和FWD计算重叠。
             if client is not None:
-                client.access_data(model, torch.device('cuda:0'))
-                client.access_data(master, torch.device('cuda:0'))
+                # TODO(jiaruifang) 移动fp16的数据更节省带宽。但是copy时间更浪费。
+                if False:
+                    client.access_data(model, torch.device('cpu:0'))
+                    client.access_data(master, torch.device('cpu:0'))
+                else:
+                    client.access_data(model, torch.device('cuda:0'))
+                    client.access_data(master, torch.device('cuda:0'))
 
                 model.ps_attr.access_tensor(AccessType.DATA).copy_(
                     master.ps_attr.access_tensor(AccessType.DATA))
