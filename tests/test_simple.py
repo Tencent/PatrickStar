@@ -78,7 +78,6 @@ def test_simple_model(is_ps: bool = False, is_fp16: bool = False):
 
     if is_ps:
         client.register_model_optimizer(model, optimizer)
-        setup_hybrid_ps_hooks(model, client)
 
     start_time = time.time()
     for n, batch in enumerate(data_loader):

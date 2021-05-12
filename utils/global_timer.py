@@ -83,7 +83,7 @@ def time_profiler():
         f'*** cpu_gpu_move_elapse {cpu_gpu_move_elapse} sec, times {cpu_gpu_move_times}, amount {cpu_gpu_move_data_amount/1e6} MB, Bandwidth {cpu_gpu_move_data_amount/1e6/(cpu_gpu_move_elapse + 1e-10)} MB/s'
     )
     logging.info(
-        f'*** gpu_cpu_move_elapse {gpu_cpu_move_elapse} sec, times {gpu_cpu_move_elapse}, amount {gpu_cpu_move_data_amount/1e6} MB, Bandwidth {gpu_cpu_move_data_amount/1e6/(gpu_cpu_move_elapse + 1e-10)} MB/s'
+        f'*** gpu_cpu_move_elapse {gpu_cpu_move_elapse} sec, times {gpu_cpu_move_times}, amount {gpu_cpu_move_data_amount/1e6} MB, Bandwidth {gpu_cpu_move_data_amount/1e6/(gpu_cpu_move_elapse + 1e-10)} MB/s'
     )
 
     logging.info("ADAM STATISTICS")

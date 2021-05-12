@@ -19,6 +19,7 @@ import datetime
 import logging
 from torch.multiprocessing import Process, Manager
 
+from .hook import setup_hybrid_ps_hooks
 from .const import AccessType, PSChunkStatus, PSTensorStatus
 from .chunk_data import Chunk
 from .chunk_list import ChunkList
@@ -67,6 +68,7 @@ class HybridPSClient(object):
             self.default_chunk_size, model, optimizer, self.chunk_list,
             self.chunk_tensor_index)
         self.chunk_schema_scheduler.schedule()
+        setup_hybrid_ps_hooks(model, self)
 
         # 拷贝模型
         for name, param in model.named_parameters():
@@ -85,7 +87,8 @@ class HybridPSClient(object):
                         master_param.data)
                     self.release_data(master_param, PSTensorStatus.HOLD)
 
-        self.chunk_tensor_index.visit_chunks(self.chunk_list)
+        # inspect chunk layout if you want.
+        # self.chunk_tensor_index.visit_chunks(self.chunk_list)
 
     def access(self, param: torch.nn.Parameter, access_type: AccessType,
                compute_device: torch.device):

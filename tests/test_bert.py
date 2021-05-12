@@ -166,11 +166,6 @@ def test_bert_model(is_ckp: bool = False,
 
         optimizer = CPUAdam(client, model.parameters(), lr=0.001)
         # optimizer = TorchAdam(model.parameters(), lr=0.001)
-        setup_hybrid_ps_hooks(model, client)
-
-        # hook_module = HookedModule(model, client)
-        # hook_module.setup_zero_stage3_hooks()
-        # model = hook_module.module
     else:
         optimizer = TorchAdam(model.parameters(), lr=0.001)
 
@@ -257,7 +252,7 @@ if __name__ == "__main__":
     # hidden_dim 1024, batch 16, seqence_leng 1024, ckp True.
     # PS is able to run the training, while PyTorch failed.
 
-    plan = "A"
+    plan = "B"
     if res_check:
         plan = "B"
     if plan == "A":
