@@ -55,6 +55,10 @@ class HybridPSManager(metaclass=SingletonMeta):
         self.gpu_mem_usage_curve = []
 
     def init(self, gpu_info, cpu_info):
+        if self._is_init_.value:
+            self.reset(gpu_info, cpu_info)
+            return
+
         for item in gpu_info:
             self.gpu_max_mem_list.append(item)
             self.gpu_used_mem_list.append(0)

@@ -158,8 +158,6 @@ def test_bert_model(is_ckp: bool = False,
     loss_res = []
 
     if is_ps:
-        manager = HybridPSManager()
-        manager.init([1024 * 1024 * 512 * 4] * 2, [1024 * 1024 * 1024 * 4 * 4])
         # chunk 512 MB, good for CPU-GPU bandwidth
         client = HybridPSClient(gpu_index=0,
                                 default_chunk_size=1024 * 1024 * 8)
@@ -260,16 +258,22 @@ if __name__ == "__main__":
     if plan == "A":
         # HybridPS可以，PyTorch不可以
         # use_ckp: True, use_fp16: True, adam default on CPU, not interleave data and grad
-        hidden_dim = 3072  #2048
-        batch_size = 16
+        if use_fp16:
+            # 精心挑选的参数
+            manager = HybridPSManager()
+            manager.init([1024 * 1024 * 256] * 2, [1024 * 1024 * 1024 * 4 * 4])
+        else:
+            manager = HybridPSManager()
+            manager.init([1024 * 1024 * 512 * 4] * 2,
+                         [1024 * 1024 * 1024 * 4 * 4])
+        hidden_dim = 3072
+        batch_size = 8
         sequence_length = 1024
         num_layer = 60
     elif plan == 'B':
-        # HybridPS and Pytorch都可以
-        # Pytorch: 1.2852387428283691 sec
-        # HybridPS: 6.879993915557861 sec
-        # client_prepare_device_elapse 0.0 client_access_elapse 2.211916446685791 client_release_elapse 2.442206859588623
-        # cpu_adam_elapse 3.7840416431427 cpu_adam_f_elapse 3.7840394973754883
+        # HybridPS and Torch都可以
+        manager = HybridPSManager()
+        manager.init([1024 * 1024 * 512 * 4] * 2, [1024 * 1024 * 1024 * 4 * 4])
         hidden_dim = 1536
         batch_size = 8
         sequence_length = 1024
@@ -278,11 +282,15 @@ if __name__ == "__main__":
         # use ckp
         # HybridPS and PyTorch is OK
         # 没有prepare device开销
+        manager = HybridPSManager()
+        manager.init([1024 * 1024 * 512 * 4] * 2, [1024 * 1024 * 1024 * 4 * 4])
         hidden_dim = 768
         batch_size = 8
         sequence_length = 1024
         num_layer = 12
     elif plan == 'D':
+        manager = HybridPSManager()
+        manager.init([1024 * 1024 * 512 * 4] * 2, [1024 * 1024 * 1024 * 4 * 4])
         hidden_dim = 4096  #2048
         batch_size = 2
         sequence_length = 1536
