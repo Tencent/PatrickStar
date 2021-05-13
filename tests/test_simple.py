@@ -46,8 +46,9 @@ def test_simple_model(is_ps: bool = False, is_fp16: bool = False):
     batch_size = 4
     device = torch.device('cuda:0')
 
-    model = SimpleModel(hidden_dim, empty_grad=False)
+    model = SimpleModel(hidden_dim, is_ckp=False)
     model.cuda()
+    model.train()
 
     see_memory_usage(f"PS {is_ps} after model init", force=True)
 
@@ -141,7 +142,7 @@ if __name__ == "__main__":
     # 4 layer每层20个elem(20*4 bytes)，最少360 (360*4 bytes)内存
     # gpu内存至少为40，反向传播一层需要的最大内存。
 
-    test_cpu_adam = False
+    test_cpu_adam = True
     if test_cpu_adam:
         # manager.init([40 * 4] * 1, [280 * 4])
         manager.init([180 * 4] * 1, [280 * 4])
@@ -159,7 +160,7 @@ if __name__ == "__main__":
         # print('gpu usage ', manager.gpu_mem_usage_curve)
         # print('cpu usgae ', manager.cpu_mem_usage_curve)
 
-    test_fp16 = True
+    test_fp16 = False
 
     if test_fp16:
         # hidden_dim = 4

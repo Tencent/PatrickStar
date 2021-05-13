@@ -41,6 +41,7 @@ from torch.nn import CrossEntropyLoss, MSELoss
 
 from transformers.activations import ACT2FN
 from torch.utils.data import SequentialSampler
+from checkpoint.torch_checkpoint import checkpoint as ps_checkpoint
 
 from transformers.modeling_utils import (
     PreTrainedModel,
@@ -593,7 +594,8 @@ class BertEncoder(nn.Module):
 
                     return custom_forward
 
-                layer_outputs = torch.utils.checkpoint.checkpoint(
+                # torch.utils.checkpoint.checkpoint
+                layer_outputs = ps_checkpoint(
                     create_custom_forward(layer_module),
                     hidden_states,
                     attention_mask,

@@ -13,64 +13,83 @@
 
 import torch
 from torch.utils.data import SequentialSampler
-from checkpoint import reset_checkpointed_activations_memory_buffer, checkpoint, init_checkpointed_activations_memory_buffer
+# from checkpoint.torch_checkpoint import checkpoint
+from torch.utils.checkpoint import checkpoint
+# from checkpoint import reset_checkpointed_activations_memory_buffer, checkpoint, init_checkpointed_activations_memory_buffer
 
+# class SimpleCKPModel(torch.nn.Module):
+#     def __init__(self, hidden_dim, empty_grad=False):
+#         super(SimpleCKPModel, self).__init__()
+#         self.hidden_dim = hidden_dim
+#         self.linear1 = torch.nn.Linear(hidden_dim, hidden_dim)
+#         self.linear2 = torch.nn.Linear(hidden_dim, hidden_dim)
+#         self.linear3 = torch.nn.Linear(hidden_dim, hidden_dim)
+#         self.linear4 = torch.nn.Linear(hidden_dim, hidden_dim)
+#         self.cross_entropy_loss = torch.nn.CrossEntropyLoss()
+#         self._is_checkpoint = is_ckp
 
-class SimpleCKPModel(torch.nn.Module):
-    def __init__(self, hidden_dim, empty_grad=False):
-        super(SimpleCKPModel, self).__init__()
-        self.hidden_dim = hidden_dim
-        self.linear1 = torch.nn.Linear(hidden_dim, hidden_dim)
-        self.linear2 = torch.nn.Linear(hidden_dim, hidden_dim)
-        self.linear3 = torch.nn.Linear(hidden_dim, hidden_dim)
-        self.linear4 = torch.nn.Linear(hidden_dim, hidden_dim)
-        self.cross_entropy_loss = torch.nn.CrossEntropyLoss()
+#     def init_ckp(self, batch_size, data_type: torch.dtype):
+#         numel = (self.hidden_dim * batch_size) * 2
+#         init_checkpointed_activations_memory_buffer(numel, data_type)
 
-    def init_ckp(self, batch_size, data_type: torch.dtype):
-        numel = (self.hidden_dim * batch_size) * 2
-        init_checkpointed_activations_memory_buffer(numel, data_type)
+#     def _checkpointed_forward(self, x):
+#         """Forward method with activation checkpointing."""
+#         def custom():
+#             def custom_forward(x):
+#                 x = self.linear1(x)
+#                 x = self.linear2(x)
+#                 return x
+#             return custom_forward
 
-    def _checkpointed_forward(self, x):
-        """Forward method with activation checkpointing."""
-        def custom():
-            def custom_forward(x):
-                x = self.linear1(x)
-                x = self.linear2(x)
-                return x
+#         # Make sure memory is freed.
+#         reset_checkpointed_activations_memory_buffer()
+#         x = checkpoint(custom(), x)
+#         return x
 
-            return custom_forward
-
-        # Make sure memory is freed.
-        reset_checkpointed_activations_memory_buffer()
-        x = checkpoint(custom(), x)
-        return x
-
-    def forward(self, x, y):
-        x = self._checkpointed_forward(x)
-        x = self.linear3(x)
-        x = self.linear4(x)
-        return self.cross_entropy_loss(x, y)
+#     def forward(self, x, y):
+#         x = self._checkpointed_forward(x)
+#         x = self.linear3(x)
+#         x = self.linear4(x)
+#         return self.cross_entropy_loss(x, y)
 
 
 class SimpleModel(torch.nn.Module):
-    def __init__(self, hidden_dim, empty_grad=False):
+    def __init__(self, hidden_dim, is_ckp=False):
         super(SimpleModel, self).__init__()
-        self.linear1 = torch.nn.Linear(hidden_dim, hidden_dim)
-        self.linear2 = torch.nn.Linear(hidden_dim, hidden_dim)
+        # self.linear1 = torch.nn.Linear(hidden_dim, hidden_dim)
+        # self.linear2 = torch.nn.Linear(hidden_dim, hidden_dim)
         self.linear3 = torch.nn.Linear(hidden_dim, hidden_dim)
         self.linear4 = torch.nn.Linear(hidden_dim, hidden_dim)
-        if empty_grad:
-            self.layers2 = torch.nn.ModuleList(
-                [torch.nn.Linear(hidden_dim, hidden_dim)])
         self.cross_entropy_loss = torch.nn.CrossEntropyLoss()
+        self.is_ckp = is_ckp
+
+        self.linear1 = torch.nn.Sequential(
+            torch.nn.Linear(hidden_dim, hidden_dim),
+            torch.nn.Linear(hidden_dim, hidden_dim))
+
+    # def _checkpointed_forward(self, x):
+    #     """Forward method with activation checkpointing."""
+    #     def custom():
+    #         def custom_forward(x):
+    #             x = self.linear2(x)
+    #             x = self.linear3(x)
+    #             return x
+    #         return custom_forward
+    #     x = checkpoint(custom(), x)
+    #     return x
 
     def forward(self, x, y):
-        hidden_dim = x
-        hidden_dim = self.linear1(hidden_dim)
-        hidden_dim = self.linear2(hidden_dim)
-        hidden_dim = self.linear3(hidden_dim)
-        hidden_dim = self.linear4(hidden_dim)
-        return self.cross_entropy_loss(hidden_dim, y)
+        # h = x
+        h1 = x
+        h2 = self.linear1(h1)
+        # print(f'linear1 grad {h} {h.requires_grad}')
+        if self.is_ckp:
+            h3 = checkpoint(self.linear3, h2)
+        else:
+            h3 = self.linear3(h2)
+            # print(f'linear3 grad {h} {h.requires_grad}')
+        h4 = self.linear4(h3)
+        return self.cross_entropy_loss(h4, y)
 
 
 def get_data_loader(batch_size,

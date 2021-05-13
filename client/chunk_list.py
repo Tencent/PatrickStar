@@ -24,7 +24,7 @@ from typing import List
 import gc
 import psutil
 import utils.global_timer as global_timer
-from utils.memory_monitor import see_memory_usage
+from utils.memory_monitor import see_memory_usage, get_free_memory
 import time
 
 from queue import PriorityQueue
@@ -122,6 +122,10 @@ class ChunkList(object):
 
         available_size = ps_manager.available_mem(target_device.type,
                                                   target_device.index)
+
+        # 当前系统可用内存，需要减去activation消耗
+        # available_size = get_free_memory(target_device)
+
         extra_need_bytes = need_bytes - available_size
 
         logging.debug(

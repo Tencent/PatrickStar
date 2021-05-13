@@ -16,6 +16,18 @@ import psutil
 import gc
 import torch
 import logging
+from pynvml import *
+
+
+def get_free_memory(device):
+    if device.type == 'cuda':
+        nvmlInit()
+        h = nvmlDeviceGetHandleByIndex(device.index)
+        info = nvmlDeviceGetMemoryInfo(h)
+        return info.free
+    elif device.type == 'cpu':
+        vm_stats = psutil.virtual_memory()
+        return vm_stats.available
 
 
 def see_memory_usage(message, force=False, scale_name="MB"):
