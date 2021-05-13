@@ -39,14 +39,16 @@ def show_optim(optimizer):
             print(p.size())
 
 
-def test_simple_model(is_ps: bool = False, is_fp16: bool = False):
+def test_simple_model(is_ps: bool = False,
+                      is_fp16: bool = False,
+                      is_ckp: bool = True):
     logging.info(f'test a simple model with hybrid ps {is_ps} FP16 {is_fp16}')
 
     hidden_dim = 4
     batch_size = 4
     device = torch.device('cuda:0')
 
-    model = SimpleModel(hidden_dim, is_ckp=False)
+    model = SimpleModel(hidden_dim, is_ckp=is_ckp)
     model.cuda()
     model.train()
 
@@ -167,7 +169,7 @@ if __name__ == "__main__":
         # 需要 40和8两个chunk
         manager.reset([48 * 2 * 4] * 1, [160 * 4 * 2 + 2 * 160])
         torch.manual_seed(0)
-        loss_list = test_simple_model(True, is_fp16=True)
+        loss_list = test_simple_model(True, is_fp16=True, is_ckp=True)
         see_memory_usage("after HybridPS simple model", force=True)
 
         torch.manual_seed(0)

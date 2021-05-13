@@ -17,6 +17,27 @@ from typing import Any, Iterable, List, Tuple
 import logging
 
 
+def move_to_device(item, device):
+    """
+    Move tensor onto device. Works on individual tensors, and tensors contained/nested in lists, tuples, and dicts.
+    Parameters:
+        item: tensor to move or (possibly nested) container of tensors to move.
+        device: target device
+    Returns:
+        None
+    """
+    if torch.is_tensor(item):
+        return item.to(device)
+    elif isinstance(item, list):
+        return [move_to_device(v, device) for v in item]
+    elif isinstance(item, tuple):
+        return tuple([move_to_device(v, device) for v in item])
+    elif isinstance(item, dict):
+        return {k: move_to_device(v, device) for k, v in item.items()}
+    else:
+        return item
+
+
 def detach_variable(inputs: Tuple[Any, ...]) -> Tuple[torch.Tensor, ...]:
     if isinstance(inputs, tuple):
         out = []
@@ -36,12 +57,6 @@ def detach_variable(inputs: Tuple[Any, ...]) -> Tuple[torch.Tensor, ...]:
 
 
 def check_backward_validity(inputs: Iterable[Any]) -> None:
-    # warnings(f"inputs len {len(inputs)}")
-    # for input in inputs:
-    #     warnings(type(input))
-    for item in inputs:
-        if isinstance(item, torch.Tensor):
-            print(item, item.size(), item.requires_grad)
     if not any(inp.requires_grad
                for inp in inputs if isinstance(inp, torch.Tensor)):
         warnings.warn(
@@ -95,10 +110,28 @@ class CheckpointFunction(torch.autograd.Function):
                 ctx.had_cuda_in_fwd = True
                 ctx.fwd_gpu_devices, ctx.fwd_gpu_states = get_device_states(
                     *args)
-        ctx.save_for_backward(*args)
-        with torch.no_grad():
-            outputs = run_function(*args)
-        # logging.info('checkpoint FWD')
+
+        if False:
+            # Note 改变了run_function和save_for_backward的相对顺序
+            inputs_cuda = move_to_device(args, torch.device('cuda:0'))
+            with torch.no_grad():
+                outputs = run_function(*inputs_cuda)
+            # logging.info('checkpoint FWD')
+            del inputs_cuda
+
+            inputs = []
+            for i, arg in enumerate(args):
+                item = arg
+                item.data = arg.data.cpu()
+                # item.requires_grad = arg.requires_grad
+                inputs.append(item)
+            print('FWD inputs ', inputs)
+            ctx.save_for_backward(*tuple(inputs))
+        else:
+            ctx.save_for_backward(*args)
+            with torch.no_grad():
+                outputs = run_function(*args)
+
         return outputs
 
     @staticmethod
@@ -107,7 +140,16 @@ class CheckpointFunction(torch.autograd.Function):
             raise RuntimeError(
                 "Checkpointing is not compatible with .grad(), please use .backward() if possible"
             )
-        inputs = ctx.saved_tensors
+        if False:
+            inputs_raw = ctx.saved_tensors
+            inputs = []
+            for inp in inputs_raw:
+                item = inp
+                item.data = inp.data.cuda()
+                inputs.append(item)
+            inputs = tuple(inputs)
+        else:
+            inputs = ctx.saved_tensors
         # Stash the surrounding rng state, and mimic the state that was
         # present at this time during forward.  Restore the surrounding state
         # when we're done.

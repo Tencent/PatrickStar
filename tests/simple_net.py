@@ -13,8 +13,8 @@
 
 import torch
 from torch.utils.data import SequentialSampler
-# from checkpoint.torch_checkpoint import checkpoint
-from torch.utils.checkpoint import checkpoint
+from checkpoint.torch_checkpoint import checkpoint
+# from torch.utils.checkpoint import checkpoint
 # from checkpoint import reset_checkpointed_activations_memory_buffer, checkpoint, init_checkpointed_activations_memory_buffer
 
 # class SimpleCKPModel(torch.nn.Module):
@@ -65,6 +65,7 @@ class SimpleModel(torch.nn.Module):
 
         self.linear1 = torch.nn.Sequential(
             torch.nn.Linear(hidden_dim, hidden_dim),
+            torch.nn.Linear(hidden_dim, hidden_dim),
             torch.nn.Linear(hidden_dim, hidden_dim))
 
     # def _checkpointed_forward(self, x):
@@ -82,12 +83,10 @@ class SimpleModel(torch.nn.Module):
         # h = x
         h1 = x
         h2 = self.linear1(h1)
-        # print(f'linear1 grad {h} {h.requires_grad}')
         if self.is_ckp:
             h3 = checkpoint(self.linear3, h2)
         else:
             h3 = self.linear3(h2)
-            # print(f'linear3 grad {h} {h.requires_grad}')
         h4 = self.linear4(h3)
         return self.cross_entropy_loss(h4, y)
 
