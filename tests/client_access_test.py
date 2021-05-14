@@ -77,10 +77,8 @@ class TestClientAccess(unittest.TestCase):
                                            AccessType.DATA)
 
         # 初始化chunk
-        self.client.chunk_list.new_chunk(0, 50, torch.float,
-                                         self.compute_device)
-        self.client.chunk_list.new_chunk(1, 20, torch.float,
-                                         self.compute_device)
+        self.client.chunk_list.new_chunk(0, 50, torch.float)
+        self.client.chunk_list.new_chunk(1, 20, torch.float)
         logging.info('prepared_chunk_schema finished')
 
     def _access_single_tensor(self, param):
@@ -136,8 +134,7 @@ class TestClientAccess(unittest.TestCase):
         self.chunk_tensor_index.add_tensor(2, self.param7.ps_attr.data_id(), 0,
                                            self.param7.numel(), self.param7,
                                            AccessType.DATA)
-        self.client.chunk_list.new_chunk(2, 25, torch.float,
-                                         self.compute_device)
+        self.client.chunk_list.new_chunk(2, 25, torch.float)
 
         # *检查显存是否真正释放, 1024 B
         see_memory_usage(
@@ -192,8 +189,7 @@ class TestClientAccess(unittest.TestCase):
         self.chunk_tensor_index.add_tensor(2, self.param7.ps_attr.data_id(), 0,
                                            self.param7.numel(), self.param7,
                                            AccessType.DATA)
-        self.client.chunk_list.new_chunk(2, 25, torch.float,
-                                         self.compute_device)
+        self.client.chunk_list.new_chunk(2, 25, torch.float)
         self.client.access_data(self.param7, self.compute_device)
         assert self.client.chunk_list[1].get_device() == None
         assert self.client.chunk_list[2].get_device() == self.compute_device

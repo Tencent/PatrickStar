@@ -34,20 +34,14 @@ class TestChunkList(unittest.TestCase):
         chunk_list = ChunkList()
         assert chunk_list.size() == 0
 
-        chunk_list.new_chunk(chunk_id=0,
-                             chunk_size=20,
-                             data_type=torch.float,
-                             compute_device=self.compute_device)
+        chunk_list.new_chunk(chunk_id=0, chunk_size=20, data_type=torch.float)
         assert chunk_list.size() == 1
         assert (chunk_list[0].get_status() == PSChunkStatus.RELEASED)
 
         chunk_list.access_chunk(0, self.compute_device)
         assert (chunk_list[0].get_status() == PSChunkStatus.FREE)
 
-        chunk_list.new_chunk(chunk_id=1,
-                             chunk_size=20,
-                             data_type=torch.float,
-                             compute_device=self.compute_device)
+        chunk_list.new_chunk(chunk_id=1, chunk_size=20, data_type=torch.float)
         assert chunk_list.size() == 2
         assert (chunk_list[1].get_status() == PSChunkStatus.RELEASED)
         chunk_list.delete_free_chunks()
@@ -57,18 +51,9 @@ class TestChunkList(unittest.TestCase):
 
     def test_chunk_move_out_order(self):
         chunk_list = ChunkList()
-        chunk_list.new_chunk(chunk_id=0,
-                             chunk_size=20,
-                             data_type=torch.float,
-                             compute_device=self.compute_device)
-        chunk_list.new_chunk(chunk_id=1,
-                             chunk_size=20,
-                             data_type=torch.float,
-                             compute_device=self.compute_device)
-        chunk_list.new_chunk(chunk_id=2,
-                             chunk_size=20,
-                             data_type=torch.float,
-                             compute_device=self.compute_device)
+        chunk_list.new_chunk(chunk_id=0, chunk_size=20, data_type=torch.float)
+        chunk_list.new_chunk(chunk_id=1, chunk_size=20, data_type=torch.float)
+        chunk_list.new_chunk(chunk_id=2, chunk_size=20, data_type=torch.float)
 
         chunk_list[0].access_moments = [0, 4]
         chunk_list[1].access_moments = [1, 5]

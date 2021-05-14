@@ -160,7 +160,8 @@ def test_bert_model(is_ckp: bool = False,
     if is_ps:
         # chunk 512 MB, good for CPU-GPU bandwidth
         client = HybridPSClient(gpu_index=0,
-                                default_chunk_size=1024 * 1024 * 8)
+                                default_chunk_size=1024 * 1024 * 8,
+                                warmup=True)
 
         optimizer = CPUAdam(client, model.parameters(), lr=0.001)
         # optimizer = TorchAdam(model.parameters(), lr=0.001)
@@ -171,13 +172,12 @@ def test_bert_model(is_ckp: bool = False,
         optimizer = FP16_Optimizer(optimizer, client=client if is_ps else None)
 
     if is_ps:
-        client.register_model_optimizer(model, optimizer)
+        client.init(model, optimizer)
 
     start_time = time.time()
     for n, batch in enumerate(data_loader):
-        global_timer.lifecycle_moment = 0
-        if n == 0:
-            global_timer.record_chunk_lifecycle = True
+        if is_ps:
+            client.pre_iter()
 
         step_start_time = time.time()
         output = model(input_ids=batch[0], labels=batch[1])
@@ -202,7 +202,6 @@ def test_bert_model(is_ckp: bool = False,
             # is_ps, 此时grad应该都是HOLD状态
             if is_ps:
                 client.release_all_data_grad(PSTensorStatus.HOLD)
-                # check_grads_status(model, PSTensorStatus.HOLD)
 
         if is_fp16:
             # pass
@@ -218,9 +217,8 @@ def test_bert_model(is_ckp: bool = False,
         logging.info(
             f"ckp {is_ckp} fp16 {is_fp16} ps {is_ps}  elapse {setp_elapse}, sec/iter, {total_macs/1e9/setp_elapse} GFlops"
         )
-        if n == 0:
-            global_timer.record_chunk_lifecycle = False
-            global_timer.lifecycle_overall_moment = global_timer.lifecycle_moment
+        if is_ps:
+            client.post_iter()
         if n == stop_step: break
 
     elapse = time.time() - start_time
@@ -261,7 +259,7 @@ if __name__ == "__main__":
         if use_fp16:
             # 精心挑选的参数
             manager = HybridPSManager()
-            manager.init([1024 * 1024 * 256] * 2, [1024 * 1024 * 1024 * 4 * 4])
+            manager.init([1024 * 1024 * 512] * 2, [1024 * 1024 * 1024 * 4 * 4])
         else:
             manager = HybridPSManager()
             manager.init([1024 * 1024 * 512 * 4] * 2,
@@ -273,7 +271,8 @@ if __name__ == "__main__":
     elif plan == 'B':
         # HybridPS and Torch都可以
         manager = HybridPSManager()
-        manager.init([1024 * 1024 * 512 * 4] * 2, [1024 * 1024 * 1024 * 4 * 4])
+        manager.init([1024 * 1024 * 1024 * 8] * 2,
+                     [1024 * 1024 * 1024 * 4 * 4])
         hidden_dim = 1536
         batch_size = 8
         sequence_length = 1024
@@ -305,7 +304,8 @@ if __name__ == "__main__":
                                     batch_size=batch_size,
                                     hidden_dim=hidden_dim,
                                     sequence_length=sequence_length,
-                                    num_layer=num_layer)
+                                    num_layer=num_layer,
+                                    stop_step=10)
         print(loss_list)
     # calculate_mem_need(hidden_dim = hidden_dim, batch_size = batch_size, is_fp16 = use_fp16)
 

@@ -173,10 +173,20 @@ FP32 M, FP32 V, FP32 param, CPU->GPU, GPU->CPU. 24xComm.
 可以把cpu分配为page-locked的pinned memory。
 把所有的cpu都分配为pinned？似乎只有grad和param需要。
 
+chunk CPU-GPU之间move的pattern在每次迭代是否固定？
+如果知道下个需要move的tensor？
+
+在第一次训练迭代时，记录chunk的使用顺序。
+第二次之后，每次access_chunk都访问chunk_id后面一个chunk
+
+异步任务队列，任务是取chunk到设备。
+client去消费任务。
+按照chunk访问顺序自动生产任务。
+保证queue中任务数目为K，少了取任务，多了不添加了。
+
 #### 三、加速Adam计算
 三是，加速CPU的ADAM计算，让一部分在GPU上，另一部分在CPU上。
 这个方法意义不大，因为对于BERT训练来说，我发现cpu adam时间占比跟小。
-
 
 
 #### 撑大模型

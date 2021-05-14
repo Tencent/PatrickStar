@@ -13,6 +13,8 @@
 
 # 统计chunk的lifecycle开关
 import logging
+from .memory_monitor import get_free_memory
+import torch
 
 
 class SingletonMeta(type):
@@ -44,7 +46,15 @@ class IterationTimer(metaclass=SingletonMeta):
         self._moment = 0
 
     def tik(self):
+        """
+        时刻前进，只有access - release形成一个闭环是一个moment
+        """
         self._moment += 1
+
+        # if self.warmup:
+        #     cuda_free = get_free_memory(torch.device('cuda:0'))
+        #     cpu_free = get_free_memory(torch.device('cpu:0'))
+        #     print(f'moment {self._moment}, cuda free {cuda_free/1e6} MB, cpu free {cpu_free/1e6} MB')
 
     def moment(self):
         return self._moment

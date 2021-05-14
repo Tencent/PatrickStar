@@ -115,7 +115,7 @@ class HybridPSClient(object):
         self.copy_optimizer(optimizer)
         self.module = model
 
-        self.chunk_tensor_index.visit_chunks(self.chunk_list)
+        # self.chunk_tensor_index.visit_chunks(self.chunk_list)
 
     def static_chunk_schedule(self, model, optimizer):
         """
