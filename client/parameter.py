@@ -37,6 +37,8 @@ class PSParameter(object):
         self.ps_numel = None
         self.ps_shape = None
 
+        self.ps_data_chunk_id = None
+        self.ps_grad_chunk_id = None
         # id, status, tensor_data
         self.data_tensor = None
         self.grad_tensor = None
@@ -108,3 +110,7 @@ class PSParameter(object):
 
 def register_param(param, name=None):
     param.ps_attr = PSParameter(param, name)
+
+
+def is_param_registed(param) -> bool:
+    return hasattr(param, 'ps_attr')

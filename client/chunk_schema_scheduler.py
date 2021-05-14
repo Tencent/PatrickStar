@@ -58,15 +58,13 @@ class ChunkShemaScheduler(object):
                                                AccessType.GRAD)
             acc_cnt += numel * 2
             if acc_cnt >= self.default_chunk_size:
-                self.chunk_list.new_chunk(chunk_id, acc_cnt, data_type,
-                                          torch.device('cuda:0'))
+                self.chunk_list.new_chunk(chunk_id, acc_cnt, data_type)
                 chunk_id += 1
                 acc_cnt = 0
 
         # 收尾，剩下的tensor凑不成一个至少default size大小的chunk
         if acc_cnt > 0:
-            self.chunk_list.new_chunk(chunk_id, acc_cnt, data_type,
-                                      torch.device('cuda:0'))
+            self.chunk_list.new_chunk(chunk_id, acc_cnt, data_type)
             chunk_id += 1
             acc_cnt = 0
 
@@ -88,20 +86,19 @@ class ChunkShemaScheduler(object):
                                                        param, AccessType.GRAD)
                     acc_cnt += numel * 2
                     if acc_cnt > self.default_chunk_size:
-                        self.chunk_list.new_chunk(chunk_id, acc_cnt, data_type,
-                                                  torch.device('cuda:0'))
+                        self.chunk_list.new_chunk(chunk_id, acc_cnt, data_type)
                         chunk_id += 1
                         acc_cnt = 0
             # 收尾
             if acc_cnt > 0:
-                self.chunk_list.new_chunk(chunk_id, acc_cnt, data_type,
-                                          torch.device('cuda:0'))
+                self.chunk_list.new_chunk(chunk_id, acc_cnt, data_type)
                 chunk_id += 1
                 acc_cnt = 0
 
         # layout for M, V
         # Parameters`tate[param_group][param]`尚未被初始化，它们在第一次step时候才出现
         # 这里提前计算它们的layout，因此需要将它们提前弄出来
+        # TODO(jiaruifang) 不是FWD计算顺序，是init初始化顺序
         for group in self.optimizer.param_groups:
             for p in group['params']:
                 # TODO(jiaruifang)应该执行一次backward计算，然后才能知道p的grad是否为None，不能用requires_grad来代替？
@@ -162,8 +159,7 @@ class ChunkShemaScheduler(object):
                         if acc_cnt >= self.default_chunk_size:
                             # logging.info(f'here')
                             self.chunk_list.new_chunk(chunk_id, acc_cnt,
-                                                      torch.float,
-                                                      torch.device('cpu:0'))
+                                                      torch.float)
                             chunk_id += 1
                             acc_cnt = 0
 
@@ -177,5 +173,4 @@ class ChunkShemaScheduler(object):
 
         # 收尾
         if acc_cnt > 0:
-            self.chunk_list.new_chunk(chunk_id, acc_cnt, data_type,
-                                      torch.device('cpu:0'))
+            self.chunk_list.new_chunk(chunk_id, acc_cnt, data_type)

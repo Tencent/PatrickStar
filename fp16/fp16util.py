@@ -39,6 +39,7 @@ from client import HybridPSClient
 import logging
 from client import PSTensorStatus
 from client import AccessType
+import utils.global_timer as global_timer
 
 
 class tofp16(nn.Module):
@@ -207,6 +208,7 @@ def model_grads_to_master_grads(model_params,
             multi_tensor_applier(amp_C.multi_tensor_scale, _overflow_buf,
                                  [model_grads, master_grads], 1.0)
         else:
+            timer = global_timer.IterationTimer()
             for model_p, master_p in zip(model_params, master_params):
                 if False:
                     # TODO(jiaruifang)放在cpu上更节省带宽，但是计算multi_tensor_applier不允许这样
@@ -228,7 +230,6 @@ def model_grads_to_master_grads(model_params,
 
                     client.release_grad(model_p, PSTensorStatus.FREE)
                     client.release_grad(master_p, PSTensorStatus.HOLD)
-
                 else:
                     client.access_grad(model_p, torch.device('cpu:0'))
                     client.access_grad(master_p, torch.device('cpu:0'))
@@ -239,6 +240,7 @@ def model_grads_to_master_grads(model_params,
                     master_p_tensor.copy_(model_p_tensor)
                     client.release_grad(model_p, PSTensorStatus.FREE)
                     client.release_grad(master_p, PSTensorStatus.HOLD)
+            timer.tik()
 
 
 def master_params_to_model_params(model_params,
@@ -260,6 +262,7 @@ def master_params_to_model_params(model_params,
                 _unflatten_dense_tensors(master_params[0].data, model_params)):
             model.data.copy_(master)
     else:
+        timer = global_timer.IterationTimer()
         for model, master in zip(model_params, master_params):
             # TODO(jiaruing) 简单弄成计算设备在cuda上，可以根据model和master现在
             # 所在的设备选择计算设备
@@ -281,6 +284,8 @@ def master_params_to_model_params(model_params,
                 client.release_data(master, PSTensorStatus.HOLD)
             else:
                 model.data.copy_(master)
+        if client is not None:
+            timer.tik()
 
 
 # Backward compatibility fixes

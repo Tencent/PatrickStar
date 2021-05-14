@@ -13,9 +13,45 @@
 
 # 统计chunk的lifecycle开关
 import logging
-record_chunk_lifecycle = False
-lifecycle_moment = 0
-lifecycle_overall_moment = 0
+
+
+class SingletonMeta(type):
+    """
+    The Singleton class can be implemented in different ways in Python. Some
+    possible methods include: base class, decorator, metaclass. We will use the
+    metaclass because it is best suited for this purpose.
+    """
+
+    _instances = {}
+
+    def __call__(cls, *args, **kwargs):
+        """
+        Possible changes to the value of the `__init__` argument do not affect
+        the returned instance.
+        """
+        if cls not in cls._instances:
+            instance = super().__call__(*args, **kwargs)
+            cls._instances[cls] = instance
+        return cls._instances[cls]
+
+
+class IterationTimer(metaclass=SingletonMeta):
+    """
+    记录每个access和release的时间点
+    """
+    def __init__(self):
+        self.warmup = False
+        self._moment = 0
+
+    def tik(self):
+        self._moment += 1
+
+    def moment(self):
+        return self._moment
+
+    def reset(self):
+        self._moment = 0
+
 
 # param访问
 client_access_elapse = 0.

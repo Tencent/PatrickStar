@@ -28,8 +28,7 @@ import utils.global_timer as global_timer
 
 # chunk是否应该感知param？
 class Chunk(object):
-    def __init__(self, capacity: int, data_type: torch.dtype, chunk_id: int,
-                 compute_device: torch.device):
+    def __init__(self, capacity: int, data_type: torch.dtype, chunk_id: int):
         """
         Chunk是数据迁移的最小单位，
         它用一段连续的内存来存储张量
@@ -39,7 +38,6 @@ class Chunk(object):
         self.chunk_id = chunk_id
         self.capacity = capacity
         self.data_type = data_type
-        self.compute_device = compute_device
 
         # 存储chunk管理tensor的状态数目
         self._status_dict = {
@@ -57,7 +55,12 @@ class Chunk(object):
         self._time_profile = True
 
         self.access_moments = []
-        self.release_moments = []
+
+    def add_moment(self, mom):
+        if len(self.access_moments) > 0 and self.access_moments[-1] == mom:
+            return
+        else:
+            self.access_moments.append(mom)
 
     def get_size(self):
         return getsizeof(self.data_type) * self.capacity
@@ -107,7 +110,6 @@ class Chunk(object):
 
     def show_life_cycle(self):
         logging.info(f'access_moments: {self.access_moments}')
-        logging.info(f'release_moments: {self.release_moments}')
 
     def get_status(self):
         """

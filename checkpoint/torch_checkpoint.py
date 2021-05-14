@@ -16,6 +16,9 @@ import warnings
 from typing import Any, Iterable, List, Tuple
 import logging
 
+# TODO(jiaruifang) 设置这个flag来实现activation checkpoint offload到cpu
+CPU_OFFLOAD_FLAG = False
+
 
 def move_to_device(item, device):
     """
@@ -111,7 +114,7 @@ class CheckpointFunction(torch.autograd.Function):
                 ctx.fwd_gpu_devices, ctx.fwd_gpu_states = get_device_states(
                     *args)
 
-        if False:
+        if CPU_OFFLOAD_FLAG:
             # Note 改变了run_function和save_for_backward的相对顺序
             inputs_cuda = move_to_device(args, torch.device('cuda:0'))
             with torch.no_grad():
@@ -122,10 +125,9 @@ class CheckpointFunction(torch.autograd.Function):
             inputs = []
             for i, arg in enumerate(args):
                 item = arg
-                item.data = arg.data.cpu()
-                # item.requires_grad = arg.requires_grad
+                if torch.is_tensor(item):
+                    item.data = arg.data.cpu()
                 inputs.append(item)
-            print('FWD inputs ', inputs)
             ctx.save_for_backward(*tuple(inputs))
         else:
             ctx.save_for_backward(*args)
@@ -140,12 +142,13 @@ class CheckpointFunction(torch.autograd.Function):
             raise RuntimeError(
                 "Checkpointing is not compatible with .grad(), please use .backward() if possible"
             )
-        if False:
+        if CPU_OFFLOAD_FLAG:
             inputs_raw = ctx.saved_tensors
             inputs = []
             for inp in inputs_raw:
                 item = inp
-                item.data = inp.data.cuda()
+                if torch.is_tensor(item):
+                    item.data = inp.data.cuda()
                 inputs.append(item)
             inputs = tuple(inputs)
         else:

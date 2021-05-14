@@ -38,6 +38,7 @@ class ChunkList(object):
         self.chunk_id_to_chunk_dict: dict[int, Chunk] = {}
         self._time_profile = True
         self.copy_stream = torch.cuda.Stream()
+        self.moments_cnt_of_iteration = None
 
     def __getitem__(self, chunk_id: int):
         """
@@ -172,8 +173,8 @@ class ChunkList(object):
         if self._time_profile:
             global_timer.chunk_move_elapse += time.time() - start_time
 
-    def new_chunk(self, chunk_id: int, chunk_size: int, data_type: torch.dtype,
-                  compute_device: torch.device) -> int:
+    def new_chunk(self, chunk_id: int, chunk_size: int,
+                  data_type: torch.dtype) -> int:
         """
         新建一个chunk，并未初始化内存
         """
@@ -181,11 +182,9 @@ class ChunkList(object):
             raise RuntimeError(
                 f"chunk list new chunk with chunk_id {chunk_id} already existed"
             )
-        self.chunk_id_to_chunk_dict[chunk_id] = Chunk(
-            capacity=chunk_size,
-            data_type=data_type,
-            chunk_id=chunk_id,
-            compute_device=compute_device)
+        self.chunk_id_to_chunk_dict[chunk_id] = Chunk(capacity=chunk_size,
+                                                      data_type=data_type,
+                                                      chunk_id=chunk_id)
         logging.debug(
             f'allocate with new chunk chunk_id {chunk_id} size {chunk_size} data_type {data_type}'
         )
@@ -225,12 +224,19 @@ class ChunkList(object):
             if chunk.get_status() == PSChunkStatus.FREE:
                 self._delete_chunk(chunk)
 
-    def get_next_access_moment(self, chunk: Chunk, current_moment):
-        for mom in chunk.access_moments:
-            if mom >= current_moment:
-                return mom
+    def get_next_access_moment(self, chunk: Chunk):
+        # 还没加入统计信息
+        timer = global_timer.IterationTimer()
+        cur_moment = timer.moment()
+        # 预热阶段，返回值固定
+        if timer.warmup:
+            return 0
 
-        return global_timer.lifecycle_overall_moment + chunk.access_moments[0]
+        # 非预热阶段
+        for mom in chunk.access_moments:
+            if mom >= cur_moment:
+                return mom
+        return self.moments_cnt_of_iteration + chunk.access_moments[0]
 
     def _chunk_to_move_out_for_room_making(
             self,
@@ -253,36 +259,22 @@ class ChunkList(object):
         # 不是最优策略？应该按照访问顺序。
         # 找到lifecycle被需要最晚的chunk换出
 
-        # 预热阶段
-        if global_timer.record_chunk_lifecycle is True:
-            for chunk_id, chunk in self.chunk_id_to_chunk_dict.items():
-                if chunk.get_device() is not None and chunk.get_device(
-                ).type == target_device.type and chunk.get_status(
-                ) == PSChunkStatus.HOLD:
-                    moved_bytes += chunk.get_size()
-                    moved_list.append(chunk_id)
-
-                    if moved_bytes >= still_need_bytes:
-                        break
-                assert chunk.get_status() != PSChunkStatus.FREE
-        else:
-            Q = PriorityQueue()
-            for chunk_id, chunk in self.chunk_id_to_chunk_dict.items():
-                if chunk.get_device() is not None and chunk.get_device(
-                ).type == target_device.type and chunk.get_status(
-                ) == PSChunkStatus.HOLD:
-                    next_mom = self.get_next_access_moment(
-                        chunk, global_timer.lifecycle_moment)
-                    # 按照next_mom从大到小排序
-                    Q.put((-next_mom, chunk))
+        Q = PriorityQueue()
+        for chunk_id, chunk in self.chunk_id_to_chunk_dict.items():
+            if chunk.get_device() is not None and chunk.get_device(
+            ).type == target_device.type and chunk.get_status(
+            ) == PSChunkStatus.HOLD:
+                next_mom = self.get_next_access_moment(chunk)
+                # 按照next_mom从大到小排序，如果相同则按照chunk_id排序（只在预热阶段出现）
+                Q.put((-next_mom, chunk_id))
             assert chunk.get_status() != PSChunkStatus.FREE
 
-            while Q:
-                next_mom, chunk = Q.get()
-                moved_bytes += chunk.get_size()
-                moved_list.append(chunk.chunk_id)
-                if moved_bytes >= still_need_bytes:
-                    break
+        while Q:
+            next_mom, chunk_id = Q.get()
+            moved_bytes += self.chunk_id_to_chunk_dict[chunk_id].get_size()
+            moved_list.append(chunk_id)
+            if moved_bytes >= still_need_bytes:
+                break
 
         # 无法腾出足够空间，抛出异常
         if moved_bytes < still_need_bytes:
@@ -294,8 +286,6 @@ class ChunkList(object):
         if self._time_profile:
             global_timer.chunk_to_move_out_for_room_making_elapse += time.time(
             ) - start_time
-        # if global_timer.record_chunk_lifecycle is False:
-        #     logging.info(f'chunk to move out {moved_list} @ momenet {global_timer.lifecycle_moment}')
         return moved_list
 
     def update_status(self, chunk_id, old_status, new_status):

@@ -31,6 +31,7 @@ def F_adam(client, params: List[torch.nn.Parameter],
     r"""Functional API that performs Adam algorithm computation.
     See :class:`~torch.optim.Adam` for details.
     """
+    timer = global_timer.IterationTimer()
     for i, param in enumerate(params):
         # HybridPS加载data
         # TODO(jiaruifang)如何判断hold状态tensor的device
@@ -91,6 +92,7 @@ def F_adam(client, params: List[torch.nn.Parameter],
         client.release_data(param)
         client.release_data(exp_avg_param)
         client.release_data(exp_avg_sq_param)
+    timer.tik()
 
 
 class CPUAdam(torch.optim.Optimizer):

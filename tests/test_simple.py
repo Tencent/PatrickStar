@@ -67,7 +67,9 @@ def test_simple_model(is_ps: bool = False,
 
     loss_res = []
     if is_ps:
-        client = HybridPSClient(gpu_index=0, default_chunk_size=20)
+        client = HybridPSClient(gpu_index=0,
+                                default_chunk_size=20,
+                                warmup=True)
         optimizer = CPUAdam(client, model.parameters(), lr=0.001)
     else:
         # optimizer = optim.Adam(model.parameters(), lr=0.001)
@@ -77,26 +79,26 @@ def test_simple_model(is_ps: bool = False,
         if is_ps:
             assert (client is not None)
         optimizer = FP16_Optimizer(optimizer, client=client if is_ps else None)
-        # optimizer = configure_fp16_optimizer(optimizer)
 
     if is_ps:
-        client.register_model_optimizer(model, optimizer)
+        client.init(model, optimizer)
 
     start_time = time.time()
     for n, batch in enumerate(data_loader):
-        global_timer.lifecycle_moment = 0
-        if n == 0:
-            global_timer.record_chunk_lifecycle = True
+        if is_ps:
+            client.pre_iter()
 
         loss = model(batch[0], batch[1])
 
         # if torch.distributed.get_rank() == 0:
-        print("LOSS:", loss.item())
+        print(f"LOSS: {loss.item()} at {n}")
         loss_res.append(loss.item())
 
         if is_fp16:
             optimizer.zero_grad(set_grads_to_None=True)
             optimizer.backward(loss, update_master_grads=False)
+            # 补一手，embedding的post-hook不work，导致embeeding grad还是compute状态
+            # 强制将compute的tensor设置为hold
             if is_ps:
                 client.release_all_data_grad(PSTensorStatus.HOLD)
         else:
@@ -113,15 +115,10 @@ def test_simple_model(is_ps: bool = False,
         optimizer.step()
         see_memory_usage(f"PS {is_ps} after step {n}", force=True)
 
-        # it is necessary to get correct results
         if is_ps:
-            client.release_all_data_grad(PSTensorStatus.HOLD)
+            client.post_iter()
 
-        if n == 0:
-            global_timer.record_chunk_lifecycle = False
-            global_timer.lifecycle_overall_moment = global_timer.lifecycle_moment
-
-        if n == 2: break
+        if n == 10: break
 
     elapse = time.time() - start_time
     logging.info(f"is_ps {is_ps} elapse {elapse}")
@@ -144,7 +141,7 @@ if __name__ == "__main__":
     # 4 layer每层20个elem(20*4 bytes)，最少360 (360*4 bytes)内存
     # gpu内存至少为40，反向传播一层需要的最大内存。
 
-    test_cpu_adam = True
+    test_cpu_adam = False
     if test_cpu_adam:
         # manager.init([40 * 4] * 1, [280 * 4])
         manager.init([180 * 4] * 1, [280 * 4])
@@ -155,6 +152,7 @@ if __name__ == "__main__":
 
         print('hybridps', loss_list)
         print('ref', loss_ref_list)
+        print(loss_ref_list - loss_list)
         for loss, loss_ref in zip(loss_list, loss_ref_list):
             assert loss == loss_ref
 
@@ -162,7 +160,7 @@ if __name__ == "__main__":
         # print('gpu usage ', manager.gpu_mem_usage_curve)
         # print('cpu usgae ', manager.cpu_mem_usage_curve)
 
-    test_fp16 = False
+    test_fp16 = True
 
     if test_fp16:
         # hidden_dim = 4

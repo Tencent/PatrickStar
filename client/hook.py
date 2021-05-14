@@ -14,6 +14,7 @@
 import torch
 import logging
 from .const import PSTensorStatus, AccessType
+import utils.global_timer as global_timer
 
 
 ############# HOOKS ####################
@@ -115,17 +116,22 @@ class PostBackwardFunction(torch.autograd.Function):
 
 # 必须具备重复调用，第二次无效的能力 fetch submodule
 def pre_sub_module_forward_function(sub_module, client, name):
+    timer = global_timer.IterationTimer()
+    flag = False
     for sub_name, param in sub_module.named_parameters(recurse=False):
         logging.debug(f'FWD pre {sub_module.id}.{name}.{sub_name} access data')
         client.access_data(param, torch.device('cuda:0'))
         param.data = param.ps_attr.access_tensor(AccessType.DATA)
+        flag = True
+    if flag:
+        timer.tik()
 
 
 # release submodule
 def post_sub_module_forward_function(sub_module, client, name):
     logging.log(logging.DEBUG,
                 f'FWD post {sub_module.id} {sub_module.__class__.__name__}')
-    # TODO(jiaruifang) recurse = True释放干净
+    timer = global_timer.IterationTimer()
     for sub_name, param in sub_module.named_parameters(recurse=False):
         logging.debug(
             f'FWD post {sub_module.id}.{name}.{sub_name} release data')
@@ -136,6 +142,8 @@ def post_sub_module_forward_function(sub_module, client, name):
 
 
 def pre_sub_module_backward_function(sub_module, client, name):
+    timer = global_timer.IterationTimer()
+    flag = False
     for sub_name, param in sub_module.named_parameters(recurse=False):
         logging.log(logging.DEBUG, f'BWD pre {name}.{sub_name}')
         logging.debug(f'BWD pre  {name}.{sub_name} access data and grad')
@@ -143,12 +151,14 @@ def pre_sub_module_backward_function(sub_module, client, name):
         client.access_grad(param, torch.device('cuda:0'))
         param.data = param.ps_attr.access_tensor(AccessType.DATA)
         param.grad = param.ps_attr.access_tensor(AccessType.GRAD)
+        flag = True
+    if flag:
+        timer.tik()
 
 
 # release param of submodule
 def post_sub_module_backward_function(sub_module, client, name):
-    #TODO(jiaruifang) backward后处理逻辑
-    # TODO(jiaruifang) recurse
+    timer = global_timer.IterationTimer()
     for sub_name, param in sub_module.named_parameters(recurse=False):
         logging.debug(f'BWD post {name}.{sub_name} release data and grad')
         logging.debug(f'post BWD {name}.{sub_name} free data and hold grad')

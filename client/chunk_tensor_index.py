@@ -141,6 +141,11 @@ class ChunkTensorIndex(object):
             chunk_id, tensor_id, start_offset, numel, param, access_type,
             param_name)
 
+        if access_type == AccessType.DATA:
+            param.ps_attr.ps_data_chunk_id = chunk_id
+        elif access_type == AccessType.GRAD:
+            param.ps_attr.ps_grad_chunk_id = chunk_id
+
     def delete_chunk_id(self, chunk_id):
         """
         @depracated，在静态chunk_schema中不应该被调用
