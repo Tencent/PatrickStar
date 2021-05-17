@@ -13,8 +13,9 @@
 
 # 统计chunk的lifecycle开关
 import logging
-from .memory_monitor import get_free_memory
+from .memory_monitor import get_memory_used
 import torch
+from manager import HybridPSManager
 
 
 class SingletonMeta(type):
@@ -45,16 +46,44 @@ class IterationTimer(metaclass=SingletonMeta):
         self.warmup = False
         self._moment = 0
 
-    def tik(self):
+        self.cpu_used_list = []
+        self.cpu_ps_used_list = []
+        self.gpu_used_list = []
+        self.gpu_ps_used_list = []
+        self.gpu_sys_used_list = []
+        self.moment_device = {}
+
+    def device_type(mom):
+        return self.moment_device[mom]
+
+    def tik(self, device_type=None):
         """
         时刻前进，只有access - release形成一个闭环是一个moment
+        moment有一个计算设备，FWD BWD的设备是cuda
+        adam的设备是cpu cuda都可以
         """
         self._moment += 1
+        if self.warmup:
+            if device_type == 'cuda':
+                self.moment_device[self._moment] = 'cuda'
+            else:
+                self.moment_device[self._moment] = 'all'
 
-        # if self.warmup:
-        #     cuda_free = get_free_memory(torch.device('cuda:0'))
-        #     cpu_free = get_free_memory(torch.device('cpu:0'))
-        #     print(f'moment {self._moment}, cuda free {cuda_free/1e6} MB, cpu free {cpu_free/1e6} MB')
+        if self.warmup:
+            mgr = HybridPSManager()
+            gpu_device = torch.device('cuda:0')
+            gpu_ps_used = mgr.used_mem(gpu_device.type, gpu_device.index)
+            gpu_used = get_memory_used(gpu_device)
+
+            cpu_device = torch.device('cpu:0')
+            cpu_ps_used = mgr.used_mem(gpu_device.type, gpu_device.index)
+            cpu_used = get_memory_used(cpu_device)
+
+            self.cpu_used_list.append(cpu_used / 1e6)
+            self.cpu_ps_used_list.append(cpu_ps_used / 1e6)
+            self.gpu_used_list.append(gpu_used / 1e6)
+            self.gpu_ps_used_list.append(gpu_ps_used / 1e6)
+            self.gpu_sys_used_list.append((gpu_used - gpu_ps_used) / 1e6)
 
     def moment(self):
         return self._moment

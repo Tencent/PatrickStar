@@ -29,7 +29,7 @@ from .chunk_schema_scheduler import ChunkShemaScheduler
 import utils.global_timer as global_timer
 import time
 from .parameter import PSParameter, register_param, is_param_registed
-from utils.memory_monitor import get_free_memory
+from utils.memory_monitor import get_memory_used
 
 
 class WarmupInfo(object):
@@ -109,13 +109,14 @@ class HybridPSClient(object):
         self.chunk_list.moments_cnt_of_iteration = timer.moment()
 
     def init(self, model, optimizer):
-        self.static_chunk_schedule(model, optimizer)
         self.register_model_hook(model)
+        if self._dynamic_chunk_scheduler is False:
+            self.static_chunk_schedule(model, optimizer)
         self.copy_model(model)
         self.copy_optimizer(optimizer)
         self.module = model
 
-        # self.chunk_tensor_index.visit_chunks(self.chunk_list)
+        self.chunk_tensor_index.visit_chunks(self.chunk_list)
 
     def static_chunk_schedule(self, model, optimizer):
         """
@@ -151,9 +152,6 @@ class HybridPSClient(object):
                     master_param.ps_attr.access_tensor(AccessType.DATA).copy_(
                         master_param.data)
                     self.release_data(master_param, PSTensorStatus.HOLD)
-
-        # inspect chunk layout if you want.
-        # self.chunk_tensor_index.visit_chunks(self.chunk_list)
 
     def access(self, param: torch.nn.Parameter, access_type: AccessType,
                compute_device: torch.device):
@@ -235,6 +233,7 @@ class HybridPSClient(object):
             else:
                 self.access(param, AccessType.DATA, compute_device)
             chunk_id = param.ps_attr.ps_data_chunk_id
+            # TODO(jiarufiang) 需要记录device信息
             self.chunk_list[chunk_id].add_moment(timer.moment())
         else:
             self.access(param, AccessType.DATA, compute_device)

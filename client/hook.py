@@ -124,7 +124,7 @@ def pre_sub_module_forward_function(sub_module, client, name):
         param.data = param.ps_attr.access_tensor(AccessType.DATA)
         flag = True
     if flag:
-        timer.tik()
+        timer.tik(device_type='cuda')
 
 
 # release submodule
@@ -153,7 +153,7 @@ def pre_sub_module_backward_function(sub_module, client, name):
         param.grad = param.ps_attr.access_tensor(AccessType.GRAD)
         flag = True
     if flag:
-        timer.tik()
+        timer.tik(device_type='cuda')
 
 
 # release param of submodule

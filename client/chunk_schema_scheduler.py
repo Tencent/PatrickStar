@@ -44,9 +44,11 @@ class ChunkShemaScheduler(object):
 
         # 注册model和optimizer的param是否应该和chunk layout schedule耦合？
         # FP16和FP32都需要注册的
+        max_param_size = 0
         for name, param in self.module.named_parameters(recurse=True):
             self.register_param(param, name)
             numel = param.numel()
+            max_param_size = max(max_param_size, numel)
             data_type = param.dtype
             self.chunk_tensor_index.add_tensor(chunk_id,
                                                param.ps_attr.data_id(),
@@ -62,14 +64,25 @@ class ChunkShemaScheduler(object):
                 chunk_id += 1
                 acc_cnt = 0
 
+        self.optimizer.max_param_size = max_param_size
+
         # 收尾，剩下的tensor凑不成一个至少default size大小的chunk
         if acc_cnt > 0:
             self.chunk_list.new_chunk(chunk_id, acc_cnt, data_type)
             chunk_id += 1
             acc_cnt = 0
 
+        # fp32 data和grad需要一个chunk即可。找到fp16最大的chunk
         if hasattr(self.optimizer, "fp32_from_fp16_groups"):
-            logging.info(f'schedule for fp16 fp32_from_fp16_groups')
+            # 分配一个chunk
+            logging.info(
+                f'schedule for fp16 fp32_from_fp16_groups, max_param_size {max_param_size}'
+            )
+            self.optimizer.param_grad_buff = torch.zeros(
+                max_param_size,
+                dtype=torch.float,
+                device=torch.device('cpu:0'),
+                pin_memory=True)
             for param_group in self.optimizer.fp32_from_fp16_groups:
                 for param in param_group:
                     # TODO, 还不能获取name
@@ -80,11 +93,7 @@ class ChunkShemaScheduler(object):
                                                        param.ps_attr.data_id(),
                                                        acc_cnt, numel, param,
                                                        AccessType.DATA)
-                    self.chunk_tensor_index.add_tensor(chunk_id,
-                                                       param.ps_attr.grad_id(),
-                                                       acc_cnt + numel, numel,
-                                                       param, AccessType.GRAD)
-                    acc_cnt += numel * 2
+                    acc_cnt += numel
                     if acc_cnt > self.default_chunk_size:
                         self.chunk_list.new_chunk(chunk_id, acc_cnt, data_type)
                         chunk_id += 1
@@ -155,7 +164,6 @@ class ChunkShemaScheduler(object):
                             1, dtype=data_type, device=torch.device('cpu:0'))
 
                         acc_cnt += numel * 2
-                        # logging.info(f'acc_cnt {acc_cnt}')
                         if acc_cnt >= self.default_chunk_size:
                             # logging.info(f'here')
                             self.chunk_list.new_chunk(chunk_id, acc_cnt,

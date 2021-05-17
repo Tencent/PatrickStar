@@ -24,7 +24,7 @@ from typing import List
 import gc
 import psutil
 import utils.global_timer as global_timer
-from utils.memory_monitor import see_memory_usage, get_free_memory
+from utils.memory_monitor import see_memory_usage, get_memory_used
 import time
 
 from queue import PriorityQueue
@@ -125,7 +125,7 @@ class ChunkList(object):
                                                   target_device.index)
 
         # 当前系统可用内存，需要减去activation消耗
-        # available_size = get_free_memory(target_device)
+        # available_size = get_memory_used(target_device)
 
         extra_need_bytes = need_bytes - available_size
 
@@ -224,7 +224,11 @@ class ChunkList(object):
             if chunk.get_status() == PSChunkStatus.FREE:
                 self._delete_chunk(chunk)
 
-    def get_next_access_moment(self, chunk: Chunk):
+    def get_next_access_moment(self, chunk: Chunk,
+                               target_device: torch.device):
+        """
+        找到chunk在本设备上下一次被访问的moment
+        """
         # 还没加入统计信息
         timer = global_timer.IterationTimer()
         cur_moment = timer.moment()
@@ -233,8 +237,12 @@ class ChunkList(object):
             return 0
 
         # 非预热阶段
+        target_device_type = target_device.type
+
         for mom in chunk.access_moments:
-            if mom >= cur_moment:
+            # 找到在当前mom之后的时刻，且该时刻计算设备不是target device
+            if mom >= cur_moment and timer.device_type(
+                    mom) == target_device_type:
                 return mom
         return self.moments_cnt_of_iteration + chunk.access_moments[0]
 
@@ -264,7 +272,9 @@ class ChunkList(object):
             if chunk.get_device() is not None and chunk.get_device(
             ).type == target_device.type and chunk.get_status(
             ) == PSChunkStatus.HOLD:
-                next_mom = self.get_next_access_moment(chunk)
+                # 本设备下一次被需要的时刻？本设备下一次不被需要的时刻
+                # 如果target_device 是cuda，
+                next_mom = 0  #self.get_next_access_moment(chunk, target_device)
                 # 按照next_mom从大到小排序，如果相同则按照chunk_id排序（只在预热阶段出现）
                 Q.put((-next_mom, chunk_id))
             assert chunk.get_status() != PSChunkStatus.FREE

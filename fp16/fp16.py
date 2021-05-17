@@ -483,9 +483,15 @@ class FP16_Optimizer(object):
         if closure is not None:
             retval = self._step_with_closure(closure)
         else:
-            retval = self.optimizer.step()
+            if self.client is not None:
+                self.optimizer.max_param_size = self.max_param_size
+                self.optimizer.param_grad_buff = self.param_grad_buff
+                retval = self.optimizer.step(None, self.fp16_groups)
+            else:
+                retval = self.optimizer.step()
 
-        self._master_params_to_model_params(self.client)
+        if self.client is None:
+            self._master_params_to_model_params(self.client)
 
         return retval
 
@@ -593,7 +599,8 @@ class FP16_Optimizer(object):
             self._check_overflow()
             if self.overflow:
                 return
-        self._model_grads_to_master_grads(self.client)
+        if self.client is None:
+            self._model_grads_to_master_grads(self.client)
         self._downscale_master()
 
     def inspect_master_grad_data(self):

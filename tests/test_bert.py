@@ -186,7 +186,9 @@ def test_bert_model(is_ckp: bool = False,
         # if torch.distributed.get_rank() == 0:
         logging.info(f"LOSS of step {n}: {loss.item()}")
         loss_res.append(loss.item())
-
+        if is_ps:
+            timer = global_timer.IterationTimer()
+            logging.info(f'FWD fininshed moment {timer.moment()}')
         if is_fp16:
             optimizer.zero_grad(set_grads_to_None=True)
             optimizer.backward(loss, update_master_grads=False)
@@ -202,9 +204,10 @@ def test_bert_model(is_ckp: bool = False,
             # is_ps, 此时grad应该都是HOLD状态
             if is_ps:
                 client.release_all_data_grad(PSTensorStatus.HOLD)
+        if is_ps:
+            logging.info(f'BWD fininshed moment {timer.moment()}')
 
         if is_fp16:
-            # pass
             optimizer.update_master_grads()
 
         # chunk 0和 chunk 1还在compute状态
@@ -229,7 +232,15 @@ def test_bert_model(is_ckp: bool = False,
     logging.info(f"model numel {model_numel/1e9} B")
     if is_ps:
         global_timer.time_profiler()
-
+        timer = global_timer.IterationTimer()
+        with open('gpu_used.txt', 'w') as fh:
+            fh.write(
+                f'gpu_ps_used_list {len(timer.gpu_ps_used_list)} \n f{timer.gpu_ps_used_list}'
+            )
+            fh.write(
+                f'gpu_used_list {len(timer.gpu_used_list)} \n {timer.gpu_used_list}'
+            )
+            fh.write(f'gpu_sys_used_list \n {timer.gpu_sys_used_list}')
     return loss_res
 
 
@@ -259,7 +270,8 @@ if __name__ == "__main__":
         if use_fp16:
             # 精心挑选的参数
             manager = HybridPSManager()
-            manager.init([1024 * 1024 * 512] * 2, [1024 * 1024 * 1024 * 4 * 4])
+            manager.init([1024 * 1024 * 1024 * 6],
+                         [1024 * 1024 * 1024 * 4 * 4])
         else:
             manager = HybridPSManager()
             manager.init([1024 * 1024 * 512 * 4] * 2,
@@ -289,7 +301,7 @@ if __name__ == "__main__":
         num_layer = 12
     elif plan == 'D':
         manager = HybridPSManager()
-        manager.init([1024 * 1024 * 512 * 4] * 2, [1024 * 1024 * 1024 * 4 * 4])
+        manager.init([1024 * 1024 * 1024 * 5], [1024 * 1024 * 1024 * 4 * 4])
         hidden_dim = 4096  #2048
         batch_size = 2
         sequence_length = 1536

@@ -18,6 +18,7 @@ import torch
 from manager import HybridPSManager
 from utils import see_memory_usage
 import contexttimer
+import time
 
 
 class TestAccess(unittest.TestCase):
@@ -30,6 +31,27 @@ class TestAccess(unittest.TestCase):
         self.compute_device = torch.device(
             'cuda') if torch.cuda.is_available() else torch.device('cpu')
         logging.info('SetUp finished')
+
+    def _release_cpu_allocate_gpu(self, size):
+        elapsed = 0
+        for i in range(10):
+            # cpu_buff = torch.ones(size, dtype=torch.float, device=torch.device('cpu:0'))
+
+            start_time = time.time()
+            torch.cuda.synchronize()
+            # 分配cpu
+            cpu_buff = torch.ones(size,
+                                  dtype=torch.float,
+                                  device=torch.device('cpu:0'))
+            del cpu_buff
+            torch.cuda.synchronize()
+            #
+            elapsed += time.time() - start_time
+            # del gpu_buff
+
+        BWD = size * 4 / (elapsed / 10) / 1e9
+        logging.info(
+            f'Release/Allocate size {size * 4/1024} KB, bandwidth {BWD} GB/s')
 
     def _copy_bandwidth_benchmark(self, size, src_device, target_device):
         src_buff = torch.ones(size, dtype=torch.float, device=src_device)
@@ -120,6 +142,7 @@ class TestAccess(unittest.TestCase):
                 1024 * 1024, 1024 * 1024 * 8, 1024 * 1024 * 13,
                 1024 * 1024 * 32
         ]:
+            self._release_cpu_allocate_gpu(size)
             # self._copy_bandwidth_benchmark(size, torch.device('cpu'),
             #                                torch.device('cuda'))
             # self._copy_bandwidth_benchmark(size, torch.device('cuda'),

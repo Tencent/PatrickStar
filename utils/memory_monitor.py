@@ -19,15 +19,15 @@ import logging
 from pynvml import *
 
 
-def get_free_memory(device):
+def get_memory_used(device):
     if device.type == 'cuda':
-        nvmlInit()
-        h = nvmlDeviceGetHandleByIndex(device.index)
-        info = nvmlDeviceGetMemoryInfo(h)
-        return info.free
+        # nvmlInit()
+        # h = nvmlDeviceGetHandleByIndex(device.index)
+        # info = nvmlDeviceGetMemoryInfo(h)
+        return torch.cuda.memory_allocated()
     elif device.type == 'cpu':
         vm_stats = psutil.virtual_memory()
-        return vm_stats.available
+        return vm_stats.used  #available
 
 
 def see_memory_usage(message, force=False, scale_name="MB"):
@@ -47,7 +47,7 @@ def see_memory_usage(message, force=False, scale_name="MB"):
     # Print message except when distributed but not rank 0
     logging.info(message)
     logging.info(
-        f"MA {round(torch.cuda.memory_allocated() / scale,2 )} {scale_name} \
+        f"MA {round(torch.cuda.memory_allocated() / scale, 2)} {scale_name} \
         Max_MA {round(torch.cuda.max_memory_allocated() / scale,2)} {scale_name} \
         CA {round(torch.cuda.memory_reserved() / scale,2)} {scale_name} \
         Max_CA {round(torch.cuda.max_memory_reserved() / scale)} {scale_name} "

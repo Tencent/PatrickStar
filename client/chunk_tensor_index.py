@@ -195,6 +195,7 @@ class ChunkTensorIndex(object):
         return self.dict_tensor_id_info[tensor_id].chunk_id
 
     def visit_chunks(self, chunk_list: ChunkList):
+        total_bytes = 0
         for chunk_id, _ in self.dict_chunk_id_tensor_id.items():
             chunk = chunk_list[chunk_id]
             logging.info(
@@ -202,6 +203,8 @@ class ChunkTensorIndex(object):
             )
             for info in self.generate_tensor_info_in_order(chunk_id):
                 assert info.chunk_id == chunk_id, f'{info.chunk_id} vs {chunk_id}'
-                logging.error(
+                logging.info(
                     f"** tensor: chunk_id {chunk_id}, start {info.start_offset}, end {info.start_offset + info.numel}, size {info.numel}, tensor_id {info.tensor_id}, status {info.status()}, name {info.tensor_name}"
                 )
+            total_bytes += chunk.get_size()
+        logging.info(f'OVERALL CHUNK SIZE {total_bytes/1e9} GB')
