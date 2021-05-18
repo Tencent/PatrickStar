@@ -78,11 +78,6 @@ class ChunkShemaScheduler(object):
             logging.info(
                 f'schedule for fp16 fp32_from_fp16_groups, max_param_size {max_param_size}'
             )
-            self.optimizer.param_grad_buff = torch.zeros(
-                max_param_size,
-                dtype=torch.float,
-                device=torch.device('cpu:0'),
-                pin_memory=True)
             for param_group in self.optimizer.fp32_from_fp16_groups:
                 for param in param_group:
                     # TODO, 还不能获取name

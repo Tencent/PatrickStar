@@ -484,8 +484,6 @@ class FP16_Optimizer(object):
             retval = self._step_with_closure(closure)
         else:
             if self.client is not None:
-                self.optimizer.max_param_size = self.max_param_size
-                self.optimizer.param_grad_buff = self.param_grad_buff
                 retval = self.optimizer.step(None, self.fp16_groups)
             else:
                 retval = self.optimizer.step()

@@ -27,12 +27,13 @@ def F_adam(client, params: List[torch.nn.Parameter], fp16_params_with_grad,
            exp_avg_sqs: List[torch.nn.Parameter],
            max_exp_avg_sqs: List[Tensor], state_steps: List[int],
            amsgrad: bool, beta1: float, beta2: float, lr: float,
-           weight_decay: float, eps: float, max_param_size, param_grad_buff):
+           weight_decay: float, eps: float, max_param_size, param_grad_buff,
+           prefer_device):
     r"""Functional API that performs Adam algorithm computation.
     See :class:`~torch.optim.Adam` for details.
     """
     timer = global_timer.IterationTimer()
-
+    adam_start_time = time.time()
     for i, param in enumerate(params):
         # HybridPS加载data
         # TODO(jiaruifang)如何判断hold状态tensor的device
@@ -40,8 +41,8 @@ def F_adam(client, params: List[torch.nn.Parameter], fp16_params_with_grad,
         #     compute_device = param.data.device
         # else:
         #     compute_device = torch.device('cpu:0')
-        compute_device = torch.device('cpu:0')
 
+        compute_device = prefer_device
         client.access_data(param, compute_device)
         param_data = param.ps_attr.access_tensor(AccessType.DATA)
 
@@ -58,8 +59,14 @@ def F_adam(client, params: List[torch.nn.Parameter], fp16_params_with_grad,
             fp16_param = fp16_params_with_grad[i]
             client.access_grad(fp16_param, torch.device('cuda:0'))
             fp16_param_grad = fp16_param.ps_attr.access_tensor(AccessType.GRAD)
-            torch.cuda.synchronize()
-            param_grad.copy_(fp16_param_grad, non_blocking=True)
+            start_time = time.time()
+            # torch.cuda.synchronize()
+            param_grad.copy_(fp16_param_grad, non_blocking=False)
+            # torch.cuda.synchronize()
+            global_timer.cpu_gpu_move_elapse += time.time() - start_time
+            global_timer.cpu_gpu_move_times += 1
+            global_timer.cpu_gpu_move_data_amount += param_grad.numel()
+            client.release_grad(fp16_param, PSTensorStatus.FREE)
 
         exp_avg_param = exp_avgs[i]
         exp_avg_sq_param = exp_avg_sqs[i]
@@ -76,10 +83,6 @@ def F_adam(client, params: List[torch.nn.Parameter], fp16_params_with_grad,
 
         bias_correction1 = 1 - beta1**step
         bias_correction2 = 1 - beta2**step
-
-        if fp16_params_with_grad is not None:
-            torch.cuda.synchronize()
-            client.release_grad(fp16_param, PSTensorStatus.FREE)
 
         if weight_decay != 0:
             param_grad = param_grad.add(param_data, alpha=weight_decay)
@@ -103,24 +106,32 @@ def F_adam(client, params: List[torch.nn.Parameter], fp16_params_with_grad,
 
         param_data.addcdiv_(exp_avg, denom, value=-step_size)
 
-        f_adam_compute_start_time = time.time()
         global_timer.cpu_adam_f_elapse += time.time(
         ) - f_adam_compute_start_time
 
-        client.release_grad(param, PSTensorStatus.FREE)
+        # TODO(jiarufiang) release grad to FREE or to HOLD?
+        # to HOLD to avoild memory release. but occupying more memory. (reset to zero to make sure correct answer)
+        # to FREE will release memory (if not optimized).
+        param_grad.zero_()
+        client.release_grad(param, PSTensorStatus.HOLD)
 
         # param fp32 -> fp16
         if fp16_params_with_grad is not None:
             fp16_param = fp16_params_with_grad[i]
             client.access_data(fp16_param, torch.device('cuda:0'))
             fp16_data = fp16_param.ps_attr.access_tensor(AccessType.DATA)
+            start_time = time.time()
             fp16_data.copy_(param_data)
+            global_timer.gpu_cpu_move_elapse += time.time() - start_time
+            global_timer.gpu_cpu_move_data_amount += fp16_data.numel()
+            global_timer.gpu_cpu_move_times += 1
             client.release_data(fp16_param, PSTensorStatus.HOLD)
 
         client.release_data(param)
         client.release_data(exp_avg_param)
         client.release_data(exp_avg_sq_param)
     timer.tik(device_type='all')
+    global_timer.cpu_adam_elapse += time.time() - adam_start_time
 
 
 class CPUAdam(torch.optim.Optimizer):
@@ -131,7 +142,8 @@ class CPUAdam(torch.optim.Optimizer):
                  betas=(0.9, 0.999),
                  eps=1e-8,
                  weight_decay=0,
-                 amsgrad=False):
+                 amsgrad=False,
+                 prefer_device=torch.device('cuda:0')):
         """
         父类Optimzer实现细节
         https://github.com/pytorch/pytorch/blob/c371542efc/torch/optim/optimizer.py
@@ -157,6 +169,21 @@ class CPUAdam(torch.optim.Optimizer):
                         amsgrad=amsgrad)
         super(CPUAdam, self).__init__(params, defaults)
         self.client = client
+        self.prefer_device = prefer_device
+
+        # fp16才需要
+        max_param_size = 0
+        data_type = None
+        for group in self.param_groups:
+            for p in group['params']:
+                max_param_size = max(max_param_size, p.numel())
+                data_type = p.dtype
+
+        self.max_param_size = max_param_size
+        if data_type == torch.half:
+            self.param_grad_buff = torch.zeros(max_param_size,
+                                               dtype=torch.float,
+                                               device=self.prefer_device)
 
     def __setstate__(self, state):
         super(CPUAdam, self).__setstate__(state)
@@ -171,7 +198,7 @@ class CPUAdam(torch.optim.Optimizer):
             closure (callable, optional): A closure that reevaluates the model
                 and returns the loss.
         """
-        adam_start_time = time.time()
+
         loss = None
         if closure is not None:
             with torch.enable_grad():
@@ -265,6 +292,6 @@ class CPUAdam(torch.optim.Optimizer):
                 exp_avg_sqs, max_exp_avg_sqs, state_steps, group['amsgrad'],
                 beta1, beta2, group['lr'], group['weight_decay'], group['eps'],
                 self.max_param_size, self.param_grad_buff if hasattr(
-                    self, 'param_grad_buff') else None)
-        global_timer.cpu_adam_elapse += time.time() - adam_start_time
+                    self, 'param_grad_buff') else None, self.prefer_device)
+
         return loss
