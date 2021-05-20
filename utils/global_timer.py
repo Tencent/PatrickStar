@@ -118,6 +118,10 @@ gpu_cpu_move_elapse = 0.
 gpu_cpu_move_times = 0
 gpu_cpu_move_data_amount = 0
 
+get_status_elapse = 0
+cpu_adam_release_elapse = 0
+cpu_adam_access_elapse = 0
+
 
 def time_profiler():
     global client_access_elapse
@@ -143,6 +147,10 @@ def time_profiler():
     global gpu_cpu_move_times
     global gpu_cpu_move_data_amount
 
+    global get_status_elapse
+    global cpu_adam_release_elapse
+    global cpu_adam_access_elapse
+
     logging.info(f'CLIENT ACCESS ELAPSE')
     logging.info(f'* client_access_elapse {client_access_elapse} ')
     logging.info(f'** access_chunk_elapse {access_chunk_elapse}')
@@ -166,7 +174,11 @@ def time_profiler():
     logging.info(
         f'* cpu_adam_elapse {cpu_adam_elapse} cpu_adam_f_elapse {cpu_adam_f_elapse}'
     )
+    logging.info(
+        f'* cpu_adam_release_elapse {cpu_adam_release_elapse} cpu_adam_access_elapse {cpu_adam_access_elapse}'
+    )
 
     logging.info(f'CLIENT RELASE ELAPSE')
     logging.info(f'* client_release_elapse {client_release_elapse}')
     logging.info(f'** memory_delete_elapse {memory_delete_elapse}')
+    logging.info(f'*** get_status_elapse {get_status_elapse}')

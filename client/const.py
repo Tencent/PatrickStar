@@ -32,9 +32,9 @@ class PSChunkStatus(Enum):
 
 class PSTensorStatus(Enum):
     # 正在被用于计算，不能随意迁移
-    COMPUTE = 1
+    COMPUTE = 0
     # 可以迁移，不能释放
-    HOLD = 2
+    HOLD = 1
     # 可以释放
-    FREE = 3
-    UNINIT = 4
+    FREE = 2
+    UNINIT = 3

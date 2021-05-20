@@ -483,10 +483,7 @@ class FP16_Optimizer(object):
         if closure is not None:
             retval = self._step_with_closure(closure)
         else:
-            if self.client is not None:
-                retval = self.optimizer.step(None, self.fp16_groups)
-            else:
-                retval = self.optimizer.step()
+            retval = self.optimizer.step()
 
         if self.client is None:
             self._master_params_to_model_params(self.client)

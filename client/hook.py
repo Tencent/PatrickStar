@@ -145,12 +145,12 @@ def pre_sub_module_backward_function(sub_module, client, name):
     timer = global_timer.IterationTimer()
     flag = False
     for sub_name, param in sub_module.named_parameters(recurse=False):
-        logging.log(logging.DEBUG, f'BWD pre {name}.{sub_name}')
-        logging.debug(f'BWD pre  {name}.{sub_name} access data and grad')
+        logging.debug(f'BWD pre {name}.{sub_name}')
         client.access_data(param, torch.device('cuda:0'))
         client.access_grad(param, torch.device('cuda:0'))
         param.data = param.ps_attr.access_tensor(AccessType.DATA)
         param.grad = param.ps_attr.access_tensor(AccessType.GRAD)
+        # param.grad.zero_()
         flag = True
     if flag:
         timer.tik(device_type='cuda')
@@ -161,9 +161,11 @@ def post_sub_module_backward_function(sub_module, client, name):
     timer = global_timer.IterationTimer()
     for sub_name, param in sub_module.named_parameters(recurse=False):
         logging.debug(f'BWD post {name}.{sub_name} release data and grad')
-        logging.debug(f'post BWD {name}.{sub_name} free data and hold grad')
         client.release_grad(param, PSTensorStatus.HOLD)
-        client.release_data(param, PSTensorStatus.HOLD)
+        # TODO(jiaruifang) FP16 release to FREE, fp32 release to HOLD
+        client.release_data(
+            param, PSTensorStatus.FREE
+            if param.dtype == torch.half else PSTensorStatus.HOLD)
 
 
 def _register_hooks_recursively(module, client, count=[0], name=""):

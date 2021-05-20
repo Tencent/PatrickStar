@@ -63,17 +63,59 @@ class ChunkTensorIndex(object):
         self.dict_tensor_id_info: dict[int, TensorInfo] = {}
         # 1-N dict, chunk_id -> List(tensor_id) in order of start_offset
         self.dict_chunk_id_tensor_id: dict[int, List[int]] = {}
+        self.dict_chunk_id_chunk_info: dict[int, tuple] = {}
+
+    def add_chunk(self, chunk_id, chunk_size, data_type):
+        self.dict_chunk_id_chunk_info[chunk_id] = (chunk_size, data_type)
+
+    def find_gap(self, numel, data_type):
+        """
+        在chunk list寻找满足numel大小，类型为data type的空隙
+        TODO(jiaruifang) 应该优先分配同设备的gap
+        实际使用场景非常具体：在fp16 BWD时，分配grad会在data的chunk内。
+        """
+        for chunk_id, tensor_info_list in self.dict_chunk_id_tensor_id.items():
+            chunk_size, chunk_data_type = self.dict_chunk_id_chunk_info[
+                chunk_id]
+            if chunk_data_type != data_type or chunk_size < numel:
+                continue
+            prev_end = 0
+            for tensor_id in tensor_info_list:
+                info = self.dict_tensor_id_info[tensor_id]
+                status = info.status()
+                if status == PSTensorStatus.FREE:
+                    continue
+                start = info.start_offset
+                gap = start - prev_end
+                if gap >= numel:
+                    return chunk_id, prev_end
+                prev_end = start + info.numel
+
+            if chunk_size - prev_end >= numel:
+                return chunk_id, prev_end
+
+        return None, None
 
     def reset(self):
         self.dict_tensor_id_info.clear()
         self.dict_chunk_id_tensor_id.clear()
 
+    def generate_grad_tensor_param(self):
+        """
+        按chunk内部排列顺序生成所有当前没有被free的grad tensor所在的param
+        """
+        for chunk_id, tensor_id_list in self.dict_chunk_id_tensor_id.items():
+            for tensor_id in tensor_id_list:
+                info = self.dict_tensor_id_info[tensor_id]
+                if info.access_type == AccessType.GRAD and info.status(
+                ) != PSTensorStatus.FREE:
+                    yield info.param
+
     def generate_all_tensor_info(self):
         """
         展示每个chunk中tensor的状态
         """
-        for chunk_id, tensor_info_list in self.dict_chunk_id_tenTensorInfosor_id.items(
-        ):
+        for chunk_id, tensor_info_list in self.dict_tensor_id_info.items():
             for tensor_id in tensor_info_list:
                 yield self.dict_tensor_id_info[tensor_id]
 
@@ -192,7 +234,10 @@ class ChunkTensorIndex(object):
 
     def get_chunk_id(self, param: PSParameter, access_type: AccessType) -> int:
         tensor_id = param.ps_attr.get_tensor_id(access_type)
-        return self.dict_tensor_id_info[tensor_id].chunk_id
+        info = self.dict_tensor_id_info.get(tensor_id)
+        if info is None:
+            return None
+        return info.chunk_id
 
     def visit_chunks(self, chunk_list: ChunkList):
         total_bytes = 0

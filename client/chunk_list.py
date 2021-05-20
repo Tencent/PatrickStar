@@ -220,9 +220,18 @@ class ChunkList(object):
         试图删除当前不被使用的chunk，即chunk内的tensor都是free状态的chunk
         """
         # 释放cpu和gpu上所有free chunk，统计目标设备上腾出的空间
+
         for chunk_id, chunk in self.chunk_id_to_chunk_dict.items():
-            if chunk.get_status() == PSChunkStatus.FREE:
-                self._delete_chunk(chunk)
+            pass
+            # if self._time_profile:
+            #     sub_start_time = time.time()
+            # # TODO(jiaruifang) 耗时
+            # status = chunk.get_status()
+            # if self._time_profile:
+            #     global_timer.memory_delete_elapse += time.time() - sub_start_time
+
+            # if status == PSChunkStatus.FREE:
+            #     self._delete_chunk(chunk)
 
     def get_next_access_moment(self, chunk: Chunk,
                                target_device: torch.device):
@@ -246,11 +255,9 @@ class ChunkList(object):
                 return mom
         return self.moments_cnt_of_iteration + chunk.access_moments[0]
 
-    def _chunk_to_move_out_for_room_making(
-            self,
-            size_in_bytes: int,
-            target_device: torch.device,
-    ) -> List:
+    def _chunk_to_move_out_for_room_making(self, size_in_bytes: int,
+                                           target_device: torch.device
+                                           ) -> List:
         """
         为target device腾出size大小，找出需要移动出哪些chunk
         先释放cpu，gpu的所有free
@@ -271,13 +278,14 @@ class ChunkList(object):
         for chunk_id, chunk in self.chunk_id_to_chunk_dict.items():
             if chunk.get_device() is not None and chunk.get_device(
             ).type == target_device.type and chunk.get_status(
-            ) == PSChunkStatus.HOLD:
+            ) != PSChunkStatus.COMPUTE:
                 # 本设备下一次被需要的时刻？本设备下一次不被需要的时刻
                 # 如果target_device 是cuda，
                 next_mom = 0  #self.get_next_access_moment(chunk, target_device)
                 # 按照next_mom从大到小排序，如果相同则按照chunk_id排序（只在预热阶段出现）
                 Q.put((-next_mom, chunk_id))
-            assert chunk.get_status() != PSChunkStatus.FREE
+            # TODO(jiaruifang)不立刻释放FREE chunk，而是让它参与复用
+            # assert chunk.get_status() != PSChunkStatus.FREE
 
         while Q:
             next_mom, chunk_id = Q.get()

@@ -15,9 +15,10 @@ from .chunk_data import Chunk
 from .chunk_list import ChunkList
 from .chunk_tensor_index import ChunkTensorIndex
 from .const import AccessType, PSTensorStatus
-from .parameter import PSParameter
+from .parameter import PSParameter, register_param
 import torch
 import logging
+import sys
 
 
 class ChunkShemaScheduler(object):
@@ -29,13 +30,10 @@ class ChunkShemaScheduler(object):
         self.chunk_list = chunk_list
         self.chunk_tensor_index = chunk_tensor_index
 
-    def register_param(self, param, name=None):
-        param.ps_attr = PSParameter(param, name)
-
     def schedule(self):
         """
         为module和optimizer的参数指定chunk schema
-        schedule过程为所有parameter进行ps化
+        schedule过程为所有parameter注册成ps_tensor
         """
         # 模型参数的data和grad间隔排列。
         # Optimizer的M，V间隔排列
@@ -43,12 +41,11 @@ class ChunkShemaScheduler(object):
         chunk_id = 0
 
         # 注册model和optimizer的param是否应该和chunk layout schedule耦合？
-        # FP16和FP32都需要注册的
-        max_param_size = 0
+        # TODO(jiaruifang)用一次FWD来得到正确的执行顺序
+        # FP16 和 FP32不一样
         for name, param in self.module.named_parameters(recurse=True):
-            self.register_param(param, name)
+            register_param(param, name)
             numel = param.numel()
-            max_param_size = max(max_param_size, numel)
             data_type = param.dtype
             self.chunk_tensor_index.add_tensor(chunk_id,
                                                param.ps_attr.data_id(),
@@ -61,27 +58,25 @@ class ChunkShemaScheduler(object):
             acc_cnt += numel * 2
             if acc_cnt >= self.default_chunk_size:
                 self.chunk_list.new_chunk(chunk_id, acc_cnt, data_type)
+                self.chunk_tensor_index.add_chunk(chunk_id, acc_cnt, data_type)
                 chunk_id += 1
                 acc_cnt = 0
-
-        self.optimizer.max_param_size = max_param_size
 
         # 收尾，剩下的tensor凑不成一个至少default size大小的chunk
         if acc_cnt > 0:
             self.chunk_list.new_chunk(chunk_id, acc_cnt, data_type)
+            self.chunk_tensor_index.add_chunk(chunk_id, acc_cnt, data_type)
             chunk_id += 1
             acc_cnt = 0
 
         # fp32 data和grad需要一个chunk即可。找到fp16最大的chunk
         if hasattr(self.optimizer, "fp32_from_fp16_groups"):
             # 分配一个chunk
-            logging.info(
-                f'schedule for fp16 fp32_from_fp16_groups, max_param_size {max_param_size}'
-            )
+            logging.info(f'schedule for fp16 fp32_from_fp16_groups')
             for param_group in self.optimizer.fp32_from_fp16_groups:
                 for param in param_group:
                     # TODO, 还不能获取name
-                    self.register_param(param, 'master')
+                    register_param(param, 'master')
                     numel = param.ps_attr.ps_numel
                     data_type = param.dtype
                     self.chunk_tensor_index.add_tensor(chunk_id,
@@ -91,11 +86,14 @@ class ChunkShemaScheduler(object):
                     acc_cnt += numel
                     if acc_cnt > self.default_chunk_size:
                         self.chunk_list.new_chunk(chunk_id, acc_cnt, data_type)
+                        self.chunk_tensor_index.add_chunk(
+                            chunk_id, acc_cnt, data_type)
                         chunk_id += 1
                         acc_cnt = 0
             # 收尾
             if acc_cnt > 0:
                 self.chunk_list.new_chunk(chunk_id, acc_cnt, data_type)
+                self.chunk_tensor_index.add_chunk(chunk_id, acc_cnt, data_type)
                 chunk_id += 1
                 acc_cnt = 0
 
@@ -138,10 +136,10 @@ class ChunkShemaScheduler(object):
                             requires_grad=False)
 
                         ps_name_prefix = p.ps_attr.ps_name
-                        self.register_param(state['exp_avg'],
-                                            f'{ps_name_prefix}.exp_avg')
-                        self.register_param(state['exp_avg_sq'],
-                                            f'{ps_name_prefix}.exp_avg_sq')
+                        register_param(state['exp_avg'],
+                                       f'{ps_name_prefix}.exp_avg')
+                        register_param(state['exp_avg_sq'],
+                                       f'{ps_name_prefix}.exp_avg_sq')
 
                         numel = p.ps_attr.ps_numel
                         self.chunk_tensor_index.add_tensor(

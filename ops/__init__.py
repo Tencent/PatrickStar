@@ -12,4 +12,5 @@
 # See the AUTHORS file for names of contributors.
 
 from .cpu_adam import CPUAdam
+from .fp16_cpu_adam import FP16Adam
 from .torch_adam import TorchAdam

@@ -32,32 +32,12 @@ from .parameter import PSParameter, register_param, is_param_registed
 from utils.memory_monitor import get_memory_used
 
 
-class WarmupInfo(object):
-    def __init__(self, chunk_size):
-        # 下次分配的chunk offset和chunk id
-        self._chunk_offset = 0
-        self._chunk_id = 0
-        # chunk size刚好大于_defualt_chunk_size
-        self._defualt_chunk_size = chunk_size
-
-    def update(self, numel, chunk_list: ChunkList, data_type):
-        """
-        更新下一个chunk分配地址
-        """
-        if self._chunk_offset >= self._defualt_chunk_size:
-            # 需要下一个chunk了，先把这个chunk分配出来
-            chunk_list.new_chunk(self._chunk_id, self._chunk_offset, data_type)
-            self._chunk_offset = 0
-            self._chunk_id += 1
-        else:
-            self._chunk_offset += numel
-
-
 class HybridPSClient(object):
     def __init__(self,
                  gpu_index: int = 0,
                  default_chunk_size: int = 1024 * 1024,
-                 warmup=True):
+                 warmup=True,
+                 is_fp16=False):
         """
         管理一个Process的Param, AccGrad, OS数据。
         每个进程可以访问一个GPU的显存，和cpu的内存
@@ -82,9 +62,14 @@ class HybridPSClient(object):
 
         self._is_warmup = warmup
         self._warmup_phase = True
-        self._warmup_chunk_info = WarmupInfo(self.default_chunk_size)
         # 通过运行一次迭代来动态进行chunk schduling
-        self._dynamic_chunk_scheduler = False
+        self._dynamic_chunk_scheduler = is_fp16
+
+        self._chunk_id = -1
+
+    def _generate_chunk_id(self):
+        self._chunk_id += 1
+        return self._chunk_id
 
     def pre_iter(self):
         if self._is_warmup:
@@ -100,23 +85,22 @@ class HybridPSClient(object):
     def set_warmup_phase(self):
         timer = global_timer.IterationTimer()
         timer.warmup = True
-        self._warmup_chunk_info = WarmupInfo(self.default_chunk_size)
 
     def unset_warmup_phase(self):
-        self._warmup_chunk_info = WarmupInfo(self.default_chunk_size)
         timer = global_timer.IterationTimer()
         timer.warmup = False
         self.chunk_list.moments_cnt_of_iteration = timer.moment()
 
     def init(self, model, optimizer):
-        self.register_model_hook(model)
         if self._dynamic_chunk_scheduler is False:
             self.static_chunk_schedule(model, optimizer)
-        self.copy_model(model)
-        self.copy_optimizer(optimizer)
-        self.module = model
+            self.copy_model(model)
+            self.copy_optimizer(optimizer)
 
-        self.chunk_tensor_index.visit_chunks(self.chunk_list)
+        self.module = model
+        self.register_model_hook(model)
+
+        # self.chunk_tensor_index.visit_chunks(self.chunk_list)
 
     def static_chunk_schedule(self, model, optimizer):
         """
@@ -153,6 +137,45 @@ class HybridPSClient(object):
                         master_param.data)
                     self.release_data(master_param, PSTensorStatus.HOLD)
 
+    def generate_grad_params(self):
+        """
+        生成当前chunk list中所有grad tensors
+        """
+        return self.chunk_tensor_index.generate_grad_tensor_param()
+
+    def _assign_chunk_for_tensor(self, param, access_type):
+        """
+        为param分配一个chunk，如果已经存在的chunk有空隙则插在空隙中
+        如果没有空隙则分配一个新的chunk
+        """
+        numel = param.ps_attr.ps_numel
+        data_type = param.dtype
+
+        chunk_id, offset = self.chunk_tensor_index.find_gap(numel, data_type)
+
+        # 如果没有gap需要新分配一个
+        # 还要拷贝数据
+        if chunk_id is None:
+            chunk_id = self._generate_chunk_id()
+            offset = 0
+            # logging.info(f"no gap need to new a chunk_id {chunk_id} numel {numel} data type {data_type}")
+            chunk_size = max(self.default_chunk_size, numel)
+            self.chunk_list.new_chunk(chunk_id, chunk_size, data_type)
+            self.chunk_tensor_index.add_chunk(chunk_id, chunk_size, data_type)
+        else:
+            # logging.info(f"find_gap chunk_id {chunk_id} numel {numel} data type {data_type}")
+            pass
+
+        if access_type == AccessType.DATA:
+            self.chunk_tensor_index.add_tensor(chunk_id,
+                                               param.ps_attr.data_id(), offset,
+                                               numel, param, AccessType.DATA)
+        elif access_type == AccessType.GRAD:
+            self.chunk_tensor_index.add_tensor(chunk_id,
+                                               param.ps_attr.grad_id(), offset,
+                                               numel, param, AccessType.GRAD)
+        return chunk_id
+
     def access(self, param: torch.nn.Parameter, access_type: AccessType,
                compute_device: torch.device):
         """
@@ -171,10 +194,23 @@ class HybridPSClient(object):
             start_time = time.time()
 
         if not hasattr(param, 'ps_attr'):
-            raise RuntimeError("access a param without ps_attr")
+            # 第一次access，动态调度方案的预热过程会遇到
+            # data 和 grad都有id
+            # TODO(jiaruifang)可以在optimizer init过程把编号分配好
+            register_param(param)
 
         # 准备param所在chunk的内存，如果内存不在计算设备上需要分配或者移动
         chunk_id = self.chunk_tensor_index.get_chunk_id(param, access_type)
+
+        # 这个tensor还没在chunk schema中
+        is_first_init = False
+        if chunk_id is None:
+            chunk_id = self._assign_chunk_for_tensor(param, access_type)
+            # logging.info(f'assign chunk {chunk_id} access type {access_type} {param.dtype}')
+            is_first_init = True
+        else:
+            pass
+            # logging.info(f'found chunk_id {chunk_id}  access type {access_type} {param.dtype}')
 
         self.chunk_list.access_chunk(chunk_id, compute_device)
         # 将param内存定位到chunk上
@@ -182,7 +218,7 @@ class HybridPSClient(object):
         info = self.chunk_tensor_index.get_tensor_info(tensor_id)
         start_offset = info.start_offset
         numel = info.numel
-        assert numel == param.ps_attr.ps_numel
+        assert numel == param.ps_attr.ps_numel, f"{numel} vs {param.ps_attr.ps_numel}"
 
         param.ps_attr.set_tensor(
             self.chunk_list[chunk_id].payload.narrow(0, start_offset, numel),
@@ -190,9 +226,16 @@ class HybridPSClient(object):
 
         old_status = param.ps_attr.get_status(access_type)
 
-        # 如果是从free状态转换的需要清零
-        if old_status == PSTensorStatus.FREE:
+        # 如果是从free状态转换的需要清零，或者从
+        if old_status == PSTensorStatus.FREE or old_status == PSTensorStatus.UNINIT:
             param.ps_attr.access_tensor(access_type).zero_()
+
+        # 第一次分配ps data时候要把原来param的tensor拷贝过来
+        if is_first_init:
+            if access_type == AccessType.DATA:
+                param.ps_attr.access_tensor(access_type).copy_(param.data)
+            elif access_type == AccessType.GRAD and param.grad is not None:
+                param.ps_attr.access_tensor(access_type).copy_(param.grad)
 
         # 访问之后应该更新Tensor的状态，chunk的状态随之改变
         self.chunk_list.update_status(chunk_id, old_status,
@@ -210,28 +253,7 @@ class HybridPSClient(object):
         """
         timer = global_timer.IterationTimer()
         if timer.warmup:
-            # TODO(jiaruifang) 按照tensor在一次迭代第一次出现位置分配chunk
-            if self._dynamic_chunk_scheduler:
-                # warmup过程首次访问该param
-                if not is_param_registed(param):
-                    register_param(param)
-                numel = param.numel()
-                data_type = param.dtype
-                chunk_id = self._warmup_chunk_info._chunk_id
-                offset = self._warmup_chunk_info._chunk_offset
-                self.chunk_tensor_index.add_tensor(chunk_id,
-                                                   param.ps_attr.data_id(),
-                                                   offset, numel, param,
-                                                   AccessType.DATA)
-                self._warmup_chunk_info.update(numel, self.chunk_list,
-                                               data_type)
-                # 赋值一个dummy data
-                param.data = torch.zeros(param.ps_attr.ps_shape,
-                                         dtype=param.dtype,
-                                         device=compute_device)
-            # 更新chunk的访问时间
-            else:
-                self.access(param, AccessType.DATA, compute_device)
+            self.access(param, AccessType.DATA, compute_device)
             chunk_id = param.ps_attr.ps_data_chunk_id
             # TODO(jiarufiang) 需要记录device信息
             self.chunk_list[chunk_id].add_moment(timer.moment())
@@ -247,26 +269,7 @@ class HybridPSClient(object):
         """
         timer = global_timer.IterationTimer()
         if timer.warmup:
-            # 预热阶段 1. 注册参数 2. 分配chunk 3. 添加chunk被访问的信息
-            if self._dynamic_chunk_scheduler:
-                if not is_param_registed(param):
-                    register_param(param)
-                    numel = param.numel()
-                    data_type = param.dtype
-                    chunk_id = self._warmup_chunk_info._chunk_id
-                    offset = self._warmup_chunk_info._chunk_offset
-                    self.chunk_tensor_index.add_tensor(chunk_id,
-                                                       param.ps_attr.grad_id(),
-                                                       offset, numel, param,
-                                                       AccessType.GRAD)
-                    self._warmup_chunk_info.update(numel, self.chunk_list,
-                                                   data_type)
-                    # 赋值一个dummy grad
-                    param.grad = torch.zeros(param.ps_attr.ps_shape,
-                                             dtype=param.dtype,
-                                             device=compute_device)
-            else:
-                self.access(param, AccessType.GRAD, compute_device)
+            self.access(param, AccessType.GRAD, compute_device)
             # 更新chunk的访问时间
             chunk_id = param.ps_attr.ps_grad_chunk_id
             self.chunk_list[chunk_id].add_moment(timer.moment())
@@ -291,9 +294,6 @@ class HybridPSClient(object):
         assert isinstance(reset_to_status, PSTensorStatus)
         if param.ps_attr.get_status(access_type) != PSTensorStatus.COMPUTE:
             return
-        # assert param.ps_attr.get_status(
-        #     access_type
-        # ) == PSTensorStatus.COMPUTE, "param to be released is not at COMPUTE status"
 
         chunk_id = self.chunk_tensor_index.get_chunk_id(param, access_type)
         logging.debug(
@@ -314,14 +314,9 @@ class HybridPSClient(object):
         elif access_type == AccessType.GRAD:
             param.grad = None
 
-        if self._time_profile:
-            sub_start_time = time.time()
-
-        # 主要耗时部分, TODO(jiaruifang) lazy release
-        self.chunk_list.delete_free_chunks()
-
-        if self._time_profile:
-            global_timer.memory_delete_elapse += time.time() - sub_start_time
+        # PS：主要耗时部分，如果真正执行，以下代码非常耗时。可以改成分配时再释放。
+        # 不应该删除chunks，因为fp16的chunk可以被复用。fp32 chunk不存在删除情况
+        # self.chunk_list.delete_free_chunks()
 
         if self._time_profile:
             global_timer.client_release_elapse += time.time() - start_time
@@ -333,19 +328,13 @@ class HybridPSClient(object):
         可以把一个tensor释放成FREE，也可以成HOLD
         """
         timer = global_timer.IterationTimer()
-        if timer.warmup and self._dynamic_chunk_scheduler:
-            param.data = torch.zeros(1, device=torch.device('cpu:0'))
-        else:
-            self.release(param, AccessType.DATA, reset_to_status)
+        self.release(param, AccessType.DATA, reset_to_status)
 
     def release_grad(self,
                      param: torch.nn.Parameter,
                      reset_to_status: PSTensorStatus = PSTensorStatus.HOLD):
         timer = global_timer.IterationTimer()
-        if timer.warmup and self._dynamic_chunk_scheduler:
-            param.grad = None
-        else:
-            self.release(param, AccessType.GRAD, reset_to_status)
+        self.release(param, AccessType.GRAD, reset_to_status)
 
     def reset(self):
         """

@@ -20,7 +20,7 @@ import torch.optim as optim
 import logging
 import time
 
-from ops import CPUAdam, TorchAdam
+from ops import CPUAdam, TorchAdam, FP16Adam
 from client import HybridPSClient, setup_hybrid_ps_hooks, PSTensorStatus
 from manager import HybridPSManager
 from utils import see_memory_usage
@@ -41,7 +41,8 @@ def show_optim(optimizer):
 
 def test_simple_model(is_ps: bool = False,
                       is_fp16: bool = False,
-                      is_ckp: bool = True):
+                      is_ckp: bool = True,
+                      stop_iter: int = 10):
     logging.info(f'test a simple model with hybrid ps {is_ps} FP16 {is_fp16}')
 
     hidden_dim = 4
@@ -69,16 +70,18 @@ def test_simple_model(is_ps: bool = False,
     if is_ps:
         client = HybridPSClient(gpu_index=0,
                                 default_chunk_size=20,
-                                warmup=True)
-        optimizer = CPUAdam(client, model.parameters(), lr=0.001)
+                                warmup=True,
+                                is_fp16=is_fp16)
+        if is_fp16:
+            optimizer = FP16Adam(client, model.parameters(), lr=0.001)
+        else:
+            optimizer = CPUAdam(client, model.parameters(), lr=0.001)
     else:
         # optimizer = optim.Adam(model.parameters(), lr=0.001)
         optimizer = TorchAdam(model.parameters(), lr=0.001)
-
-    if is_fp16:
-        if is_ps:
-            assert (client is not None)
-        optimizer = FP16_Optimizer(optimizer, client=client if is_ps else None)
+        if is_fp16:
+            optimizer = FP16_Optimizer(optimizer,
+                                       client=client if is_ps else None)
 
     if is_ps:
         client.init(model, optimizer)
@@ -94,35 +97,27 @@ def test_simple_model(is_ps: bool = False,
         print(f"LOSS: {loss.item()} at {n}")
         loss_res.append(loss.item())
 
-        if is_fp16:
+        if is_fp16 and not is_ps:
             optimizer.zero_grad(set_grads_to_None=True)
             optimizer.backward(loss, update_master_grads=False)
-            # 补一手，embedding的post-hook不work，导致embeeding grad还是compute状态
-            # 强制将compute的tensor设置为hold
-            if is_ps:
-                client.release_all_data_grad(PSTensorStatus.HOLD)
+            optimizer.update_master_grads()
         else:
             optimizer.zero_grad()
             loss.backward()
-            if is_ps:
-                client.release_all_data_grad(PSTensorStatus.HOLD)
 
-        if is_fp16:
-            # pass
-            optimizer.update_master_grads()
-
-        # chunk 0和 chunk 1还在compute状态
         optimizer.step()
+
         see_memory_usage(f"PS {is_ps} after step {n}", force=True)
 
         if is_ps:
             client.post_iter()
 
-        if n == 10: break
+        if n == stop_iter: break
 
     elapse = time.time() - start_time
     logging.info(f"is_ps {is_ps} elapse {elapse}")
     logging.info("======================" * 4)
+
     if is_ps:
         client.chunk_list.visit()
         global_timer.time_profiler()
@@ -141,7 +136,7 @@ if __name__ == "__main__":
     # 4 layer每层20个elem(20*4 bytes)，最少360 (360*4 bytes)内存
     # gpu内存至少为40，反向传播一层需要的最大内存。
 
-    test_cpu_adam = False
+    test_cpu_adam = True
     if test_cpu_adam:
         # manager.init([40 * 4] * 1, [280 * 4])
         manager.init([180 * 4] * 1, [280 * 4])
@@ -152,13 +147,8 @@ if __name__ == "__main__":
 
         print('hybridps', loss_list)
         print('ref', loss_ref_list)
-        print(loss_ref_list - loss_list)
         for loss, loss_ref in zip(loss_list, loss_ref_list):
             assert loss == loss_ref
-
-        # print(loss_list)
-        # print('gpu usage ', manager.gpu_mem_usage_curve)
-        # print('cpu usgae ', manager.cpu_mem_usage_curve)
 
     test_fp16 = True
 
