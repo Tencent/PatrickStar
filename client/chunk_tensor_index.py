@@ -104,12 +104,14 @@ class ChunkTensorIndex(object):
         """
         按chunk内部排列顺序生成所有当前没有被free的grad tensor所在的param
         """
+        res_list = []
         for chunk_id, tensor_id_list in self.dict_chunk_id_tensor_id.items():
             for tensor_id in tensor_id_list:
                 info = self.dict_tensor_id_info[tensor_id]
                 if info.access_type == AccessType.GRAD and info.status(
                 ) != PSTensorStatus.FREE:
-                    yield info.param
+                    res_list.append(info.param)
+        return res_list
 
     def generate_all_tensor_info(self):
         """
@@ -232,7 +234,8 @@ class ChunkTensorIndex(object):
         else:
             return info.chunk_id
 
-    def get_chunk_id(self, param: PSParameter, access_type: AccessType) -> int:
+    def get_chunk_id(self, param: torch.nn.Parameter,
+                     access_type: AccessType) -> int:
         tensor_id = param.ps_attr.get_tensor_id(access_type)
         info = self.dict_tensor_id_info.get(tensor_id)
         if info is None:

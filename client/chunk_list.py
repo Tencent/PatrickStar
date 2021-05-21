@@ -52,6 +52,12 @@ class ChunkList(object):
         """
         return len(self.chunk_id_to_chunk_dict)
 
+    def max_chunk_size(self):
+        max_size = 0
+        for chunk_id, chunk in self.chunk_id_to_chunk_dict.items():
+            max_size = max(chunk.capacity, max_size)
+        return max_size
+
     def access_chunk(self, chunk_id: int, compute_device: torch.device):
         """
         访问chunk_id，将chunk的内存准备到compute device上。

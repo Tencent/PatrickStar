@@ -2,12 +2,15 @@
 client负责管理本进程的显存和内存使用。
 系统中多个进程Client管理的显存和内存互相隔离的，这样避免了client之间进程进程间通信。
 
-client可以register module，也可以register paramter。
-通过param作为key来索引每个Parameter对应的data和grad。
+Client的成员变量有ChunkList，ChunkTensorIndex。
+Chunk是一段连续的内存空间，可以在内存或者显存中。
+Chunk可以在内存和显存间按需移动。
+ChunkList就是一串Chunk的链表。
 Parameter的data和grad存储在以Chunk方式管理的tensor中(chunked tensor)。
-Chunk是一段连续的内存空间，可以在内存或者显存中。Chunk可以在内存和显存间按需移动。
+Client通过param作为key来索引每个Parameter对应的data和grad。
 
 Parameter是client管理的最小单位。
+client具备改造`torch.nn.Parameter`的能力，给Paramter添加一个ps_attr属性，架空它原本的data和grad。
 client只能注册一个nn.Parameter，而无法单独注册一个tensor。
 因为，一旦改变的tensor.data的位置，那么这个tensor也就不是原来的tensor了。
 如果想让一个tensor被弄成chunked tensor形式，需要将tensor包装成nn.Parameter给PS注册。

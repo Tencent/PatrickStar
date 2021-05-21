@@ -160,7 +160,7 @@ def test_bert_model(is_ckp: bool = False,
     if is_ps:
         # chunk 512 MB, good for CPU-GPU bandwidth
         client = HybridPSClient(gpu_index=0,
-                                default_chunk_size=1024 * 1024 * 512,
+                                default_chunk_size=1024 * 1024 * 8,
                                 warmup=True,
                                 is_fp16=is_fp16)
 
