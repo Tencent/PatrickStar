@@ -20,14 +20,14 @@ from manager import HybridPSManager
 from utils import init_distributed
 import torch
 
-init_distributed(dist_backend='gloo')
+init_distributed(dist_backend='nccl')
 rank = torch.distributed.get_rank()
 manager = HybridPSManager()
 manager.init([10, 10], [10, 10])
 
 # 每个进程都分配一个chunk
-chunk = Chunk(2, torch.half, 0)
-chunk.allocate_payload(torch.device('cpu:0'))
+chunk = Chunk(4, torch.half, 0)
+chunk.allocate_payload(torch.device(f'cuda:{rank}'))
 chunk.payload.random_()
 
 # 不同进程chunk执行allgather，每个进程获得一个allgather的chunk

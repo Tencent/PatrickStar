@@ -154,7 +154,7 @@ class Chunk(object):
         assert self.capacity % world_size == 0, "capacity cannot divide world_size equally."
         assert self.location_status == PSChunkLocStatus.GPU_DUP or self.location_status == PSChunkLocStatus.CPU_DUP
 
-        partition_size = self.payload.numel()
+        partition_size = self.capacity // world_size
         rank = torch.distributed.get_rank()
 
         total_size = self.capacity
