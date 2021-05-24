@@ -30,6 +30,7 @@ class PSChunkStatus(Enum):
     RELEASED = 4
 
 
+# 数据在计算逻辑中的状态
 class PSTensorStatus(Enum):
     # 正在被用于计算，不能随意迁移
     COMPUTE = 0
@@ -38,3 +39,13 @@ class PSTensorStatus(Enum):
     # 可以释放
     FREE = 2
     UNINIT = 3
+
+
+# chunk的位置
+class PSChunkLocStatus(Enum):
+    CPU_PART = 0
+    GPU_PART = 1
+    GPU_DUP = 2
+    UNINIT = 3
+    # 调试使用，真实场景不存在这种状态
+    CPU_DUP = 4

@@ -13,7 +13,7 @@
 
 import os
 import torch
-from .const import PSTensorStatus, PSChunkStatus, AccessType
+from .const import PSTensorStatus, PSChunkStatus, AccessType, PSChunkLocStatus
 from .helper import getsizeof
 from .helper import getsizeof
 
@@ -55,6 +55,7 @@ class Chunk(object):
         self._time_profile = True
 
         self.access_moments = []
+        self.location_status = PSChunkLocStatus.UNINIT
 
     def add_moment(self, mom):
         if len(self.access_moments) > 0 and self.access_moments[-1] == mom:
@@ -77,15 +78,83 @@ class Chunk(object):
                                        dtype=self.data_type,
                                        device=device,
                                        pin_memory=True)
+            self.location_status = PSChunkLocStatus.CPU_PART
         else:
             self.payload = torch.zeros(self.capacity,
                                        dtype=self.data_type,
                                        device=device)
+            self.location_status = PSChunkLocStatus.GPU_PART
         self.ps_manager.add(device.type, device.index, self.get_size())
 
         self.touch()
         if self._time_profile:
             global_timer.memory_allocate_elapse = time.time() - start_time
+
+    def allgather(self, async_op=False):
+        """
+        将不同进程相同chunk id的payload allgather成一个chunk
+        此时chunk的payload可能是`PSChunkLocStatus.GPU_PART`
+        """
+        assert torch.distributed.is_initialized(
+        ), "torch distributed is not initialized during allgather"
+        assert self.payload is not None, "payload of chunk is None during allgather"
+        # assert self._status_dict[PSChunkStatus.COMPUTE] == 0, f"Neither of tensors assigned to the chunk shall be at the status of COMPUTE during allgather {self._status_dict[PSChunkStatus.COMPUTE]}."
+        world_size = torch.distributed.get_world_size()
+        gathered_chunk_size = self.capacity * world_size
+        torch.cuda.synchronize()
+        partitions = []
+        flat_tensor = torch.zeros(gathered_chunk_size,
+                                  dtype=self.data_type,
+                                  device=self.payload.device).view(-1)
+
+        rank = torch.distributed.get_rank()
+        for i in range(world_size):
+            partitions.append(
+                flat_tensor.narrow(0, self.capacity * i, self.capacity))
+
+            if i == rank:
+                partitions[i].data.copy_(self.payload, non_blocking=True)
+
+        handle = torch.distributed.all_gather(partitions,
+                                              partitions[rank],
+                                              async_op=async_op)
+
+        # replicated_tensor = flat_tensor.narrow(0, 0, self.capacity)
+        self.payload = flat_tensor
+        self.location_status = PSChunkLocStatus.GPU_DUP if self.payload.type == "cuda" else PSChunkLocStatus.CPU_DUP
+        return handle
+
+    def reduce_scatter(self):
+        """
+        BWD access_grad时候需要执行它
+        位置状态是GPU_DUP -> GPU_PART
+        数据状态是COMPUTE
+        """
+        world_size = torch.distributed.get_world_size()
+        assert self.capacity % world_size == 0, "capacity cannot divide world_size equally."
+        assert self.location_status == PSChunkLocStatus.GPU_DUP or self.location_status == PSChunkLocStatus.CPU_DUP
+
+        partition_size = self.capacity // world_size
+        rank = torch.distributed.get_rank()
+
+        total_size = self.capacity * world_size
+        input_list = []
+
+        for i in range(world_size):
+            start = i * partition_size
+            end = start + partition_size
+
+            #print("before reduce scatter gradients")
+            input = self.payload.view(-1).narrow(0, start, partition_size)
+
+            #print("after reduce scatter gradients")
+            input_list.append(input)
+
+        handle = torch.distributed.reduce_scatter(input_list[rank],
+                                                  input_list,
+                                                  async_op=True)
+
+        return handle, input_list[rank]
 
     def release_payload(self):
         """

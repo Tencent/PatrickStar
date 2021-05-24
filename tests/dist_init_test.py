@@ -11,7 +11,20 @@
 # permissions and limitations under the License.
 # See the AUTHORS file for names of contributors.
 
-from .global_timer import *
-from .memory_monitor import see_memory_usage
-from .logging import log_dist, logger
-from .distributed import init_distributed
+from runtime import initialize, InsertPostInitMethodToModuleSubClasses
+from tests.simple_net import SimpleModel
+
+hidden_dim = 4
+model = SimpleModel(hidden_dim=hidden_dim)
+
+# 初始化计算引擎
+model, _, _, _ = initialize(args=None,
+                            model=model,
+                            model_parameters=model.parameters())
+
+# 初始化模型参数
+with InsertPostInitMethodToModuleSubClasses():
+    model2 = SimpleModel(hidden_dim=hidden_dim)
+
+for param in model2.named_parameters():
+    print(param)
