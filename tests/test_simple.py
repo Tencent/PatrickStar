@@ -50,14 +50,15 @@ def test_simple_model(is_ps: bool = False,
     device = torch.device('cuda:0')
 
     model = SimpleModel(hidden_dim, is_ckp=is_ckp)
-    model.cuda()
+    if not is_ps:
+        model.cuda()
+        if is_fp16:
+            model = FP16_Module(model)
     model.train()
 
     see_memory_usage(f"PS {is_ps} after model init", force=True)
 
-    if is_fp16:
-        model = FP16_Module(model)
-        # model.half()
+    # model.half()
 
     data_loader = get_data_loader(
         batch_size=batch_size,

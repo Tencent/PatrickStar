@@ -211,12 +211,14 @@ class BertEmbeddings(nn.Module):
         if position_ids is None:
             position_ids = self.position_ids[:, past_key_values_length:
                                              seq_length +
-                                             past_key_values_length]
+                                             past_key_values_length].cuda()
 
+        # TODO(jiaruifang)为了PS adam修改的，如果模型初始化在cpu上，并没有机制把ids显式移动到
+        # cuda设备上。多机情况尚未考虑。
         if token_type_ids is None:
-            token_type_ids = torch.zeros(input_shape,
-                                         dtype=torch.long,
-                                         device=self.position_ids.device)
+            token_type_ids = torch.zeros(
+                input_shape, dtype=torch.long,
+                device=self.position_ids.device).cuda()
 
         if inputs_embeds is None:
             inputs_embeds = self.word_embeddings(input_ids)

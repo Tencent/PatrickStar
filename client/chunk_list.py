@@ -94,13 +94,13 @@ class ChunkList(object):
         # 只有chunk状态是hold的会被移动，而hold状态的chunk中所有tensor都是hold或者free。
         # 这种tensor的内存都悬空
         elif chunk.get_device().type != compute_device.type:
-            logging.debug(
-                f'access_chunk chunk {chunk_id} prepare {local_space} B memory on {compute_device}'
-            )
             local_space = chunk.get_chunk_space()
             if torch.distributed.is_initialized():
                 local_space = local_space // torch.distributed.get_world_size()
                 assert local_space % torch.distributed.get_world_size() == 0
+            logging.debug(
+                f'access_chunk chunk {chunk_id} prepare {local_space} B memory on {compute_device}'
+            )
             self.prepare_device(compute_device, local_space)
             chunk.move(compute_device, self.copy_stream)
             assert chunk.get_device(

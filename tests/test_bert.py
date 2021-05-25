@@ -139,14 +139,15 @@ def test_bert_model(is_ckp: bool = False,
     calculate_model_size(cfg)
     total_macs = calucate_MAC(cfg, batch_size, sequence_length)
 
-    model.cuda()
-    model.train()
+    if not is_ps:
+        model.cuda()
+        if is_fp16:
+            model = FP16_Module(model)
 
     see_memory_usage(
         f"ckp {is_ckp} fp16 {is_fp16} ps {is_ps} after model init", force=True)
 
-    if is_fp16:
-        model = FP16_Module(model)
+    model.train()
 
     data_loader = get_bert_data_loader(
         batch_size=batch_size,
@@ -168,7 +169,11 @@ def test_bert_model(is_ckp: bool = False,
             optimizer = FP16Adam(client,
                                  model.parameters(),
                                  lr=0.001,
-                                 prefer_device=torch.device('cpu:0'))
+                                 prefer_device=torch.device('cuda:0'))
+            see_memory_usage(
+                f"ckp {is_ckp} fp16 {is_fp16} ps {is_ps} after FP16 Adam init",
+                force=True)
+
         else:
             optimizer = CPUAdam(client,
                                 model.parameters(),

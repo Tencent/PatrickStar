@@ -166,7 +166,7 @@ def FP16_f_adamv2(client,
     按照在chunk内的存储顺序连续访问fp16_param_with_grad_list的参数，获取fp16 grad，
     以chunk为单位拷贝到一个tmp buff之中
     """
-    assert prefer_device.type == 'cpu'
+    # assert prefer_device.type == 'cpu'
     timer = global_timer.IterationTimer()
     if time_profile:
         adam_start_time = time.time()
@@ -181,7 +181,7 @@ def FP16_f_adamv2(client,
         fp16_param = fp16_param_with_grad_list[i]
 
         # 把fp16_param所在的chunk拷贝到tmp_buff中，并返回对应的tensor
-        if True:
+        if False:
             # client.access_grad(fp16_param, torch.device('cuda:0'))
             param_grad = client.fp16_to_fp32_copy(
                 fp16_param, AccessType.GRAD).view(param_data.shape)
@@ -329,6 +329,7 @@ class FP16Adam(torch.optim.Optimizer):
         # 将group参数放置到每个param内部
         for group in self.param_groups:
             for p in group['params']:
+                p.data = p.data.half()
                 max_param_size = max(max_param_size, p.numel())
                 data_type = p.dtype
                 self.state[p]['betas'] = group['betas']
@@ -337,7 +338,7 @@ class FP16Adam(torch.optim.Optimizer):
                 self.state[p]['eps'] = group['eps']
 
         self.max_param_size = max_param_size
-        assert data_type == torch.half
+        assert data_type == torch.half, f"data type is {data_type}"
         # TODO(jiaruifang) buff应该是最大chunk的size rather than default chunk size.
         # move to first init
 
