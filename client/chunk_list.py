@@ -34,11 +34,12 @@ class ChunkList(object):
     """
     管理一个chunk链表
     """
-    def __init__(self):
+    def __init__(self, rank: int = 0):
         self.chunk_id_to_chunk_dict: dict[int, Chunk] = {}
         self._time_profile = True
         self.copy_stream = torch.cuda.Stream()
         self.moments_cnt_of_iteration = None
+        self.rank = rank
 
     def __getitem__(self, chunk_id: int):
         """
@@ -76,10 +77,14 @@ class ChunkList(object):
         # 如果chunk的内存释放了，需要将它分配出来
         if chunk_status == PSChunkStatus.RELEASED:
             # 直接在compute device上腾出空间
+            local_space = chunk.get_chunk_space()
+            if torch.distributed.is_initialized():
+                local_space = local_space // torch.distributed.get_world_size()
+                assert local_space % torch.distributed.get_world_size() == 0
             logging.debug(
-                f'access_chunk chunk {chunk_id}, need to allocate {chunk.get_size()} B memory on {compute_device}'
+                f'access_chunk chunk {chunk_id}, need to allocate {local_space} B memory on {compute_device}'
             )
-            self.prepare_device(compute_device, chunk.get_size())
+            self.prepare_device(compute_device, local_space)
 
             chunk.allocate_payload(compute_device)
             if self._time_profile:
@@ -90,10 +95,14 @@ class ChunkList(object):
         # 只有chunk状态是hold的会被移动，而hold状态的chunk中所有tensor都是hold或者free。
         # 这种tensor的内存都悬空
         elif chunk.get_device().type != compute_device.type:
+            local_space = chunk.get_chunk_space()
+            if torch.distributed.is_initialized():
+                local_space = local_space // torch.distributed.get_world_size()
+                assert local_space % torch.distributed.get_world_size() == 0
             logging.debug(
-                f'access_chunk chunk {chunk_id} prepare {chunk.get_size()} B memory on {compute_device}'
+                f'access_chunk chunk {chunk_id} prepare {local_space} B memory on {compute_device}'
             )
-            self.prepare_device(compute_device, chunk.get_size())
+            self.prepare_device(compute_device, local_space)
             chunk.move(compute_device, self.copy_stream)
             assert chunk.get_device(
             ).type == compute_device.type, f"chunk device {chunk.get_device()} compute device {compute_device}"
@@ -152,7 +161,8 @@ class ChunkList(object):
 
         # TODO(jiaruifang)只考虑单卡情况，新设备只有gpu和cpu
         new_device = torch.device(
-            'cpu') if target_device.type == 'cuda' else torch.device('cuda:0')
+            'cpu') if target_device.type == 'cuda' else torch.device(
+                f'cuda:{self.rank}')
 
         # 把他们移动到新设备上
         for idx in moved_list:
@@ -190,7 +200,8 @@ class ChunkList(object):
             )
         self.chunk_id_to_chunk_dict[chunk_id] = Chunk(capacity=chunk_size,
                                                       data_type=data_type,
-                                                      chunk_id=chunk_id)
+                                                      chunk_id=chunk_id,
+                                                      rank=self.rank)
         logging.debug(
             f'allocate with new chunk chunk_id {chunk_id} size {chunk_size} data_type {data_type}'
         )
@@ -247,6 +258,7 @@ class ChunkList(object):
         # 还没加入统计信息
         timer = global_timer.IterationTimer()
         cur_moment = timer.moment()
+        return 0
         # 预热阶段，返回值固定
         if timer.warmup:
             return 0
@@ -295,7 +307,8 @@ class ChunkList(object):
 
         while Q:
             next_mom, chunk_id = Q.get()
-            moved_bytes += self.chunk_id_to_chunk_dict[chunk_id].get_size()
+            moved_bytes += self.chunk_id_to_chunk_dict[
+                chunk_id].get_payload_space()
             moved_list.append(chunk_id)
             if moved_bytes >= still_need_bytes:
                 break
@@ -323,7 +336,7 @@ class ChunkList(object):
         logging.info('** chunk_id, device, size(B), ' 'type, device, status')
         for chunk_id, chunk in self.chunk_id_to_chunk_dict.items():
             logging.info(
-                f'** {chunk_id}, {chunk.get_device()}, {chunk.get_size()}, '
+                f'** {chunk_id}, {chunk.get_device()}, {chunk.get_chunk_space()}, '
                 f'{chunk.data_type}, {chunk.get_device()}, {chunk.get_status()}'
             )
             chunk.show_life_cycle()

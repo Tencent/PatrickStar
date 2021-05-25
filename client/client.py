@@ -34,16 +34,17 @@ from utils.memory_monitor import get_memory_used
 
 class CachedFP32Buff(object):
     # TODO release max_chunk_size
-    def __init__(self, default_chunk_size: int):
+    def __init__(self, default_chunk_size: int, rank: int):
         self.cached_chunk_id = None
         self.max_chunk_size = default_chunk_size
+        self.rank = rank
         self.cpu_cached_fp32_payload = torch.zeros(self.max_chunk_size,
                                                    dtype=torch.float,
                                                    pin_memory=True)
         self.cuda_cached_fp32_payload = torch.zeros(
             self.max_chunk_size,
             dtype=torch.float,
-            device=torch.device('cuda:0'))
+            device=torch.device(f'cuda:{self.rank}'))
 
     def reset(self):
         self.cached_chunk_id = None
@@ -72,7 +73,7 @@ class CachedFP32Buff(object):
                 self.cuda_cached_fp32_payload = torch.zeros(
                     self.max_chunk_size,
                     dtype=torch.float,
-                    device=torch.device('cuda:0'))
+                    device=torch.device(f'cuda:{self.rank}'))
 
             cuda_buff = self.cuda_cached_fp32_payload.narrow(0, 0, chunk_size)
             cuda_buff.copy_(chunk.payload)
@@ -91,7 +92,7 @@ class CachedFP32Buff(object):
 
 class HybridPSClient(object):
     def __init__(self,
-                 gpu_index: int = 0,
+                 rank: int = 0,
                  default_chunk_size: int = 1024 * 1024,
                  warmup=True,
                  is_fp16=False):
@@ -105,7 +106,7 @@ class HybridPSClient(object):
         self.pid = os.getpid()
 
         # index of gpu
-        self.gpu_index = gpu_index
+        self.rank = rank
 
         self.chunk_list = ChunkList()
 
@@ -123,8 +124,7 @@ class HybridPSClient(object):
         self._dynamic_chunk_scheduler = is_fp16
 
         self._chunk_id = -1
-
-        self._cached_fp32_buff = CachedFP32Buff(default_chunk_size)
+        self._cached_fp32_buff = CachedFP32Buff(default_chunk_size, rank)
 
     def _generate_chunk_id(self):
         self._chunk_id += 1

@@ -120,7 +120,7 @@ def pre_sub_module_forward_function(sub_module, client, name):
     flag = False
     for sub_name, param in sub_module.named_parameters(recurse=False):
         logging.debug(f'FWD pre {sub_module.id}.{name}.{sub_name} access data')
-        client.access_data(param, torch.device('cuda:0'))
+        client.access_data(param, torch.device(f'cuda:{client.rank}'))
         param.data = param.ps_attr.access_tensor(AccessType.DATA)
         flag = True
     if flag:
@@ -146,8 +146,8 @@ def pre_sub_module_backward_function(sub_module, client, name):
     flag = False
     for sub_name, param in sub_module.named_parameters(recurse=False):
         logging.debug(f'BWD pre {name}.{sub_name}')
-        client.access_data(param, torch.device('cuda:0'))
-        client.access_grad(param, torch.device('cuda:0'))
+        client.access_data(param, torch.device(f'cuda:{client.rank}'))
+        client.access_grad(param, torch.device(f'cuda:{client.rank}'))
         param.data = param.ps_attr.access_tensor(AccessType.DATA)
         param.grad = param.ps_attr.access_tensor(AccessType.GRAD)
         # param.grad.zero_()

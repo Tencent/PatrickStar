@@ -10,8 +10,24 @@
 # implied. See the License for the specific language governing
 # permissions and limitations under the License.
 # See the AUTHORS file for names of contributors.
+"""
+python ../launcher/runner.py --num_nodes 1 --num_gpus 1 dist_init_test.py
+"""
+import torch
+from runtime import initialize_engine, init_context, Init
+from tests.simple_net import SimpleModel
 
-from .global_timer import *
-from .memory_monitor import see_memory_usage
-from .logging import log_dist, logger
-from .distributed import init_distributed
+hidden_dim = 4
+
+# 初始化模型参数
+with Init():
+    model = SimpleModel(hidden_dim=hidden_dim)
+
+rank = torch.distributed.get_rank()
+for param in model.named_parameters():
+    print(f'rank {rank}', param)
+
+# 初始化计算引擎，不常用
+model, _, _, _ = initialize_engine(args=None,
+                                   model=model,
+                                   model_parameters=model.parameters())

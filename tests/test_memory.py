@@ -65,7 +65,7 @@ def test_monitor():
     # NOTE(jiaruifang) Why CPU memory usage increase? I guess the PyTorch runtime occupy some memory.
     see_memory_usage('after init param1 and parm2', force=True)
 
-    client = HybridPSClient(gpu_index=0, default_chunk_size=1024)
+    client = HybridPSClient(rank=0, default_chunk_size=1024)
 
     client.register_param(param1)
 

@@ -247,12 +247,12 @@ class ChunkTensorIndex(object):
         for chunk_id, _ in self.dict_chunk_id_tensor_id.items():
             chunk = chunk_list[chunk_id]
             logging.info(
-                f'Chunk id {chunk.chunk_id}, capacity {chunk.capacity} dtype {chunk.data_type}, size {chunk.get_size()}, device {chunk.get_device()}'
+                f'Chunk id {chunk.chunk_id}, capacity {chunk.capacity} dtype {chunk.data_type}, size {chunk.get_chunk_space()}, device {chunk.get_device()}'
             )
             for info in self.generate_tensor_info_in_order(chunk_id):
                 assert info.chunk_id == chunk_id, f'{info.chunk_id} vs {chunk_id}'
                 logging.info(
                     f"** tensor: chunk_id {chunk_id}, start {info.start_offset}, end {info.start_offset + info.numel}, size {info.numel}, tensor_id {info.tensor_id}, status {info.status()}, name {info.tensor_name}"
                 )
-            total_bytes += chunk.get_size()
+            total_bytes += chunk.get_chunk_space()
         logging.info(f'OVERALL CHUNK SIZE {total_bytes/1e9} GB')

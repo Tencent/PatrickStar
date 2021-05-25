@@ -31,6 +31,7 @@ from fp16 import FP16_Module
 from fp16 import FP16_Optimizer
 
 from tests.simple_net import SimpleModel, get_data_loader
+from runtime import initialize_engine, Init
 
 
 def show_optim(optimizer):
@@ -47,17 +48,48 @@ def test_simple_model(is_ps: bool = False,
 
     hidden_dim = 4
     batch_size = 4
-    device = torch.device('cuda:0')
 
-    model = SimpleModel(hidden_dim, is_ckp=is_ckp)
-    model.cuda()
-    model.train()
+    if torch.distributed.is_initialized():
+        rank = torch.distributed.get_rank()
+    else:
+        rank = 0
+    device = torch.device(f'cuda:{rank}')
+
+    if not is_ps:
+        model = SimpleModel(hidden_dim, is_ckp=is_ckp)
+        model.cuda()
+        if is_fp16:
+            model = FP16_Module(model)
+        model.train()
+        optimizer = TorchAdam(model.parameters(), lr=0.001)
+        if is_fp16:
+            optimizer = FP16_Optimizer(optimizer)
+    else:
+        if is_fp16:
+            with Init(dtype=torch.float):
+                model = SimpleModel(hidden_dim, is_ckp=is_ckp)
+
+            class Config(object):
+                def __init__(self):
+                    self.default_chunk_size = 1024 * 1024
+
+            config = Config()
+            config.default_chunk_size = 20
+            model, optimizer, _, _ = initialize_engine(
+                args=None,
+                model=model,
+                model_parameters=model.parameters(),
+                config=config)
+        else:
+            model = SimpleModel(hidden_dim, is_ckp=is_ckp)
+            client = HybridPSClient(rank=0,
+                                    default_chunk_size=20,
+                                    warmup=True,
+                                    is_fp16=is_fp16)
+            optimizer = CPUAdam(client, model.parameters(), lr=0.001)
+            client.init(model, optimizer)
 
     see_memory_usage(f"PS {is_ps} after model init", force=True)
-
-    if is_fp16:
-        model = FP16_Module(model)
-        # model.half()
 
     data_loader = get_data_loader(
         batch_size=batch_size,
@@ -67,29 +99,11 @@ def test_simple_model(is_ps: bool = False,
         data_type=torch.half if is_fp16 else torch.float)
 
     loss_res = []
-    if is_ps:
-        client = HybridPSClient(gpu_index=0,
-                                default_chunk_size=20,
-                                warmup=True,
-                                is_fp16=is_fp16)
-        if is_fp16:
-            optimizer = FP16Adam(client, model.parameters(), lr=0.001)
-        else:
-            optimizer = CPUAdam(client, model.parameters(), lr=0.001)
-    else:
-        # optimizer = optim.Adam(model.parameters(), lr=0.001)
-        optimizer = TorchAdam(model.parameters(), lr=0.001)
-        if is_fp16:
-            optimizer = FP16_Optimizer(optimizer,
-                                       client=client if is_ps else None)
-
-    if is_ps:
-        client.init(model, optimizer)
 
     start_time = time.time()
     for n, batch in enumerate(data_loader):
-        if is_ps:
-            client.pre_iter()
+        # if is_ps:
+        #     client.pre_iter()
 
         loss = model(batch[0], batch[1])
 
@@ -97,20 +111,26 @@ def test_simple_model(is_ps: bool = False,
         print(f"LOSS: {loss.item()} at {n}")
         loss_res.append(loss.item())
 
-        if is_fp16 and not is_ps:
-            optimizer.zero_grad(set_grads_to_None=True)
-            optimizer.backward(loss, update_master_grads=False)
-            optimizer.update_master_grads()
+        if not is_ps:
+            if is_fp16:
+                optimizer.zero_grad(set_grads_to_None=True)
+                optimizer.backward(loss, update_master_grads=False)
+                optimizer.update_master_grads()
+            else:
+                optimizer.zero_grad()
+                loss.backward()
         else:
-            optimizer.zero_grad()
-            loss.backward()
-
+            if is_fp16:
+                model.backward(loss)
+            else:
+                optimizer.zero_grad()
+                loss.backward()
         optimizer.step()
 
         see_memory_usage(f"PS {is_ps} after step {n}", force=True)
 
-        if is_ps:
-            client.post_iter()
+        # if is_ps:
+        #     client.post_iter()
 
         if n == stop_iter: break
 
@@ -119,7 +139,7 @@ def test_simple_model(is_ps: bool = False,
     logging.info("======================" * 4)
 
     if is_ps:
-        client.chunk_list.visit()
+        # client.chunk_list.visit()
         global_timer.time_profiler()
 
     return loss_res

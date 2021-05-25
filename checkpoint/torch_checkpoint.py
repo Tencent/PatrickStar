@@ -116,7 +116,9 @@ class CheckpointFunction(torch.autograd.Function):
 
         if CPU_OFFLOAD_FLAG:
             # Note 改变了run_function和save_for_backward的相对顺序
-            inputs_cuda = move_to_device(args, torch.device('cuda:0'))
+            if torch.distributed.is_initialized():
+                rank = torch.distributed.get_rank()
+            inputs_cuda = move_to_device(args, torch.device(f'cuda:{rank}'))
             with torch.no_grad():
                 outputs = run_function(*inputs_cuda)
             # logging.info('checkpoint FWD')

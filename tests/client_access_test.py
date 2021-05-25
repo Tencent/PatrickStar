@@ -24,7 +24,7 @@ class TestClientAccess(unittest.TestCase):
     def setUp(self):
         self.default_chunk_size = 20
         self.client = HybridPSClient(
-            gpu_index=0, default_chunk_size=self.default_chunk_size)
+            rank=0, default_chunk_size=self.default_chunk_size)
         self.manager = HybridPSManager()
         self.manager.reset([300], [1024])
         self.compute_device = torch.device(
@@ -138,14 +138,14 @@ class TestClientAccess(unittest.TestCase):
 
         # *检查显存是否真正释放, 1024 B
         see_memory_usage(
-            f"before release a chunk of size {self.client.chunk_list[1].get_size()} B and allocate a chunk of size {self.client.chunk_list[2].get_size()} B",
+            f"before release a chunk of size {self.client.chunk_list[1].get_payload_space()} B and allocate a chunk of size {self.client.chunk_list[2].get_payload_space()} B",
             True, "B")
 
         self.client.access_data(self.param7, self.compute_device)
 
         # *检查显存是否真正释放, 1024 B
         see_memory_usage(
-            f"after release a chunk of size {self.client.chunk_list[1].get_size()} B and allocate a chunk of size {self.client.chunk_list[2].get_size()} B",
+            f"after release a chunk of size {self.client.chunk_list[1].get_payload_space()} B and allocate a chunk of size {self.client.chunk_list[2].get_payload_space()} B",
             True, "B")
 
         assert self.client.chunk_list[1].get_device() == torch.device('cpu')
@@ -168,7 +168,7 @@ class TestClientAccess(unittest.TestCase):
 
         # *检查显存是否真正释放, 1024 B
         see_memory_usage(
-            f"before release a chunk of size {self.client.chunk_list[1].get_size()} B",
+            f"before release a chunk of size {self.client.chunk_list[1].get_payload_space()} B",
             True, "B")
         self._release_param(self.param6, PSTensorStatus.FREE)
         print(self.client.chunk_list[1].get_status())
@@ -178,7 +178,7 @@ class TestClientAccess(unittest.TestCase):
         # *检查显存是否真正释放, 512 B
         torch.cuda.empty_cache()
         see_memory_usage(
-            f"after release a chunk of size {self.client.chunk_list[1].get_size()} B",
+            f"after release a chunk of size {self.client.chunk_list[1].get_payload_space()} B",
             True, "B")
 
         # self.client.chunk_list.visit()

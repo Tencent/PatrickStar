@@ -183,13 +183,9 @@ class FP16_Optimizer(object):
                  static_loss_scale=1.0,
                  dynamic_loss_scale=False,
                  dynamic_loss_args=None,
-                 verbose=False,
-                 client: HybridPSClient = None):
+                 verbose=False):
         if not torch.cuda.is_available:
             raise SystemError("Cannot use fp16 without CUDA.")
-
-        self.client = client
-
         self.verbose = verbose
 
         self.optimizer = init_optimizer
@@ -320,29 +316,23 @@ class FP16_Optimizer(object):
     def _update_scale(self, has_overflow=False):
         self.loss_scaler.update_scale(has_overflow)
 
-    def _master_params_to_model_params(self, client: HybridPSClient = None):
+    def _master_params_to_model_params(self):
         for fp16_group, fp32_from_fp16_group in zip(
                 self.fp16_groups, self.fp32_from_fp16_groups):
-            master_params_to_model_params(fp16_group,
-                                          fp32_from_fp16_group,
-                                          client=client)
+            master_params_to_model_params(fp16_group, fp32_from_fp16_group)
 
-    def _model_params_to_master_params(self, client: HybridPSClient = None):
+    def _model_params_to_master_params(self):
         for fp16_group, fp32_from_fp16_group in zip(
                 self.fp16_groups, self.fp32_from_fp16_groups):
-            master_params_to_model_params(fp32_from_fp16_group,
-                                          fp16_group,
-                                          client=client)
+            master_params_to_model_params(fp32_from_fp16_group, fp16_group)
 
     # To consider:  Integrate distributed with this wrapper by registering a hook on each variable
     # that does the overflow check, gradient copy + downscale, and fp32
     # allreduce in a different stream.
-    def _model_grads_to_master_grads(self, client: HybridPSClient = None):
+    def _model_grads_to_master_grads(self):
         for fp16_group, fp32_from_fp16_group in zip(
                 self.fp16_groups, self.fp32_from_fp16_groups):
-            model_grads_to_master_grads(fp16_group,
-                                        fp32_from_fp16_group,
-                                        client=client)
+            model_grads_to_master_grads(fp16_group, fp32_from_fp16_group)
 
     def _downscale_master(self):
         if self.loss_scale != 1.0:
@@ -485,8 +475,7 @@ class FP16_Optimizer(object):
         else:
             retval = self.optimizer.step()
 
-        if self.client is None:
-            self._master_params_to_model_params(self.client)
+        self._master_params_to_model_params()
 
         return retval
 
@@ -581,7 +570,7 @@ class FP16_Optimizer(object):
         # discarding the iteration,  but probably wouldn't improve overall efficiency.
         self.loss_scaler.backward(loss.float(), retain_graph=retain_graph)
         if update_master_grads:
-            self.update_master_grads(self.client)
+            self.update_master_grads()
 
     def update_master_grads(self):
         """
@@ -594,8 +583,7 @@ class FP16_Optimizer(object):
             self._check_overflow()
             if self.overflow:
                 return
-        if self.client is None:
-            self._model_grads_to_master_grads(self.client)
+        self._model_grads_to_master_grads()
         self._downscale_master()
 
     def inspect_master_grad_data(self):

@@ -13,7 +13,7 @@
 
 import os
 import torch
-from .const import PSTensorStatus, PSChunkStatus, AccessType
+from .const import PSTensorStatus, PSChunkStatus, AccessType, PSChunkLocStatus
 from .helper import getsizeof
 from .helper import getsizeof
 
@@ -28,17 +28,24 @@ import utils.global_timer as global_timer
 
 # chunk是否应该感知param？
 class Chunk(object):
-    def __init__(self, capacity: int, data_type: torch.dtype, chunk_id: int):
+    def __init__(self,
+                 capacity: int,
+                 data_type: torch.dtype,
+                 chunk_id: int,
+                 rank: int = 0):
         """
         Chunk是数据迁移的最小单位，
         它用一段连续的内存来存储张量
         删除tensor，只需要将tensor的status设置为free
+        这里把chunk设置为对是否分布式无感的，每个进程看到自己的chunk instance。
         """
         self.pid = os.getpid()
         self.chunk_id = chunk_id
+        # capacity是逻辑上的，如果分布在两个线程，payload尺寸是capcity/2
+        # payload numel 不等于 capacity
         self.capacity = capacity
         self.data_type = data_type
-
+        self.rank = rank
         # 存储chunk管理tensor的状态数目
         self._status_dict = {
             PSTensorStatus.COMPUTE: 0,
@@ -55,6 +62,7 @@ class Chunk(object):
         self._time_profile = True
 
         self.access_moments = []
+        self.location_status = PSChunkLocStatus.UNINIT
 
     def add_moment(self, mom):
         if len(self.access_moments) > 0 and self.access_moments[-1] == mom:
@@ -62,8 +70,20 @@ class Chunk(object):
         else:
             self.access_moments.append(mom)
 
-    def get_size(self):
+    def get_chunk_space(self):
+        """
+        获取chunk的尺寸(Bytes)
+        """
         return getsizeof(self.data_type) * self.capacity
+
+    def get_payload_space(self):
+        """
+        获取payload的尺寸(Bytes)
+        """
+        if self.payload is None:
+            return 0
+        else:
+            return getsizeof(self.payload.dtype) * self.payload.numel()
 
     def allocate_payload(self, device):
         """
@@ -72,20 +92,94 @@ class Chunk(object):
         """
         if self._time_profile:
             start_time = time.time()
+
+        payload_size = self.capacity
+        if torch.distributed.is_initialized():
+            payload_size = self.capacity // torch.distributed.get_world_size()
         if device.type == 'cpu':
-            self.payload = torch.zeros(self.capacity,
+            self.payload = torch.zeros(payload_size,
                                        dtype=self.data_type,
                                        device=device,
                                        pin_memory=True)
+            self.location_status = PSChunkLocStatus.CPU_PART
         else:
-            self.payload = torch.zeros(self.capacity,
+            self.payload = torch.zeros(payload_size,
                                        dtype=self.data_type,
                                        device=device)
-        self.ps_manager.add(device.type, device.index, self.get_size())
+            self.location_status = PSChunkLocStatus.GPU_PART
+        self.ps_manager.add(device.type, device.index,
+                            self.get_payload_space())
 
         self.touch()
         if self._time_profile:
             global_timer.memory_allocate_elapse = time.time() - start_time
+
+    def allgather(self, async_op=False):
+        """
+        将不同进程相同chunk id的payload allgather成一个chunk
+        此时chunk的payload可能是`PSChunkLocStatus.GPU_PART`
+        """
+        assert torch.distributed.is_initialized(
+        ), "torch distributed is not initialized during allgather"
+        assert self.payload is not None, "payload of chunk is None during allgather"
+        # assert self._status_dict[PSChunkStatus.COMPUTE] == 0, f"Neither of tensors assigned to the chunk shall be at the status of COMPUTE during allgather {self._status_dict[PSChunkStatus.COMPUTE]}."
+        world_size = torch.distributed.get_world_size()
+        gathered_chunk_size = self.capacity
+        payload_size = self.payload.numel()
+        torch.cuda.synchronize()
+        partitions = []
+        flat_tensor = torch.zeros(gathered_chunk_size,
+                                  dtype=self.data_type,
+                                  device=self.payload.device).view(-1)
+
+        rank = torch.distributed.get_rank()
+        for i in range(world_size):
+            partitions.append(
+                flat_tensor.narrow(0, payload_size * i, payload_size))
+
+            if i == rank:
+                partitions[i].data.copy_(self.payload, non_blocking=True)
+
+        handle = torch.distributed.all_gather(partitions,
+                                              partitions[rank],
+                                              async_op=async_op)
+
+        self.payload = flat_tensor
+        self.location_status = PSChunkLocStatus.GPU_DUP if self.payload.type == "cuda" else PSChunkLocStatus.CPU_DUP
+        return handle
+
+    def reduce_scatter(self):
+        """
+        BWD access_grad时候需要执行它
+        位置状态是GPU_DUP -> GPU_PART
+        数据状态是COMPUTE
+        """
+        world_size = torch.distributed.get_world_size()
+        assert self.capacity % world_size == 0, "capacity cannot divide world_size equally."
+        assert self.location_status == PSChunkLocStatus.GPU_DUP or self.location_status == PSChunkLocStatus.CPU_DUP
+
+        partition_size = self.capacity // world_size
+        rank = torch.distributed.get_rank()
+
+        total_size = self.capacity
+        input_list = []
+
+        for i in range(world_size):
+            start = i * partition_size
+            end = start + partition_size
+
+            #print("before reduce scatter gradients")
+            input = self.payload.view(-1).narrow(0, start, partition_size)
+
+            #print("after reduce scatter gradients")
+            input_list.append(input)
+
+        handle = torch.distributed.reduce_scatter(input_list[rank],
+                                                  input_list,
+                                                  async_op=False)
+
+        self.payload = input_list[rank]
+        return handle
 
     def release_payload(self):
         """
@@ -95,7 +189,8 @@ class Chunk(object):
         # if self._time_profile:
         #     start_time = time.time()
         self.ps_manager.delete(self.get_device().type,
-                               self.get_device().index, self.get_size())
+                               self.get_device().index,
+                               self.get_payload_space())
 
         # 删除chunk的内存
         del self.payload
@@ -144,12 +239,13 @@ class Chunk(object):
         if self.get_device() == target_device:
             return
 
-        # logging.info(
-        #     f'move chunk {self.chunk_id} numel {self.payload.numel()} from {self.get_device()} to {target_device}'
-        # )
+        logging.info(
+            f'move chunk {self.chunk_id} numel {self.payload.numel()} from {self.get_device()} to {target_device}'
+        )
         #TODO(jiaruifang)异步
         self.ps_manager.delete(self.get_device().type,
-                               self.get_device().index, self.get_size())
+                               self.get_device().index,
+                               self.get_payload_space())
         if is_async:
             if target_device.type == 'cpu':
                 pinned_payload_cpu = torch.ones(self.payload.shape,
@@ -168,7 +264,7 @@ class Chunk(object):
                 old_payload = self.payload
                 self.payload = torch.ones(self.payload.shape,
                                           dtype=self.payload.dtype,
-                                          device='cuda:0')
+                                          device=f'cuda:{self.rank}')
                 copy_stream.synchronize()
                 # NOTE(jiaruifang) it is necessary
                 torch.cuda.synchronize()
@@ -187,18 +283,20 @@ class Chunk(object):
             self.payload = self.payload.to(target_device)
 
         self.ps_manager.add(target_device.type, target_device.index,
-                            self.get_size())
+                            self.get_payload_space())
         self.touch()
 
         if self._time_profile:
             if target_device.type == 'cpu':
                 global_timer.cpu_gpu_move_elapse += time.time() - start_time
                 global_timer.cpu_gpu_move_times += 1
-                global_timer.cpu_gpu_move_data_amount += self.get_size()
+                global_timer.cpu_gpu_move_data_amount += self.get_payload_space(
+                )
             elif target_device.type == 'cuda':
                 global_timer.gpu_cpu_move_elapse += time.time() - start_time
                 global_timer.gpu_cpu_move_times += 1
-                global_timer.gpu_cpu_move_data_amount += self.get_size()
+                global_timer.gpu_cpu_move_data_amount += self.get_payload_space(
+                )
 
     def get_device(self):
         if self.payload is not None:
