@@ -29,12 +29,18 @@ import argparse
 from client import HybridPSClient, PSTensorStatus, AccessType
 from manager import HybridPSManager
 from client import setup_hybrid_ps_hooks
-# from utils.zero_hook import HookedModule
 from ops import CPUAdam, TorchAdam, FP16Adam
 import utils.global_timer as global_timer
+from runtime import Init, initialize_engine
 
 parser = argparse.ArgumentParser(
-    description='Checkpointing for Memory Saving.')
+    description="DeepSpeed distributed training launch"
+    " utility that creates multiple distributed"
+    " processes on a single node")
+parser.add_argument('--local_rank',
+                    default=0,
+                    type=int,
+                    help="rank number of the current process.")
 parser.add_argument('--use_ckp',
                     dest='use_ckp',
                     action='store_true',
@@ -122,8 +128,8 @@ def test_bert_model(is_ckp: bool = False,
     logging.info(
         f'batch_size {batch_size}, hidden_dim {hidden_dim}, sequence_length {sequence_length}, num_layer {num_layer}'
     )
-
-    device = torch.device('cuda:0')
+    rank = args.local_rank
+    device = torch.device(f'cuda:{rank}')
 
     if is_ckp:
         cfg = BertConfig(gradient_checkpointing=True,
@@ -134,20 +140,55 @@ def test_bert_model(is_ckp: bool = False,
         cfg = BertConfig(hidden_dim=hidden_dim,
                          max_position_embeddings=sequence_length,
                          num_hidden_layers=num_layer)
-    model = BertForSequenceClassification(cfg)
+
+    if not is_ps:
+        model = BertForSequenceClassification(cfg)
+        model.cuda()
+        model.train()
+        if is_fp16:
+            model = FP16_Module(model)
+        optimizer = TorchAdam(model.parameters(), lr=0.001)
+        if is_fp16:
+            optimizer = FP16_Optimizer(optimizer, client=None)
+    else:
+        # chunk 512 MB, good for CPU-GPU bandwidth
+        if is_fp16:
+            with Init(dtype=torch.float):
+                model = BertForSequenceClassification(cfg)
+
+            class Config(object):
+                def __init__(self):
+                    self.default_chunk_size = 1024 * 1024
+
+            config = Config()
+            config.default_chunk_size = 1024 * 1024 * 128
+            model, optimizer, _, _ = initialize_engine(
+                args=None,
+                model=model,
+                model_parameters=model.parameters(),
+                config=config)
+        else:
+            model = BertForSequenceClassification(cfg)
+            model.train()
+            client = HybridPSClient(rank=0,
+                                    default_chunk_size=1024 * 1024 * 8,
+                                    warmup=True,
+                                    is_fp16=is_fp16)
+            optimizer = CPUAdam(client,
+                                model.parameters(),
+                                lr=0.001,
+                                prefer_device=torch.device(f'cuda:{rank}'))
+            client.init(model, optimizer)
+        see_memory_usage(
+            f"ckp {is_ckp} fp16 {is_fp16} ps {is_ps} after FP16 Adam init",
+            force=True)
+
     model_numel = get_model_size(model)
     calculate_model_size(cfg)
     total_macs = calucate_MAC(cfg, batch_size, sequence_length)
 
-    if not is_ps:
-        model.cuda()
-        if is_fp16:
-            model = FP16_Module(model)
-
     see_memory_usage(
         f"ckp {is_ckp} fp16 {is_fp16} ps {is_ps} after model init", force=True)
-
-    model.train()
 
     data_loader = get_bert_data_loader(
         batch_size=batch_size,
@@ -158,38 +199,10 @@ def test_bert_model(is_ckp: bool = False,
 
     loss_res = []
 
-    if is_ps:
-        # chunk 512 MB, good for CPU-GPU bandwidth
-        client = HybridPSClient(gpu_index=0,
-                                default_chunk_size=1024 * 1024 * 8,
-                                warmup=True,
-                                is_fp16=is_fp16)
-
-        if is_fp16:
-            optimizer = FP16Adam(client,
-                                 model.parameters(),
-                                 lr=0.001,
-                                 prefer_device=torch.device('cuda:0'))
-            see_memory_usage(
-                f"ckp {is_ckp} fp16 {is_fp16} ps {is_ps} after FP16 Adam init",
-                force=True)
-
-        else:
-            optimizer = CPUAdam(client,
-                                model.parameters(),
-                                lr=0.001,
-                                prefer_device=torch.device('cuda:0'))
-        client.init(model, optimizer)
-    else:
-        optimizer = TorchAdam(model.parameters(), lr=0.001)
-        if is_fp16:
-            optimizer = FP16_Optimizer(optimizer,
-                                       client=client if is_ps else None)
-
     start_time = time.time()
     for n, batch in enumerate(data_loader):
-        if is_ps:
-            client.pre_iter()
+        # if is_ps:
+        #     client.pre_iter()
 
         step_start_time = time.time()
         output = model(input_ids=batch[0], labels=batch[1])
@@ -201,18 +214,29 @@ def test_bert_model(is_ckp: bool = False,
         if is_ps:
             timer = global_timer.IterationTimer()
             logging.info(f'FWD fininshed moment {timer.moment()}')
-        if is_fp16 and not is_ps:
-            optimizer.zero_grad(set_grads_to_None=True)
-            optimizer.backward(loss, update_master_grads=False)
-            optimizer.update_master_grads()
-        else:
-            optimizer.zero_grad()
-            loss.backward()
-            if is_ps:
-                logging.info(f'BWD fininshed moment {timer.moment()}')
 
-        # chunk 0和 chunk 1还在compute状态
+        if not is_ps:
+            if is_fp16:
+                optimizer.zero_grad(set_grads_to_None=True)
+                optimizer.backward(loss, update_master_grads=False)
+                optimizer.update_master_grads()
+            else:
+                optimizer.zero_grad()
+                loss.backward()
+        else:
+            if is_fp16:
+                model.backward(loss)
+            else:
+                optimizer.zero_grad()
+                loss.backward()
+
+        if is_ps:
+            timer = global_timer.IterationTimer()
+            logging.info(f'BWD fininshed moment {timer.moment()}')
         optimizer.step()
+        if is_ps:
+            timer = global_timer.IterationTimer()
+            logging.info(f'step fininshed moment {timer.moment()}')
         see_memory_usage(
             f"ckp {is_ckp} fp16 {is_fp16} ps {is_ps}  after step {n}",
             force=True)
@@ -221,8 +245,8 @@ def test_bert_model(is_ckp: bool = False,
         logging.info(
             f"ckp {is_ckp} fp16 {is_fp16} ps {is_ps}  elapse {setp_elapse}, sec/iter, {total_macs/1e9/setp_elapse} GFlops"
         )
-        if is_ps:
-            client.post_iter()
+        # if is_ps:
+        #     client.post_iter()
         if n == stop_step: break
 
     elapse = time.time() - start_time
@@ -260,7 +284,6 @@ if __name__ == "__main__":
     use_ps = args.use_ps
     # 检查结果正确性
     res_check = args.res_check
-
     # hidden_dim 1024, batch 16, seqence_leng 1024, ckp True.
     # PS is able to run the training, while PyTorch failed.
 

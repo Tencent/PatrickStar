@@ -71,7 +71,11 @@ class IterationTimer(metaclass=SingletonMeta):
 
         if self.warmup:
             mgr = HybridPSManager()
-            gpu_device = torch.device('cuda:0')
+            if torch.distributed.is_initialized():
+                rank = torch.distributed.get_rank()
+            else:
+                rank = 0
+            gpu_device = torch.device(f'cuda:{rank}')
             gpu_ps_used = mgr.used_mem(gpu_device.type, gpu_device.index)
             gpu_used = get_memory_used(gpu_device)
 

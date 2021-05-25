@@ -41,7 +41,7 @@ from torch.nn import CrossEntropyLoss, MSELoss
 
 from transformers.activations import ACT2FN
 from torch.utils.data import SequentialSampler
-from checkpoint.torch_checkpoint import checkpoint as ps_checkpoint
+from torch.utils.checkpoint import checkpoint as ps_checkpoint
 
 from transformers.modeling_utils import (
     PreTrainedModel,

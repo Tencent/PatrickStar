@@ -13,20 +13,20 @@
 
 from utils import log_dist, logger
 from .engine import HybridPSEngine
-from .init_context import InsertPostInitMethodToModuleSubClasses
+from .init_context import Init
 
 
-def initialize(args=None,
-               model=None,
-               optimizer=None,
-               model_parameters=None,
-               training_data=None,
-               lr_scheduler=None,
-               mpu=None,
-               dist_init_required=None,
-               collate_fn=None,
-               config=None,
-               config_params=None):
+def initialize_engine(args=None,
+                      model=None,
+                      optimizer=None,
+                      model_parameters=None,
+                      training_data=None,
+                      lr_scheduler=None,
+                      mpu=None,
+                      dist_init_required=None,
+                      collate_fn=None,
+                      config=None,
+                      config_params=None):
     """Initialize the HybridPS Engine.
     Arguments:
         args: an object containing local_rank and deepspeed_config fields.

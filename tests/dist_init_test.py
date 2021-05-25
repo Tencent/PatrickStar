@@ -10,21 +10,24 @@
 # implied. See the License for the specific language governing
 # permissions and limitations under the License.
 # See the AUTHORS file for names of contributors.
-
-from runtime import initialize, InsertPostInitMethodToModuleSubClasses
+"""
+python ../launcher/runner.py --num_nodes 1 --num_gpus 1 dist_init_test.py
+"""
+import torch
+from runtime import initialize_engine, init_context, Init
 from tests.simple_net import SimpleModel
 
 hidden_dim = 4
-model = SimpleModel(hidden_dim=hidden_dim)
-
-# 初始化计算引擎
-model, _, _, _ = initialize(args=None,
-                            model=model,
-                            model_parameters=model.parameters())
 
 # 初始化模型参数
-with InsertPostInitMethodToModuleSubClasses():
-    model2 = SimpleModel(hidden_dim=hidden_dim)
+with Init():
+    model = SimpleModel(hidden_dim=hidden_dim)
 
-for param in model2.named_parameters():
-    print(param)
+rank = torch.distributed.get_rank()
+for param in model.named_parameters():
+    print(f'rank {rank}', param)
+
+# 初始化计算引擎，不常用
+model, _, _, _ = initialize_engine(args=None,
+                                   model=model,
+                                   model_parameters=model.parameters())

@@ -34,11 +34,12 @@ class ChunkList(object):
     """
     管理一个chunk链表
     """
-    def __init__(self):
+    def __init__(self, rank: int = 0):
         self.chunk_id_to_chunk_dict: dict[int, Chunk] = {}
         self._time_profile = True
         self.copy_stream = torch.cuda.Stream()
         self.moments_cnt_of_iteration = None
+        self.rank = rank
 
     def __getitem__(self, chunk_id: int):
         """
@@ -160,7 +161,8 @@ class ChunkList(object):
 
         # TODO(jiaruifang)只考虑单卡情况，新设备只有gpu和cpu
         new_device = torch.device(
-            'cpu') if target_device.type == 'cuda' else torch.device('cuda:0')
+            'cpu') if target_device.type == 'cuda' else torch.device(
+                f'cuda:{self.rank}')
 
         # 把他们移动到新设备上
         for idx in moved_list:
@@ -198,7 +200,8 @@ class ChunkList(object):
             )
         self.chunk_id_to_chunk_dict[chunk_id] = Chunk(capacity=chunk_size,
                                                       data_type=data_type,
-                                                      chunk_id=chunk_id)
+                                                      chunk_id=chunk_id,
+                                                      rank=self.rank)
         logging.debug(
             f'allocate with new chunk chunk_id {chunk_id} size {chunk_size} data_type {data_type}'
         )
@@ -255,6 +258,7 @@ class ChunkList(object):
         # 还没加入统计信息
         timer = global_timer.IterationTimer()
         cur_moment = timer.moment()
+        return 0
         # 预热阶段，返回值固定
         if timer.warmup:
             return 0

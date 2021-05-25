@@ -45,7 +45,7 @@ def test_client():
                                 requires_grad=False)
 
     # 用一个HybridPSClient来管理这两个tensor
-    client = HybridPSClient(gpu_index=local_rank, default_chunk_size=20)
+    client = HybridPSClient(rank=local_rank, default_chunk_size=20)
     # CPU 3* chunk, param1 2*chunk, param2 1*chunk
     client.register_param(param1)
     client.register_param(param2)
@@ -132,7 +132,7 @@ def test_migrate():
         param2 = torch.randn(20, device=torch.device('cuda:0'))
 
         # 交给HybridPS管理，会先被分在cpu上
-        client = HybridPSClient(gpu_index=local_rank, default_chunk_size=40)
+        client = HybridPSClient(rank=local_rank, default_chunk_size=40)
         client.register_param(param1, compute_device)
         client.register_param(param2, compute_device)
 
@@ -181,7 +181,7 @@ def test_migrate():
             torch.randn(20, device=torch.device('cuda:0')))
 
         # 交给HybridPS管理，会先被分在cpu上, 占据了2个chunk
-        client = HybridPSClient(gpu_index=local_rank, default_chunk_size=40)
+        client = HybridPSClient(rank=local_rank, default_chunk_size=40)
         logging.info('client register param1')
         client.register_param(param1)
         logging.info('client register param2')
@@ -219,7 +219,7 @@ def test_fp16():
         manager.reset(gpu_info=[80 * 4], cpu_info=[200 * 4])
 
         # 交给HybridPS管理，会先被分在cpu上, 占据了2个chunk
-        client = HybridPSClient(gpu_index=0, default_chunk_size=40)
+        client = HybridPSClient(rank=0, default_chunk_size=40)
         logging.info('client register param1')
         param1 = torch.nn.Parameter(torch.randn(10,
                                                 device=torch.device('cuda:0'),
@@ -272,7 +272,7 @@ def test_on_demand_access():
         manager.reset(gpu_info=[80 * 4], cpu_info=[200 * 4])
 
         # 交给HybridPS管理，会先被分在cpu上, 占据了2个chunk
-        client = HybridPSClient(gpu_index=0, default_chunk_size=10)
+        client = HybridPSClient(rank=0, default_chunk_size=10)
         logging.info('client register param1')
         param1 = torch.nn.Parameter(torch.randn(10,
                                                 device=torch.device('cuda:0'),
@@ -307,7 +307,7 @@ def test_tensor_remove():
         manager.reset(gpu_info=[80 * 4], cpu_info=[200 * 4])
 
         # 交给HybridPS管理，会先被分在cpu上, 占据了2个chunk
-        client = HybridPSClient(gpu_index=0, default_chunk_size=20)
+        client = HybridPSClient(rank=0, default_chunk_size=20)
         logging.info('client register param1')
         param1 = torch.nn.Parameter(torch.randn(10,
                                                 device=torch.device('cuda:0'),
@@ -349,7 +349,7 @@ def test_tensor_remove():
         print(client.chunk_tensor_index.dict_chunk_id_tensor_id)
 
     def test_dict():
-        client = HybridPSClient(gpu_index=0, default_chunk_size=20)
+        client = HybridPSClient(rank=0, default_chunk_size=20)
         # chunk : tensor
         # 0 : 0
         # 0 : 1

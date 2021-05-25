@@ -91,7 +91,7 @@ def test_bert_model(is_ckp: bool = False,
     manager = HybridPSManager()
     manager.init([1024 * 1024 * 1024 * 2] * 1, [1024 * 1024 * 1024 * 4 * 4])
     # chunk 512 MB, good for CPU-GPU bandwidth
-    client = HybridPSClient(gpu_index=0, default_chunk_size=1024 * 1024)
+    client = HybridPSClient(rank=0, default_chunk_size=1024 * 1024)
 
     optimizer = CPUAdam(client, model.parameters(), lr=0.001)
     if is_fp16:

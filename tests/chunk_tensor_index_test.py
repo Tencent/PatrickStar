@@ -22,7 +22,7 @@ class TestAccess(unittest.TestCase):
     def setUp(self):
         self.default_chunk_size = 20
         self.client = HybridPSClient(
-            gpu_index=0, default_chunk_size=self.default_chunk_size)
+            rank=0, default_chunk_size=self.default_chunk_size)
         self.manager = HybridPSManager()
         self.manager.init([32, 32], [1024])
         self.compute_device = torch.device(

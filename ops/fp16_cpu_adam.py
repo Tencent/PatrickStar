@@ -23,129 +23,6 @@ import utils.global_timer as global_timer
 from client.parameter import register_param
 
 
-def FP16_f_adam(client,
-                fp32_params: List[torch.nn.Parameter],
-                fp16_param_with_grad_list,
-                exp_avgs: List[torch.nn.Parameter],
-                exp_avg_sqs: List[torch.nn.Parameter],
-                max_exp_avg_sqs: List[Tensor],
-                state_steps: List[int],
-                amsgrad: bool,
-                beta1: float,
-                beta2: float,
-                lr: float,
-                weight_decay: float,
-                eps: float,
-                max_param_size,
-                param_grad_buff,
-                prefer_device,
-                time_profile=True):
-    r"""Functional API that performs Adam algorithm computation.
-    按照在chunk内的存储顺序连续访问fp16_param_with_grad_list的参数，获取fp16 grad，
-    以chunk为单位拷贝到一个tmp buff之中
-    """
-    timer = global_timer.IterationTimer()
-    if time_profile:
-        adam_start_time = time.time()
-    # TODO(jiaruifang)计算粒度为什么是tensor，而不是chunk
-    for i, param in enumerate(fp32_params):
-        if time_profile:
-            adam_iter_access_start = time.time()
-        compute_device = prefer_device
-        client.access_data(param, compute_device)
-        param_data = param.ps_attr.access_tensor(AccessType.DATA)
-
-        param_grad = param_grad_buff.narrow(0, 0, param_data.numel()).view(
-            param_data.shape)
-        fp16_param = fp16_param_with_grad_list[i]
-        client.access_grad(fp16_param, torch.device('cuda:0'))
-        fp16_param_grad = fp16_param.ps_attr.access_tensor(AccessType.GRAD)
-
-        if time_profile:
-            start_time = time.time()
-        # torch.cuda.synchronize()
-        param_grad.copy_(fp16_param_grad, non_blocking=False)
-        # torch.cuda.synchronize()
-        if time_profile:
-            global_timer.cpu_gpu_move_elapse += time.time() - start_time
-            global_timer.cpu_gpu_move_times += 1
-            global_timer.cpu_gpu_move_data_amount += param_grad.numel()
-
-        #TODO(jiaruifang) HOLD->FREE
-        # fp16_param_grad.zero_()
-        client.release_grad(fp16_param, PSTensorStatus.FREE)
-
-        exp_avg_param = exp_avgs[i]
-        exp_avg_sq_param = exp_avg_sqs[i]
-
-        client.access_data(exp_avg_param, compute_device)
-        client.access_data(exp_avg_sq_param, compute_device)
-
-        exp_avg = exp_avg_param.ps_attr.access_tensor(AccessType.DATA)
-
-        exp_avg_sq = exp_avg_sq_param.ps_attr.access_tensor(AccessType.DATA)
-
-        if time_profile:
-            global_timer.cpu_adam_access_elapse += time.time(
-            ) - adam_iter_access_start
-            f_adam_compute_start_time = time.time()
-
-        step = state_steps[i]
-
-        bias_correction1 = 1 - beta1**step
-        bias_correction2 = 1 - beta2**step
-
-        if weight_decay != 0:
-            param_grad = param_grad.add(param_data, alpha=weight_decay)
-
-        exp_avg.mul_(beta1).add_(param_grad, alpha=1 - beta1)
-        exp_avg_sq.mul_(beta2).addcmul_(param_grad,
-                                        param_grad,
-                                        value=1 - beta2)
-        if amsgrad:
-            # Maintains the maximum of all 2nd moment running avg. till now
-            torch.maximum(max_exp_avg_sqs[i],
-                          exp_avg_sq,
-                          out=max_exp_avg_sqs[i])
-            # Use the max. for normalizing running avg. of gradient
-            denom = (max_exp_avg_sqs[i].sqrt() /
-                     math.sqrt(bias_correction2)).add_(eps)
-        else:
-            denom = (exp_avg_sq.sqrt() / math.sqrt(bias_correction2)).add_(eps)
-
-        step_size = lr / bias_correction1
-
-        param_data.addcdiv_(exp_avg, denom, value=-step_size)
-
-        if time_profile:
-            global_timer.cpu_adam_f_elapse += time.time(
-            ) - f_adam_compute_start_time
-            adam_iter_release_start = time.time()
-
-        fp16_param = fp16_param_with_grad_list[i]
-        client.access_data(fp16_param, torch.device('cuda:0'))
-        fp16_data = fp16_param.ps_attr.access_tensor(AccessType.DATA)
-        if time_profile:
-            start_time = time.time()
-        fp16_data.copy_(param_data, non_blocking=False)
-        if time_profile:
-            global_timer.gpu_cpu_move_elapse += time.time() - start_time
-            global_timer.gpu_cpu_move_data_amount += fp16_data.numel()
-            global_timer.gpu_cpu_move_times += 1
-
-        client.release_data(fp16_param, PSTensorStatus.HOLD)
-        client.release_data(param)
-        client.release_data(exp_avg_param)
-        client.release_data(exp_avg_sq_param)
-
-        if time_profile:
-            global_timer.cpu_adam_release_elapse += time.time(
-            ) - adam_iter_release_start
-
-    timer.tik(device_type='all')
-    global_timer.cpu_adam_elapse += time.time() - adam_start_time
-
-
 def FP16_f_adamv2(client,
                   fp32_params: List[torch.nn.Parameter],
                   fp16_param_with_grad_list,
@@ -182,13 +59,13 @@ def FP16_f_adamv2(client,
 
         # 把fp16_param所在的chunk拷贝到tmp_buff中，并返回对应的tensor
         if False:
-            # client.access_grad(fp16_param, torch.device('cuda:0'))
+            # client.access_grad(fp16_param, torch.device(f'cuda:{client.rank}'))
             param_grad = client.fp16_to_fp32_copy(
                 fp16_param, AccessType.GRAD).view(param_data.shape)
             # necessary to reset grads
             client.release_grad(fp16_param, PSTensorStatus.FREE)
         else:
-            client.access_grad(fp16_param, torch.device('cuda:0'))
+            client.access_grad(fp16_param, torch.device(f'cuda:{client.rank}'))
             fp16_param_grad = fp16_param.ps_attr.access_tensor(AccessType.GRAD)
 
             if time_profile:
@@ -261,7 +138,7 @@ def FP16_f_adamv2(client,
             adam_iter_release_start = time.time()
 
         fp16_param = fp16_param_with_grad_list[i]
-        client.access_data(fp16_param, torch.device('cuda:0'))
+        client.access_data(fp16_param, torch.device(f'cuda:{client.rank}'))
         fp16_data = fp16_param.ps_attr.access_tensor(AccessType.DATA)
         if time_profile:
             start_time = time.time()
@@ -329,7 +206,8 @@ class FP16Adam(torch.optim.Optimizer):
         # 将group参数放置到每个param内部
         for group in self.param_groups:
             for p in group['params']:
-                p.data = p.data.half()
+                if p.dtype == torch.float:
+                    p.data = p.data.half()
                 max_param_size = max(max_param_size, p.numel())
                 data_type = p.dtype
                 self.state[p]['betas'] = group['betas']
@@ -380,6 +258,7 @@ class FP16Adam(torch.optim.Optimizer):
                 # state['exp_avg_sq'].ps_attr.access_tensor(
                 #     AccessType.DATA).zero_()
                 # self.client.release_data(state['exp_avg_sq'])
+        self.param_grad_buff = None
 
     def __setstate__(self, state):
         super(CPUAdam, self).__setstate__(state)
@@ -420,6 +299,8 @@ class FP16Adam(torch.optim.Optimizer):
         lr_list = []
 
         self.client._cached_fp32_buff.reset()
+        logging.info('init adam')
+        first_init_flag = False
         for p in self.client.generate_grad_params():
             if p.requires_grad:
                 fp16_param_with_grad_list.append(p)
@@ -427,20 +308,9 @@ class FP16Adam(torch.optim.Optimizer):
 
                 # if len(state) == 0:
                 if 'exp_avg' not in state:
+                    first_init_flag = True
                     # 第一次预热时候，拷贝FP32 data数据
                     state['step'] = 0
-
-                    if self.prefer_device.type == 'cpu':
-                        self.param_grad_buff = torch.zeros(
-                            self.client.chunk_list.max_chunk_size(),
-                            dtype=torch.float,
-                            device=self.prefer_device,
-                            pin_memory=True)
-                    else:
-                        self.param_grad_buff = torch.zeros(
-                            self.client.chunk_list.max_chunk_size(),
-                            dtype=torch.float,
-                            device=self.prefer_device)
 
                     state['exp_avg'] = torch.nn.Parameter(torch.zeros(
                         p.ps_attr.ps_shape,
@@ -484,98 +354,22 @@ class FP16Adam(torch.optim.Optimizer):
             else:
                 raise RuntimeError(f"tensor id {p.ps_attr.grad_id()}")
 
+        if first_init_flag:
+            if self.prefer_device.type == 'cpu':
+                self.param_grad_buff = torch.zeros(
+                    self.client.chunk_list.max_chunk_size(),
+                    dtype=torch.float,
+                    device=self.prefer_device,
+                    pin_memory=True)
+            else:
+                self.param_grad_buff = torch.zeros(
+                    self.client.chunk_list.max_chunk_size(),
+                    dtype=torch.float,
+                    device=self.prefer_device)
+
         FP16_f_adamv2(self.client, fp32_param_list, fp16_param_with_grad_list,
                       exp_avgs, exp_avg_sqs, max_exp_avg_sqs, state_steps,
                       False, beta1_list, beta2_list, lr_list,
                       weight_decay_list, eps_list, self.prefer_device,
                       self.param_grad_buff)
-
-        # for i, group in enumerate(self.param_groups):
-        #     fp16_param_with_grad_list = []
-        #     fp32_param_list = []
-        #     exp_avgs = []
-        #     exp_avg_sqs = []
-        #     state_sums = []
-        #     max_exp_avg_sqs = []
-        #     state_steps = []
-
-        #     for j, p in enumerate(group['params']):
-        #         if p.requires_grad:
-        #             fp16_param_with_grad_list.append(p)
-        #             state = self.state[p]
-
-        #             # if len(state) == 0:
-        #             if 'exp_avg' not in state:
-        #                 # 第一次预热时候，拷贝FP32 data数据
-        #                 state['step'] = 0
-
-        #                 # fp32_param = torch.nn.Parameter(torch.zeros(
-        #                 #     p.ps_attr.ps_shape,
-        #                 #     dtype=torch.float,
-        #                 #     device=torch.device('cpu:0')),
-        #                 #     requires_grad=False)
-        #                 # self.client.access_data(fp32_param, self.prefer_device)
-        #                 # self.client.access_data(p, self.prefer_device)
-
-        #                 # fp32_param_data = fp32_param.ps_attr.access_tensor(
-        #                 #     AccessType.DATA)
-        #                 # fp16_param_data = p.ps_attr.access_tensor(AccessType.DATA)
-
-        #                 # fp32_param_data.copy_(fp16_param_data.float())
-        #                 # state['fp32_param_data'] = fp32_param
-
-        #                 # self.client.release_data(fp32_param)
-        #                 # self.client.release_data(p)
-
-        #                 state['exp_avg'] = torch.nn.Parameter(torch.zeros(
-        #                     p.ps_attr.ps_shape,
-        #                     dtype=torch.float, device=self.prefer_device),
-        #                                                     requires_grad=False)
-        #                 # Exponential moving average of squared gradient values
-        #                 state['exp_avg_sq'] = torch.nn.Parameter(torch.zeros(
-        #                     p.ps_attr.ps_shape,
-        #                     dtype=torch.float, device=self.prefer_device),
-        #                                                         requires_grad=False)
-
-        #                 self.client.access_data(state['exp_avg'], self.prefer_device)
-        #                 state['exp_avg'].ps_attr.access_tensor(AccessType.DATA).zero_()
-        #                 self.client.release_data(state['exp_avg'])
-
-        #                 self.client.access_data(state['exp_avg_sq'],
-        #                                         self.prefer_device)
-        #                 state['exp_avg_sq'].ps_attr.access_tensor(
-        #                     AccessType.DATA).zero_()
-        #                 self.client.release_data(state['exp_avg_sq'])
-
-        #                 if group['amsgrad']:
-        #                     raise NotImplementedError
-        #                     # Maintains max of all exp. moving avg. of sq. grad. values
-        #                     state['max_exp_avg_sq'] = torch.zeros_like(
-        #                         p, memory_format=torch.preserve_format)
-
-        #             exp_avgs.append(state['exp_avg'])
-        #             exp_avg_sqs.append(state['exp_avg_sq'])
-        #             fp32_param_list.append(state['fp32_param_data'])
-
-        #             if group['amsgrad']:
-        #                 max_exp_avg_sqs.append(state['max_exp_avg_sq'])
-
-        #             # update the steps for each param group update
-        #             state['step'] += 1
-        #             # record the step after step update
-        #             state_steps.append(state['step'])
-        #         else:
-        #             raise RuntimeError(f"tensor id {p.ps_attr.grad_id()}")
-
-        #     beta1, beta2 = group['betas']
-
-        #     # self.client.chunk_tensor_index.visit_chunks(self.client.chunk_list)
-        #     # input('wait')
-        #     FP16_f_adam(
-        #         self.client, fp32_param_list, fp16_param_with_grad_list, exp_avgs,
-        #         exp_avg_sqs, max_exp_avg_sqs, state_steps, group['amsgrad'],
-        #         beta1, beta2, group['lr'], group['weight_decay'], group['eps'],
-        #         self.max_param_size, self.param_grad_buff if hasattr(
-        #             self, 'param_grad_buff') else None, self.prefer_device)
-
         return loss

@@ -28,7 +28,11 @@ import utils.global_timer as global_timer
 
 # chunk是否应该感知param？
 class Chunk(object):
-    def __init__(self, capacity: int, data_type: torch.dtype, chunk_id: int):
+    def __init__(self,
+                 capacity: int,
+                 data_type: torch.dtype,
+                 chunk_id: int,
+                 rank: int = 0):
         """
         Chunk是数据迁移的最小单位，
         它用一段连续的内存来存储张量
@@ -41,7 +45,7 @@ class Chunk(object):
         # payload numel 不等于 capacity
         self.capacity = capacity
         self.data_type = data_type
-
+        self.rank = rank
         # 存储chunk管理tensor的状态数目
         self._status_dict = {
             PSTensorStatus.COMPUTE: 0,
@@ -235,9 +239,9 @@ class Chunk(object):
         if self.get_device() == target_device:
             return
 
-        # logging.info(
-        #     f'move chunk {self.chunk_id} numel {self.payload.numel()} from {self.get_device()} to {target_device}'
-        # )
+        logging.info(
+            f'move chunk {self.chunk_id} numel {self.payload.numel()} from {self.get_device()} to {target_device}'
+        )
         #TODO(jiaruifang)异步
         self.ps_manager.delete(self.get_device().type,
                                self.get_device().index,
@@ -260,7 +264,7 @@ class Chunk(object):
                 old_payload = self.payload
                 self.payload = torch.ones(self.payload.shape,
                                           dtype=self.payload.dtype,
-                                          device='cuda:0')
+                                          device=f'cuda:{self.rank}')
                 copy_stream.synchronize()
                 # NOTE(jiaruifang) it is necessary
                 torch.cuda.synchronize()

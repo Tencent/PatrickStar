@@ -33,12 +33,9 @@ from torch._utils import _flatten_dense_tensors, _unflatten_dense_tensors
 
 from apex.multi_tensor_apply import multi_tensor_applier
 import amp_C
-from client import HybridPSClient
 
 # from megatron import mpu
 import logging
-from client import PSTensorStatus
-from client import AccessType
 import utils.global_timer as global_timer
 
 
@@ -171,10 +168,8 @@ def prep_param_lists(model, flat_master=False):
         return model_params, master_params
 
 
-def model_grads_to_master_grads(model_params,
-                                master_params,
-                                flat_master=False,
-                                client: HybridPSClient = None):
+def model_grads_to_master_grads(model_params, master_params,
+                                flat_master=False):
     """
     Copy model gradients to master gradients.
     Args:
@@ -182,71 +177,32 @@ def model_grads_to_master_grads(model_params,
         master_params:  List of FP32 master parameters created by :func:`prep_param_lists`.  If ``master_params`` was created with ``flat_master=True``, ``flat_master=True`` should also be supplied to :func:`model_grads_to_master_grads`.
     """
     if flat_master:
-        if client is not None:
-            raise NotImplementedError(
-                "not implement flat_master True case in model_grads_to_master_grads"
-            )
+        raise NotImplementedError(
+            "not implement flat_master True case in model_grads_to_master_grads"
+        )
         # The flattening may incur one more deep copy than is necessary.
         master_params[0].grad.data.copy_(
             _flatten_dense_tensors([p.grad.data for p in model_params]))
     else:
-        if client is None:
-            for model, master in zip(model_params, master_params):
-                if model.grad is not None:
-                    if master.grad is None:
-                        master.grad = Variable(
-                            master.data.new(*master.data.size()))
-                else:
-                    master.grad = None
-            model_grads = [p.grad for p in model_params if p.grad is not None]
-            master_grads = [
-                p.grad for p in master_params if p.grad is not None
-            ]
-            _overflow_buf = torch.cuda.IntTensor([0])
-            # Fused overflow check + scale for a list of contiguous tensors
-            # NOTE(jiaruifang) I found it copys model_grad to master_grad.
-            multi_tensor_applier(amp_C.multi_tensor_scale, _overflow_buf,
-                                 [model_grads, master_grads], 1.0)
-        else:
-            timer = global_timer.IterationTimer()
-            for model_p, master_p in zip(model_params, master_params):
-                if False:
-                    # TODO(jiaruifang)放在cpu上更节省带宽，但是计算multi_tensor_applier不允许这样
-                    client.access_grad(model_p, torch.device('cuda:0'))
-                    client.access_grad(master_p, torch.device('cuda:0'))
-
-                    model_grad = [
-                        model_p.ps_attr.access_tensor(AccessType.GRAD)
-                    ]
-                    master_grad = [
-                        master_p.ps_attr.access_tensor(AccessType.GRAD)
-                    ]
-                    _overflow_buf = torch.cuda.IntTensor([0])
-                    # Fused overflow check + scale for a list of contiguous tensors
-                    # TODO(jiaruifang) I found it copys model_grad to master_grad.
-                    multi_tensor_applier(amp_C.multi_tensor_scale,
-                                         _overflow_buf,
-                                         [model_grad, master_grad], 1.0)
-
-                    client.release_grad(model_p, PSTensorStatus.FREE)
-                    client.release_grad(master_p, PSTensorStatus.HOLD)
-                else:
-                    client.access_grad(model_p, torch.device('cpu:0'))
-                    client.access_grad(master_p, torch.device('cpu:0'))
-                    model_p_tensor = model_p.ps_attr.access_tensor(
-                        AccessType.GRAD)
-                    master_p_tensor = master_p.ps_attr.access_tensor(
-                        AccessType.GRAD)
-                    master_p_tensor.copy_(model_p_tensor)
-                    client.release_grad(model_p, PSTensorStatus.FREE)
-                    client.release_grad(master_p, PSTensorStatus.HOLD)
-            timer.tik()
+        for model, master in zip(model_params, master_params):
+            if model.grad is not None:
+                if master.grad is None:
+                    master.grad = Variable(
+                        master.data.new(*master.data.size()))
+            else:
+                master.grad = None
+        model_grads = [p.grad for p in model_params if p.grad is not None]
+        master_grads = [p.grad for p in master_params if p.grad is not None]
+        _overflow_buf = torch.cuda.IntTensor([0])
+        # Fused overflow check + scale for a list of contiguous tensors
+        # NOTE(jiaruifang) I found it copys model_grad to master_grad.
+        multi_tensor_applier(amp_C.multi_tensor_scale, _overflow_buf,
+                             [model_grads, master_grads], 1.0)
 
 
 def master_params_to_model_params(model_params,
                                   master_params,
-                                  flat_master=False,
-                                  client=None):
+                                  flat_master=False):
     """
     Copy master parameters to model parameters.
     Args:
@@ -264,28 +220,7 @@ def master_params_to_model_params(model_params,
     else:
         timer = global_timer.IterationTimer()
         for model, master in zip(model_params, master_params):
-            # TODO(jiaruing) 简单弄成计算设备在cuda上，可以根据model和master现在
-            # 所在的设备选择计算设备
-            # TODO(jiaruifang) 这个过程可以和FWD计算重叠。
-            if client is not None:
-                # TODO(jiaruifang) 移动fp16的数据更节省带宽。但是copy时间更浪费。
-                if False:
-                    client.access_data(model, torch.device('cpu:0'))
-                    client.access_data(master, torch.device('cpu:0'))
-                else:
-                    client.access_data(model, torch.device('cuda:0'))
-                    client.access_data(master, torch.device('cuda:0'))
-
-                model.ps_attr.access_tensor(AccessType.DATA).copy_(
-                    master.ps_attr.access_tensor(AccessType.DATA))
-
-                # FP16 param data被标记成hold
-                client.release_data(model, PSTensorStatus.HOLD)
-                client.release_data(master, PSTensorStatus.HOLD)
-            else:
-                model.data.copy_(master)
-        if client is not None:
-            timer.tik()
+            model.data.copy_(master)
 
 
 # Backward compatibility fixes

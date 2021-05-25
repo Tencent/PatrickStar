@@ -84,7 +84,7 @@ loss_res = []
 manager = HybridPSManager()
 manager.init([1024 * 1024 * 512] * 1, [1024 * 1024 * 1024 * 4 * 4])
 # chunk 32 M
-client = HybridPSClient(gpu_index=0, default_chunk_size=1024 * 1024 * 16)
+client = HybridPSClient(rank=0, default_chunk_size=1024 * 1024 * 16)
 optimizer = TorchAdam(model.parameters(), lr=0.001)
 
 client.register_module(model)

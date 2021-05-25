@@ -111,6 +111,7 @@ class ChunkTensorIndex(object):
                 if info.access_type == AccessType.GRAD and info.status(
                 ) != PSTensorStatus.FREE:
                     res_list.append(info.param)
+        logging.info(f'res_list len {len(res_list)}')
         return res_list
 
     def generate_all_tensor_info(self):
