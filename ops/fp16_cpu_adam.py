@@ -73,6 +73,7 @@ def FP16_f_adamv2(client,
             param_grad = param_grad_buff.narrow(0, 0, param_data.numel()).view(
                 param_data.shape)
             # torch.cuda.synchronize()
+            # print(f"fp16 ps grad {i} ", fp16_param_grad)
             param_grad.copy_(fp16_param_grad, non_blocking=False)
             # torch.cuda.synchronize()
             if time_profile:
@@ -199,64 +200,16 @@ class FP16Adam(torch.optim.Optimizer):
         self.client = client
         self.prefer_device = prefer_device
 
-        max_param_size = 0
-        data_type = None
-
         # 将group参数放置到每个param内部
         for group in self.param_groups:
             for p in group['params']:
                 if p.dtype == torch.float:
                     p.data = p.data.half()
-                max_param_size = max(max_param_size, p.numel())
-                data_type = p.dtype
                 self.state[p]['betas'] = group['betas']
                 self.state[p]['lr'] = group['lr']
                 self.state[p]['weight_decay'] = group['weight_decay']
                 self.state[p]['eps'] = group['eps']
 
-        self.max_param_size = max_param_size
-        assert data_type == torch.half, f"data type is {data_type}"
-        # TODO(jiaruifang) buff应该是最大chunk的size rather than default chunk size.
-        # move to first init
-
-        # 存储fp32 param的data
-        # 在初始化时，先把fp16的数据拷贝到fp32的参数内
-        # 按照初始化顺序来拷贝，这不好
-
-        # 可以做一个p -> group的映射，获取正确的group['betas']
-        self.fp32_params_list = []
-        for i, group in enumerate(self.param_groups):
-            for j, p in enumerate(group['params']):
-                state = self.state[p]
-                # state['step'] = 0
-
-                fp32_param = torch.nn.Parameter(torch.zeros_like(
-                    p, dtype=torch.float, device=torch.device('cpu:0')),
-                                                requires_grad=False)
-                self.client.access_data(fp32_param, self.prefer_device)
-                fp32_param_data = fp32_param.ps_attr.access_tensor(
-                    AccessType.DATA)
-                fp32_param_data.copy_(p.data.float())
-                state['fp32_param_data'] = fp32_param
-                self.client.release_data(fp32_param)
-
-                # state['exp_avg'] = torch.nn.Parameter(torch.zeros(
-                #     p.shape, dtype=torch.float, device=self.prefer_device),
-                #                                       requires_grad=False)
-                # # Exponential moving average of squared gradient values
-                # state['exp_avg_sq'] = torch.nn.Parameter(torch.zeros(
-                #     p.shape, dtype=torch.float, device=self.prefer_device),
-                #                                          requires_grad=False)
-
-                # self.client.access_data(state['exp_avg'], self.prefer_device)
-                # state['exp_avg'].ps_attr.access_tensor(AccessType.DATA).zero_()
-                # self.client.release_data(state['exp_avg'])
-
-                # self.client.access_data(state['exp_avg_sq'],
-                #                         self.prefer_device)
-                # state['exp_avg_sq'].ps_attr.access_tensor(
-                #     AccessType.DATA).zero_()
-                # self.client.release_data(state['exp_avg_sq'])
         self.param_grad_buff = None
 
     def __setstate__(self, state):
@@ -272,10 +225,7 @@ class FP16Adam(torch.optim.Optimizer):
             closure (callable, optional): A closure that reevaluates the model
                 and returns the loss.
         """
-
-        # 对hook逻辑bug进行补救，embedding层的grad反向结束后仍是COMPUTE，这里将它们设置为HOLD
-        # fp16 逻辑
-        # release其实是grad
+        # 对hook逻辑bug进行补救，第一层层的grad反向结束后仍是COMPUTE，这里将它们设置为HOLD
         for n, param in self.client.module.named_parameters():
             if param.ps_attr.get_status(
                     AccessType.DATA) != PSTensorStatus.HOLD:
@@ -312,35 +262,6 @@ class FP16Adam(torch.optim.Optimizer):
                 if p.requires_grad:
                     fp16_param_with_grad_list.append(p)
                     state = self.state[p]
-                    # if len(state) == 0:
-                    if 'exp_avg' not in state:
-                        first_init_flag = True
-                        # 第一次预热时候，拷贝FP32 data数据
-                        state['step'] = 0
-
-                        state['exp_avg'] = torch.nn.Parameter(
-                            torch.zeros(p.ps_attr.ps_shape,
-                                        dtype=torch.float,
-                                        device=self.prefer_device),
-                            requires_grad=False)
-                        # Exponential moving average of squared gradient values
-                        state['exp_avg_sq'] = torch.nn.Parameter(
-                            torch.zeros(p.ps_attr.ps_shape,
-                                        dtype=torch.float,
-                                        device=self.prefer_device),
-                            requires_grad=False)
-
-                        self.client.access_data(state['exp_avg'],
-                                                self.prefer_device)
-                        state['exp_avg'].ps_attr.access_tensor(
-                            AccessType.DATA).zero_()
-                        self.client.release_data(state['exp_avg'])
-
-                        self.client.access_data(state['exp_avg_sq'],
-                                                self.prefer_device)
-                        state['exp_avg_sq'].ps_attr.access_tensor(
-                            AccessType.DATA).zero_()
-                        self.client.release_data(state['exp_avg_sq'])
 
                     exp_avgs.append(state['exp_avg'])
                     exp_avg_sqs.append(state['exp_avg_sq'])
@@ -360,7 +281,7 @@ class FP16Adam(torch.optim.Optimizer):
                 else:
                     raise RuntimeError(f"tensor id {p.ps_attr.grad_id()}")
 
-        if first_init_flag:
+        if self.param_grad_buff is None:
             if self.prefer_device.type == 'cpu':
                 self.param_grad_buff = torch.zeros(
                     self.client.chunk_list.max_chunk_size(),
@@ -372,7 +293,9 @@ class FP16Adam(torch.optim.Optimizer):
                     self.client.chunk_list.max_chunk_size(),
                     dtype=torch.float,
                     device=self.prefer_device)
-
+            logging.info(
+                f"adam max_chunk_size {self.client.chunk_list.max_chunk_size()}"
+            )
         FP16_f_adamv2(self.client, fp32_param_list, fp16_param_with_grad_list,
                       exp_avgs, exp_avg_sqs, max_exp_avg_sqs, state_steps,
                       False, beta1_list, beta2_list, lr_list,

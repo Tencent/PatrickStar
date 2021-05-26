@@ -121,7 +121,7 @@ class HybridPSClient(object):
         self._is_warmup = warmup
         self._warmup_phase = True
         # 通过运行一次迭代来动态进行chunk schduling
-        self._dynamic_chunk_scheduler = is_fp16
+        self._is_fp16 = is_fp16
 
         self._chunk_id = -1
         self._cached_fp32_buff = CachedFP32Buff(default_chunk_size, rank)
@@ -151,12 +151,12 @@ class HybridPSClient(object):
         self.chunk_list.moments_cnt_of_iteration = timer.moment()
 
     def init(self, model, optimizer):
-        if self._dynamic_chunk_scheduler is False:
-            self.static_chunk_schedule(model, optimizer)
-            self.copy_model(model)
-            self.copy_optimizer(optimizer)
-
         self.module = model
+        self.optimizer = optimizer
+
+        self.static_chunk_schedule(model, optimizer)
+        self._copy_model(model)
+
         self.register_model_hook(model)
 
         # self.chunk_tensor_index.visit_chunks(self.chunk_list)
@@ -167,34 +167,35 @@ class HybridPSClient(object):
         注册模型和优化器，相当于静态图的预处理过程
         执行chunk schema调取，为每个tensor找到对应的chunk和位置
         """
-        assert self._dynamic_chunk_scheduler is False
         self.chunk_schema_scheduler = ChunkShemaScheduler(
             self.default_chunk_size, model, optimizer, self.chunk_list,
             self.chunk_tensor_index)
-        self.chunk_schema_scheduler.schedule()
+        if self._is_fp16:
+            self.chunk_schema_scheduler.schedule_fp16()
+        else:
+            self.chunk_schema_scheduler.schedule()
         logging.info(f"static_chunk_schedule finished")
 
     def register_model_hook(self, model):
         setup_hybrid_ps_hooks(model, self)
 
-    def copy_model(self, model):
+    def _copy_model(self, model):
         # 拷贝模型
-        for name, param in model.named_parameters():
-            # TODO(jiaruifang)设备应该是自适应的
-            self.access_data(param, torch.device('cpu:0'))
-            data_tensor = param.ps_attr.access_tensor(AccessType.DATA)
-            data_tensor.copy_(param.data)
-            self.release_data(param, PSTensorStatus.HOLD)
+        for i, group in enumerate(self.optimizer.param_groups):
+            for j, param in enumerate(group['params']):
+                self.access_data(param, torch.device('cpu:0'))
+                data_tensor = param.ps_attr.access_tensor(AccessType.DATA)
+                data_tensor.copy_(param.data)
 
-    def copy_optimizer(self, optimizer):
-        # FP16 master model copy
-        if hasattr(optimizer, 'fp32_from_fp16_groups'):
-            for param_group in optimizer.fp32_from_fp16_groups:
-                for master_param in param_group:
-                    self.access_data(master_param, torch.device('cpu:0'))
-                    master_param.ps_attr.access_tensor(AccessType.DATA).copy_(
-                        master_param.data)
-                    self.release_data(master_param, PSTensorStatus.HOLD)
+                if self._is_fp16:
+                    param_fp32 = self.optimizer.state[param]['fp32_param_data']
+                    self.access_data(param_fp32, torch.device('cpu:0'))
+                    data_tensor_fp32 = param_fp32.ps_attr.access_tensor(
+                        AccessType.DATA)
+                    data_tensor_fp32.copy_(param.data.float())
+                    self.release_data(param_fp32, PSTensorStatus.HOLD)
+
+                self.release_data(param, PSTensorStatus.HOLD)
 
     def generate_grad_params(self):
         """
@@ -264,6 +265,8 @@ class HybridPSClient(object):
             # data 和 grad都有id
             # TODO(jiaruifang)可以在optimizer init过程把编号分配好
             register_param(param)
+            raise RuntimeError(
+                "FP16 training shall not meet tensors not registered for PS")
 
         # 准备param所在chunk的内存，如果内存不在计算设备上需要分配或者移动
         chunk_id = self.chunk_tensor_index.get_chunk_id(param, access_type)
@@ -274,6 +277,8 @@ class HybridPSClient(object):
             chunk_id = self._assign_chunk_for_tensor(param, access_type)
             # logging.info(f'not found chunk, assign chunk {chunk_id} access type {access_type} {param.dtype}')
             is_first_init = True
+            raise RuntimeError(
+                "FP16 training shall not meet tensors with no chunk assigned")
         else:
             pass
             # logging.info(f'found chunk_id {chunk_id}  access type {access_type} {param.dtype}')
@@ -420,15 +425,3 @@ class HybridPSClient(object):
             for n, p in self.module.named_parameters():
                 self.release_grad(p, status)
                 self.release_data(p, status)
-
-    def allreduce(self, param, access_type):
-        """
-        必须所有process同时执行，规约后的payload存储在哪(cpu or gpu)由调度器决定
-        """
-        pass
-
-    def broadcast(self, param, access_type):
-        """
-        必须所有process同时执行，规约后的payload存储在哪由调度器决定
-        """
-        pass

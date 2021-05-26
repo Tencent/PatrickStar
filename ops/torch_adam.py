@@ -30,6 +30,7 @@ def adam(params: List[Tensor], grads: List[Tensor], exp_avgs: List[Tensor],
     for i, param in enumerate(params):
 
         grad = grads[i]
+        # print(f"torch ps grad {i} ", grad)
         exp_avg = exp_avgs[i]
         exp_avg_sq = exp_avg_sqs[i]
 

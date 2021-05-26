@@ -171,7 +171,6 @@ if __name__ == "__main__":
             assert loss == loss_ref
 
     test_fp16 = True
-
     if test_fp16:
         # hidden_dim = 4
         # 需要 40和8两个chunk

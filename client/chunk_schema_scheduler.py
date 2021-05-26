@@ -46,7 +46,7 @@ class ChunkShemaScheduler(object):
         for name, param in self.module.named_parameters(recurse=True):
             register_param(param, name)
             numel = param.numel()
-            data_type = param.dtype
+            data_type = torch.float
             self.chunk_tensor_index.add_tensor(chunk_id,
                                                param.ps_attr.data_id(),
                                                acc_cnt, numel, param,
@@ -175,3 +175,135 @@ class ChunkShemaScheduler(object):
         # 收尾
         if acc_cnt > 0:
             self.chunk_list.new_chunk(chunk_id, acc_cnt, data_type)
+
+    def schedule_fp16(self):
+        """
+        为module和optimizer的参数指定chunk schema
+        schedule过程为所有parameter注册成ps_tensor
+        """
+        # 模型参数的data和grad间隔排列。
+        # Optimizer的M，V间隔排列
+        acc_cnt = 0
+        chunk_id = 0
+
+        # 注册param data fp16
+        for group in self.optimizer.param_groups:
+            for param in group['params']:
+                register_param(param, "param_fp16")
+                numel = param.numel()
+                data_type = torch.half
+                self.chunk_tensor_index.add_tensor(chunk_id,
+                                                   param.ps_attr.data_id(),
+                                                   acc_cnt, numel, param,
+                                                   AccessType.DATA)
+                acc_cnt += numel
+                if acc_cnt >= self.default_chunk_size:
+                    self.chunk_list.new_chunk(chunk_id, acc_cnt, data_type)
+                    self.chunk_tensor_index.add_chunk(chunk_id, acc_cnt,
+                                                      data_type)
+                    chunk_id += 1
+                    acc_cnt = 0
+
+        # 收尾，剩下的tensor凑不成一个至少default size大小的chunk
+        if acc_cnt > 0:
+            self.chunk_list.new_chunk(chunk_id, acc_cnt, data_type)
+            self.chunk_tensor_index.add_chunk(chunk_id, acc_cnt, data_type)
+            chunk_id += 1
+            acc_cnt = 0
+
+        # 注册param data fp32
+        for group in self.optimizer.param_groups:
+            for p in group['params']:
+                # TODO, 还不能获取name
+                state = self.optimizer.state[p]
+                param = torch.nn.Parameter(torch.zeros_like(
+                    p, dtype=torch.float, device=torch.device('cpu:0')),
+                                           requires_grad=False)
+                state['fp32_param_data'] = param
+
+                register_param(param, 'master')
+                numel = param.ps_attr.ps_numel
+                data_type = torch.float
+                self.chunk_tensor_index.add_tensor(chunk_id,
+                                                   param.ps_attr.data_id(),
+                                                   acc_cnt, numel, param,
+                                                   AccessType.DATA)
+                acc_cnt += numel
+                if acc_cnt >= self.default_chunk_size:
+                    self.chunk_list.new_chunk(chunk_id, acc_cnt, data_type)
+                    self.chunk_tensor_index.add_chunk(chunk_id, acc_cnt,
+                                                      data_type)
+                    chunk_id += 1
+                    acc_cnt = 0
+        # 收尾
+        if acc_cnt > 0:
+            self.chunk_list.new_chunk(chunk_id, acc_cnt, data_type)
+            self.chunk_tensor_index.add_chunk(chunk_id, acc_cnt, data_type)
+            chunk_id += 1
+            acc_cnt = 0
+
+        # 注册M，V, param data fp32
+        for group in self.optimizer.param_groups:
+            for p in group['params']:
+                if p.requires_grad is True:
+                    state = self.optimizer.state[p]
+                    # Eager state initialization, different from Pytorch
+                    state['step'] = 0
+                    # 被HybridPS管理
+                    # Exponential moving average of gradient values
+                    data_type = torch.float
+                    state['exp_avg'] = torch.nn.Parameter(
+                        torch.zeros(
+                            p.ps_attr.ps_shape,
+                            dtype=data_type,
+                            # memory_format=torch.preserve_format,
+                            device=torch.device('cpu:0')),
+                        requires_grad=False)
+                    # Exponential moving average of squared gradient values
+                    state['exp_avg_sq'] = torch.nn.Parameter(
+                        torch.zeros(
+                            p.ps_attr.ps_shape,
+                            dtype=data_type,
+                            # memory_format=torch.preserve_format,
+                            device=torch.device('cpu:0')),
+                        requires_grad=False)
+
+                    ps_name_prefix = p.ps_attr.ps_name
+                    register_param(state['exp_avg'],
+                                   f'{ps_name_prefix}.exp_avg')
+                    register_param(state['exp_avg_sq'],
+                                   f'{ps_name_prefix}.exp_avg_sq')
+
+                    numel = p.ps_attr.ps_numel
+                    self.chunk_tensor_index.add_tensor(
+                        chunk_id, state['exp_avg'].ps_attr.data_id(), acc_cnt,
+                        numel, state['exp_avg'], AccessType.DATA)
+                    self.chunk_tensor_index.add_tensor(
+                        chunk_id, state['exp_avg_sq'].ps_attr.data_id(),
+                        acc_cnt + numel, numel, state['exp_avg_sq'],
+                        AccessType.DATA)
+
+                    # param.data不被需要，将他们的内存释放
+                    state['exp_avg'].data = torch.zeros(
+                        1, dtype=data_type, device=torch.device('cpu:0'))
+                    state['exp_avg_sq'].data = torch.zeros(
+                        1, dtype=data_type, device=torch.device('cpu:0'))
+
+                    acc_cnt += numel * 2
+                    if acc_cnt >= self.default_chunk_size:
+                        # logging.info(f'here')
+                        self.chunk_list.new_chunk(chunk_id, acc_cnt,
+                                                  torch.float)
+                        chunk_id += 1
+                        acc_cnt = 0
+
+                    if group['amsgrad']:
+                        # Maintains max of all exp. moving avg. of sq. grad. values
+                        raise NotImplementedError
+                else:
+                    raise RuntimeError
+
+        # 收尾
+        if acc_cnt > 0:
+            self.chunk_list.new_chunk(chunk_id, acc_cnt, data_type)
+        logging.info('static schedule with FP16 finished')
