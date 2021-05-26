@@ -239,7 +239,7 @@ class Chunk(object):
         if self.get_device() == target_device:
             return
 
-        logging.info(
+        logging.debug(
             f'move chunk {self.chunk_id} numel {self.payload.numel()} from {self.get_device()} to {target_device}'
         )
         #TODO(jiaruifang)异步

@@ -136,9 +136,6 @@ def post_sub_module_forward_function(sub_module, client, name):
         logging.debug(
             f'FWD post {sub_module.id}.{name}.{sub_name} release data')
         client.release_data(param)
-        param.data = torch.zeros(1,
-                                 dtype=param.dtype,
-                                 device=torch.device('cpu:0'))
 
 
 def pre_sub_module_backward_function(sub_module, client, name):
@@ -146,26 +143,37 @@ def pre_sub_module_backward_function(sub_module, client, name):
     flag = False
     for sub_name, param in sub_module.named_parameters(recurse=False):
         logging.debug(f'BWD pre {name}.{sub_name}')
-        client.access_data(param, torch.device(f'cuda:{client.rank}'))
-        client.access_grad(param, torch.device(f'cuda:{client.rank}'))
-        param.data = param.ps_attr.access_tensor(AccessType.DATA)
-        param.grad = param.ps_attr.access_tensor(AccessType.GRAD)
-        # param.grad.zero_()
+        if param.dtype == torch.half:
+            client.access_data(param, torch.device(f'cuda:{client.rank}'))
+            tmp_tensor = param.ps_attr.access_tensor(AccessType.DATA)
+            param.data = tmp_tensor
+            param.grad = torch.zeros_like(tmp_tensor)
+            assert param.data.data_ptr() != param.grad.data_ptr()
+        elif param.dtype == torch.float:
+            logging.debug(f'BWD pre {name}.{sub_name}')
+            client.access_data(param, torch.device(f'cuda:{client.rank}'))
+            client.access_grad(param, torch.device(f'cuda:{client.rank}'))
+            param.data = param.ps_attr.access_tensor(AccessType.DATA)
+            param.grad = param.ps_attr.access_tensor(AccessType.GRAD)
         flag = True
     if flag:
         timer.tik(device_type='cuda')
 
 
 # release param of submodule
+# TODO(jiaruifang) 我们嫌隙sub_module计算完data不再需要，也就是没有连线到其他submodule
 def post_sub_module_backward_function(sub_module, client, name):
     timer = global_timer.IterationTimer()
     for sub_name, param in sub_module.named_parameters(recurse=False):
         logging.debug(f'BWD post {name}.{sub_name} release data and grad')
-        client.release_grad(param, PSTensorStatus.HOLD)
-        # TODO(jiaruifang) FP16 release to FREE, fp32 release to HOLD
-        client.release_data(
-            param, PSTensorStatus.FREE
-            if param.dtype == torch.half else PSTensorStatus.HOLD)
+        if param.dtype == torch.half:
+            tmp_tensor = param.ps_attr.access_tensor(AccessType.DATA)
+            tmp_tensor.copy_(param.grad)
+            client.release_data(param, PSTensorStatus.HOLD)
+            param.grad = None
+        elif param.dtype == torch.float:
+            client.release_grad(param, PSTensorStatus.HOLD)
+            client.release_data(param, PSTensorStatus.HOLD)
 
 
 def _register_hooks_recursively(module, client, count=[0], name=""):

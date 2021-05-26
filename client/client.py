@@ -272,7 +272,7 @@ class HybridPSClient(object):
         is_first_init = False
         if chunk_id is None:
             chunk_id = self._assign_chunk_for_tensor(param, access_type)
-            # logging.info(f'assign chunk {chunk_id} access type {access_type} {param.dtype}')
+            # logging.info(f'not found chunk, assign chunk {chunk_id} access type {access_type} {param.dtype}')
             is_first_init = True
         else:
             pass

@@ -181,7 +181,7 @@ if __name__ == "__main__":
         see_memory_usage("after HybridPS simple model", force=True)
 
         torch.manual_seed(0)
-        loss_list_ref = test_simple_model(False, is_fp16=True)
+        loss_list_ref = test_simple_model(False, is_fp16=True, is_ckp=True)
 
         print('ps loss', loss_list)
         print('ref loss', loss_list_ref)
