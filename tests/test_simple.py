@@ -156,7 +156,7 @@ if __name__ == "__main__":
     # 4 layer每层20个elem(20*4 bytes)，最少360 (360*4 bytes)内存
     # gpu内存至少为40，反向传播一层需要的最大内存。
 
-    test_cpu_adam = True
+    test_cpu_adam = False
     if test_cpu_adam:
         # manager.init([40 * 4] * 1, [280 * 4])
         manager.init([180 * 4] * 1, [280 * 4])

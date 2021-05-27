@@ -19,24 +19,45 @@ from client import Chunk
 from manager import HybridPSManager
 from utils import init_distributed
 import torch
+import torch.distributed as dist
 
-init_distributed(dist_backend='nccl')
-rank = torch.distributed.get_rank()
-manager = HybridPSManager()
-manager.init([10, 10], [10, 10])
 
-# 每个进程都分配一个chunk
-chunk = Chunk(4, torch.half, 0)
-chunk.allocate_payload(torch.device(f'cuda:{rank}'))
-chunk.payload.random_()
+def test_collective_comm():
+    rank = torch.distributed.get_rank()
+    manager = HybridPSManager()
+    manager.init([10, 10], [10, 10])
 
-# 不同进程chunk执行allgather，每个进程获得一个allgather的chunk
-print(f'before allgather, rank {rank}', chunk.payload)
+    # 每个进程都分配一个chunk
+    chunk = Chunk(4, torch.half, 0)
+    chunk.allocate_payload(torch.device(f'cuda:{rank}'))
+    chunk.payload.random_()
 
-chunk.allgather()
+    # 不同进程chunk执行allgather，每个进程获得一个allgather的chunk
+    print(f'before allgather, rank {rank}', chunk.payload)
 
-print(f'after allgather, rank {rank}', chunk.payload)
+    chunk.allgather()
 
-chunk.reduce_scatter()
+    print(f'after allgather, rank {rank}', chunk.payload)
 
-print(f'after reduce_scatter, rank {rank}', chunk.payload)
+    chunk.reduce_scatter()
+
+    print(f'after reduce_scatter, rank {rank}', chunk.payload)
+
+
+def test_p2p():
+    rank = torch.distributed.get_rank()
+    world_size = torch.distributed.get_world_size()
+    tensor = torch.ones(10)
+    if rank == 0:
+        tensor = torch.ones(10) + 123
+        for i in range(1, world_size):
+            dist.send(tensor=tensor, dst=i)
+    else:
+        dist.recv(tensor=tensor, src=0)
+
+    print(tensor)
+
+
+if __name__ == "__main__":
+    init_distributed(dist_backend='gloo')
+    test_p2p()
