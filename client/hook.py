@@ -150,7 +150,6 @@ def pre_sub_module_backward_function(sub_module, client, name):
             param.grad = torch.zeros_like(tmp_tensor)
             assert param.data.data_ptr() != param.grad.data_ptr()
         elif param.dtype == torch.float:
-            logging.debug(f'BWD pre {name}.{sub_name}')
             client.access_data(param, torch.device(f'cuda:{client.rank}'))
             client.access_grad(param, torch.device(f'cuda:{client.rank}'))
             param.data = param.ps_attr.access_tensor(AccessType.DATA)
@@ -165,11 +164,18 @@ def pre_sub_module_backward_function(sub_module, client, name):
 def post_sub_module_backward_function(sub_module, client, name):
     timer = global_timer.IterationTimer()
     for sub_name, param in sub_module.named_parameters(recurse=False):
-        logging.debug(f'BWD post {name}.{sub_name} release data and grad')
+        logging.debug(
+            f'BWD post {name}.{sub_name} release data and grad {param.grad}')
         if param.dtype == torch.half:
             tmp_tensor = param.ps_attr.access_tensor(AccessType.DATA)
             tmp_tensor.copy_(param.grad)
-            client.release_data(param, PSTensorStatus.HOLD)
+            if torch.distributed.is_initialized():
+                # 对已经ready的grad data做all reduce
+                client.release(param, AccessType.DATA, PSTensorStatus.HOLD,
+                               True)
+            else:
+                client.release_data(param, PSTensorStatus.HOLD)
+
             param.grad = None
         elif param.dtype == torch.float:
             client.release_grad(param, PSTensorStatus.HOLD)
