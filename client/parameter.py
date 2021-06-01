@@ -109,7 +109,8 @@ class PSParameter(object):
 
 
 def register_param(param, name=None):
-    param.ps_attr = PSParameter(param, name)
+    if not hasattr(param, 'ps_attr'):
+        param.ps_attr = PSParameter(param, name)
 
 
 def is_param_registed(param) -> bool:

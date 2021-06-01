@@ -21,13 +21,15 @@ class AccessType(Enum):
 
 class PSChunkStatus(Enum):
     # Chunk内存被分配出来，在计算中
-    COMPUTE = 1
+    COMPUTE = 0
     # Chunk内存被分配出来，持有有意义的数据
-    HOLD = 2
+    HOLD = 1
     # Chunk内存被分配出来，持有无意义数据
-    FREE = 3
+    FREE = 2
     # Chunk内存没有被分配出来
-    RELEASED = 4
+    RELEASED = 3
+    # dist使用，虽然所有tensor都是hold，但被pin在计算设备上
+    WAIT = 4
 
 
 # 数据在计算逻辑中的状态
@@ -43,9 +45,6 @@ class PSTensorStatus(Enum):
 
 # chunk的位置
 class PSChunkLocStatus(Enum):
-    CPU_PART = 0
-    GPU_PART = 1
-    GPU_DUP = 2
-    UNINIT = 3
-    # 调试使用，真实场景不存在这种状态
-    CPU_DUP = 4
+    LOCAL = 0
+    REMOTE = 1
+    UNINIT = 2

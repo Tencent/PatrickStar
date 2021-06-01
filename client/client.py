@@ -30,6 +30,7 @@ import utils.global_timer as global_timer
 import time
 from .parameter import PSParameter, register_param, is_param_registed
 from utils.memory_monitor import get_memory_used
+from utils import logger
 
 
 class CachedFP32Buff(object):
@@ -41,6 +42,7 @@ class CachedFP32Buff(object):
         self.cpu_cached_fp32_payload = torch.zeros(self.max_chunk_size,
                                                    dtype=torch.float,
                                                    pin_memory=True)
+        logger.info(f'CachedFP32Buff init with rank {self.rank}')
         self.cuda_cached_fp32_payload = torch.zeros(
             self.max_chunk_size,
             dtype=torch.float,
@@ -155,11 +157,15 @@ class HybridPSClient(object):
         self.optimizer = optimizer
 
         self.static_chunk_schedule(model, optimizer)
+
+        if torch.distributed.is_initialized():
+            rank = torch.distributed.get_rank()
+        # TODO(jiaruifang) 目前仍是调试状态，每个进程有全部模型
         self._copy_model(model)
 
         self.register_model_hook(model)
 
-        self.chunk_tensor_index.visit_chunks(self.chunk_list)
+        # self.chunk_tensor_index.visit_chunks(self.chunk_list)
 
     def static_chunk_schedule(self, model, optimizer):
         """
@@ -243,6 +249,71 @@ class HybridPSClient(object):
                                                numel, param, AccessType.GRAD)
         return chunk_id
 
+    def access_grad_dist(self, param: torch.nn.Parameter,
+                         compute_device: torch.device):
+        """
+        在单机多卡训练过程中，访问param的grad tensor。
+        找到param.grad对应的chunk，获得global chunks。
+        等待global chunks都从compute状态变成hold，执行reduce-scatter
+        每个
+        """
+    def access_dist(self, param: torch.nn.Parameter, access_type: AccessType,
+                    compute_device: torch.device):
+        if self._time_profile:
+            start_time = time.time()
+
+        assert compute_device.type == "cuda"
+        if not hasattr(param, 'ps_attr'):
+            register_param(param)
+            raise RuntimeError(
+                "FP16 training shall not meet tensors not registered for PS")
+
+        # 准备param所在chunk的内存，如果内存不在计算设备上需要分配或者移动
+        chunk_id = self.chunk_tensor_index.get_chunk_id(param, access_type)
+
+        chunk_id_list = self.chunk_tensor_index.get_global_chunk_id_list(
+            chunk_id)
+        rank = torch.distributed.get_rank()
+        local_chunk_id = chunk_id_list[rank]
+        logger.info(
+            f'rank {rank} access_dist local_chunk_id {local_chunk_id} chunk_id_list {chunk_id_list}'
+        )
+
+        # 每个进程把chunk_id_list都弄到本地
+        self.chunk_list.access_chunk_dist(local_chunk_id, chunk_id_list,
+                                          compute_device)
+
+        # 将param内存定位到chunk上
+        tensor_id = param.ps_attr.get_tensor_id(access_type)
+        info = self.chunk_tensor_index.get_tensor_info(tensor_id)
+        start_offset = info.start_offset
+        numel = info.numel
+        assert numel == param.ps_attr.ps_numel, f"{numel} vs {param.ps_attr.ps_numel}"
+
+        param.ps_attr.set_tensor(
+            self.chunk_list[chunk_id].payload.narrow(0, start_offset, numel),
+            access_type)
+
+        ### 改变param's tensor对应chunk的status，chunk状态由它管理的所有tensor状态共同决定。
+        old_status = param.ps_attr.get_status(access_type)
+
+        # 如果是从free/uninit状态转换的需要清零
+        if old_status == PSTensorStatus.FREE or old_status == PSTensorStatus.UNINIT:
+            param.ps_attr.access_tensor(access_type).zero_()
+
+        # 访问之后应该更新Tensor的状态，tensor对应的chunk的状态随之改变
+        # dist情况
+        # 对于global chunk_list其他chunk，他们的payload被分配出来了，他们的status生效
+        # 可以被换入换出。如果payload size是0也不会被换入换出。
+        # 如果on local则可以被本进程换入换出。
+        # TODO release时候要被释放payload
+        self.chunk_list.update_status(chunk_id, old_status,
+                                      PSTensorStatus.COMPUTE)
+        param.ps_attr.set_status(PSTensorStatus.COMPUTE, access_type)
+
+        if self._time_profile:
+            global_timer.client_access_elapse += time.time() - start_time
+
     def access(self, param: torch.nn.Parameter, access_type: AccessType,
                compute_device: torch.device):
         """
@@ -256,6 +327,11 @@ class HybridPSClient(object):
         将payload分配到计算设备的内存上，分配前需要给计算设备腾出足够空间。
 
         异常：一个chunk中两个tensor的计算设备不一致。
+        两种access，
+        1. FWD+BWD过程的access_data and access_grad?
+        如果访问的是本地chunk_id，也需要allgather配合其他process
+        2. adam过程access_data
+        只能访问本地chunk不需要通信
         """
         if self._time_profile:
             start_time = time.time()
@@ -274,14 +350,19 @@ class HybridPSClient(object):
         # 这个tensor还没在chunk schema中
         is_first_init = False
         if chunk_id is None:
+            raise RuntimeError(
+                "FP16 training shall not meet tensors with no chunk assigned")
             chunk_id = self._assign_chunk_for_tensor(param, access_type)
             # logging.info(f'not found chunk, assign chunk {chunk_id} access type {access_type} {param.dtype}')
             is_first_init = True
-            raise RuntimeError(
-                "FP16 training shall not meet tensors with no chunk assigned")
         else:
             pass
             # logging.info(f'found chunk_id {chunk_id}  access type {access_type} {param.dtype}')
+
+        rank = torch.distributed.get_rank()
+        logger.debug(
+            f'rank {rank} accesses chunk id {chunk_id} payload {self.chunk_list[chunk_id].payload}'
+        )
 
         self.chunk_list.access_chunk(chunk_id, compute_device)
         # 将param内存定位到chunk上
@@ -379,15 +460,18 @@ class HybridPSClient(object):
 
         # 找到需要删除的chunk，先删除chunk关联的tensors
         if access_type == AccessType.DATA:
+            # TODO(jiaruifang) 必须to device它和param.grad_fn.next_functions[0][0]
             param.data = torch.zeros(1,
                                      dtype=param.dtype,
-                                     device=torch.device('cpu:0'))
+                                     device=torch.device('cpu:0')).to(
+                                         param.device)
         elif access_type == AccessType.GRAD:
             param.grad = None
 
         # PS：主要耗时部分，如果真正执行，以下代码非常耗时。可以改成分配时再释放。
         # 不应该删除chunks，因为fp16的chunk可以被复用。fp32 chunk不存在删除情况
-        # self.chunk_list.delete_free_chunks()
+        self.chunk_list.delete_free_chunks()
+        # TODO(jiaruifang) remote chunk且是free需要释放payload
 
         if self._time_profile:
             global_timer.client_release_elapse += time.time() - start_time

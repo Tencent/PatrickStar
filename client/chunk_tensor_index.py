@@ -12,11 +12,11 @@
 # See the AUTHORS file for names of contributors.
 
 from typing import List
-import logging
 import torch
 from .const import AccessType, PSChunkStatus, PSTensorStatus
 from .chunk_list import ChunkList
 import utils.global_timer as global_timer
+from utils import logger
 import time
 from .parameter import PSParameter
 
@@ -49,7 +49,7 @@ class TensorInfo(object):
         return self.param.ps_attr.get_status(self.access_type)
 
     def showme(self):
-        logging.info(
+        logger.info(
             f'tensor_id {self.tensor_id}, name {self.tensor_name}, shape {self.param.ps_shape}, chunk_id {self.chunk_id}, start_offset {self.start_offset}, nueml {self.numel}, status {self.status()}'
         )
 
@@ -65,8 +65,20 @@ class ChunkTensorIndex(object):
         self.dict_chunk_id_tensor_id: dict[int, List[int]] = {}
         self.dict_chunk_id_chunk_info: dict[int, tuple] = {}
 
-    def add_chunk(self, chunk_id, chunk_size, data_type):
+        world_size = 1
+        if torch.distributed.is_initialized():
+            world_size = torch.distributed.get_world_size()
+        # global_chunk_id 对应的chunk_id_list
+        self.global_chunk_id_chunk_id_list = {}
+        self.dict_chunk_id_global_id = {}
+
+    def add_chunk(self, chunk_id, chunk_size, data_type, global_chunk_id=0):
         self.dict_chunk_id_chunk_info[chunk_id] = (chunk_size, data_type)
+
+        if global_chunk_id not in self.global_chunk_id_chunk_id_list:
+            self.global_chunk_id_chunk_id_list[global_chunk_id] = list()
+        self.global_chunk_id_chunk_id_list[global_chunk_id].append(chunk_id)
+        self.dict_chunk_id_global_id[chunk_id] = global_chunk_id
 
     def find_gap(self, numel, data_type):
         """
@@ -198,7 +210,7 @@ class ChunkTensorIndex(object):
         raise NotImplementedError
         # 删除chunk中的tensor
         if self.dict_chunk_id_tensor_id.get(chunk_id) is None:
-            # logging.info(f'delete_chunk_id {chunk_id} does not exist')
+            # logger.info(f'delete_chunk_id {chunk_id} does not exist')
             return
         for tid in self.dict_chunk_id_tensor_id.get(chunk_id, []):
             del self.dict_tensor_id_info[tid]
@@ -242,17 +254,30 @@ class ChunkTensorIndex(object):
             return None
         return info.chunk_id
 
+    def get_global_chunk_id_list(self, chunk_id: int) -> List[int]:
+        return self.global_chunk_id_chunk_id_list[
+            self.dict_chunk_id_global_id[chunk_id]]
+
+    def generate_all_chunks(self, chunk_list):
+        for chunk_id, _ in self.dict_chunk_id_tensor_id.items():
+            chunk = chunk_list[chunk_id]
+            global_chunk_id = self.dict_chunk_id_global_id[chunk_id]
+            yield chunk_id, global_chunk_id, chunk
+
     def visit_chunks(self, chunk_list: ChunkList):
         total_bytes = 0
         for chunk_id, _ in self.dict_chunk_id_tensor_id.items():
             chunk = chunk_list[chunk_id]
-            logging.info(
-                f'Chunk id {chunk.chunk_id}, capacity {chunk.capacity} dtype {chunk.data_type}, size {chunk.get_chunk_space()}, device {chunk.get_device()}'
+            global_chunk_id = self.dict_chunk_id_global_id[chunk_id]
+            assert global_chunk_id is not None
+
+            logger.info(
+                f'Chunk id {chunk.chunk_id}, global chunk id {global_chunk_id}, capacity {chunk.capacity} dtype {chunk.data_type}, size {chunk.get_chunk_space()}, device {chunk.get_device()}'
             )
             for info in self.generate_tensor_info_in_order(chunk_id):
                 assert info.chunk_id == chunk_id, f'{info.chunk_id} vs {chunk_id}'
-                logging.info(
+                logger.info(
                     f"** tensor: chunk_id {chunk_id}, start {info.start_offset}, end {info.start_offset + info.numel}, size {info.numel}, tensor_id {info.tensor_id}, status {info.status()}, name {info.tensor_name}"
                 )
             total_bytes += chunk.get_chunk_space()
-        logging.info(f'OVERALL CHUNK SIZE {total_bytes/1e9} GB')
+        logger.info(f'OVERALL CHUNK SIZE {total_bytes/1e9} GB')

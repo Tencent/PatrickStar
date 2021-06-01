@@ -13,7 +13,7 @@
 
 import logging
 import sys
-
+import torch
 import torch.distributed as dist
 
 
@@ -66,3 +66,8 @@ def log_dist(message, ranks=None, level=logging.INFO):
     if should_log:
         final_message = "[Rank {}] {}".format(my_rank, message)
         logger.log(level, final_message)
+
+
+def print_rank(message, rank=0, debug=False, force=False):
+    if torch.distributed.get_rank() == rank and (debug or force):
+        logger.info(message)

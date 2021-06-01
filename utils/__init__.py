@@ -13,5 +13,6 @@
 
 from .global_timer import *
 from .memory_monitor import see_memory_usage
-from .logging import log_dist, logger
+from .logging import log_dist, logger, print_rank
 from .distributed import init_distributed
+debug_flag = True

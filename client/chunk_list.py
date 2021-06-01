@@ -12,7 +12,7 @@
 # See the AUTHORS file for names of contributors.
 
 from .chunk_data import Chunk
-from .const import PSChunkStatus, AccessType, PSTensorStatus
+from .const import PSChunkStatus, AccessType, PSTensorStatus, PSChunkLocStatus
 from .helper import getsizeof
 from manager import HybridPSManager
 
@@ -26,6 +26,7 @@ import psutil
 import utils.global_timer as global_timer
 from utils.memory_monitor import see_memory_usage, get_memory_used
 import time
+from utils import logger, log_dist, debug_flag
 
 from queue import PriorityQueue
 
@@ -37,7 +38,8 @@ class ChunkList(object):
     def __init__(self, rank: int = 0):
         self.chunk_id_to_chunk_dict: dict[int, Chunk] = {}
         self._time_profile = True
-        self.copy_stream = torch.cuda.Stream()
+        # TODO单GPU不能启动太多stream
+        self.copy_stream = None if debug_flag else torch.cuda.Stream()
         self.moments_cnt_of_iteration = None
         self.rank = rank
 
@@ -59,14 +61,113 @@ class ChunkList(object):
             max_size = max(chunk.capacity, max_size)
         return max_size
 
+    def _prepare_payload_from_remote_chunk(self, local_chunk_id,
+                                           chunk_id_list):
+        """
+        为chunk_id_list中的chunk准备payload。
+        其中本进程负责维护local_chunk_id的chunk payload
+        远程的进程需要通过allgather通信获取payload
+        结果是，每个进程chunk_id_list中对应的chunk payload的在本地
+        """
+        local_chunk_payload = self.chunk_id_to_chunk_dict[
+            local_chunk_id].payload
+        local_chunk_device = local_chunk_payload.device
+        allgather_payload_buff = []
+
+        for chunk_id in chunk_id_list:
+            if chunk_id == local_chunk_id:
+                allgather_payload_buff.append(local_chunk_payload)
+            else:
+                self.chunk_id_to_chunk_dict[chunk_id].allocate_payload(
+                    local_chunk_device)
+                allgather_payload_buff.append(
+                    self.chunk_id_to_chunk_dict[chunk_id].payload)
+
+        assert torch.distributed.is_initialized(
+        ), "torch distributed is not initialized during allgather"
+
+        world_size = torch.distributed.get_world_size()
+        rank = torch.distributed.get_rank()
+        log_dist(
+            f'before allgather on rank {rank} buff {allgather_payload_buff}',
+            [0, 1])
+        handle = torch.distributed.all_gather(allgather_payload_buff,
+                                              local_chunk_payload,
+                                              async_op=False)
+        log_dist(
+            f'after allgather on rank {rank} buff {allgather_payload_buff}',
+            [0, 1])
+        # allgather_payload_buff的item要立刻释放，否则payload释放后还在allgather_payload_buff中保存
+        allgather_payload_buff = []
+        return handle
+
+    def access_chunk_dist(self, local_chunk_id: int, chunk_id_list: List[int],
+                          compute_device: torch.device):
+        """
+        在分布式训练中访问local_chunk_id对应的chunk，
+        结果是把global_chunk_id管辖的chunk_id都填满
+        """
+        if self._time_profile:
+            start_time = time.time()
+        chunk = self.chunk_id_to_chunk_dict[local_chunk_id]
+        chunk_status = chunk.get_status()
+        local_space = chunk.get_chunk_space()
+
+        world_size = torch.distributed.get_world_size()
+        # 全局的payload需要的空间
+        payload_space = local_space * world_size
+
+        if chunk_status == PSChunkStatus.RELEASED:
+            log_dist(
+                f'access_chunk chunk {local_chunk_id}, need to allocate {payload_space} B memory on {compute_device}',
+                [0, 1])
+            self.prepare_device(compute_device, payload_space)
+
+            chunk.allocate_payload(compute_device)
+            # TODO(jiaruifang) 分配 n_proc - 1个chunk payload作为buffer
+            self._prepare_payload_from_remote_chunk(local_chunk_id,
+                                                    chunk_id_list)
+            if self._time_profile:
+                global_timer.access_chunk_elapse += time.time() - start_time
+            return
+        elif chunk.get_device().type != compute_device.type:
+            log_dist(
+                f'access_chunk chunk {local_chunk_id} prepare {payload_space} B memory on {compute_device}',
+                [0, 1])
+            self.prepare_device(compute_device, payload_space)
+            chunk.move(compute_device, self.copy_stream)
+            # TODO(jiaruifang) 分配 n_proc - 1个chunk payload作为buffer
+
+            log_dist(
+                f'move chunk {local_chunk_id} to {compute_device} payload {chunk.payload}',
+                [0, 1])
+            self._prepare_payload_from_remote_chunk(local_chunk_id,
+                                                    chunk_id_list)
+
+            assert chunk.get_device(
+            ).type == compute_device.type, f"chunk device {chunk.get_device()} compute device {compute_device}"
+            # TODO(jiaruifang) 分配 n_proc - 1个chunk payload作为buffer
+            # 然后allgather
+
+            if self._time_profile:
+                global_timer.access_chunk_elapse += time.time() - start_time
+            return
+        else:
+            log_dist(
+                f'access_chunk chunk {local_chunk_id} directly on {compute_device}',
+                [0, 1])
+
     def access_chunk(self, chunk_id: int, compute_device: torch.device):
         """
         访问chunk_id，将chunk的内存准备到compute device上。
-        如果chunk在其他设备上，需要移动。
+        1. local
+        如果chunk在本进程其他设备上，需要移动。
             TODO(jiaruifang)异步移动，在第一次迭代统计chunk的声明周期。
             调用本函数时，先执行对chunk_id的同步操作。
             再发起对下一个chunk_id的预取。
         如果chunk的内存被释放，需要分配。
+        2. distributed
+        需要获取其他进程chunk，进行一次allgather获取一个完成的global chunk
         """
         if self._time_profile:
             start_time = time.time()
@@ -74,17 +175,16 @@ class ChunkList(object):
         chunk = self.chunk_id_to_chunk_dict[chunk_id]
         chunk_status = chunk.get_status()
 
+        payload_space = chunk.get_chunk_space()
+
         # 如果chunk的内存释放了，需要将它分配出来
+        # 分布式情况，需要分配一个全局的payload
         if chunk_status == PSChunkStatus.RELEASED:
-            # 直接在compute device上腾出空间
-            local_space = chunk.get_chunk_space()
-            if torch.distributed.is_initialized():
-                local_space = local_space // torch.distributed.get_world_size()
-                assert local_space % torch.distributed.get_world_size() == 0
-            logging.debug(
-                f'access_chunk chunk {chunk_id}, need to allocate {local_space} B memory on {compute_device}'
+            rank = torch.distributed.get_rank()
+            logger.debug(
+                f'access_chunk chunk {chunk_id}, need to allocate {payload_space} B memory on {compute_device}'
             )
-            self.prepare_device(compute_device, local_space)
+            self.prepare_device(compute_device, payload_space)
 
             chunk.allocate_payload(compute_device)
             if self._time_profile:
@@ -95,14 +195,8 @@ class ChunkList(object):
         # 只有chunk状态是hold的会被移动，而hold状态的chunk中所有tensor都是hold或者free。
         # 这种tensor的内存都悬空
         elif chunk.get_device().type != compute_device.type:
-            local_space = chunk.get_chunk_space()
-            if torch.distributed.is_initialized():
-                local_space = local_space // torch.distributed.get_world_size()
-                assert local_space % torch.distributed.get_world_size() == 0
-            logging.debug(
-                f'access_chunk chunk {chunk_id} prepare {local_space} B memory on {compute_device}'
-            )
-            self.prepare_device(compute_device, local_space)
+            rank = torch.distributed.get_rank()
+            self.prepare_device(compute_device, payload_space)
             chunk.move(compute_device, self.copy_stream)
             assert chunk.get_device(
             ).type == compute_device.type, f"chunk device {chunk.get_device()} compute device {compute_device}"
@@ -239,16 +333,16 @@ class ChunkList(object):
         # 释放cpu和gpu上所有free chunk，统计目标设备上腾出的空间
 
         for chunk_id, chunk in self.chunk_id_to_chunk_dict.items():
-            pass
-            # if self._time_profile:
-            #     sub_start_time = time.time()
-            # # TODO(jiaruifang) 耗时
-            # status = chunk.get_status()
-            # if self._time_profile:
-            #     global_timer.memory_delete_elapse += time.time() - sub_start_time
+            if self._time_profile:
+                sub_start_time = time.time()
+            # TODO(jiaruifang) 耗时
+            status = chunk.get_status()
+            if self._time_profile:
+                global_timer.memory_delete_elapse += time.time(
+                ) - sub_start_time
 
-            # if status == PSChunkStatus.FREE:
-            #     self._delete_chunk(chunk)
+            if status == PSChunkStatus.FREE and chunk.location_status == PSChunkLocStatus.REMOTE:
+                self._delete_chunk(chunk)
 
     def get_next_access_moment(self, chunk: Chunk,
                                target_device: torch.device):

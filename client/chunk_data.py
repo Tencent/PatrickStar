@@ -94,19 +94,15 @@ class Chunk(object):
             start_time = time.time()
 
         payload_size = self.capacity
-        if torch.distributed.is_initialized():
-            payload_size = self.capacity // torch.distributed.get_world_size()
         if device.type == 'cpu':
             self.payload = torch.zeros(payload_size,
                                        dtype=self.data_type,
                                        device=device,
                                        pin_memory=True)
-            self.location_status = PSChunkLocStatus.CPU_PART
         else:
             self.payload = torch.zeros(payload_size,
                                        dtype=self.data_type,
                                        device=device)
-            self.location_status = PSChunkLocStatus.GPU_PART
         self.ps_manager.add(device.type, device.index,
                             self.get_payload_space())
 
@@ -117,7 +113,6 @@ class Chunk(object):
     def allgather(self, async_op=False):
         """
         将不同进程相同chunk id的payload allgather成一个chunk
-        此时chunk的payload可能是`PSChunkLocStatus.GPU_PART`
         """
         assert torch.distributed.is_initialized(
         ), "torch distributed is not initialized during allgather"
@@ -145,7 +140,6 @@ class Chunk(object):
                                               async_op=async_op)
 
         self.payload = flat_tensor
-        self.location_status = PSChunkLocStatus.GPU_DUP if self.payload.type == "cuda" else PSChunkLocStatus.CPU_DUP
         return handle
 
     def reduce_scatter(self):
@@ -156,7 +150,6 @@ class Chunk(object):
         """
         world_size = torch.distributed.get_world_size()
         assert self.capacity % world_size == 0, "capacity cannot divide world_size equally."
-        assert self.location_status == PSChunkLocStatus.GPU_DUP or self.location_status == PSChunkLocStatus.CPU_DUP
 
         partition_size = self.capacity // world_size
         rank = torch.distributed.get_rank()
@@ -214,6 +207,7 @@ class Chunk(object):
         if self.payload is None:
             return PSChunkStatus.RELEASED
 
+        # dist训练，需要强制把chunk固定在计算设备上
         if self._status_dict[PSTensorStatus.COMPUTE] > 0:
             return PSChunkStatus.COMPUTE
         elif self._status_dict[PSTensorStatus.HOLD] > 0:
@@ -227,7 +221,7 @@ class Chunk(object):
     def get_timestamp(self):
         return self.timestamp
 
-    def move(self, target_device: torch.device, copy_stream, is_async=True):
+    def move(self, target_device: torch.device, copy_stream, is_async=False):
         """
         将这个chunk移动到target_device上。前提条件，target_device已经腾出足够的空间。
         """

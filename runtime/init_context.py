@@ -15,15 +15,13 @@ import os
 from utils import init_distributed, see_memory_usage
 import torch
 import functools
+from utils import logger, print_rank, debug_flag
+from client.parameter import PSParameter, register_param
 
 _orig_torch_empty = torch.empty
 
 
-def print_rank_0(message, debug=False, force=False):
-    if torch.distributed.get_rank() == 0 and (debug or force):
-        print(message)
-
-
+# 直接在初始化后把，内存放在ps tensor上
 def empty_cuda_tensor_half(*size, **kwargs):
     if not 'device' in kwargs.keys():
         kwargs['device'] = torch.device('cpu:0')
@@ -34,9 +32,14 @@ def empty_cuda_tensor_half(*size, **kwargs):
         return tensor
 
 
+# TODO能否和param的注册过程放在一起
+# 问题是看不到param
 def new_cuda_tensor_half(cls, *args):
     device = torch.device('cpu:0')
     tensor = torch.ones((1, 1), device=device).new_empty(*args).half()
+    print_rank(
+        f'During model initialization, a new tensor of shape {tensor.shape} is created.'
+    )
     if tensor.is_floating_point():
         return tensor.half()
     else:
@@ -78,12 +81,11 @@ class InsertPostInitMethodToModuleSubClasses(object):
         def partition_after(f):
             @functools.wraps(f)
             def wrapper(module, *args, **kwargs):
-                print_rank_0(
-                    f'Before initializing {module.__class__.__name__}',
-                    force=False)
+                print_rank(f'Before initializing {module.__class__.__name__}',
+                           force=False)
                 f(module, *args, **kwargs)
                 self._post_init_method(module)
-                print_rank_0(
+                print_rank(
                     f'After initializing followed by post init for {module.__class__.__name__}',
                     force=False)
 
@@ -172,8 +174,9 @@ class Init(InsertPostInitMethodToModuleSubClasses):
                          mem_efficient_linear=mem_efficient_linear,
                          config=config,
                          dtype=dtype)
+        # TODO backend is not locked to nccl
         if not torch.distributed.is_initialized():
-            init_distributed()
+            init_distributed(dist_backend="gloo" if debug_flag else "nccl")
             assert torch.distributed.is_initialized(
             ), "Parameters cannot be scattered without initializing torch.distributed"
         if data_parallel_group is None:
@@ -205,25 +208,23 @@ class Init(InsertPostInitMethodToModuleSubClasses):
 
     def _post_init_method(self, module):
         """
-        不在这里进行param的ps_tensor注册。
-        运行时dynamic chunk schedule
+        在构造model过程中的每个sub_module构造完毕后执行
+        1. 保留rank=0的模型内存，删除其他rank的模型内存。
+        2.
         """
-        pass
         #see_memory_usage(f"Before converting parmas in {module.__class__.__name__}", force=False)
-        # print_rank_0(f'Converting Params in {module.__class__.__name__}', force=True)
+        print_rank(f'Converting Params in {module.__class__.__name__}',
+                   force=True)
+        for name, param in module.named_parameters(recurse=False):
+            register_param(param, name)
+            #TODO(jiaruifang) 只有rank 0载入模型
+            # if self.rank != 0:
+            #     param.data = torch.zeros(1, device = torch.device('cpu:0'))
+
         # see_memory_usage(
         #     f"Before converting and partitioning parmas in {module.__class__.__name__}",
         #     force=True)
 
-        # global param_count
-        # for name, param in module.named_parameters(recurse=False):
-        #     param_count += param.numel()
-        #     if not is_zero_param(param):
-        #         self._convert_to_deepspeed_param(param)
-        #         print_rank_0(
-        #             f"Partitioning param with ds id {param.ds_id} and shape {param.data.shape}"
-        #         )
-        #         param.partition()
         # see_memory_usage(
         #     f"After converting and partitioning parmas in {module.__class__.__name__}",
         #     force=True)
