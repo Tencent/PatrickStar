@@ -431,7 +431,8 @@ class HybridPSClient(object):
     def release(self,
                 param: torch.nn.Parameter,
                 access_type: AccessType,
-                reset_to_status: PSTensorStatus = PSTensorStatus.HOLD):
+                reset_to_status: PSTensorStatus = PSTensorStatus.HOLD,
+                is_fp16_bwd: bool = False):
         """
         这个param的data, grad不再需要放在计算设备
         1. 更新状态
@@ -449,7 +450,8 @@ class HybridPSClient(object):
 
         chunk_id = self.chunk_tensor_index.get_chunk_id(param, access_type)
         logging.debug(
-            f'release {access_type} chunk_id {chunk_id} to {reset_to_status}')
+            f'release a tensor of {access_type} chunk_id {chunk_id} to {reset_to_status}'
+        )
 
         # 更新tensor和chunk状态， tensor被设置为free，需要删除内存
         # 释放tensor的内存，再释放chunk内存
@@ -460,7 +462,7 @@ class HybridPSClient(object):
 
         # 找到需要删除的chunk，先删除chunk关联的tensors
         if access_type == AccessType.DATA:
-            # TODO(jiaruifang) 必须to device它和param.grad_fn.next_functions[0][0]
+            # NOTE(jiaruifang) 必须to device它和param.grad_fn.next_functions[0][0]
             param.data = torch.zeros(1,
                                      dtype=param.dtype,
                                      device=torch.device('cpu:0')).to(
@@ -468,10 +470,20 @@ class HybridPSClient(object):
         elif access_type == AccessType.GRAD:
             param.grad = None
 
-        # PS：主要耗时部分，如果真正执行，以下代码非常耗时。可以改成分配时再释放。
+        # TODO(jiaruifang)
         # 不应该删除chunks，因为fp16的chunk可以被复用。fp32 chunk不存在删除情况
-        self.chunk_list.delete_free_chunks()
-        # TODO(jiaruifang) remote chunk且是free需要释放payload
+        if not is_fp16_bwd:
+            self.chunk_list.delete_free_chunks()
+        else:
+            # 写一个DPP等价版本
+            # TODO 如果chunk状态从compute->hold被更新需要执行
+            if self.chunk_list[chunk_id].get_status() == PSChunkStatus.HOLD:
+                world_size = torch.distributed.get_world_size()
+                assert self.chunk_list[chunk_id].payload is not None
+                torch.distributed.all_reduce(self.chunk_list[chunk_id].payload,
+                                             op=torch.distributed.ReduceOp.SUM,
+                                             async_op=False)
+                self.chunk_list[chunk_id].payload /= world_size
 
         if self._time_profile:
             global_timer.client_release_elapse += time.time() - start_time

@@ -232,7 +232,12 @@ class FP16Adam(torch.optim.Optimizer):
                 tmp_tensor = param.ps_attr.access_tensor(AccessType.DATA)
                 tmp_tensor.copy_(param.grad)
                 param.grad = None
-                self.client.release_data(param, PSTensorStatus.HOLD)
+
+                if torch.distributed.is_initialized():
+                    self.client.release(param, AccessType.DATA,
+                                        PSTensorStatus.HOLD, True)
+                else:
+                    self.client.release_data(param, PSTensorStatus.HOLD)
 
         loss = None
         if closure is not None:

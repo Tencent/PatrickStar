@@ -46,7 +46,8 @@ def get_data_loader(batch_size,
                     total_samples,
                     hidden_dim,
                     device,
-                    data_type=torch.float):
+                    data_type=torch.float,
+                    is_distrbuted=False):
     train_data = torch.randn(total_samples,
                              hidden_dim,
                              device=device,
@@ -54,7 +55,11 @@ def get_data_loader(batch_size,
     train_label = torch.empty(total_samples, dtype=torch.long,
                               device=device).random_(hidden_dim)
     train_dataset = torch.utils.data.TensorDataset(train_data, train_label)
-    sampler = SequentialSampler(train_dataset)
+    if is_distrbuted:
+        sampler = torch.utils.data.distributed.DistributedSampler(
+            train_dataset)
+    else:
+        sampler = SequentialSampler(train_dataset)
     train_loader = torch.utils.data.DataLoader(train_dataset,
                                                batch_size=batch_size,
                                                sampler=sampler)
