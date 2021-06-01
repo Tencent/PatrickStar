@@ -70,15 +70,16 @@ class HybridPSEngine(Module):
         #creates backward hooks for gradient partitioning
 
     def reduce_ready_partitions_and_remove_grads(self, param, i):
-        print_rank_0(f"reduce_ready_partitions_and_remove_grads param {i}",
-                     force=True)
-        # self.reduce_independent_p_g_buckets_and_remove_grads(param, i)
-        print_rank_0(f'ps_name {param.ps_attr.ps_name} {param.grad}',
-                     force=True)
+        pass
+        # print_rank_0(f"reduce_ready_partitions_and_remove_grads param {i}",
+        #              force=True)
+        # # self.reduce_independent_p_g_buckets_and_remove_grads(param, i)
+        # print_rank_0(f'ps_name {param.ps_attr.ps_name} {param.grad}',
+        #              force=True)
         # reduce grad and release grad，TODO(jiaruifang)确认这个hook和bwd hook的关系
 
     def create_reduce_and_remove_grad_hooks(self):
-        print_rank_0(f'[Begin] Create gradient reduction hooks', force=True)
+        # print_rank_0(f'[Begin] Create gradient reduction hooks', force=True)
         self.grad_accs = []
         for i, param_group in enumerate(self.optimizer.param_groups):
             for param in param_group['params']:

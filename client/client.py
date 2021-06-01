@@ -483,6 +483,7 @@ class HybridPSClient(object):
                 torch.distributed.all_reduce(self.chunk_list[chunk_id].payload,
                                              op=torch.distributed.ReduceOp.SUM,
                                              async_op=False)
+                # TODO把下面行注释了不影响最终结果？loss可能是有softmax算出，所以相对值不影响LOSS比较，但是影响了
                 self.chunk_list[chunk_id].payload /= world_size
 
         if self._time_profile:
