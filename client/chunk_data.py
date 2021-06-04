@@ -87,6 +87,15 @@ class Chunk(object):
         else:
             return getsizeof(self.payload.dtype) * self.payload.numel()
 
+    def pin(self):
+        self._pin_flag = True
+
+    def unpin(self):
+        self._pin_flag = False
+
+    def is_pin(self):
+        return self._pin_flag
+
     def allocate_payload(self, device):
         """
         为chunk分配payload，存储在compute_device上。

@@ -319,7 +319,11 @@ class HybridPSClient(object):
                 local_chunk_payload = self.chunk_list[chunk_id].payload
                 allgather_payload_buff.append(local_chunk_payload)
             else:
-                # TODO 应该把chunk内tensor和chunk一起改变 (tensor -> hold)
+                # TODO 需要prepared device before allocate payload
+                # 但是别把 local_chunk_id 换出去了
+                self.chunk_list.prepare_device(
+                    compute_device,
+                    self.chunk_list[chunk_id].get_chunk_space())
                 self.chunk_list[chunk_id].allocate_payload(compute_device)
                 self.set_all_tensors_status_in_chunk(chunk_id,
                                                      PSTensorStatus.HOLD)
@@ -360,11 +364,15 @@ class HybridPSClient(object):
         )
 
         # 每个进程把local_chunk_id都弄到本地
+        # TODO access_chunk访问第一个param之前应该准备chunk_size * world_size大小的显存。
         self.chunk_list.access_chunk(local_chunk_id, compute_device)
+        self.chunk_list[local_chunk_id].pin()
 
         # 把chunk_id_list的所有chunk都弄到本地，如果在本地do nothing
+        # TODO _fetch_remote_chunks不要将local_chunk_id也给换出去了，因为它的状态还是HOLD。
         self._fetch_remote_chunks(chunk_id_list, local_chunk_id,
                                   compute_device, param.ps_attr.ps_name)
+        self.chunk_list[local_chunk_id].unpin()
 
         # 将param内存定位到chunk上
         tensor_id = param.ps_attr.get_tensor_id(access_type)

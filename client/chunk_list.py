@@ -84,22 +84,17 @@ class ChunkList(object):
         # 如果chunk的内存释放了，需要将它分配出来
         # 分布式情况，需要分配一个全局的payload
         if chunk_status == PSChunkStatus.RELEASED:
-            rank = torch.distributed.get_rank()
             logger.debug(
-                f'access_chunk chunk {chunk_id}, need to allocate {payload_space} B memory on {compute_device}'
+                f'rank {torch.distributed.get_rank()} access_chunk chunk {chunk_id}, need to allocate {payload_space} B memory on {compute_device}'
             )
-            self.prepare_device(compute_device, payload_space)
 
+            # TODO 在分布式环境应该准备
+            self.prepare_device(compute_device, payload_space)
             chunk.allocate_payload(compute_device)
             if self._time_profile:
                 global_timer.access_chunk_elapse += time.time() - start_time
             return
-        # 如果chunk目前所在的设备和计算设备不一致，
-        # 光chunk的内存move是不够的，还需要param都move
-        # 只有chunk状态是hold的会被移动，而hold状态的chunk中所有tensor都是hold或者free。
-        # 这种tensor的内存都悬空
         elif chunk.get_device().type != compute_device.type:
-            rank = torch.distributed.get_rank()
             self.prepare_device(compute_device, payload_space)
             chunk.move(compute_device, self.copy_stream)
             assert chunk.get_device(
@@ -108,6 +103,7 @@ class ChunkList(object):
                 global_timer.access_chunk_elapse += time.time() - start_time
             return
         else:
+            # 目标chunk已经在计算设备上了
             logging.debug(
                 f'access_chunk chunk {chunk_id} directly on {compute_device}')
 
@@ -289,7 +285,7 @@ class ChunkList(object):
         for chunk_id, chunk in self.chunk_id_to_chunk_dict.items():
             if chunk.get_device() is not None and chunk.get_device(
             ).type == target_device.type and chunk.get_status(
-            ) != PSChunkStatus.COMPUTE:
+            ) != PSChunkStatus.COMPUTE and chunk.is_pin() is False:
                 # 本设备下一次被需要的时刻？本设备下一次不被需要的时刻
                 # 如果target_device 是cuda，
                 next_mom = 0  #self.get_next_access_moment(chunk, target_device)
