@@ -24,7 +24,7 @@ class PSTensor(object):
         global global_id
         self.ps_tensor = None
         self.ps_id = global_id
-        self.ps_status = PSTensorStatus.UNINIT
+        self.ps_status = PSTensorStatus.FREE
         global_id += 1
 
 

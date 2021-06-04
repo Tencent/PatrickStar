@@ -265,6 +265,7 @@ class ChunkTensorIndex(object):
             yield chunk_id, global_chunk_id, chunk
 
     def visit_chunks(self, chunk_list: ChunkList):
+        rank = torch.distributed.get_rank()
         total_bytes = 0
         for chunk_id, _ in self.dict_chunk_id_tensor_id.items():
             chunk = chunk_list[chunk_id]
@@ -272,7 +273,7 @@ class ChunkTensorIndex(object):
             assert global_chunk_id is not None
 
             logger.info(
-                f'Chunk id {chunk.chunk_id}, global chunk id {global_chunk_id}, capacity {chunk.capacity} dtype {chunk.data_type}, size {chunk.get_chunk_space()}, device {chunk.get_device()}'
+                f'rank {rank} Chunk id {chunk.chunk_id}, status, {chunk.get_status()} global chunk id {global_chunk_id}, capacity {chunk.capacity} dtype {chunk.data_type}, size {chunk.get_chunk_space()}, device {chunk.get_device()}'
             )
             for info in self.generate_tensor_info_in_order(chunk_id):
                 assert info.chunk_id == chunk_id, f'{info.chunk_id} vs {chunk_id}'

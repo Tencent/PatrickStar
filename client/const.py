@@ -25,11 +25,12 @@ class PSChunkStatus(Enum):
     # Chunk内存被分配出来，持有有意义的数据
     HOLD = 1
     # Chunk内存被分配出来，持有无意义数据
-    FREE = 2
+    HOLD_AFTER_FWD = 2
+    HOLD_AFTER_BWD = 3
+    FREE = 4
     # Chunk内存没有被分配出来
-    RELEASED = 3
+    RELEASED = 5
     # dist使用，虽然所有tensor都是hold，但被pin在计算设备上
-    WAIT = 4
 
 
 # 数据在计算逻辑中的状态
@@ -38,13 +39,7 @@ class PSTensorStatus(Enum):
     COMPUTE = 0
     # 可以迁移，不能释放
     HOLD = 1
+    HOLD_AFTER_FWD = 2
+    HOLD_AFTER_BWD = 3
     # 可以释放
-    FREE = 2
-    UNINIT = 3
-
-
-# chunk的位置
-class PSChunkLocStatus(Enum):
-    LOCAL = 0
-    REMOTE = 1
-    UNINIT = 2
+    FREE = 4

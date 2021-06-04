@@ -60,7 +60,7 @@ class HybridPSEngine(Module):
                                   prefer_device=torch.device(f'cpu:0'))
         # prefer_device = torch.device(f'cuda:{self.rank}')
         # 这个hook并没啥意义，为何不能和postbwd hook一起？
-        self.create_reduce_and_remove_grad_hooks()
+        # self.create_reduce_and_remove_grad_hooks()
 
         self.client.init(self.module, self.optimizer)
         logger.info('init HybridPSEngine')
@@ -119,6 +119,8 @@ class HybridPSEngine(Module):
             **kwargs: variable length keyword arguments
         """
         loss = self.module(*inputs, **kwargs)
+        for chunk_id, chunk in self.client.chunk_list.generate_chunk():
+            chunk.fwd_bwd_used = False
         return loss
 
     def backward(self, loss, allreduce_gradients=True, release_loss=False):

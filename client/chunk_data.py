@@ -13,7 +13,7 @@
 
 import os
 import torch
-from .const import PSTensorStatus, PSChunkStatus, AccessType, PSChunkLocStatus
+from .const import PSTensorStatus, PSChunkStatus, AccessType
 from .helper import getsizeof
 from .helper import getsizeof
 
@@ -39,19 +39,22 @@ class Chunk(object):
         删除tensor，只需要将tensor的status设置为free
         这里把chunk设置为对是否分布式无感的，每个进程看到自己的chunk instance。
         """
+        # TODO(jiaruifang)标记本chunk是否在FWD和BWD被使用过，在FWD和BWD计算后被重置
+        self.fwd_bwd_used = False
         self.pid = os.getpid()
         self.chunk_id = chunk_id
-        # capacity是逻辑上的，如果分布在两个线程，payload尺寸是capcity/2
-        # payload numel 不等于 capacity
+        # payload numel 不等于 capacity, payload可能是None
         self.capacity = capacity
         self.data_type = data_type
         self.rank = rank
+
         # 存储chunk管理tensor的状态数目
         self._status_dict = {
             PSTensorStatus.COMPUTE: 0,
             PSTensorStatus.HOLD: 0,
-            PSTensorStatus.FREE: 0,
-            PSTensorStatus.UNINIT: 0
+            PSTensorStatus.HOLD_AFTER_FWD: 0,
+            PSTensorStatus.HOLD_AFTER_BWD: 0,
+            PSTensorStatus.FREE: 0
         }
 
         self.ps_manager = HybridPSManager()
@@ -62,7 +65,6 @@ class Chunk(object):
         self._time_profile = True
 
         self.access_moments = []
-        self.location_status = PSChunkLocStatus.UNINIT
 
     def add_moment(self, mom):
         if len(self.access_moments) > 0 and self.access_moments[-1] == mom:
@@ -110,70 +112,6 @@ class Chunk(object):
         if self._time_profile:
             global_timer.memory_allocate_elapse = time.time() - start_time
 
-    def allgather(self, async_op=False):
-        """
-        将不同进程相同chunk id的payload allgather成一个chunk
-        """
-        assert torch.distributed.is_initialized(
-        ), "torch distributed is not initialized during allgather"
-        assert self.payload is not None, "payload of chunk is None during allgather"
-        # assert self._status_dict[PSChunkStatus.COMPUTE] == 0, f"Neither of tensors assigned to the chunk shall be at the status of COMPUTE during allgather {self._status_dict[PSChunkStatus.COMPUTE]}."
-        world_size = torch.distributed.get_world_size()
-        gathered_chunk_size = self.capacity
-        payload_size = self.payload.numel()
-        torch.cuda.synchronize()
-        partitions = []
-        flat_tensor = torch.zeros(gathered_chunk_size,
-                                  dtype=self.data_type,
-                                  device=self.payload.device).view(-1)
-
-        rank = torch.distributed.get_rank()
-        for i in range(world_size):
-            partitions.append(
-                flat_tensor.narrow(0, payload_size * i, payload_size))
-
-            if i == rank:
-                partitions[i].data.copy_(self.payload, non_blocking=True)
-
-        handle = torch.distributed.all_gather(partitions,
-                                              partitions[rank],
-                                              async_op=async_op)
-
-        self.payload = flat_tensor
-        return handle
-
-    def reduce_scatter(self):
-        """
-        BWD access_grad时候需要执行它
-        位置状态是GPU_DUP -> GPU_PART
-        数据状态是COMPUTE
-        """
-        world_size = torch.distributed.get_world_size()
-        assert self.capacity % world_size == 0, "capacity cannot divide world_size equally."
-
-        partition_size = self.capacity // world_size
-        rank = torch.distributed.get_rank()
-
-        total_size = self.capacity
-        input_list = []
-
-        for i in range(world_size):
-            start = i * partition_size
-            end = start + partition_size
-
-            #print("before reduce scatter gradients")
-            input = self.payload.view(-1).narrow(0, start, partition_size)
-
-            #print("after reduce scatter gradients")
-            input_list.append(input)
-
-        handle = torch.distributed.reduce_scatter(input_list[rank],
-                                                  input_list,
-                                                  async_op=False)
-
-        self.payload = input_list[rank]
-        return handle
-
     def release_payload(self):
         """
         释放负载
@@ -212,7 +150,12 @@ class Chunk(object):
             return PSChunkStatus.COMPUTE
         elif self._status_dict[PSTensorStatus.HOLD] > 0:
             return PSChunkStatus.HOLD
+        elif self._status_dict[PSTensorStatus.HOLD_AFTER_FWD] > 0:
+            return PSChunkStatus.HOLD_AFTER_FWD
+        elif self._status_dict[PSTensorStatus.HOLD_AFTER_BWD] > 0:
+            return PSChunkStatus.HOLD_AFTER_BWD
         else:
+            # uninit和free同等对待
             return PSChunkStatus.FREE
 
     def touch(self):

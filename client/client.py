@@ -182,6 +182,20 @@ class HybridPSClient(object):
             self.chunk_schema_scheduler.schedule()
         logging.info(f"static_chunk_schedule finished")
 
+    def set_all_tensors_status_in_chunk(self, chunk_id, new_status):
+        """
+        把一个chunk所有的tensor状态设置为status，chunk的状态也随之改变
+        不管payload是否被分配
+        """
+        chunk = self.chunk_list[chunk_id]
+        for info in self.chunk_tensor_index.generate_tensor_info_in_order(
+                chunk_id):
+            param = info.param
+            access_type = info.access_type
+            old_status = param.ps_attr.get_status(access_type)
+            self.chunk_list.update_status(chunk_id, old_status, new_status)
+            param.ps_attr.set_status(new_status, access_type)
+
     def register_model_hook(self, model):
         setup_hybrid_ps_hooks(model, self)
 
@@ -189,19 +203,27 @@ class HybridPSClient(object):
         # 拷贝模型
         for i, group in enumerate(self.optimizer.param_groups):
             for j, param in enumerate(group['params']):
-                self.access_data(param, torch.device('cpu:0'))
-                data_tensor = param.ps_attr.access_tensor(AccessType.DATA)
-                data_tensor.copy_(param.data)
+                # TODO(jiaruifang) 目前：每个进程有一份model replica，释放掉非本地的param
+                # 改成rank 0有一份模型，p2p通信给其他进程传递它们需要的部分
+                if self.is_local_tensor(param, AccessType.DATA):
+                    self.access_data(param, torch.device('cpu:0'))
+                    data_tensor = param.ps_attr.access_tensor(AccessType.DATA)
+                    data_tensor.copy_(param.data)
+                    # chunk_id = self.chunk_tensor_index.get_chunk_id(param, AccessType.DATA)
+                    if self._is_fp16:
+                        param_fp32 = self.optimizer.state[param][
+                            'fp32_param_data']
+                        self.access_data(param_fp32, torch.device('cpu:0'))
+                        data_tensor_fp32 = param_fp32.ps_attr.access_tensor(
+                            AccessType.DATA)
+                        data_tensor_fp32.copy_(param.data.float())
 
-                if self._is_fp16:
-                    param_fp32 = self.optimizer.state[param]['fp32_param_data']
-                    self.access_data(param_fp32, torch.device('cpu:0'))
-                    data_tensor_fp32 = param_fp32.ps_attr.access_tensor(
-                        AccessType.DATA)
-                    data_tensor_fp32.copy_(param.data.float())
-                    self.release_data(param_fp32, PSTensorStatus.HOLD)
-
-                self.release_data(param, PSTensorStatus.HOLD)
+                        self.release_data(param_fp32, PSTensorStatus.HOLD)
+                    self.release_data(param, PSTensorStatus.HOLD)
+                else:
+                    param.data = torch.zeros(1,
+                                             dtype=param.dtype,
+                                             device=param.device)
 
     def generate_grad_params(self):
         """
@@ -249,14 +271,71 @@ class HybridPSClient(object):
                                                numel, param, AccessType.GRAD)
         return chunk_id
 
-    def access_grad_dist(self, param: torch.nn.Parameter,
-                         compute_device: torch.device):
+    def is_local_tensor(self, param, access_type) -> bool:
         """
-        在单机多卡训练过程中，访问param的grad tensor。
-        找到param.grad对应的chunk，获得global chunks。
-        等待global chunks都从compute状态变成hold，执行reduce-scatter
-        每个
+        判断tensor是否在本GPU之上
         """
+        # 准备param所在chunk的内存，如果内存不在计算设备上需要分配或者移动
+        chunk_id = self.chunk_tensor_index.get_chunk_id(param, access_type)
+
+        chunk_id_list = self.chunk_tensor_index.get_global_chunk_id_list(
+            chunk_id)
+        rank = torch.distributed.get_rank()
+        local_chunk_id = chunk_id_list[rank]
+        return chunk_id == local_chunk_id
+
+    def _fetch_remote_chunks(self,
+                             chunk_id_list,
+                             local_chunk_id,
+                             compute_device,
+                             param_name=""):
+        """
+        将chunk_id_list中远端的chunk取到本地
+        """
+        world_size = torch.distributed.get_world_size()
+        rank = torch.distributed.get_rank()
+
+        # release数目只有两种情况
+        # 1 hold, N-1 release
+        # no release
+        has_released_chunk = False
+        for i in chunk_id_list:
+            # TODO fwd_bwd_used表示这个chunk被释放过一次了，不会再被access。实现太丑陋
+            if self.chunk_list[i].get_status(
+            ) == PSChunkStatus.RELEASED and not self.chunk_list[i].fwd_bwd_used:
+                has_released_chunk = True
+                break
+        if not has_released_chunk:
+            return
+
+        logger.debug(
+            f'rank {rank} fetch {param_name} remote chunks {chunk_id_list} local chunk {local_chunk_id}'
+        )
+        allgather_payload_buff = []
+
+        local_chunk_payload = None
+        for chunk_id in chunk_id_list:
+            if chunk_id == local_chunk_id:
+                local_chunk_payload = self.chunk_list[chunk_id].payload
+                allgather_payload_buff.append(local_chunk_payload)
+            else:
+                # TODO 应该把chunk内tensor和chunk一起改变 (tensor -> hold)
+                self.chunk_list[chunk_id].allocate_payload(compute_device)
+                self.set_all_tensors_status_in_chunk(chunk_id,
+                                                     PSTensorStatus.HOLD)
+                allgather_payload_buff.append(
+                    self.chunk_list[chunk_id].payload)
+
+        assert torch.distributed.is_initialized(
+        ), "torch distributed is not initialized during allgather"
+
+        world_size = torch.distributed.get_world_size()
+        rank = torch.distributed.get_rank()
+        handle = torch.distributed.all_gather(allgather_payload_buff,
+                                              local_chunk_payload,
+                                              async_op=False)
+        allgather_payload_buff = []
+
     def access_dist(self, param: torch.nn.Parameter, access_type: AccessType,
                     compute_device: torch.device):
         if self._time_profile:
@@ -275,13 +354,17 @@ class HybridPSClient(object):
             chunk_id)
         rank = torch.distributed.get_rank()
         local_chunk_id = chunk_id_list[rank]
-        logger.info(
-            f'rank {rank} access_dist local_chunk_id {local_chunk_id} chunk_id_list {chunk_id_list}'
+
+        logger.debug(
+            f'rank {rank} access_dist access tensor {param.ps_attr.ps_name} local_chunk_id {local_chunk_id} chunk_id_list {chunk_id_list}'
         )
 
-        # 每个进程把chunk_id_list都弄到本地
-        self.chunk_list.access_chunk_dist(local_chunk_id, chunk_id_list,
-                                          compute_device)
+        # 每个进程把local_chunk_id都弄到本地
+        self.chunk_list.access_chunk(local_chunk_id, compute_device)
+
+        # 把chunk_id_list的所有chunk都弄到本地，如果在本地do nothing
+        self._fetch_remote_chunks(chunk_id_list, local_chunk_id,
+                                  compute_device, param.ps_attr.ps_name)
 
         # 将param内存定位到chunk上
         tensor_id = param.ps_attr.get_tensor_id(access_type)
@@ -290,6 +373,8 @@ class HybridPSClient(object):
         numel = info.numel
         assert numel == param.ps_attr.ps_numel, f"{numel} vs {param.ps_attr.ps_numel}"
 
+        assert self.chunk_list[
+            chunk_id].payload is not None, f"rank {rank} chunk id {chunk_id}' payload is None'"
         param.ps_attr.set_tensor(
             self.chunk_list[chunk_id].payload.narrow(0, start_offset, numel),
             access_type)
@@ -298,15 +383,12 @@ class HybridPSClient(object):
         old_status = param.ps_attr.get_status(access_type)
 
         # 如果是从free/uninit状态转换的需要清零
-        if old_status == PSTensorStatus.FREE or old_status == PSTensorStatus.UNINIT:
+        if old_status == PSTensorStatus.FREE:
             param.ps_attr.access_tensor(access_type).zero_()
 
-        # 访问之后应该更新Tensor的状态，tensor对应的chunk的状态随之改变
+        # 访问之后应该更新Tensor的状态，鉴于chunk状态是由它管理tensor共同决定
+        # 因此tensor对应的chunk的状态随之改变
         # dist情况
-        # 对于global chunk_list其他chunk，他们的payload被分配出来了，他们的status生效
-        # 可以被换入换出。如果payload size是0也不会被换入换出。
-        # 如果on local则可以被本进程换入换出。
-        # TODO release时候要被释放payload
         self.chunk_list.update_status(chunk_id, old_status,
                                       PSTensorStatus.COMPUTE)
         param.ps_attr.set_status(PSTensorStatus.COMPUTE, access_type)
@@ -353,18 +435,13 @@ class HybridPSClient(object):
             raise RuntimeError(
                 "FP16 training shall not meet tensors with no chunk assigned")
             chunk_id = self._assign_chunk_for_tensor(param, access_type)
-            # logging.info(f'not found chunk, assign chunk {chunk_id} access type {access_type} {param.dtype}')
             is_first_init = True
         else:
             pass
-            # logging.info(f'found chunk_id {chunk_id}  access type {access_type} {param.dtype}')
-
         rank = torch.distributed.get_rank()
-        logger.debug(
-            f'rank {rank} accesses chunk id {chunk_id} payload {self.chunk_list[chunk_id].payload}'
-        )
 
         self.chunk_list.access_chunk(chunk_id, compute_device)
+
         # 将param内存定位到chunk上
         tensor_id = param.ps_attr.get_tensor_id(access_type)
         info = self.chunk_tensor_index.get_tensor_info(tensor_id)
@@ -376,10 +453,13 @@ class HybridPSClient(object):
             self.chunk_list[chunk_id].payload.narrow(0, start_offset, numel),
             access_type)
 
+        # logger.info(
+        #     f'rank {rank} fjr accesses chunk id {chunk_id} param {param.ps_attr.ps_name} {self.chunk_list[chunk_id].payload.narrow(0, start_offset, numel)}'
+        # )
         old_status = param.ps_attr.get_status(access_type)
 
         # 如果是从free状态转换的需要清零，或者从
-        if old_status == PSTensorStatus.FREE or old_status == PSTensorStatus.UNINIT:
+        if old_status == PSTensorStatus.FREE:
             param.ps_attr.access_tensor(access_type).zero_()
 
         # 第一次分配ps data时候要把原来param的tensor拷贝过来
@@ -428,11 +508,10 @@ class HybridPSClient(object):
         else:
             self.access(param, AccessType.GRAD, compute_device)
 
-    def release(self,
-                param: torch.nn.Parameter,
-                access_type: AccessType,
-                reset_to_status: PSTensorStatus = PSTensorStatus.HOLD,
-                is_fp16_bwd: bool = False):
+    def release_dist(self,
+                     param: torch.nn.Parameter,
+                     access_type: AccessType,
+                     reset_to_status: PSTensorStatus = PSTensorStatus.HOLD):
         """
         这个param的data, grad不再需要放在计算设备
         1. 更新状态
@@ -443,14 +522,21 @@ class HybridPSClient(object):
         """
         if self._time_profile:
             start_time = time.time()
+        rank = torch.distributed.get_rank()
 
         assert isinstance(reset_to_status, PSTensorStatus)
+        assert torch.distributed.is_initialized()
         # if param.ps_attr.get_status(access_type) != PSTensorStatus.COMPUTE:
         #     return
 
         chunk_id = self.chunk_tensor_index.get_chunk_id(param, access_type)
+        chunk_id_list = self.chunk_tensor_index.get_global_chunk_id_list(
+            chunk_id)
+
+        local_chunk_id = chunk_id_list[rank]
+
         logging.debug(
-            f'release a tensor of {access_type} chunk_id {chunk_id} to {reset_to_status}'
+            f'rank {rank} release tensor {param.ps_attr.ps_name} of chunk_id {chunk_id} to {reset_to_status}'
         )
 
         # 更新tensor和chunk状态， tensor被设置为free，需要删除内存
@@ -470,20 +556,125 @@ class HybridPSClient(object):
         elif access_type == AccessType.GRAD:
             param.grad = None
 
-        # TODO(jiaruifang)
-        # 不应该删除chunks，因为fp16的chunk可以被复用。fp32 chunk不存在删除情况
-        if not is_fp16_bwd:
-            self.chunk_list.delete_free_chunks()
-        else:
-            # 写一个DPP等价版本
-            # TODO 如果chunk状态从compute->hold被更新需要执行
-            if self.chunk_list[chunk_id].get_status() == PSChunkStatus.HOLD:
+        # chunk_id_list都是hold状态，可以reduce-scatter，保留local_chunk_id的allreduce结果
+        # TODO(jiaruifang) 如何选择一个allreduce时机？不能用chunk status是hold判断
+        # FWD后会把所有chunk设置为hold,grad计算完毕拷贝
+        # 增加一个grad ready 状态？
+
+        all_chunks_ready = True
+        for i in chunk_id_list:
+            if self.chunk_list[i].get_status() != PSChunkStatus.HOLD_AFTER_BWD:
+                all_chunks_ready = False
+
+        if all_chunks_ready:
+            world_size = torch.distributed.get_world_size()
+            assert self.chunk_list[local_chunk_id].payload is not None
+            if False:
+                input_list = []
+                for i in chunk_id_list:
+                    input_list.append(self.chunk_list[i].payload)
+                torch.distributed.reduce_scatter(
+                    self.chunk_list[local_chunk_id].payload,
+                    input_list,
+                    op=torch.distributed.ReduceOp.SUM,
+                    async_op=False)
+            else:
+                for rank_, chunk_id_ in enumerate(chunk_id_list):
+                    torch.distributed.reduce(
+                        self.chunk_list[chunk_id_].payload,
+                        rank_,
+                        op=torch.distributed.ReduceOp.SUM,
+                        async_op=False)
+            # TODO把下面行注释了不影响最终结果？loss可能是有softmax算出，所以相对值不影响LOSS比较，但是影响了
+            self.chunk_list[local_chunk_id].payload /= world_size
+
+            # 删除remote chunk的payload
+            for i in chunk_id_list:
+                if i != local_chunk_id:
+                    logger.debug(
+                        f'rank {rank} bwd remove payload of chunk_id {i}')
+                    self.chunk_list[i].payload = None
+                    self.set_all_tensors_status_in_chunk(
+                        i, PSTensorStatus.FREE)
+                    self.chunk_list[i].fwd_bwd_used = True
+                else:
+                    # 正确的
+                    pass
+                    logger.debug(
+                        f'rank {rank} bwd after allreduce chunk_id {i} param {param.ps_attr.ps_name} payload {self.chunk_list[i].payload}'
+                    )
+
+        if self._time_profile:
+            global_timer.client_release_elapse += time.time() - start_time
+
+    def release(self,
+                param: torch.nn.Parameter,
+                access_type: AccessType,
+                reset_to_status: PSTensorStatus = PSTensorStatus.HOLD,
+                allreduce_local_grad: bool = False,
+                remove_remote_data: bool = False):
+        """
+        @allreduce_local_grad: 在分布式训练中，对param的tensor进行allreduce
+        @remove_remote_data: 在分布式训练中，删除param tensor的payload
+        这个param的data, grad不再需要放在计算设备
+        1. 更新状态
+        首先更新tensor和chunk的状态
+        2. 释放内存
+        在释放Parameter中tensor的内存，释放PSTensor中的内存
+        看看是否有chunk的状态为free，释放chunk内存
+        """
+        if self._time_profile:
+            start_time = time.time()
+
+        rank = torch.distributed.get_rank()
+        assert isinstance(reset_to_status, PSTensorStatus)
+        # if param.ps_attr.get_status(access_type) != PSTensorStatus.COMPUTE:
+        #     return
+
+        chunk_id = self.chunk_tensor_index.get_chunk_id(param, access_type)
+        logger.debug(
+            f'rank {rank} release a tensor of {access_type} chunk_id {chunk_id} to {reset_to_status}'
+        )
+
+        # 更新tensor和chunk状态，如果tensor被设置为free，需要删除ps_tensor的内存
+        self.chunk_list.update_status(chunk_id,
+                                      param.ps_attr.get_status(access_type),
+                                      reset_to_status)
+        param.ps_attr.set_status(reset_to_status, access_type)
+
+        # 找到需要删除的chunk，先删除chunk关联的tensors
+        if access_type == AccessType.DATA:
+            # NOTE() 必须to device它和param.grad_fn.next_functions[0][0]
+            param.data = torch.zeros(1,
+                                     dtype=param.dtype,
+                                     device=torch.device('cpu:0')).to(
+                                         param.device)
+        elif access_type == AccessType.GRAD:
+            param.grad = None
+
+        if remove_remote_data:
+            # FWD逻辑，如果chunk计算完毕非本地的chunk被释放
+            # TODO 释放之后，access看见有释放的由给分配出来
+            if not self.is_local_tensor(
+                    param,
+                    access_type) and self.chunk_list[chunk_id].get_status(
+                    ) == PSChunkStatus.HOLD_AFTER_FWD:
+                logger.debug(
+                    f'rank {rank} fwd remove payload of chunk_id {chunk_id}')
+                self.chunk_list[chunk_id].payload = None
+                self.chunk_list[chunk_id].fwd_bwd_used = True
+                self.set_all_tensors_status_in_chunk(chunk_id,
+                                                     PSTensorStatus.FREE)
+        if allreduce_local_grad:
+            # debug分支，一个DPP等价版本，每个chunk在BWD时候同步
+            # Chunk状态从compute->HOLD_AFTER_BWD被触发
+            if self.chunk_list[chunk_id].get_status(
+            ) == PSChunkStatus.HOLD_AFTER_BWD:
                 world_size = torch.distributed.get_world_size()
                 assert self.chunk_list[chunk_id].payload is not None
                 torch.distributed.all_reduce(self.chunk_list[chunk_id].payload,
                                              op=torch.distributed.ReduceOp.SUM,
                                              async_op=False)
-                # TODO把下面行注释了不影响最终结果？loss可能是有softmax算出，所以相对值不影响LOSS比较，但是影响了
                 self.chunk_list[chunk_id].payload /= world_size
 
         if self._time_profile:
@@ -511,14 +702,9 @@ class HybridPSClient(object):
         raise NotImplementedError
 
     def visit(self):
+        rank = torch.distributed.get_rank()
         for idx, chunk in self.chunk_list.generate_chunk():
             logging.info(
-                f"chunk {idx} on device {chunk.device} status {chunk.get_status()}"
+                f"rank {rank} chunk {idx} on device {chunk.get_device()} status {chunk.get_status()}"
             )
-            chunk.visit(self.chunk_tensor_index)
-
-    def release_all_data_grad(self, status):
-        if self.module is not None:
-            for n, p in self.module.named_parameters():
-                self.release_grad(p, status)
-                self.release_data(p, status)
+            # chunk.visit(self.chunk_tensor_index)

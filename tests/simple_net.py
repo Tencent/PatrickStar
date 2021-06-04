@@ -27,6 +27,7 @@ class SimpleModel(torch.nn.Module):
 
         self.linear3 = torch.nn.Linear(hidden_dim, hidden_dim)
         self.linear4 = torch.nn.Linear(hidden_dim, hidden_dim)
+        self.linear5 = torch.nn.Linear(hidden_dim, hidden_dim)
         self.cross_entropy_loss = torch.nn.CrossEntropyLoss()
         self.is_ckp = is_ckp
 
@@ -39,7 +40,8 @@ class SimpleModel(torch.nn.Module):
         else:
             h3 = self.linear3(h2)
         h4 = self.linear4(h3)
-        return self.cross_entropy_loss(h4, y)
+        h5 = self.linear5(h4)
+        return self.cross_entropy_loss(h5, y)
 
 
 def get_data_loader(batch_size,

@@ -196,10 +196,13 @@ class ChunkShemaScheduler(object):
         schedule过程为所有parameter注册成ps_tensor
         """
 
+        for name, param in self.module.named_parameters(recurse=True):
+            register_param(param, f"{name}")
+
         # 注册param data fp16，按照初始化顺序
         for group in self.optimizer.param_groups:
             for param in group['params']:
-                register_param(param, "param_fp16")
+                # register_param(param, "param_fp16")
                 numel = param.ps_attr.ps_numel
                 data_type = torch.half
 
@@ -212,7 +215,6 @@ class ChunkShemaScheduler(object):
         # 注册param data fp32
         for group in self.optimizer.param_groups:
             for p in group['params']:
-                # TODO, 还不能获取name
                 state = self.optimizer.state[p]
                 data_type = torch.float
                 param_fp32 = torch.nn.Parameter(torch.zeros(
@@ -221,7 +223,7 @@ class ChunkShemaScheduler(object):
                     device=torch.device('cpu:0')),
                                                 requires_grad=False)
                 state['fp32_param_data'] = param_fp32
-                register_param(param_fp32, 'param_fp32')
+                register_param(param_fp32, f'{p.ps_attr.ps_name}_fp32')
                 numel = param_fp32.ps_attr.ps_numel
                 self.chunk_creator.add_tensor(param_fp32.ps_attr.data_id(),
                                               numel, param_fp32,

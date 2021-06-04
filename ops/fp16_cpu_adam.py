@@ -20,6 +20,7 @@ from typing import List, Optional
 import logging
 from client.const import PSTensorStatus, AccessType
 import utils.global_timer as global_timer
+from utils import print_rank, logger, use_dist_flag
 from client.parameter import register_param
 
 
@@ -43,11 +44,12 @@ def FP16_f_adamv2(client,
     按照在chunk内的存储顺序连续访问fp16_param_with_grad_list的参数，获取fp16 grad，
     以chunk为单位拷贝到一个tmp buff之中
     """
-    # assert prefer_device.type == 'cpu'
     timer = global_timer.IterationTimer()
     if time_profile:
         adam_start_time = time.time()
-    # TODO(jiaruifang)计算粒度为什么是tensor，而不是chunk
+    rank = torch.distributed.get_rank()
+    world_size = torch.distributed.get_world_size()
+    # NOTE 因为每个参数计算计算后需要自增step，计算粒度只能是tensor而不是chunk
     for i, param in enumerate(fp32_params):
         if time_profile:
             adam_iter_access_start = time.time()
@@ -56,18 +58,19 @@ def FP16_f_adamv2(client,
         param_data = param.ps_attr.access_tensor(AccessType.DATA)
 
         fp16_param = fp16_param_with_grad_list[i]
-
-        # 把fp16_param所在的chunk拷贝到tmp_buff中，并返回对应的tensor
         if False:
+            # 以chunk为粒度拷贝grad fp16 (FWD+BWD计算设备CUDA) -> grad fp32 (Adam计算设备CPU)
             # client.access_grad(fp16_param, torch.device(f'cuda:{client.rank}'))
             param_grad = client.fp16_to_fp32_copy(
                 fp16_param, AccessType.DATA).view(param_data.shape)
             # necessary to reset grads
             client.release_data(fp16_param, PSTensorStatus.FREE)
         else:
+            # 以tensor为粒度拷贝grad fp16 -> grad fp32
             # 放在data位置上的grad
             client.access_data(fp16_param, torch.device(f'cuda:{client.rank}'))
             fp16_param_grad = fp16_param.ps_attr.access_tensor(AccessType.DATA)
+            # logger.info(f'rank {rank} PS {i} {fp16_param.ps_attr.ps_name} grad {fp16_param_grad}')
             if time_profile:
                 start_time = time.time()
             param_grad = param_grad_buff.narrow(0, 0, param_data.numel()).view(
@@ -142,7 +145,9 @@ def FP16_f_adamv2(client,
         fp16_data = fp16_param.ps_attr.access_tensor(AccessType.DATA)
         if time_profile:
             start_time = time.time()
-        # TODO 直接拷贝一块
+
+        # TODO(jiaruifang) 目前以tensor为粒度直接拷贝data fp32 (ADAM计算设备 CPU)-> data fp16 (FWD+BWD计算设备 CUDA)
+        # 可以改成以chunk为粒度
         fp16_data.copy_(param_data, non_blocking=False)
         if time_profile:
             global_timer.cpu_gpu_move_elapse += time.time() - start_time
@@ -200,9 +205,10 @@ class FP16Adam(torch.optim.Optimizer):
         self.client = client
         self.prefer_device = prefer_device
 
-        # 将group参数放置到每个param内部
+        # 将group参数放置到每个param内部，可以按照参数切分并行计算adam
         for group in self.param_groups:
             for p in group['params']:
+                # TODO(jiaruifang)将model的fp32->fp16
                 if p.dtype == torch.float:
                     p.data = p.data.half()
                 self.state[p]['betas'] = group['betas']
@@ -210,12 +216,27 @@ class FP16Adam(torch.optim.Optimizer):
                 self.state[p]['weight_decay'] = group['weight_decay']
                 self.state[p]['eps'] = group['eps']
 
+        # 用作fp16 grad 存储的buffer
         self.param_grad_buff = None
 
     def __setstate__(self, state):
         super(CPUAdam, self).__setstate__(state)
         for group in self.param_groups:
             group.setdefault('amsgrad', False)
+
+    def show_param(self):
+        """
+        Debug使用，展示model目前参数状态
+        """
+        rank = torch.distributed.get_rank()
+        for n, param in self.client.module.named_parameters():
+            if self.client.is_local_tensor(param, AccessType.DATA):
+                self.client.access_data(
+                    param, torch.device(f'cuda:{self.client.rank}'))
+                grad_tensor = param.ps_attr.access_tensor(AccessType.DATA)
+                logger.info(f'rank {rank} param {n} \'s grad {grad_tensor}')
+                # TODO reset to HOLD？
+                self.client.release_data(param, PSTensorStatus.HOLD)
 
     @torch.no_grad()
     def step(self, closure=None):
@@ -225,19 +246,39 @@ class FP16Adam(torch.optim.Optimizer):
             closure (callable, optional): A closure that reevaluates the model
                 and returns the loss.
         """
-        # 对hook逻辑bug进行补救，第一层层的grad反向结束后仍是COMPUTE，这里将它们设置为HOLD
+        rank = torch.distributed.get_rank()
         for n, param in self.client.module.named_parameters():
             if param.ps_attr.get_status(
-                    AccessType.DATA) != PSTensorStatus.HOLD:
+                    AccessType.DATA) == PSTensorStatus.COMPUTE:
+                logger.debug(
+                    f'rank {rank} release param {n} from COMPUTE to HOLD_AFTER_BWD'
+                )
                 tmp_tensor = param.ps_attr.access_tensor(AccessType.DATA)
                 tmp_tensor.copy_(param.grad)
                 param.grad = None
 
                 if torch.distributed.is_initialized():
-                    self.client.release(param, AccessType.DATA,
-                                        PSTensorStatus.HOLD, True)
+                    if use_dist_flag:
+                        self.client.release_dist(param, AccessType.DATA,
+                                                 PSTensorStatus.HOLD_AFTER_BWD)
+                    else:
+                        self.client.release(param, AccessType.DATA,
+                                            PSTensorStatus.HOLD_AFTER_BWD,
+                                            True)
                 else:
                     self.client.release_data(param, PSTensorStatus.HOLD)
+
+            # TODO debug why add this line does not work.
+            # 其中一个进程在reduce过程，另一个进程却没有配合，正常执行了access + release
+            # if self.client.is_local_tensor(param, AccessType.DATA):
+            #     self.client.access_data(param, torch.device(f'cuda:{self.client.rank}'))
+            #     grad_tensor = param.ps_attr.access_tensor(AccessType.DATA)
+            #     logger.info(f'fjr debug  rank {rank} before adam {n} grad {grad_tensor}')
+            #     self.client.release_data(param, PSTensorStatus.HOLD)
+
+        # TODO(jiaruifang) BWD之后接触所有chunk的访问标记，实现过于丑陋
+        for chunk_id, chunk in self.client.chunk_list.generate_chunk():
+            chunk.fwd_bwd_used = False
 
         loss = None
         if closure is not None:
@@ -257,16 +298,22 @@ class FP16Adam(torch.optim.Optimizer):
         eps_list = []
         lr_list = []
 
+        # TODO(jiaruifang) 复用fp32 grad的buff
         self.client._cached_fp32_buff.reset()
-        logging.info('init adam')
-        first_init_flag = False
 
-        # for p in self.client.generate_grad_params():
         for i, group in enumerate(self.param_groups):
             for j, p in enumerate(group['params']):
                 if p.requires_grad:
-                    fp16_param_with_grad_list.append(p)
+                    # update the steps for each param group update
                     state = self.state[p]
+                    state['step'] += 1
+
+                    # 如果p所属的chunk是remote则跳过
+                    if use_dist_flag and not self.client.is_local_tensor(
+                            p, AccessType.DATA):
+                        continue
+
+                    fp16_param_with_grad_list.append(p)
 
                     exp_avgs.append(state['exp_avg'])
                     exp_avg_sqs.append(state['exp_avg_sq'])
@@ -279,8 +326,6 @@ class FP16Adam(torch.optim.Optimizer):
                     weight_decay_list.append(state['weight_decay'])
                     eps_list.append(state['eps'])
 
-                    # update the steps for each param group update
-                    state['step'] += 1
                     # record the step after step update
                     state_steps.append(state['step'])
                 else:

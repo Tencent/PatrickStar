@@ -15,6 +15,7 @@ import torch
 import logging
 from .const import PSTensorStatus, AccessType
 import utils.global_timer as global_timer
+from utils import logger, use_dist_flag
 
 
 ############# HOOKS ####################
@@ -119,8 +120,13 @@ def pre_sub_module_forward_function(sub_module, client, name):
     timer = global_timer.IterationTimer()
     flag = False
     for sub_name, param in sub_module.named_parameters(recurse=False):
-        logging.debug(f'FWD pre {sub_module.id}.{name}.{sub_name} access data')
-        client.access_data(param, torch.device(f'cuda:{client.rank}'))
+        rank = torch.distributed.get_rank()
+        logger.debug(f'rank {rank} FWD pre {name}.{sub_name} access data')
+        if use_dist_flag:
+            client.access_dist(param, AccessType.DATA,
+                               torch.device(f'cuda:{client.rank}'))
+        else:
+            client.access_data(param, torch.device(f'cuda:{client.rank}'))
         param.data = param.ps_attr.access_tensor(AccessType.DATA)
         flag = True
     if flag:
@@ -129,22 +135,30 @@ def pre_sub_module_forward_function(sub_module, client, name):
 
 # release submodule
 def post_sub_module_forward_function(sub_module, client, name):
-    logging.log(logging.DEBUG,
-                f'FWD post {sub_module.id} {sub_module.__class__.__name__}')
     timer = global_timer.IterationTimer()
     for sub_name, param in sub_module.named_parameters(recurse=False):
-        logging.debug(
-            f'FWD post {sub_module.id}.{name}.{sub_name} release data')
-        client.release_data(param)
+        rank = torch.distributed.get_rank()
+        logger.debug(f'rank {rank} FWD post {name}.{sub_name}')
+        client.release(param,
+                       AccessType.DATA,
+                       PSTensorStatus.HOLD_AFTER_FWD,
+                       remove_remote_data=use_dist_flag)
 
 
 def pre_sub_module_backward_function(sub_module, client, name):
     timer = global_timer.IterationTimer()
     flag = False
     for sub_name, param in sub_module.named_parameters(recurse=False):
-        logging.debug(f'BWD pre {name}.{sub_name}')
+        rank = torch.distributed.get_rank()
+        logger.debug(f'rank {rank} BWD pre {name}.{sub_name}')
         if param.dtype == torch.half:
-            client.access_data(param, torch.device(f'cuda:{client.rank}'))
+            rank = torch.distributed.get_rank()
+            if use_dist_flag:
+                client.access_dist(param, AccessType.DATA,
+                                   torch.device(f'cuda:{client.rank}'))
+            else:
+                client.access(param, AccessType.DATA,
+                              torch.device(f'cuda:{client.rank}'))
             tmp_tensor = param.ps_attr.access_tensor(AccessType.DATA)
             param.data = tmp_tensor
             param.grad = torch.zeros_like(tmp_tensor)
@@ -159,20 +173,27 @@ def pre_sub_module_backward_function(sub_module, client, name):
         timer.tik(device_type='cuda')
 
 
-# release param of submodule
-# TODO(jiaruifang) 我们嫌隙sub_module计算完data不再需要，也就是没有连线到其他submodule
 def post_sub_module_backward_function(sub_module, client, name):
     timer = global_timer.IterationTimer()
     for sub_name, param in sub_module.named_parameters(recurse=False):
-        logging.debug(
-            f'BWD post {name}.{sub_name} release data and grad {param.grad}')
         if param.dtype == torch.half:
             tmp_tensor = param.ps_attr.access_tensor(AccessType.DATA)
             tmp_tensor.copy_(param.grad)
             if torch.distributed.is_initialized():
-                # 对已经ready的grad data做all reduce
-                client.release(param, AccessType.DATA, PSTensorStatus.HOLD,
-                               True)
+                rank = torch.distributed.get_rank()
+                # 正确的梯度
+                logger.debug(
+                    f'rank {rank} BWD post before allreduce {name}.{sub_name} grad {tmp_tensor}'
+                )
+                if use_dist_flag:
+                    client.release_dist(param, AccessType.DATA,
+                                        PSTensorStatus.HOLD_AFTER_BWD)
+                else:
+                    client.release(param,
+                                   AccessType.DATA,
+                                   PSTensorStatus.HOLD_AFTER_BWD,
+                                   True,
+                                   allreduce_local_grad=True)
             else:
                 client.release_data(param, PSTensorStatus.HOLD)
 
