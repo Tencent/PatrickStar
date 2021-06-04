@@ -85,7 +85,8 @@ def test_simple_model(is_ps: bool = False,
                 model, device_ids=[rank])
     else:
         manager = HybridPSManager()
-        manager.reset([40] * world_size, [40 * 14 * 6] * world_size)
+        manager.reset([40 * world_size] * world_size,
+                      [40 * 14 * 6] * world_size)
         if is_fp16:
 
             class Config(object):
