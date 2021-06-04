@@ -147,7 +147,7 @@ class ChunkList(object):
         if extra_need_bytes <= 0:
             return
 
-        logger.info(
+        logger.debug(
             f'the device {target_device} has no enough free space, extra size is {extra_need_bytes} bytes'
         )
         # 需要在target_device上腾出空间
@@ -285,7 +285,6 @@ class ChunkList(object):
         # TODO(jiaruifang)目前贪心地找到应该移动出去的chunk
         # 不是最优策略？应该按照访问顺序。
         # 找到lifecycle被需要最晚的chunk换出
-
         Q = PriorityQueue()
         for chunk_id, chunk in self.chunk_id_to_chunk_dict.items():
             if chunk.get_device() is not None and chunk.get_device(
@@ -298,8 +297,7 @@ class ChunkList(object):
                 Q.put((-next_mom, chunk_id))
             # TODO(jiaruifang)不立刻释放FREE chunk，而是让它参与复用
             # assert chunk.get_status() != PSChunkStatus.FREE
-
-        while Q:
+        while not Q.empty():
             next_mom, chunk_id = Q.get()
             moved_bytes += self.chunk_id_to_chunk_dict[
                 chunk_id].get_payload_space()
@@ -309,7 +307,7 @@ class ChunkList(object):
 
         # 无法腾出足够空间，抛出异常
         if moved_bytes < still_need_bytes:
-            self.visit()
+            # self.visit()
             raise RuntimeError(
                 f"still need {still_need_bytes} bytes, but device {target_device} has not enough space for item."
             )

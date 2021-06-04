@@ -593,7 +593,7 @@ class HybridPSClient(object):
                 if i != local_chunk_id:
                     logger.debug(
                         f'rank {rank} bwd remove payload of chunk_id {i}')
-                    self.chunk_list[i].payload = None
+                    self.chunk_list[i].release_payload()
                     self.set_all_tensors_status_in_chunk(
                         i, PSTensorStatus.FREE)
                     self.chunk_list[i].fwd_bwd_used = True
@@ -661,7 +661,7 @@ class HybridPSClient(object):
                     ) == PSChunkStatus.HOLD_AFTER_FWD:
                 logger.debug(
                     f'rank {rank} fwd remove payload of chunk_id {chunk_id}')
-                self.chunk_list[chunk_id].payload = None
+                self.chunk_list[chunk_id].release_payload()
                 self.chunk_list[chunk_id].fwd_bwd_used = True
                 self.set_all_tensors_status_in_chunk(chunk_id,
                                                      PSTensorStatus.FREE)
