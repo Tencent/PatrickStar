@@ -577,7 +577,7 @@ class HybridPSClient(object):
         if all_chunks_ready:
             world_size = torch.distributed.get_world_size()
             assert self.chunk_list[local_chunk_id].payload is not None
-            if debug_flag:
+            if not debug_flag:
                 input_list = []
                 for i in chunk_id_list:
                     input_list.append(self.chunk_list[i].payload)
