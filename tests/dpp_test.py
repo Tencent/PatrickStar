@@ -83,17 +83,17 @@ def test_simple_model(is_ps: bool = False,
             model = torch.nn.parallel.DistributedDataParallel(
                 model, device_ids=[rank])
     else:
+        default_chunk_size = 25
         manager = HybridPSManager()
-        manager.reset([40 * world_size] * world_size,
-                      [40 * 14 * 6] * world_size)
+        manager.reset([default_chunk_size * 2 * world_size] * world_size,
+                      [default_chunk_size * 2 * 14 * 6] * world_size)
         if is_fp16:
 
             class Config(object):
                 def __init__(self):
-                    self.default_chunk_size = 1024 * 1024
+                    self.default_chunk_size = default_chunk_size
 
             config = Config()
-            config.default_chunk_size = 20
             model = SimpleModel(hidden_dim, is_ckp=is_ckp)
             if debug_flag:
                 model.cuda(0)

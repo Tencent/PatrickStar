@@ -158,14 +158,14 @@ class HybridPSClient(object):
 
         self.static_chunk_schedule(model, optimizer)
 
+        self.chunk_tensor_index.visit_chunks(self.chunk_list)
+
         if torch.distributed.is_initialized():
             rank = torch.distributed.get_rank()
         # TODO(jiaruifang) 目前仍是调试状态，每个进程有全部模型
         self._copy_model(model)
 
         self.register_model_hook(model)
-
-        # self.chunk_tensor_index.visit_chunks(self.chunk_list)
 
     def static_chunk_schedule(self, model, optimizer):
         """

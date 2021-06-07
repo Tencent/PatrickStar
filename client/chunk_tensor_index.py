@@ -267,6 +267,7 @@ class ChunkTensorIndex(object):
     def visit_chunks(self, chunk_list: ChunkList):
         rank = torch.distributed.get_rank()
         total_bytes = 0
+        logger.info(f'visit chunks')
         for chunk_id, _ in self.dict_chunk_id_tensor_id.items():
             chunk = chunk_list[chunk_id]
             global_chunk_id = self.dict_chunk_id_global_id[chunk_id]

@@ -50,37 +50,41 @@ class ChunkCreator(object):
         """
         向chunk_tensor_index注册tensor，如果超过已有chunk size则新建一个chunk
         相邻add_tensor的data type都是相同的
-        TDOD 如果累计的param buff刚好超过default_chunk_size，则新建一个chunk。
-        此时每个chunk的size其实并不一致。而分布式通信要保证chunk尺寸一致。
+        所有chunk size都是相同的
         """
+        # data_type甚至可以和param不一致
         self.data_type = data_type
-        self.chunk_tensor_index.add_tensor(self.chunk_id, tensor_id,
-                                           self.acc_cnt, numel, param,
-                                           access_type)
-        self.acc_cnt += numel
-        # TODO(jiaruifang) 让所有chunk size都一样
-        if self.acc_cnt >= self.default_chunk_size:
-            # data_type甚至可以和param不一致
-            self.chunk_list.new_chunk(self.chunk_id, self.acc_cnt,
+        if self.acc_cnt + numel > self.default_chunk_size:
+            # 如果再加入一个tensor就超过default_chunk_size了，将已经积累的tensor打包
+            self.chunk_list.new_chunk(self.chunk_id, self.default_chunk_size,
                                       self.data_type)
-            self.chunk_tensor_index.add_chunk(self.chunk_id, self.acc_cnt,
+            self.chunk_tensor_index.add_chunk(self.chunk_id,
+                                              self.default_chunk_size,
                                               self.data_type,
                                               self.global_chunk_id)
-            self.chunk_id += 1
-            self.acc_cnt = 0
-
+            # 标记chunk在global chunk中的位置
             self.list_id += 1
             if self.list_id % self.world_size == 0:
                 self.global_chunk_id += 1
 
-    def start_new_chunk(self):
+            # 为下一个chunk准备
+            self.chunk_id += 1
+            self.acc_cnt = 0
+
+        self.chunk_tensor_index.add_tensor(self.chunk_id, tensor_id,
+                                           self.acc_cnt, numel, param,
+                                           access_type)
+        self.acc_cnt += numel
+
+    def start_new_chunk_list(self):
         """
         对构造中的chunk进行收尾
         """
         if self.acc_cnt > 0:
-            self.chunk_list.new_chunk(self.chunk_id, self.acc_cnt,
+            self.chunk_list.new_chunk(self.chunk_id, self.default_chunk_size,
                                       self.data_type)
-            self.chunk_tensor_index.add_chunk(self.chunk_id, self.acc_cnt,
+            self.chunk_tensor_index.add_chunk(self.chunk_id,
+                                              self.default_chunk_size,
                                               self.data_type,
                                               self.global_chunk_id)
             self.chunk_id += 1
@@ -126,7 +130,7 @@ class ChunkShemaScheduler(object):
             self.chunk_creator.add_tensor(param.ps_attr.grad_id(), numel,
                                           param, AccessType.DATA, data_type)
 
-        self.chunk_creator.start_new_chunk()
+        self.chunk_creator.start_new_chunk_list()
 
         # layout for M, V
         # Parameters`tate[param_group][param]`尚未被初始化，它们在第一次step时候才出现
@@ -188,7 +192,7 @@ class ChunkShemaScheduler(object):
                                 p, memory_format=torch.preserve_format)
                 else:
                     raise RuntimeError
-        self.chunk_creator.start_new_chunk()
+        self.chunk_creator.start_new_chunk_list()
 
     def schedule_fp16(self):
         """
@@ -210,7 +214,7 @@ class ChunkShemaScheduler(object):
                                               param, AccessType.DATA,
                                               data_type)
 
-        self.chunk_creator.start_new_chunk()
+        self.chunk_creator.start_new_chunk_list()
 
         # 注册param data fp32
         for group in self.optimizer.param_groups:
@@ -229,7 +233,7 @@ class ChunkShemaScheduler(object):
                                               numel, param_fp32,
                                               AccessType.DATA, data_type)
 
-        self.chunk_creator.start_new_chunk()
+        self.chunk_creator.start_new_chunk_list()
 
         # 注册M，V, param data fp32
         for group in self.optimizer.param_groups:
@@ -268,7 +272,7 @@ class ChunkShemaScheduler(object):
                 else:
                     raise RuntimeError
 
-        self.chunk_creator.start_new_chunk()
+        self.chunk_creator.start_new_chunk_list()
 
         # 注册exp_avg_sq
         for group in self.optimizer.param_groups:
@@ -308,6 +312,6 @@ class ChunkShemaScheduler(object):
                     raise RuntimeError
 
         # 收尾
-        self.chunk_creator.start_new_chunk()
+        self.chunk_creator.start_new_chunk_list()
 
         logging.info('static schedule with FP16 finished')
