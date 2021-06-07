@@ -43,3 +43,9 @@ class PSTensorStatus(Enum):
     HOLD_AFTER_BWD = 3
     # 可以释放
     FREE = 4
+
+
+class TrainingStage(Enum):
+    FWD = 0
+    BWD = 1
+    ADAM = 2

@@ -20,7 +20,7 @@ import logging
 from torch.multiprocessing import Process, Manager
 
 from .hook import setup_hybrid_ps_hooks
-from .const import AccessType, PSChunkStatus, PSTensorStatus
+from .const import AccessType, PSChunkStatus, PSTensorStatus, TrainingStage
 from .chunk_data import Chunk
 from .chunk_list import ChunkList
 from .helper import getsizeof
@@ -284,12 +284,9 @@ class HybridPSClient(object):
         local_chunk_id = chunk_id_list[rank]
         return chunk_id == local_chunk_id
 
-    def _fetch_remote_chunks(self,
-                             chunk_id_list,
-                             local_chunk_id,
-                             compute_device,
-                             param_name="",
-                             is_fwd=False):
+    def _fetch_remote_chunks(self, chunk_id_list, local_chunk_id,
+                             compute_device, param_name,
+                             training_stage: TrainingStage):
         """
         将chunk_id_list中远端的chunk取到本地
         """
@@ -339,11 +336,9 @@ class HybridPSClient(object):
                                               async_op=False)
         allgather_payload_buff = []
 
-    def access_dist(self,
-                    param: torch.nn.Parameter,
-                    access_type: AccessType,
+    def access_dist(self, param: torch.nn.Parameter, access_type: AccessType,
                     compute_device: torch.device,
-                    is_fwd: bool = False):
+                    training_stage: TrainingStage):
         if self._time_profile:
             start_time = time.time()
 
@@ -373,7 +368,7 @@ class HybridPSClient(object):
 
         self._fetch_remote_chunks(chunk_id_list, local_chunk_id,
                                   compute_device, param.ps_attr.ps_name,
-                                  is_fwd)
+                                  training_stage)
         self.chunk_list[local_chunk_id].unpin()
 
         # 将param内存定位到chunk上
@@ -518,12 +513,9 @@ class HybridPSClient(object):
         else:
             self.access(param, AccessType.GRAD, compute_device)
 
-    def release_dist(self,
-                     param: torch.nn.Parameter,
-                     access_type: AccessType,
-                     reset_to_status: PSTensorStatus = PSTensorStatus.HOLD,
-                     is_fwd=False,
-                     is_allreduce=False):
+    def release_dist(self, param: torch.nn.Parameter, access_type: AccessType,
+                     reset_to_status: PSTensorStatus,
+                     training_stage: TrainingStage, is_allreduce: bool):
         """
         这个param的data, grad不再需要放在计算设备
         1. 更新状态
@@ -573,15 +565,16 @@ class HybridPSClient(object):
         # BWD: 当所有chunk都是HOLD_AFTER_BWD
         all_chunks_ready = True
         for i in chunk_id_list:
-            if is_fwd:
+            if training_stage == TrainingStage.FWD:
                 if self.chunk_list[i].get_status(
                 ) != PSChunkStatus.HOLD_AFTER_FWD:
                     all_chunks_ready = False
-            else:
+            elif training_stage == TrainingStage.BWD:
                 if self.chunk_list[i].get_status(
                 ) != PSChunkStatus.HOLD_AFTER_BWD:
                     all_chunks_ready = False
-
+            else:
+                raise RuntimeError
         if all_chunks_ready:
             if is_allreduce:
                 world_size = torch.distributed.get_world_size()

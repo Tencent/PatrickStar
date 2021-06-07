@@ -13,7 +13,7 @@
 
 import torch
 import logging
-from .const import PSTensorStatus, AccessType
+from .const import PSTensorStatus, AccessType, TrainingStage
 import utils.global_timer as global_timer
 from utils import logger, use_dist_flag
 
@@ -126,7 +126,7 @@ def pre_sub_module_forward_function(sub_module, client, name):
             client.access_dist(param,
                                AccessType.DATA,
                                torch.device(f'cuda:{client.rank}'),
-                               is_fwd=True)
+                               training_stage=TrainingStage.FWD)
         else:
             client.access_data(param, torch.device(f'cuda:{client.rank}'))
         param.data = param.ps_attr.access_tensor(AccessType.DATA)
@@ -144,7 +144,7 @@ def post_sub_module_forward_function(sub_module, client, name):
         client.release_dist(param,
                             AccessType.DATA,
                             PSTensorStatus.HOLD_AFTER_FWD,
-                            is_fwd=True,
+                            training_stage=TrainingStage.FWD,
                             is_allreduce=False)
 
 
@@ -157,8 +157,10 @@ def pre_sub_module_backward_function(sub_module, client, name):
         if param.dtype == torch.half:
             rank = torch.distributed.get_rank()
             if use_dist_flag:
-                client.access_dist(param, AccessType.DATA,
-                                   torch.device(f'cuda:{client.rank}'))
+                client.access_dist(param,
+                                   AccessType.DATA,
+                                   torch.device(f'cuda:{client.rank}'),
+                                   training_stage=TrainingStage.BWD)
             else:
                 client.access(param, AccessType.DATA,
                               torch.device(f'cuda:{client.rank}'))
@@ -192,7 +194,7 @@ def post_sub_module_backward_function(sub_module, client, name):
                     client.release_dist(param,
                                         AccessType.DATA,
                                         PSTensorStatus.HOLD_AFTER_BWD,
-                                        is_fwd=False,
+                                        training_stage=TrainingStage.BWD,
                                         is_allreduce=True)
                 else:
                     client.release(param,

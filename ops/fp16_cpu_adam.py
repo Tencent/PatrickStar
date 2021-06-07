@@ -18,7 +18,7 @@ from pathlib import Path
 from torch import Tensor
 from typing import List, Optional
 import logging
-from client.const import PSTensorStatus, AccessType
+from client.const import PSTensorStatus, AccessType, TrainingStage
 import utils.global_timer as global_timer
 from utils import print_rank, logger, use_dist_flag
 from client.parameter import register_param
@@ -259,11 +259,12 @@ class FP16Adam(torch.optim.Optimizer):
 
                 if torch.distributed.is_initialized():
                     if use_dist_flag:
-                        self.client.release_dist(param,
-                                                 AccessType.DATA,
-                                                 PSTensorStatus.HOLD_AFTER_BWD,
-                                                 is_fwd=False,
-                                                 is_allreduce=True)
+                        self.client.release_dist(
+                            param,
+                            AccessType.DATA,
+                            PSTensorStatus.HOLD_AFTER_BWD,
+                            training_stage=TrainingStage.BWD,
+                            is_allreduce=True)
                     else:
                         self.client.release(param, AccessType.DATA,
                                             PSTensorStatus.HOLD_AFTER_BWD,
