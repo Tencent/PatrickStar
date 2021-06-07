@@ -331,8 +331,15 @@ class HybridPSClient(object):
 
         world_size = torch.distributed.get_world_size()
         rank = torch.distributed.get_rank()
+
+        group_list = []
+        for i, _ in enumerate(chunk_id_list):
+            group_list.append(i)
+        group = torch.distributed.new_group(group_list)
+
         handle = torch.distributed.all_gather(allgather_payload_buff,
                                               local_chunk_payload,
+                                              group=group,
                                               async_op=False)
         allgather_payload_buff = []
 
@@ -354,6 +361,10 @@ class HybridPSClient(object):
         chunk_id_list = self.chunk_tensor_index.get_global_chunk_id_list(
             chunk_id)
         rank = torch.distributed.get_rank()
+
+        if rank >= len(chunk_id_list):
+            return
+
         local_chunk_id = chunk_id_list[rank]
 
         logger.debug(
@@ -537,6 +548,9 @@ class HybridPSClient(object):
         chunk_id_list = self.chunk_tensor_index.get_global_chunk_id_list(
             chunk_id)
 
+        if rank >= len(chunk_id_list):
+            return
+
         local_chunk_id = chunk_id_list[rank]
 
         logging.debug(
@@ -579,6 +593,12 @@ class HybridPSClient(object):
             if is_allreduce:
                 world_size = torch.distributed.get_world_size()
                 assert self.chunk_list[local_chunk_id].payload is not None
+
+                group_list = []
+                for i, _ in enumerate(chunk_id_list):
+                    group_list.append(i)
+                group = torch.distributed.new_group(group_list)
+
                 if not debug_flag:
                     input_list = []
                     for i in chunk_id_list:
@@ -587,6 +607,7 @@ class HybridPSClient(object):
                         self.chunk_list[local_chunk_id].payload,
                         input_list,
                         op=torch.distributed.ReduceOp.SUM,
+                        group=group,
                         async_op=False)
                 else:
                     for rank_, chunk_id_ in enumerate(chunk_id_list):
@@ -594,6 +615,7 @@ class HybridPSClient(object):
                             self.chunk_list[chunk_id_].payload,
                             rank_,
                             op=torch.distributed.ReduceOp.SUM,
+                            group=group,
                             async_op=False)
                 # NOTE把下面行注释了不影响最终结果？loss可能是有softmax算出，所以相对值不影响LOSS比较，但是影响了
                 self.chunk_list[local_chunk_id].payload /= world_size
