@@ -52,12 +52,11 @@ def test_simple_model(is_ps: bool = False,
     batch_size = 4
 
     if not torch.distributed.is_initialized():
-        dist.init_process_group(backend='gloo')
+        dist.init_process_group(backend='gloo' if debug_flag else 'nccl')
 
     rank = torch.distributed.get_rank()
     world_size = torch.distributed.get_world_size()
 
-    # TODO,单卡模拟多卡
     if debug_flag:
         torch.cuda.set_device(0)
         device = torch.device(f'cuda:0')

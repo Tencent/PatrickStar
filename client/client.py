@@ -30,7 +30,7 @@ import utils.global_timer as global_timer
 import time
 from .parameter import PSParameter, register_param, is_param_registed
 from utils.memory_monitor import get_memory_used
-from utils import logger
+from utils import logger, debug_flag
 
 
 class CachedFP32Buff(object):
@@ -577,7 +577,7 @@ class HybridPSClient(object):
         if all_chunks_ready:
             world_size = torch.distributed.get_world_size()
             assert self.chunk_list[local_chunk_id].payload is not None
-            if False:
+            if debug_flag:
                 input_list = []
                 for i in chunk_id_list:
                     input_list.append(self.chunk_list[i].payload)
