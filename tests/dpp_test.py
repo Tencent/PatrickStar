@@ -201,11 +201,11 @@ if __name__ == "__main__":
         # 需要 40和8两个chunk
 
         torch.manual_seed(0)
-        loss_list = test_simple_model(False, is_fp16=True, is_ckp=False)
+        loss_list = test_simple_model(False, is_fp16=True, is_ckp=True)
         see_memory_usage("after HybridPS simple model", force=True)
 
         torch.manual_seed(0)
-        loss_list_ref = test_simple_model(True, is_fp16=True, is_ckp=False)
+        loss_list_ref = test_simple_model(True, is_fp16=True, is_ckp=True)
 
         print('ps loss', loss_list)
         print('ref loss', loss_list_ref)

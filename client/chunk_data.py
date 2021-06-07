@@ -39,8 +39,6 @@ class Chunk(object):
         删除tensor，只需要将tensor的status设置为free
         这里把chunk设置为对是否分布式无感的，每个进程看到自己的chunk instance。
         """
-        # TODO(jiaruifang)标记本chunk是否在FWD和BWD被使用过，在FWD和BWD计算后被重置
-        self.fwd_bwd_used = False
         self.pid = os.getpid()
         self.chunk_id = chunk_id
         # payload numel 不等于 capacity, payload可能是None
@@ -65,6 +63,7 @@ class Chunk(object):
         self._time_profile = True
 
         self.access_moments = []
+        self._pin_flag = False
 
     def add_moment(self, mom):
         if len(self.access_moments) > 0 and self.access_moments[-1] == mom:

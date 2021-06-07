@@ -259,26 +259,17 @@ class FP16Adam(torch.optim.Optimizer):
 
                 if torch.distributed.is_initialized():
                     if use_dist_flag:
-                        self.client.release_dist(param, AccessType.DATA,
-                                                 PSTensorStatus.HOLD_AFTER_BWD)
+                        self.client.release_dist(param,
+                                                 AccessType.DATA,
+                                                 PSTensorStatus.HOLD_AFTER_BWD,
+                                                 is_fwd=False,
+                                                 is_allreduce=True)
                     else:
                         self.client.release(param, AccessType.DATA,
                                             PSTensorStatus.HOLD_AFTER_BWD,
                                             True)
                 else:
                     self.client.release_data(param, PSTensorStatus.HOLD)
-
-            # TODO debug why add this line does not work.
-            # 其中一个进程在reduce过程，另一个进程却没有配合，正常执行了access + release
-            # if self.client.is_local_tensor(param, AccessType.DATA):
-            #     self.client.access_data(param, torch.device(f'cuda:{self.client.rank}'))
-            #     grad_tensor = param.ps_attr.access_tensor(AccessType.DATA)
-            #     logger.info(f'fjr debug  rank {rank} before adam {n} grad {grad_tensor}')
-            #     self.client.release_data(param, PSTensorStatus.HOLD)
-
-        # TODO(jiaruifang) BWD之后接触所有chunk的访问标记，实现过于丑陋
-        for chunk_id, chunk in self.client.chunk_list.generate_chunk():
-            chunk.fwd_bwd_used = False
 
         loss = None
         if closure is not None:

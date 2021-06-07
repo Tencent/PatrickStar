@@ -14,7 +14,7 @@
 from utils import logger, init_distributed
 from utils import print_rank as print_rank_0, debug_flag
 from torch.nn.modules import Module
-from client import HybridPSClient, AccessType
+from client import HybridPSClient, AccessType, PSChunkStatus, PSTensorStatus
 import torch
 from ops import FP16Adam
 
@@ -120,7 +120,10 @@ class HybridPSEngine(Module):
         """
         loss = self.module(*inputs, **kwargs)
         for chunk_id, chunk in self.client.chunk_list.generate_chunk():
-            chunk.fwd_bwd_used = False
+            # chunk.fwd_used = False
+            if chunk.get_status() == PSChunkStatus.HOLD_AFTER_FWD:
+                self.client.set_all_tensors_status_in_chunk(
+                    chunk_id, PSTensorStatus.HOLD)
         return loss
 
     def backward(self, loss, allreduce_gradients=True, release_loss=False):

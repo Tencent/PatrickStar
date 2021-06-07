@@ -288,21 +288,22 @@ class HybridPSClient(object):
                              chunk_id_list,
                              local_chunk_id,
                              compute_device,
-                             param_name=""):
+                             param_name="",
+                             is_fwd=False):
         """
         将chunk_id_list中远端的chunk取到本地
         """
         world_size = torch.distributed.get_world_size()
         rank = torch.distributed.get_rank()
 
-        # release数目只有两种情况
-        # 1 hold, N-1 release
-        # no release
+        # release数目只有两种情况, 1 hold + N-1 release, no release
+        # FWD过程，当global chunk中有param第一次被访问时，需要将global chunk收集到本地。
+        # 如何判断global chunk中有param第一次被访问的时刻，从而正确触发allgather操作。
+        # 第一个param被访问时的必要条件是remote chunk状态为RELEASED。
+        # 因此，当每个chunk由HOLD_AFTER_FWD(HOLD_ADFTER_BWD)->RELEASED时
         has_released_chunk = False
         for i in chunk_id_list:
-            # TODO fwd_bwd_used表示这个chunk被释放过一次了，不会再被access。实现太丑陋
-            if self.chunk_list[i].get_status(
-            ) == PSChunkStatus.RELEASED and not self.chunk_list[i].fwd_bwd_used:
+            if self.chunk_list[i].get_status() == PSChunkStatus.RELEASED:
                 has_released_chunk = True
                 break
         if not has_released_chunk:
@@ -319,8 +320,6 @@ class HybridPSClient(object):
                 local_chunk_payload = self.chunk_list[chunk_id].payload
                 allgather_payload_buff.append(local_chunk_payload)
             else:
-                # TODO 需要prepared device before allocate payload
-                # 但是别把 local_chunk_id 换出去了
                 self.chunk_list.prepare_device(
                     compute_device,
                     self.chunk_list[chunk_id].get_chunk_space())
@@ -340,8 +339,11 @@ class HybridPSClient(object):
                                               async_op=False)
         allgather_payload_buff = []
 
-    def access_dist(self, param: torch.nn.Parameter, access_type: AccessType,
-                    compute_device: torch.device):
+    def access_dist(self,
+                    param: torch.nn.Parameter,
+                    access_type: AccessType,
+                    compute_device: torch.device,
+                    is_fwd: bool = False):
         if self._time_profile:
             start_time = time.time()
 
@@ -364,14 +366,14 @@ class HybridPSClient(object):
         )
 
         # 每个进程把local_chunk_id都弄到本地
-        # TODO access_chunk访问第一个param之前应该准备chunk_size * world_size大小的显存。
         self.chunk_list.access_chunk(local_chunk_id, compute_device)
+
+        # _fetch_remote_chunks不要将local_chunk_id也给换出去了，因为它的状态还是HOLD，加上pin。
         self.chunk_list[local_chunk_id].pin()
 
-        # 把chunk_id_list的所有chunk都弄到本地，如果在本地do nothing
-        # TODO _fetch_remote_chunks不要将local_chunk_id也给换出去了，因为它的状态还是HOLD。
         self._fetch_remote_chunks(chunk_id_list, local_chunk_id,
-                                  compute_device, param.ps_attr.ps_name)
+                                  compute_device, param.ps_attr.ps_name,
+                                  is_fwd)
         self.chunk_list[local_chunk_id].unpin()
 
         # 将param内存定位到chunk上
@@ -519,7 +521,9 @@ class HybridPSClient(object):
     def release_dist(self,
                      param: torch.nn.Parameter,
                      access_type: AccessType,
-                     reset_to_status: PSTensorStatus = PSTensorStatus.HOLD):
+                     reset_to_status: PSTensorStatus = PSTensorStatus.HOLD,
+                     is_fwd=False,
+                     is_allreduce=False):
         """
         这个param的data, grad不再需要放在计算设备
         1. 更新状态
@@ -564,37 +568,42 @@ class HybridPSClient(object):
         elif access_type == AccessType.GRAD:
             param.grad = None
 
-        # chunk_id_list都是hold状态，可以reduce-scatter，保留local_chunk_id的allreduce结果
-        # TODO(jiaruifang) 如何选择一个allreduce时机？不能用chunk status是hold判断
-        # FWD后会把所有chunk设置为hold,grad计算完毕拷贝
-        # 增加一个grad ready 状态？
-
+        # 判断global所有的chunk都被使用完毕，可以释放remote chunk
+        # FWD: 当所有chunk都是HOLD_AFTER_FWD
+        # BWD: 当所有chunk都是HOLD_AFTER_BWD
         all_chunks_ready = True
         for i in chunk_id_list:
-            if self.chunk_list[i].get_status() != PSChunkStatus.HOLD_AFTER_BWD:
-                all_chunks_ready = False
+            if is_fwd:
+                if self.chunk_list[i].get_status(
+                ) != PSChunkStatus.HOLD_AFTER_FWD:
+                    all_chunks_ready = False
+            else:
+                if self.chunk_list[i].get_status(
+                ) != PSChunkStatus.HOLD_AFTER_BWD:
+                    all_chunks_ready = False
 
         if all_chunks_ready:
-            world_size = torch.distributed.get_world_size()
-            assert self.chunk_list[local_chunk_id].payload is not None
-            if not debug_flag:
-                input_list = []
-                for i in chunk_id_list:
-                    input_list.append(self.chunk_list[i].payload)
-                torch.distributed.reduce_scatter(
-                    self.chunk_list[local_chunk_id].payload,
-                    input_list,
-                    op=torch.distributed.ReduceOp.SUM,
-                    async_op=False)
-            else:
-                for rank_, chunk_id_ in enumerate(chunk_id_list):
-                    torch.distributed.reduce(
-                        self.chunk_list[chunk_id_].payload,
-                        rank_,
+            if is_allreduce:
+                world_size = torch.distributed.get_world_size()
+                assert self.chunk_list[local_chunk_id].payload is not None
+                if not debug_flag:
+                    input_list = []
+                    for i in chunk_id_list:
+                        input_list.append(self.chunk_list[i].payload)
+                    torch.distributed.reduce_scatter(
+                        self.chunk_list[local_chunk_id].payload,
+                        input_list,
                         op=torch.distributed.ReduceOp.SUM,
                         async_op=False)
-            # TODO把下面行注释了不影响最终结果？loss可能是有softmax算出，所以相对值不影响LOSS比较，但是影响了
-            self.chunk_list[local_chunk_id].payload /= world_size
+                else:
+                    for rank_, chunk_id_ in enumerate(chunk_id_list):
+                        torch.distributed.reduce(
+                            self.chunk_list[chunk_id_].payload,
+                            rank_,
+                            op=torch.distributed.ReduceOp.SUM,
+                            async_op=False)
+                # NOTE把下面行注释了不影响最终结果？loss可能是有softmax算出，所以相对值不影响LOSS比较，但是影响了
+                self.chunk_list[local_chunk_id].payload /= world_size
 
             # 删除remote chunk的payload
             for i in chunk_id_list:
@@ -604,13 +613,6 @@ class HybridPSClient(object):
                     self.chunk_list[i].release_payload()
                     self.set_all_tensors_status_in_chunk(
                         i, PSTensorStatus.FREE)
-                    self.chunk_list[i].fwd_bwd_used = True
-                else:
-                    # 正确的
-                    pass
-                    logger.debug(
-                        f'rank {rank} bwd after allreduce chunk_id {i} param {param.ps_attr.ps_name} payload {self.chunk_list[i].payload}'
-                    )
 
         if self._time_profile:
             global_timer.client_release_elapse += time.time() - start_time
@@ -662,7 +664,6 @@ class HybridPSClient(object):
 
         if remove_remote_data:
             # FWD逻辑，如果chunk计算完毕非本地的chunk被释放
-            # TODO 释放之后，access看见有释放的由给分配出来
             if not self.is_local_tensor(
                     param,
                     access_type) and self.chunk_list[chunk_id].get_status(
@@ -670,7 +671,6 @@ class HybridPSClient(object):
                 logger.debug(
                     f'rank {rank} fwd remove payload of chunk_id {chunk_id}')
                 self.chunk_list[chunk_id].release_payload()
-                self.chunk_list[chunk_id].fwd_bwd_used = True
                 self.set_all_tensors_status_in_chunk(chunk_id,
                                                      PSTensorStatus.FREE)
         if allreduce_local_grad:

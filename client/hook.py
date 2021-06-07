@@ -123,8 +123,10 @@ def pre_sub_module_forward_function(sub_module, client, name):
         rank = torch.distributed.get_rank()
         logger.debug(f'rank {rank} FWD pre {name}.{sub_name} access data')
         if use_dist_flag:
-            client.access_dist(param, AccessType.DATA,
-                               torch.device(f'cuda:{client.rank}'))
+            client.access_dist(param,
+                               AccessType.DATA,
+                               torch.device(f'cuda:{client.rank}'),
+                               is_fwd=True)
         else:
             client.access_data(param, torch.device(f'cuda:{client.rank}'))
         param.data = param.ps_attr.access_tensor(AccessType.DATA)
@@ -139,10 +141,11 @@ def post_sub_module_forward_function(sub_module, client, name):
     for sub_name, param in sub_module.named_parameters(recurse=False):
         rank = torch.distributed.get_rank()
         logger.debug(f'rank {rank} FWD post {name}.{sub_name}')
-        client.release(param,
-                       AccessType.DATA,
-                       PSTensorStatus.HOLD_AFTER_FWD,
-                       remove_remote_data=use_dist_flag)
+        client.release_dist(param,
+                            AccessType.DATA,
+                            PSTensorStatus.HOLD_AFTER_FWD,
+                            is_fwd=True,
+                            is_allreduce=False)
 
 
 def pre_sub_module_backward_function(sub_module, client, name):
@@ -183,11 +186,14 @@ def post_sub_module_backward_function(sub_module, client, name):
                 rank = torch.distributed.get_rank()
                 # 正确的梯度
                 logger.debug(
-                    f'rank {rank} BWD post before allreduce {name}.{sub_name} grad {tmp_tensor}'
+                    f'rank {rank} BWD post before release_dist {name}.{sub_name}'
                 )
                 if use_dist_flag:
-                    client.release_dist(param, AccessType.DATA,
-                                        PSTensorStatus.HOLD_AFTER_BWD)
+                    client.release_dist(param,
+                                        AccessType.DATA,
+                                        PSTensorStatus.HOLD_AFTER_BWD,
+                                        is_fwd=False,
+                                        is_allreduce=True)
                 else:
                     client.release(param,
                                    AccessType.DATA,
