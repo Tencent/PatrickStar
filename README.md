@@ -1,6 +1,6 @@
-### PatrickStar
+### PatrickStar: Break The Memory Wall of Parallel Training Large Language Models via Chunk-based Parameter Server
 
-HybirdPS是一种应用于大规模语言模型(LM)训练中的参数服务器。
+PatrickStar(派大星)是一种应用于大规模语言模型(LM)训练中的参数服务器。
 
 #### 问题背景
 对于大的LM，单个GPU的显存无法存储训练所需的全部数据。
