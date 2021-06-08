@@ -16,7 +16,7 @@ python runner.py --num_nodes 1 --num_gpus 2 test.py
 """
 
 from client import Chunk
-from manager import HybridPSManager
+from manager import PatrickStarManager
 from utils import init_distributed
 import torch
 import torch.distributed as dist
@@ -24,7 +24,7 @@ import torch.distributed as dist
 
 def test_collective_comm():
     rank = torch.distributed.get_rank()
-    manager = HybridPSManager()
+    manager = PatrickStarManager()
     manager.init([10, 10], [10, 10])
 
     # 每个进程都分配一个chunk

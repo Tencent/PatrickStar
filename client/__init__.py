@@ -11,7 +11,7 @@
 # permissions and limitations under the License.
 # See the AUTHORS file for names of contributors.
 
-from .client import HybridPSClient
+from .client import PatrickStarClient
 from .chunk_list import ChunkList
 from .chunk_data import Chunk
 from .const import AccessType, PSChunkStatus, PSTensorStatus

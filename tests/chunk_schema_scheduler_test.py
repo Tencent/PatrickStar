@@ -27,8 +27,8 @@ from fp16 import FP16_Optimizer
 import time
 import argparse
 
-from client import HybridPSClient, PSTensorStatus
-from manager import HybridPSManager
+from client import PatrickStarClient, PSTensorStatus
+from manager import PatrickStarManager
 from client import setup_hybrid_ps_hooks, ChunkShemaScheduler
 # from utils.zero_hook import HookedModule
 from ops import CPUAdam, TorchAdam
@@ -88,10 +88,10 @@ def test_bert_model(is_ckp: bool = False,
     if is_fp16:
         model = FP16_Module(model)
 
-    manager = HybridPSManager()
+    manager = PatrickStarManager()
     manager.init([1024 * 1024 * 1024 * 2] * 1, [1024 * 1024 * 1024 * 4 * 4])
     # chunk 512 MB, good for CPU-GPU bandwidth
-    client = HybridPSClient(rank=0, default_chunk_size=1024 * 1024)
+    client = PatrickStarClient(rank=0, default_chunk_size=1024 * 1024)
 
     optimizer = CPUAdam(client, model.parameters(), lr=0.001)
     if is_fp16:
@@ -123,9 +123,9 @@ if __name__ == "__main__":
         sequence_length = 1024
         num_layer = 60
     elif plan == 'B':
-        # HybridPS and Pytorch都可以
+        # PatrickStar and Pytorch都可以
         # Pytorch: 1.2852387428283691 sec
-        # HybridPS: 6.879993915557861 sec
+        # PatrickStar: 6.879993915557861 sec
         # client_prepare_device_elapse 0.0 client_access_elapse 2.211916446685791 client_release_elapse 2.442206859588623
         # cpu_adam_elapse 3.7840416431427 cpu_adam_f_elapse 3.7840394973754883
         hidden_dim = 1536
@@ -134,7 +134,7 @@ if __name__ == "__main__":
         num_layer = 12
     elif plan == 'C':
         # use ckp
-        # HybridPS and PyTorch is OK
+        # PatrickStar and PyTorch is OK
         # 没有prepare device开销
         hidden_dim = 768
         batch_size = 8
@@ -142,7 +142,7 @@ if __name__ == "__main__":
         num_layer = 1
     elif plan == 'D':
         # use ckp
-        # HybridPS and PyTorch is OK
+        # PatrickStar and PyTorch is OK
         # 没有prepare device开销
         hidden_dim = 4096  #2048
         batch_size = 2

@@ -29,8 +29,8 @@ from fp16 import FP16_Optimizer
 import time
 import argparse
 
-from client import HybridPSClient
-from manager import HybridPSManager
+from client import PatrickStarClient
+from manager import PatrickStarManager
 from utils import setup_hybrid_ps_hooks
 from ops import CPUAdam, TorchAdam
 
@@ -81,10 +81,10 @@ data_loader = get_bert_data_loader(batch_size=batch_size,
 
 loss_res = []
 
-manager = HybridPSManager()
+manager = PatrickStarManager()
 manager.init([1024 * 1024 * 512] * 1, [1024 * 1024 * 1024 * 4 * 4])
 # chunk 32 M
-client = HybridPSClient(rank=0, default_chunk_size=1024 * 1024 * 16)
+client = PatrickStarClient(rank=0, default_chunk_size=1024 * 1024 * 16)
 optimizer = TorchAdam(model.parameters(), lr=0.001)
 
 client.register_module(model)

@@ -11,4 +11,4 @@
 # permissions and limitations under the License.
 # See the AUTHORS file for names of contributors.
 
-from .manager import HybridPSManager
+from .manager import PatrickStarManager

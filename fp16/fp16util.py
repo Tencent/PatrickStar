@@ -211,7 +211,7 @@ def master_params_to_model_params(model_params,
     """
     if flat_master:
         raise NotImplementedError(
-            "master_params_to_model_params flatten is not implemented for HybridPS"
+            "master_params_to_model_params flatten is not implemented for PatrickStar"
         )
         for model, master in zip(
                 model_params,

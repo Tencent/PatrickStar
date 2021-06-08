@@ -22,8 +22,8 @@ import time
 import torch.distributed as dist
 
 from ops import CPUAdam, TorchAdam, FP16Adam
-from client import HybridPSClient, setup_hybrid_ps_hooks, PSTensorStatus
-from manager import HybridPSManager
+from client import PatrickStarClient, setup_hybrid_ps_hooks, PSTensorStatus
+from manager import PatrickStarManager
 from utils import see_memory_usage, debug_flag
 import utils.global_timer as global_timer
 
@@ -84,7 +84,7 @@ def test_simple_model(is_ps: bool = False,
                 model, device_ids=[rank])
     else:
         default_chunk_size = 25
-        manager = HybridPSManager()
+        manager = PatrickStarManager()
         manager.reset([default_chunk_size * 2 * world_size] * world_size,
                       [default_chunk_size * 2 * 14 * 6] * world_size)
         if is_fp16:
@@ -106,10 +106,10 @@ def test_simple_model(is_ps: bool = False,
                 config=config)
         else:
             model = SimpleModel(hidden_dim, is_ckp=is_ckp)
-            client = HybridPSClient(rank=0 if debug_flag else rank,
-                                    default_chunk_size=20,
-                                    warmup=True,
-                                    is_fp16=is_fp16)
+            client = PatrickStarClient(rank=0 if debug_flag else rank,
+                                       default_chunk_size=20,
+                                       warmup=True,
+                                       is_fp16=is_fp16)
             optimizer = CPUAdam(client, model.parameters(), lr=0.001)
             client.init(model, optimizer)
 
@@ -177,7 +177,7 @@ if __name__ == "__main__":
         datefmt='%Y-%m-%d:%H:%M:%S',
         level=logging.INFO)
     torch.manual_seed(0)
-    manager = HybridPSManager()
+    manager = PatrickStarManager()
     # 4 layer每层20个elem(20*4 bytes)，最少360 (360*4 bytes)内存
     # gpu内存至少为40，反向传播一层需要的最大内存。
 
@@ -202,7 +202,7 @@ if __name__ == "__main__":
 
         torch.manual_seed(0)
         loss_list = test_simple_model(False, is_fp16=True, is_ckp=True)
-        see_memory_usage("after HybridPS simple model", force=True)
+        see_memory_usage("after PatrickStar simple model", force=True)
 
         torch.manual_seed(0)
         loss_list_ref = test_simple_model(True, is_fp16=True, is_ckp=True)

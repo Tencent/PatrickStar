@@ -11,8 +11,8 @@
 # permissions and limitations under the License.
 # See the AUTHORS file for names of contributors.
 
-from manager import HybridPSManager
-from client import HybridPSClient
+from manager import PatrickStarManager
+from client import PatrickStarClient
 import torch
 import torch.distributed as dist
 from common import distributed_test
@@ -22,14 +22,14 @@ import logging
 from client.const import AccessType
 from client.const import PSTensorStatus
 
-manager = HybridPSManager()
+manager = PatrickStarManager()
 
 
 @distributed_test(world_size=1)
 def test_client():
     world_size = dist.get_world_size()
     manager.init(gpu_info=[32 * 4] * world_size, cpu_info=[64 * 4])
-    print("is init manager", HybridPSManager().is_init())
+    print("is init manager", PatrickStarManager().is_init())
     local_rank = dist.get_rank()
 
     # 申请两个tensor
@@ -44,8 +44,8 @@ def test_client():
         if torch.cuda.is_available() else torch.device('cpu')),
                                 requires_grad=False)
 
-    # 用一个HybridPSClient来管理这两个tensor
-    client = HybridPSClient(rank=local_rank, default_chunk_size=20)
+    # 用一个PatrickStarClient来管理这两个tensor
+    client = PatrickStarClient(rank=local_rank, default_chunk_size=20)
     # CPU 3* chunk, param1 2*chunk, param2 1*chunk
     client.register_param(param1)
     client.register_param(param2)
@@ -85,8 +85,8 @@ def test_mgr_dist():
 
     #测试mgr正确更新
     def test_mgr_update():
-        # 在两个进程上使用HybridPSClient，测试manager效果
-        manager = HybridPSManager()
+        # 在两个进程上使用PatrickStarClient，测试manager效果
+        manager = PatrickStarManager()
         manager.reset([32 * 4, 32 * 4], [64 * 4])
 
         @distributed_test(world_size=world_size)
@@ -124,15 +124,15 @@ def test_migrate():
 
         compute_device = torch.device('cuda:0')
         local_rank = dist.get_rank()
-        manager = HybridPSManager()
+        manager = PatrickStarManager()
         manager.reset(gpu_info=[80 * 4], cpu_info=[200 * 4])
 
         # 申请两个tensor, 他们放在一个chunk中，计算设备在cuda上
         param1 = torch.randn(20, device=torch.device('cuda:0'))
         param2 = torch.randn(20, device=torch.device('cuda:0'))
 
-        # 交给HybridPS管理，会先被分在cpu上
-        client = HybridPSClient(rank=local_rank, default_chunk_size=40)
+        # 交给PatrickStar管理，会先被分在cpu上
+        client = PatrickStarClient(rank=local_rank, default_chunk_size=40)
         client.register_param(param1, compute_device)
         client.register_param(param2, compute_device)
 
@@ -171,7 +171,7 @@ def test_migrate():
         compute_device = torch.device('cuda:0')
 
         local_rank = dist.get_rank()
-        manager = HybridPSManager()
+        manager = PatrickStarManager()
         manager.reset(gpu_info=[80 * 4], cpu_info=[200 * 4])
 
         # 申请两个tensor, 他们放在一个chunk中，计算设备在cuda上
@@ -180,8 +180,8 @@ def test_migrate():
         param2 = torch.nn.Parameter(
             torch.randn(20, device=torch.device('cuda:0')))
 
-        # 交给HybridPS管理，会先被分在cpu上, 占据了2个chunk
-        client = HybridPSClient(rank=local_rank, default_chunk_size=40)
+        # 交给PatrickStar管理，会先被分在cpu上, 占据了2个chunk
+        client = PatrickStarClient(rank=local_rank, default_chunk_size=40)
         logging.info('client register param1')
         client.register_param(param1)
         logging.info('client register param2')
@@ -215,11 +215,11 @@ def test_migrate():
 
 def test_fp16():
     def test_register():
-        manager = HybridPSManager()
+        manager = PatrickStarManager()
         manager.reset(gpu_info=[80 * 4], cpu_info=[200 * 4])
 
-        # 交给HybridPS管理，会先被分在cpu上, 占据了2个chunk
-        client = HybridPSClient(rank=0, default_chunk_size=40)
+        # 交给PatrickStar管理，会先被分在cpu上, 占据了2个chunk
+        client = PatrickStarClient(rank=0, default_chunk_size=40)
         logging.info('client register param1')
         param1 = torch.nn.Parameter(torch.randn(10,
                                                 device=torch.device('cuda:0'),
@@ -268,11 +268,11 @@ def test_fp16():
 
 def test_on_demand_access():
     def test_register():
-        manager = HybridPSManager()
+        manager = PatrickStarManager()
         manager.reset(gpu_info=[80 * 4], cpu_info=[200 * 4])
 
-        # 交给HybridPS管理，会先被分在cpu上, 占据了2个chunk
-        client = HybridPSClient(rank=0, default_chunk_size=10)
+        # 交给PatrickStar管理，会先被分在cpu上, 占据了2个chunk
+        client = PatrickStarClient(rank=0, default_chunk_size=10)
         logging.info('client register param1')
         param1 = torch.nn.Parameter(torch.randn(10,
                                                 device=torch.device('cuda:0'),
@@ -303,11 +303,11 @@ def test_on_demand_access():
 
 def test_tensor_remove():
     def test_remove():
-        manager = HybridPSManager()
+        manager = PatrickStarManager()
         manager.reset(gpu_info=[80 * 4], cpu_info=[200 * 4])
 
-        # 交给HybridPS管理，会先被分在cpu上, 占据了2个chunk
-        client = HybridPSClient(rank=0, default_chunk_size=20)
+        # 交给PatrickStar管理，会先被分在cpu上, 占据了2个chunk
+        client = PatrickStarClient(rank=0, default_chunk_size=20)
         logging.info('client register param1')
         param1 = torch.nn.Parameter(torch.randn(10,
                                                 device=torch.device('cuda:0'),
@@ -349,7 +349,7 @@ def test_tensor_remove():
         print(client.chunk_tensor_index.dict_chunk_id_tensor_id)
 
     def test_dict():
-        client = HybridPSClient(rank=0, default_chunk_size=20)
+        client = PatrickStarClient(rank=0, default_chunk_size=20)
         # chunk : tensor
         # 0 : 0
         # 0 : 1

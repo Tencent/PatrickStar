@@ -2,7 +2,7 @@
 DeepSpeed的优化必须采用fp16。因此Param data和grad都需要一份额外的FP16存储。
 FP16和FP32的转化尽量在GPU上完成。
 
-### 在HybridPS存储
+### 在PatrickStar存储
 作为nn.Parameter的成员变量。
 fp16_data, fp16_grad
 fp32_data, fp32_data

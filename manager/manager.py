@@ -37,7 +37,7 @@ class SingletonMeta(type):
         return cls._instances[cls]
 
 
-class HybridPSManager(metaclass=SingletonMeta):
+class PatrickStarManager(metaclass=SingletonMeta):
     """
   知道所有设备的使用情况，来指导payload的迁移
   singleton类，被所有进程访问
@@ -137,7 +137,7 @@ class HybridPSManager(metaclass=SingletonMeta):
                 if self.available_mem("cuda", idx) >= size_in_byte:
                     # self.add("cuda", idx, size_in_byte)
                     return torch.device(f"cuda:{idx}")
-        logging.error(f"HybridPSManager can not find {size_in_byte} space")
+        logging.error(f"PatrickStarManager can not find {size_in_byte} space")
         raise RuntimeError
 
     def available_mem(self, device_type, index):
@@ -168,16 +168,19 @@ class HybridPSManager(metaclass=SingletonMeta):
 
 
 if __name__ == "__main__":
-    s1 = HybridPSManager()
+    s1 = PatrickStarManager()
     s1.init([64, 64], [128])
 
     # do nothing if you initialize a singleton twice
-    s2 = HybridPSManager()
+    s2 = PatrickStarManager()
     s2.init([32, 32, 3], [32])
     assert s2.gpu_num() == 2
 
     if id(s1) == id(s2):
         print(
-            "HybridPSManager works, both variables contain the same instance.")
+            "PatrickStarManager works, both variables contain the same instance."
+        )
     else:
-        print("HybridPSManager failed, variables contain different instances.")
+        print(
+            "PatrickStarManager failed, variables contain different instances."
+        )

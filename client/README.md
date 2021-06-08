@@ -102,7 +102,7 @@ TODO
 目前的方案是所有层的data和grad分配是连在一起的。
 
 ##### FP16 Optimizer
-目前HybridPS支持apex的FP16 Optimier。
+目前PatrickStar支持apex的FP16 Optimier。
 
 ##### 效果
 对弈个Simple Model。包含4层Linear，每个linear param data大小16，bias大小4。

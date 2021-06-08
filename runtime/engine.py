@@ -14,12 +14,12 @@
 from utils import logger, init_distributed
 from utils import print_rank as print_rank_0, debug_flag
 from torch.nn.modules import Module
-from client import HybridPSClient, AccessType, PSChunkStatus, PSTensorStatus
+from client import PatrickStarClient, AccessType, PSChunkStatus, PSTensorStatus
 import torch
 from ops import FP16Adam
 
 
-class HybridPSEngine(Module):
+class PatrickStarEngine(Module):
     r"""DeepSpeed engine for training.
     """
     def __init__(self,
@@ -35,7 +35,7 @@ class HybridPSEngine(Module):
                  config=None,
                  config_params=None,
                  dont_change_device=False):
-        super(HybridPSEngine, self).__init__()
+        super(PatrickStarEngine, self).__init__()
         if not torch.distributed.is_initialized():
             self.dist_backend = "gloo" if debug_flag else "nccl"
             init_distributed(dist_backend=self.dist_backend)
@@ -47,7 +47,8 @@ class HybridPSEngine(Module):
         self.module = model
         self.module.train()
 
-        self.client = HybridPSClient(
+        logger.info(f'config.default_chunk_size {config.default_chunk_size}')
+        self.client = PatrickStarClient(
             rank=self.rank,
             default_chunk_size=config.default_chunk_size,
             warmup=False,
@@ -63,7 +64,7 @@ class HybridPSEngine(Module):
         # self.create_reduce_and_remove_grad_hooks()
 
         self.client.init(self.module, self.optimizer)
-        logger.info('init HybridPSEngine')
+        logger.info('init PatrickStarEngine')
 
         # for param in self.module.named_parameters():
         #     print(param)

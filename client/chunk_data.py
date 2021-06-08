@@ -18,7 +18,7 @@ from .helper import getsizeof
 from .helper import getsizeof
 
 from typing import Dict
-from manager import HybridPSManager
+from manager import PatrickStarManager
 
 import datetime
 import logging
@@ -55,7 +55,7 @@ class Chunk(object):
             PSTensorStatus.FREE: 0
         }
 
-        self.ps_manager = HybridPSManager()
+        self.ps_manager = PatrickStarManager()
         if self.ps_manager.is_init() is False:
             raise "init Manager first before init a Chunk"
 

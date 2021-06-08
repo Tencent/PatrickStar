@@ -12,19 +12,19 @@
 # See the AUTHORS file for names of contributors.
 
 import unittest
-from client import HybridPSClient, ChunkList, PSTensorStatus, AccessType, ChunkTensorIndex, Chunk
+from client import PatrickStarClient, ChunkList, PSTensorStatus, AccessType, ChunkTensorIndex, Chunk
 import logging
 import torch
-from manager import HybridPSManager
+from manager import PatrickStarManager
 from client import PSChunkStatus
 
 
 class TestChunkData(unittest.TestCase):
     def setUp(self):
         self.default_chunk_size = 40
-        self.client = HybridPSClient(
+        self.client = PatrickStarClient(
             rank=0, default_chunk_size=self.default_chunk_size)
-        self.manager = HybridPSManager()
+        self.manager = PatrickStarManager()
         self.manager.init([32, 32], [1024])
         self.compute_device = torch.device(
             'cuda:0') if torch.cuda.is_available() else torch.device('cpu')

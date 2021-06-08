@@ -12,7 +12,7 @@
 # See the AUTHORS file for names of contributors.
 
 from utils import log_dist, logger
-from .engine import HybridPSEngine
+from .engine import PatrickStarEngine
 from .init_context import Init
 
 
@@ -27,7 +27,7 @@ def initialize_engine(args=None,
                       collate_fn=None,
                       config=None,
                       config_params=None):
-    """Initialize the HybridPS Engine.
+    """Initialize the PatrickStar Engine.
     Arguments:
         args: an object containing local_rank and deepspeed_config fields.
             This is optional if `config` is passed.
@@ -63,17 +63,17 @@ def initialize_engine(args=None,
 
     assert model is not None, "deepspeed.initialize requires a model"
 
-    engine = HybridPSEngine(args=args,
-                            model=model,
-                            optimizer=optimizer,
-                            model_parameters=model_parameters,
-                            training_data=training_data,
-                            lr_scheduler=lr_scheduler,
-                            mpu=mpu,
-                            dist_init_required=dist_init_required,
-                            collate_fn=collate_fn,
-                            config=config,
-                            config_params=config_params)
+    engine = PatrickStarEngine(args=args,
+                               model=model,
+                               optimizer=optimizer,
+                               model_parameters=model_parameters,
+                               training_data=training_data,
+                               lr_scheduler=lr_scheduler,
+                               mpu=mpu,
+                               dist_init_required=dist_init_required,
+                               collate_fn=collate_fn,
+                               config=config,
+                               config_params=config_params)
 
     return_items = [
         engine, engine.optimizer, engine.training_dataloader,

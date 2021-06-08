@@ -15,7 +15,7 @@
 import logging
 from .memory_monitor import get_memory_used
 import torch
-from manager import HybridPSManager
+from manager import PatrickStarManager
 
 
 class SingletonMeta(type):
@@ -70,7 +70,7 @@ class IterationTimer(metaclass=SingletonMeta):
                 self.moment_device[self._moment] = 'all'
 
         if self.warmup:
-            mgr = HybridPSManager()
+            mgr = PatrickStarManager()
             if torch.distributed.is_initialized():
                 rank = torch.distributed.get_rank()
             else:

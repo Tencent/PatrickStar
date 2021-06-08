@@ -13,7 +13,7 @@
 
 import torch
 import os
-from manager import HybridPSManager
+from manager import PatrickStarManager
 from typing import Dict
 import datetime
 import logging
@@ -92,7 +92,7 @@ class CachedFP32Buff(object):
         return self.cpu_cached_fp32_payload.narrow(0, start_offset, numel)
 
 
-class HybridPSClient(object):
+class PatrickStarClient(object):
     def __init__(self,
                  rank: int = 0,
                  default_chunk_size: int = 1024 * 1024,
@@ -103,7 +103,7 @@ class HybridPSClient(object):
         每个进程可以访问一个GPU的显存，和cpu的内存
         功能:
           1. 充分利用cpu和gpu内存
-          2. 细粒度调度，HybridPSClient包含若干chunk
+          2. 细粒度调度，PatrickStarClient包含若干chunk
         """
         self.pid = os.getpid()
 

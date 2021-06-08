@@ -26,8 +26,8 @@ from fp16 import FP16_Module, FP16_Optimizer
 import time
 import argparse
 
-from client import HybridPSClient, PSTensorStatus, AccessType
-from manager import HybridPSManager
+from client import PatrickStarClient, PSTensorStatus, AccessType
+from manager import PatrickStarManager
 from client import setup_hybrid_ps_hooks
 from ops import CPUAdam, TorchAdam, FP16Adam
 import utils.global_timer as global_timer
@@ -170,7 +170,7 @@ def test_bert_model(is_ckp: bool = False,
                 model, device_ids=[rank])
     else:
         default_chunk_size = 1024 * 1024 * 8
-        manager = HybridPSManager()
+        manager = PatrickStarManager()
         manager.reset([default_chunk_size * 4 * world_size] * world_size,
                       [default_chunk_size * 2 * 14 * 6] * world_size)
         if is_fp16:
@@ -192,10 +192,10 @@ def test_bert_model(is_ckp: bool = False,
                 config=config)
         else:
             model = BertForSequenceClassification(cfg)
-            client = HybridPSClient(rank=0 if debug_flag else rank,
-                                    default_chunk_size=default_chunk_size,
-                                    warmup=True,
-                                    is_fp16=is_fp16)
+            client = PatrickStarClient(rank=0 if debug_flag else rank,
+                                       default_chunk_size=default_chunk_size,
+                                       warmup=True,
+                                       is_fp16=is_fp16)
             optimizer = CPUAdam(client, model.parameters(), lr=0.001)
             client.init(model, optimizer)
 
@@ -307,15 +307,15 @@ if __name__ == "__main__":
     if res_check:
         plan = "B"
     if plan == "A":
-        # HybridPS可以，PyTorch不可以
+        # PatrickStar可以，PyTorch不可以
         # use_ckp: True, use_fp16: True, adam default on CPU, not interleave data and grad
         if use_fp16:
             # 精心挑选的参数
-            manager = HybridPSManager()
+            manager = PatrickStarManager()
             manager.init([1024 * 1024 * 1024 * 2] * world_size,
                          [1024 * 1024 * 1024 * 4 * 4] * world_size)
         else:
-            manager = HybridPSManager()
+            manager = PatrickStarManager()
             manager.init([1024 * 1024 * 512 * 4] * world_size,
                          [1024 * 1024 * 1024 * 4 * 4] * world_size)
         hidden_dim = 3072
@@ -323,8 +323,8 @@ if __name__ == "__main__":
         sequence_length = 1024
         num_layer = 60
     elif plan == 'B':
-        # HybridPS and Torch都可以
-        manager = HybridPSManager()
+        # PatrickStar and Torch都可以
+        manager = PatrickStarManager()
         manager.init([1024 * 1024 * 1024 * 8] * world_size,
                      [1024 * 1024 * 1024 * 4 * 4] * world_size)
         hidden_dim = 1536
@@ -333,9 +333,9 @@ if __name__ == "__main__":
         num_layer = 12
     elif plan == 'C':
         # use ckp
-        # HybridPS and PyTorch is OK
+        # PatrickStar and PyTorch is OK
         # 没有prepare device开销
-        manager = HybridPSManager()
+        manager = PatrickStarManager()
         manager.init([1024 * 1024 * 512 * 4] * world_size,
                      [1024 * 1024 * 1024 * 4 * 4] * world_size)
         hidden_dim = 768
@@ -343,7 +343,7 @@ if __name__ == "__main__":
         sequence_length = 1024
         num_layer = 12
     elif plan == 'D':
-        manager = HybridPSManager()
+        manager = PatrickStarManager()
         manager.init([1024 * 1024 * 1024] * world_size,
                      [1024 * 1024 * 1024 * 4 * 4] * world_size)
         hidden_dim = 4096  #2048

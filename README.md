@@ -1,4 +1,4 @@
-### HybridPS
+### PatrickStar
 
 HybirdPS是一种应用于大规模语言模型(LM)训练中的参数服务器。
 
@@ -23,33 +23,33 @@ Hybrid区别于传统PS，让参数只在系统中存储一份，计算时按需
 3. 激活(Activations): 正反向计算的中间结果，不同GPU的计算过程产生不同的中间结果。
 4. 优化器状态(Optimizer States, OS): Adam优化器需要的状态参数，包括momentum和variance，全局唯一。
 
-HybridPS的使用对象是Params, AccGrads, OS。它们都有全局唯一的性质。
+PatrickStar的使用对象是Params, AccGrads, OS。它们都有全局唯一的性质。
 
 
 #### 设计
-HybridPS是管理Param，AccGrad和OS的一种分布式存储模块，
+PatrickStar是管理Param，AccGrad和OS的一种分布式存储模块，
 它所分配的内存空间一个异构的设备的集合中，最典型的应用就是但机多卡GPU服务器，
 设备集合包括一块CPU和多块GPU。
 
 Chunk是内存管理的最小单位，它是一块连续的内存，可以坐落在CPU或者任何一块GPU之上。
-GPU显存使用具有类似潮汐性质，在正向反向传播计算时，由于activation存在，GPU可供HybridPS存储很少。
-当Optimizer更新时，由于activation都释放掉了，GPU显存几乎可以全部供HybridPS使用。
+GPU显存使用具有类似潮汐性质，在正向反向传播计算时，由于activation存在，GPU可供PatrickStar存储很少。
+当Optimizer更新时，由于activation都释放掉了，GPU显存几乎可以全部供PatrickStar使用。
 因为，为了更充分利用内存资源，增加计算通信重叠，Chunk机制营运而生。
 当计算设备需要用一个Chunk的数据时，这个Chunk不在本地，则需要通过通信方式从远程设备上获取，
 通信方式包括CPU-GPU之间拷贝，和GPU之间的collective通信。
 [Chunk设计文档](./client/README.md)
 
 
-HybridPS由Manager和Client两部分组成。
+PatrickStar由Manager和Client两部分组成。
 [PyTorch DDP](https://pytorch.org/tutorials/intermediate/ddp_tutorial.html)的数据并行方案中，
 每一个进程负责一块GPU卡的计算。
-基于此，HybridPS在每一个GPU计算进程中一个Client。
+基于此，PatrickStar在每一个GPU计算进程中一个Client。
 它负责Param，AccGrad和OS的管理。
 Manager是一个Singleton被所有计算进程共享的全局数据结构。
 
 Client支持的方法
-1. register_module(module)，将一个pytorch Module的Param (FP16)和Grad (FP16)存储由HybridPS接管。
-2. register_optim(optim)，讲一个优化器的底层空间(P FP32, G FP32, M FP32, V FP32)有HybridPS接管。
+1. register_module(module)，将一个pytorch Module的Param (FP16)和Grad (FP16)存储由PatrickStar接管。
+2. register_optim(optim)，讲一个优化器的底层空间(P FP32, G FP32, M FP32, V FP32)有PatrickStar接管。
 3. access(param)，让param存储在计算设备上，param/grad计算设备是GPU，opti计算设备是cpu
 4. release(param)，param不用了，可以被迁移了
 4. allreduce/broadcast(local_tensor)，local_tensor每个进程拥有的本地tensor，allreduce结果是一个被Hybrid管理的张量。
@@ -101,12 +101,12 @@ CPU-GPU data move elapse 0.0002434253692626953 sec, total elapse 0.0339269638061
 *时间
 is_ps True elapse 0.20960783958435059
 
-3. 不使用HybridPS
+3. 不使用PatrickStar
 *时间：
 is_ps False elapse 0.07625579833984375
 *内存:
 MA 232.0 KB         Max_MA 245.5 KB         CA 2048.0 KB         Max_CA 2048 KB
 CPU Virtual Memory:  used = 3.92 GB, percent = 25.1%
 
-目前HybridPS可以显著节省显存。但是内存用量没有变化，延迟显著增加。一部分是CPU-GPU数据移动引起的。另一部分可能是分配释放内存引起的。
+目前PatrickStar可以显著节省显存。但是内存用量没有变化，延迟显著增加。一部分是CPU-GPU数据移动引起的。另一部分可能是分配释放内存引起的。
 Chunk复用，预取，通信计算重叠是性能优化的方向。

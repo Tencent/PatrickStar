@@ -35,7 +35,7 @@ from torch._utils import _flatten_dense_tensors, _unflatten_dense_tensors
 from .loss_scaler import DynamicLossScaler, LossScaler
 from .fp16util import model_grads_to_master_grads, master_params_to_model_params, clip_grad_norm
 
-from client import HybridPSClient
+from client import PatrickStarClient
 
 from apex.multi_tensor_apply import multi_tensor_applier
 import amp_C
@@ -196,7 +196,7 @@ class FP16_Optimizer(object):
         self.fp16_groups = []
         self.fp32_from_fp16_groups = []
         self.fp32_from_fp32_groups = []
-        # TODO(jiaruifang) master_param被HybridPS接管
+        # TODO(jiaruifang) master_param被PatrickStar接管
         # 需要和fp16的chunk分割方式一样
         for i, param_group in enumerate(self.optimizer.param_groups):
             self.maybe_print(

@@ -19,6 +19,7 @@ from .parameter import PSParameter, register_param
 import torch
 import logging
 import sys
+from utils import logger
 
 
 class ChunkCreator(object):
@@ -44,6 +45,7 @@ class ChunkCreator(object):
         # list_id表示tensor在list的顺序。global id跨list需要清零
         self.list_id = 0
         self.global_chunk_id = 0
+        logger.info(f'default chunk size {default_chunk_size}')
 
     def add_tensor(self, tensor_id, numel, param, access_type: AccessType,
                    data_type):
@@ -145,7 +147,7 @@ class ChunkShemaScheduler(object):
                     # Eager state initialization, different from Pytorch
                     if len(state) == 0:
                         state['step'] = 0
-                        # 被HybridPS管理
+                        # 被PatrickStar管理
                         # Exponential moving average of gradient values
                         data_type = p.dtype
                         state['exp_avg'] = torch.nn.Parameter(
@@ -241,7 +243,7 @@ class ChunkShemaScheduler(object):
                 if p.requires_grad is True:
                     state = self.optimizer.state[p]
                     state['step'] = 0
-                    # 被HybridPS管理
+                    # 被PatrickStar管理
                     # Exponential moving average of gradient values
                     data_type = torch.float
                     state['exp_avg'] = torch.nn.Parameter(
@@ -281,7 +283,7 @@ class ChunkShemaScheduler(object):
                     state = self.optimizer.state[p]
                     # Eager state initialization, different from Pytorch
                     state['step'] = 0
-                    # 被HybridPS管理
+                    # 被PatrickStar管理
                     # Exponential moving average of gradient values
                     data_type = torch.float
                     state['exp_avg_sq'] = torch.nn.Parameter(

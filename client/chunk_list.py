@@ -14,7 +14,7 @@
 from .chunk_data import Chunk
 from .const import PSChunkStatus, AccessType, PSTensorStatus
 from .helper import getsizeof
-from manager import HybridPSManager
+from manager import PatrickStarManager
 
 import sys
 import logging
@@ -118,7 +118,7 @@ class ChunkList(object):
         logger.debug(
             f'prepare_device target device {target_device} need size {need_bytes} bytes'
         )
-        ps_manager = HybridPSManager()
+        ps_manager = PatrickStarManager()
         max_mem = ps_manager.max_mem(target_device.type, target_device.index)
         if max_mem < need_bytes:
             logger.error(
@@ -318,7 +318,7 @@ class ChunkList(object):
             old_status, new_status)
 
     def visit(self):
-        ps_manager = HybridPSManager()
+        ps_manager = PatrickStarManager()
         ps_manager.visit()
         logging.info('* chunk list visit results:')
         logging.info('** chunk_id, device, size(B), ' 'type, device, status')

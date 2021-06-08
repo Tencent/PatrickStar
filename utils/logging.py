@@ -45,7 +45,7 @@ class LoggerFactory:
         return logger_
 
 
-logger = LoggerFactory.create_logger(name="HybridPS", level=logging.INFO)
+logger = LoggerFactory.create_logger(name="PatrickStar", level=logging.INFO)
 
 
 def log_dist(message, ranks=None, level=logging.INFO):

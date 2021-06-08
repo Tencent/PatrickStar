@@ -11,7 +11,7 @@ chunk底层一段连续的存储空间，它被用来存储多个张量。
 必须释放FP32 chunk，新建一个FP16 chunk来完成FP32->FP16的转换。
 
 优化Pytorch runtime内存的思路是，
-在正反向传播计算时，把param的data和grad指向HybridPS管理的内存。
+在正反向传播计算时，把param的data和grad指向PatrickStar管理的内存。
 
 Pytorch nn.Paramter使用规则。
 Parameter的grad和data必须在同一个设备上。

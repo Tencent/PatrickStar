@@ -12,10 +12,10 @@
 # See the AUTHORS file for names of contributors.
 
 import unittest
-from client import HybridPSClient, ChunkList, PSTensorStatus, AccessType, ChunkTensorIndex, PSChunkStatus
+from client import PatrickStarClient, ChunkList, PSTensorStatus, AccessType, ChunkTensorIndex, PSChunkStatus
 import logging
 import torch
-from manager import HybridPSManager
+from manager import PatrickStarManager
 from utils import see_memory_usage
 from client import register_param
 
@@ -23,9 +23,9 @@ from client import register_param
 class TestClientAccess(unittest.TestCase):
     def setUp(self):
         self.default_chunk_size = 20
-        self.client = HybridPSClient(
+        self.client = PatrickStarClient(
             rank=0, default_chunk_size=self.default_chunk_size)
-        self.manager = HybridPSManager()
+        self.manager = PatrickStarManager()
         self.manager.reset([300], [1024])
         self.compute_device = torch.device(
             'cuda:0') if torch.cuda.is_available() else torch.device('cpu')

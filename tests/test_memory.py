@@ -17,18 +17,18 @@ from common import distributed_test
 import time
 import logging
 
-from manager import HybridPSManager
-from client import HybridPSClient, AccessType
+from manager import PatrickStarManager
+from client import PatrickStarClient, AccessType
 from utils import see_memory_usage
 
-manager = HybridPSManager()
+manager = PatrickStarManager()
 
 
 def test_monitor():
     # gpu 4GB, CPU 4 GB
     manager.init(gpu_info=[1024 * 1024 * 1024 * 4],
                  cpu_info=[4 * 1024 * 1024 * 1024])
-    print("is init manager", HybridPSManager().is_init())
+    print("is init manager", PatrickStarManager().is_init())
 
     # nothing in memory
     # MA 0.0 KB         Max_MA 0.0 KB         CA 0.0 KB         Max_CA 0 KB
@@ -65,7 +65,7 @@ def test_monitor():
     # NOTE(jiaruifang) Why CPU memory usage increase? I guess the PyTorch runtime occupy some memory.
     see_memory_usage('after init param1 and parm2', force=True)
 
-    client = HybridPSClient(rank=0, default_chunk_size=1024)
+    client = PatrickStarClient(rank=0, default_chunk_size=1024)
 
     client.register_param(param1)
 
