@@ -31,6 +31,7 @@ from manager import HybridPSManager
 from client import setup_hybrid_ps_hooks
 from ops import CPUAdam, TorchAdam, FP16Adam
 import utils.global_timer as global_timer
+from utils import debug_flag
 from runtime import Init, initialize_engine
 
 parser = argparse.ArgumentParser(
@@ -124,44 +125,66 @@ def test_bert_model(is_ckp: bool = False,
                     sequence_length=256,
                     num_layer=12,
                     stop_step=10):
-    logging.info(f'test a simple model with checkpoit {is_ckp} FP16 {is_fp16}')
+    logging.info(f'test a bert model with checkpoit {is_ckp} FP16 {is_fp16}')
     logging.info(
         f'batch_size {batch_size}, hidden_dim {hidden_dim}, sequence_length {sequence_length}, num_layer {num_layer}'
     )
-    rank = args.local_rank
+    # rank = args.local_rank
+    rank = torch.distributed.get_rank()
+    if debug_flag:
+        rank = 0
+
     device = torch.device(f'cuda:{rank}')
 
+    # TODO(jiaruifang) 把vocab size调小，WE层需要特殊处理？
+    # rank 0在cpu上计算？
     if is_ckp:
         cfg = BertConfig(gradient_checkpointing=True,
                          hidden_dim=hidden_dim,
+                         vocab_size=10,
                          max_position_embeddings=sequence_length,
                          num_hidden_layers=num_layer)
     else:
         cfg = BertConfig(hidden_dim=hidden_dim,
+                         vocab_size=10,
                          max_position_embeddings=sequence_length,
                          num_hidden_layers=num_layer)
 
     if not is_ps:
         model = BertForSequenceClassification(cfg)
         model.cuda()
-        model.train()
         if is_fp16:
             model = FP16_Module(model)
+        model.train()
         optimizer = TorchAdam(model.parameters(), lr=0.001)
         if is_fp16:
             optimizer = FP16_Optimizer(optimizer)
+        # TODO单卡模拟多卡
+        if debug_flag:
+            model.cuda(0)
+            model = torch.nn.parallel.DistributedDataParallel(model,
+                                                              device_ids=[0])
+        else:
+            model.cuda(rank)
+            model = torch.nn.parallel.DistributedDataParallel(
+                model, device_ids=[rank])
     else:
-        # chunk 512 MB, good for CPU-GPU bandwidth
+        default_chunk_size = 1024 * 1024 * 8
+        manager = HybridPSManager()
+        manager.reset([default_chunk_size * 4 * world_size] * world_size,
+                      [default_chunk_size * 2 * 14 * 6] * world_size)
         if is_fp16:
-            with Init(dtype=torch.float):
-                model = BertForSequenceClassification(cfg)
 
             class Config(object):
                 def __init__(self):
-                    self.default_chunk_size = 1024 * 1024
+                    self.default_chunk_size = default_chunk_size
 
             config = Config()
-            config.default_chunk_size = 1024 * 1024 * 128
+            model = BertForSequenceClassification(cfg)
+            if debug_flag:
+                model.cuda(0)
+            else:
+                model.cuda(rank)
             model, optimizer, _, _ = initialize_engine(
                 args=None,
                 model=model,
@@ -169,19 +192,12 @@ def test_bert_model(is_ckp: bool = False,
                 config=config)
         else:
             model = BertForSequenceClassification(cfg)
-            model.train()
-            client = HybridPSClient(rank=0,
-                                    default_chunk_size=1024 * 1024 * 8,
+            client = HybridPSClient(rank=0 if debug_flag else rank,
+                                    default_chunk_size=default_chunk_size,
                                     warmup=True,
                                     is_fp16=is_fp16)
-            optimizer = CPUAdam(client,
-                                model.parameters(),
-                                lr=0.001,
-                                prefer_device=torch.device(f'cuda:{rank}'))
+            optimizer = CPUAdam(client, model.parameters(), lr=0.001)
             client.init(model, optimizer)
-        see_memory_usage(
-            f"ckp {is_ckp} fp16 {is_fp16} ps {is_ps} after FP16 Adam init",
-            force=True)
 
     model_numel = get_model_size(model)
     calculate_model_size(cfg)
@@ -195,7 +211,8 @@ def test_bert_model(is_ckp: bool = False,
         total_samples=1000,
         sequence_length=sequence_length,
         device=device,
-        data_type=torch.half if is_fp16 else torch.float)
+        data_type=torch.half if is_fp16 else torch.float,
+        is_distrbuted=True)
 
     loss_res = []
 
@@ -211,9 +228,6 @@ def test_bert_model(is_ckp: bool = False,
         # if torch.distributed.get_rank() == 0:
         logging.info(f"LOSS of step {n}: {loss.item()}")
         loss_res.append(loss.item())
-        if is_ps:
-            timer = global_timer.IterationTimer()
-            logging.info(f'FWD fininshed moment {timer.moment()}')
 
         if not is_ps:
             if is_fp16:
@@ -230,13 +244,8 @@ def test_bert_model(is_ckp: bool = False,
                 optimizer.zero_grad()
                 loss.backward()
 
-        if is_ps:
-            timer = global_timer.IterationTimer()
-            logging.info(f'BWD fininshed moment {timer.moment()}')
         optimizer.step()
-        if is_ps:
-            timer = global_timer.IterationTimer()
-            logging.info(f'step fininshed moment {timer.moment()}')
+
         see_memory_usage(
             f"ckp {is_ckp} fp16 {is_fp16} ps {is_ps}  after step {n}",
             force=True)
@@ -256,17 +265,17 @@ def test_bert_model(is_ckp: bool = False,
     )
     logging.info(f"{total_macs/1e9/(elapse/(stop_step+1))} GFlops")
     logging.info(f"model numel {model_numel/1e9} B")
-    if is_ps:
-        global_timer.time_profiler()
-        timer = global_timer.IterationTimer()
-        with open('gpu_used.txt', 'w') as fh:
-            fh.write(
-                f'gpu_ps_used_list {len(timer.gpu_ps_used_list)} \n f{timer.gpu_ps_used_list}'
-            )
-            fh.write(
-                f'gpu_used_list {len(timer.gpu_used_list)} \n {timer.gpu_used_list}'
-            )
-            fh.write(f'gpu_sys_used_list \n {timer.gpu_sys_used_list}')
+    # if is_ps:
+    #     global_timer.time_profiler()
+    #     timer = global_timer.IterationTimer()
+    #     with open('gpu_used.txt', 'w') as fh:
+    #         fh.write(
+    #             f'gpu_ps_used_list {len(timer.gpu_ps_used_list)} \n f{timer.gpu_ps_used_list}'
+    #         )
+    #         fh.write(
+    #             f'gpu_used_list {len(timer.gpu_used_list)} \n {timer.gpu_used_list}'
+    #         )
+    #         fh.write(f'gpu_sys_used_list \n {timer.gpu_sys_used_list}')
     logging.info("*" * 20)
     return loss_res
 
@@ -287,7 +296,14 @@ if __name__ == "__main__":
     # hidden_dim 1024, batch 16, seqence_leng 1024, ckp True.
     # PS is able to run the training, while PyTorch failed.
 
-    plan = "A"
+    if not torch.distributed.is_initialized():
+        torch.distributed.init_process_group(
+            backend='gloo' if debug_flag else 'nccl')
+
+    rank = torch.distributed.get_rank()
+    world_size = torch.distributed.get_world_size()
+
+    plan = "B"
     if res_check:
         plan = "B"
     if plan == "A":
@@ -296,12 +312,12 @@ if __name__ == "__main__":
         if use_fp16:
             # 精心挑选的参数
             manager = HybridPSManager()
-            manager.init([1024 * 1024 * 1024 * 2],
-                         [1024 * 1024 * 1024 * 4 * 4])
+            manager.init([1024 * 1024 * 1024 * 2] * world_size,
+                         [1024 * 1024 * 1024 * 4 * 4] * world_size)
         else:
             manager = HybridPSManager()
-            manager.init([1024 * 1024 * 512 * 4] * 2,
-                         [1024 * 1024 * 1024 * 4 * 4])
+            manager.init([1024 * 1024 * 512 * 4] * world_size,
+                         [1024 * 1024 * 1024 * 4 * 4] * world_size)
         hidden_dim = 3072
         batch_size = 8
         sequence_length = 1024
@@ -309,10 +325,10 @@ if __name__ == "__main__":
     elif plan == 'B':
         # HybridPS and Torch都可以
         manager = HybridPSManager()
-        manager.init([1024 * 1024 * 1024 * 8] * 2,
-                     [1024 * 1024 * 1024 * 4 * 4])
+        manager.init([1024 * 1024 * 1024 * 8] * world_size,
+                     [1024 * 1024 * 1024 * 4 * 4] * world_size)
         hidden_dim = 1536
-        batch_size = 8
+        batch_size = 1
         sequence_length = 1024
         num_layer = 12
     elif plan == 'C':
@@ -320,14 +336,16 @@ if __name__ == "__main__":
         # HybridPS and PyTorch is OK
         # 没有prepare device开销
         manager = HybridPSManager()
-        manager.init([1024 * 1024 * 512 * 4] * 2, [1024 * 1024 * 1024 * 4 * 4])
+        manager.init([1024 * 1024 * 512 * 4] * world_size,
+                     [1024 * 1024 * 1024 * 4 * 4] * world_size)
         hidden_dim = 768
         batch_size = 8
         sequence_length = 1024
         num_layer = 12
     elif plan == 'D':
         manager = HybridPSManager()
-        manager.init([1024 * 1024 * 1024], [1024 * 1024 * 1024 * 4 * 4])
+        manager.init([1024 * 1024 * 1024] * world_size,
+                     [1024 * 1024 * 1024 * 4 * 4] * world_size)
         hidden_dim = 4096  #2048
         batch_size = 2
         sequence_length = 1536
@@ -351,7 +369,7 @@ if __name__ == "__main__":
         torch.manual_seed(0)
         loss_list = test_bert_model(is_ckp=use_ckp,
                                     is_fp16=use_fp16,
-                                    is_ps=True,
+                                    is_ps=False,
                                     hidden_dim=hidden_dim,
                                     batch_size=batch_size,
                                     sequence_length=sequence_length,
@@ -362,7 +380,7 @@ if __name__ == "__main__":
         torch.manual_seed(0)
         loss_ref_list = test_bert_model(is_ckp=use_ckp,
                                         is_fp16=use_fp16,
-                                        is_ps=False,
+                                        is_ps=True,
                                         hidden_dim=hidden_dim,
                                         batch_size=batch_size,
                                         sequence_length=sequence_length,

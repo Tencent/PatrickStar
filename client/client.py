@@ -281,6 +281,9 @@ class HybridPSClient(object):
         chunk_id_list = self.chunk_tensor_index.get_global_chunk_id_list(
             chunk_id)
         rank = torch.distributed.get_rank()
+        # if rank >= len(chunk_id_list):
+        #     return False
+        assert rank < len(chunk_id_list)
         local_chunk_id = chunk_id_list[rank]
         return chunk_id == local_chunk_id
 
@@ -293,7 +296,6 @@ class HybridPSClient(object):
         world_size = torch.distributed.get_world_size()
         rank = torch.distributed.get_rank()
 
-        # release数目只有两种情况, 1 hold + N-1 release, no release
         # FWD过程，当global chunk中有param第一次被访问时，需要将global chunk收集到本地。
         # 如何判断global chunk中有param第一次被访问的时刻，从而正确触发allgather操作。
         # 第一个param被访问时的必要条件是remote chunk状态为RELEASED。
@@ -321,10 +323,15 @@ class HybridPSClient(object):
                     compute_device,
                     self.chunk_list[chunk_id].get_chunk_space())
                 self.chunk_list[chunk_id].allocate_payload(compute_device)
+                # 刚分配的chunk，以备allgather使用，allgather之前不要被换出。
+                self.chunk_list[chunk_id].pin()
                 self.set_all_tensors_status_in_chunk(chunk_id,
                                                      PSTensorStatus.HOLD)
                 allgather_payload_buff.append(
                     self.chunk_list[chunk_id].payload)
+
+        for chunk_id in chunk_id_list:
+            self.chunk_list[chunk_id].unpin()
 
         assert torch.distributed.is_initialized(
         ), "torch distributed is not initialized during allgather"
@@ -332,6 +339,7 @@ class HybridPSClient(object):
         world_size = torch.distributed.get_world_size()
         rank = torch.distributed.get_rank()
 
+        # TODO(jiaruifang) 部分process做allreduce，用dummy chunk！
         group_list = []
         for i, _ in enumerate(chunk_id_list):
             group_list.append(i)
@@ -341,6 +349,7 @@ class HybridPSClient(object):
                                               local_chunk_payload,
                                               group=group,
                                               async_op=False)
+
         allgather_payload_buff = []
 
     def access_dist(self, param: torch.nn.Parameter, access_type: AccessType,
@@ -362,8 +371,9 @@ class HybridPSClient(object):
             chunk_id)
         rank = torch.distributed.get_rank()
 
-        if rank >= len(chunk_id_list):
-            return
+        # if rank >= len(chunk_id_list):
+        #     return
+        assert rank < len(chunk_id_list), f"rank {rank} < {len(chunk_id_list)}"
 
         local_chunk_id = chunk_id_list[rank]
 
@@ -382,6 +392,9 @@ class HybridPSClient(object):
                                   training_stage)
         self.chunk_list[local_chunk_id].unpin()
 
+        # _fetch_remote_chunks可能不执行allgather，此时远端的chunk在本地，需要取到计算设备上。
+        self.chunk_list.access_chunk(chunk_id, compute_device)
+
         # 将param内存定位到chunk上
         tensor_id = param.ps_attr.get_tensor_id(access_type)
         info = self.chunk_tensor_index.get_tensor_info(tensor_id)
@@ -391,6 +404,9 @@ class HybridPSClient(object):
 
         assert self.chunk_list[
             chunk_id].payload is not None, f"rank {rank} chunk id {chunk_id}' payload is None'"
+        assert self.chunk_list[
+            chunk_id].payload.device == compute_device, f"rank {rank} chunk id {chunk_id}' payload is not on {compute_device}, but on {self.chunk_list[chunk_id].payload.device}"
+
         param.ps_attr.set_tensor(
             self.chunk_list[chunk_id].payload.narrow(0, start_offset, numel),
             access_type)
@@ -548,8 +564,9 @@ class HybridPSClient(object):
         chunk_id_list = self.chunk_tensor_index.get_global_chunk_id_list(
             chunk_id)
 
-        if rank >= len(chunk_id_list):
-            return
+        # if rank >= len(chunk_id_list):
+        #     return
+        assert rank < len(chunk_id_list), f"rank {rank} < {len(chunk_id_list)}"
 
         local_chunk_id = chunk_id_list[rank]
 

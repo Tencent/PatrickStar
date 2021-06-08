@@ -933,7 +933,8 @@ def get_bert_data_loader(batch_size,
                          total_samples,
                          sequence_length,
                          device,
-                         data_type=torch.float):
+                         data_type=torch.float,
+                         is_distrbuted=False):
     train_data = torch.randint(low=0,
                                high=10,
                                size=(total_samples, sequence_length),
@@ -941,7 +942,11 @@ def get_bert_data_loader(batch_size,
                                dtype=torch.long)
     train_label = torch.zeros(total_samples, dtype=torch.long, device=device)
     train_dataset = torch.utils.data.TensorDataset(train_data, train_label)
-    sampler = SequentialSampler(train_dataset)
+    if is_distrbuted:
+        sampler = torch.utils.data.distributed.DistributedSampler(
+            train_dataset)
+    else:
+        sampler = SequentialSampler(train_dataset)
     train_loader = torch.utils.data.DataLoader(train_dataset,
                                                batch_size=batch_size,
                                                sampler=sampler)
