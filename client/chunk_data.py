@@ -32,7 +32,8 @@ class Chunk(object):
                  capacity: int,
                  data_type: torch.dtype,
                  chunk_id: int,
-                 rank: int = 0):
+                 rank: int = 0,
+                 is_dummy: bool = False):
         """
         Chunk是数据迁移的最小单位，
         它用一段连续的内存来存储张量
@@ -45,6 +46,7 @@ class Chunk(object):
         self.capacity = capacity
         self.data_type = data_type
         self.rank = rank
+        self._is_dummy = is_dummy
 
         # 存储chunk管理tensor的状态数目
         self._status_dict = {
@@ -64,6 +66,9 @@ class Chunk(object):
 
         self.access_moments = []
         self._pin_flag = False
+
+    def is_dummy(self):
+        return self._is_dummy
 
     def add_moment(self, mom):
         if len(self.access_moments) > 0 and self.access_moments[-1] == mom:
@@ -165,6 +170,17 @@ class Chunk(object):
         else:
             # uninit和free同等对待
             return PSChunkStatus.FREE
+
+    def all_tensor_status(self, status):
+        """
+        判断所有tensor都是status状态
+        """
+        # TODO(jiaruifang) 可以优化一下
+        tensor_num = 0
+        for k, v in self._status_dict.items():
+            if k != PSTensorStatus.FREE:
+                tensor_num += v
+        return self._status_dict[status] == tensor_num
 
     def touch(self):
         self.timestamp = datetime.datetime.now().timestamp()

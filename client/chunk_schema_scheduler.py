@@ -20,11 +20,13 @@ import torch
 import logging
 import sys
 from utils import logger
+from typing import List
 
 
 class ChunkCreator(object):
     def __init__(self, default_chunk_size: int, chunk_list: ChunkList,
-                 chunk_tensor_index: ChunkTensorIndex):
+                 chunk_tensor_index: ChunkTensorIndex,
+                 dummy_param_list: List[torch.nn.Parameter]):
         """
         更新chunk_list和chunk_tensor_index，来建立chunk-tensor schema
         """
@@ -45,6 +47,8 @@ class ChunkCreator(object):
         # list_id表示tensor在list的顺序。global id跨list需要清零
         self.list_id = 0
         self.global_chunk_id = 0
+
+        self.dummy_param_list = dummy_param_list
         logger.info(f'default chunk size {default_chunk_size}')
 
     def add_tensor(self, tensor_id, numel, param, access_type: AccessType,
@@ -91,8 +95,32 @@ class ChunkCreator(object):
                                               self.global_chunk_id)
             self.chunk_id += 1
             self.acc_cnt = 0
+            # 下一个chunk的list_id
+            self.list_id += 1
 
-            self.process_id = 0
+        # 给不足world_size的global chunk补上dummy chunk，每个dummy chunk管理一个dummy param
+
+        while self.list_id % self.world_size != 0:
+            logger.info('add dummy chunk')
+            self.chunk_list.new_chunk(self.chunk_id,
+                                      self.default_chunk_size,
+                                      self.data_type,
+                                      is_dummy=True)
+            self.chunk_tensor_index.add_chunk(self.chunk_id,
+                                              self.default_chunk_size,
+                                              self.data_type,
+                                              self.global_chunk_id)
+            self.dummy_param_list.append(
+                torch.nn.Parameter(torch.zeros(1, dtype=self.data_type),
+                                   requires_grad=False))
+            # 加入一个dummy param可以让dummy chunk状态被设置为hold
+            register_param(self.dummy_param_list[-1], "dummy")
+            self.chunk_tensor_index.add_tensor(
+                self.chunk_id, self.dummy_param_list[-1].ps_attr.data_id(), 0,
+                1, self.dummy_param_list[-1], AccessType.DATA)
+
+            self.chunk_id += 1
+            self.list_id += 1
 
         self.list_id = 0
         self.global_chunk_id += 1
@@ -106,9 +134,11 @@ class ChunkShemaScheduler(object):
         self.default_chunk_size = default_chunk_size
         self.chunk_list = chunk_list
         self.chunk_tensor_index = chunk_tensor_index
+        self.dummy_param_list = []
 
         self.chunk_creator = ChunkCreator(default_chunk_size, chunk_list,
-                                          chunk_tensor_index)
+                                          chunk_tensor_index,
+                                          self.dummy_param_list)
 
     def schedule(self):
         """

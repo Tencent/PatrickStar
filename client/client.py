@@ -158,12 +158,11 @@ class PatrickStarClient(object):
 
         self.static_chunk_schedule(model, optimizer)
 
-        self.chunk_tensor_index.visit_chunks(self.chunk_list)
-
         if torch.distributed.is_initialized():
             rank = torch.distributed.get_rank()
         # TODO(jiaruifang) 目前仍是调试状态，每个进程有全部模型
         self._copy_model(model)
+        # self.chunk_tensor_index.visit_chunks(self.chunk_list)
 
         self.register_model_hook(model)
 
@@ -224,6 +223,10 @@ class PatrickStarClient(object):
                     param.data = torch.zeros(1,
                                              dtype=param.dtype,
                                              device=param.device)
+        for param in self.chunk_schema_scheduler.dummy_param_list:
+            if self.is_local_tensor(param, AccessType.DATA):
+                self.access_data(param, torch.device('cpu:0'))
+                self.release_data(param, PSTensorStatus.HOLD)
 
     def generate_grad_params(self):
         """
@@ -345,6 +348,7 @@ class PatrickStarClient(object):
             group_list.append(i)
         group = torch.distributed.new_group(group_list)
 
+        logger.debug(f'rank {rank} allgather {chunk_id_list}')
         handle = torch.distributed.all_gather(allgather_payload_buff,
                                               local_chunk_payload,
                                               group=group,
@@ -592,20 +596,24 @@ class PatrickStarClient(object):
             param.grad = None
 
         # 判断global所有的chunk都被使用完毕，可以释放remote chunk
-        # FWD: 当所有chunk都是HOLD_AFTER_FWD
-        # BWD: 当所有chunk都是HOLD_AFTER_BWD
+        # FWD: 当所有非dummy的chunk都是HOLD_AFTER_FWD
+        # BWD: 当所有非dummy的chunk都是HOLD_AFTER_BWD
         all_chunks_ready = True
         for i in chunk_id_list:
             if training_stage == TrainingStage.FWD:
-                if self.chunk_list[i].get_status(
-                ) != PSChunkStatus.HOLD_AFTER_FWD:
+                if not self.chunk_list[i].all_tensor_status(
+                        PSTensorStatus.HOLD_AFTER_FWD
+                ) and not self.chunk_list[i].is_dummy():
                     all_chunks_ready = False
             elif training_stage == TrainingStage.BWD:
-                if self.chunk_list[i].get_status(
-                ) != PSChunkStatus.HOLD_AFTER_BWD:
+                if not self.chunk_list[i].all_tensor_status(
+                        PSTensorStatus.HOLD_AFTER_BWD
+                ) and not self.chunk_list[i].is_dummy():
                     all_chunks_ready = False
+                # self.chunk_tensor_index.visit_chunk(self.chunk_list[i])
             else:
                 raise RuntimeError
+
         if all_chunks_ready:
             if is_allreduce:
                 world_size = torch.distributed.get_world_size()
@@ -628,6 +636,8 @@ class PatrickStarClient(object):
                         async_op=False)
                 else:
                     for rank_, chunk_id_ in enumerate(chunk_id_list):
+                        if self.chunk_list[chunk_id_].is_dummy():
+                            continue
                         torch.distributed.reduce(
                             self.chunk_list[chunk_id_].payload,
                             rank_,
@@ -635,13 +645,13 @@ class PatrickStarClient(object):
                             group=group,
                             async_op=False)
                 # NOTE把下面行注释了不影响最终结果？loss可能是有softmax算出，所以相对值不影响LOSS比较，但是影响了
+                # 不应该除以world_size,减去dummy chunk个数
                 self.chunk_list[local_chunk_id].payload /= world_size
 
             # 删除remote chunk的payload
             for i in chunk_id_list:
                 if i != local_chunk_id:
-                    logger.debug(
-                        f'rank {rank} bwd remove payload of chunk_id {i}')
+                    logger.debug(f'rank {rank} remove payload of chunk_id {i}')
                     self.chunk_list[i].release_payload()
                     self.set_all_tensors_status_in_chunk(
                         i, PSTensorStatus.FREE)

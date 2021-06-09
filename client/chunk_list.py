@@ -180,8 +180,11 @@ class ChunkList(object):
         if self._time_profile:
             global_timer.chunk_move_elapse += time.time() - start_time
 
-    def new_chunk(self, chunk_id: int, chunk_size: int,
-                  data_type: torch.dtype) -> int:
+    def new_chunk(self,
+                  chunk_id: int,
+                  chunk_size: int,
+                  data_type: torch.dtype,
+                  is_dummy: bool = False) -> int:
         """
         新建一个chunk，并未初始化内存
         """
@@ -192,7 +195,8 @@ class ChunkList(object):
         self.chunk_id_to_chunk_dict[chunk_id] = Chunk(capacity=chunk_size,
                                                       data_type=data_type,
                                                       chunk_id=chunk_id,
-                                                      rank=self.rank)
+                                                      rank=self.rank,
+                                                      is_dummy=is_dummy)
         logging.debug(
             f'allocate with new chunk chunk_id {chunk_id} size {chunk_size} data_type {data_type}'
         )

@@ -169,7 +169,7 @@ def test_bert_model(is_ckp: bool = False,
             model = torch.nn.parallel.DistributedDataParallel(
                 model, device_ids=[rank])
     else:
-        default_chunk_size = 1024 * 1024 * 8
+        default_chunk_size = 1024 * 1024 * 10
         manager = PatrickStarManager()
         manager.reset([default_chunk_size * 4 * world_size] * world_size,
                       [default_chunk_size * 2 * 14 * 6] * world_size)
