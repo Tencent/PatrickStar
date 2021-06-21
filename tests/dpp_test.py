@@ -24,7 +24,7 @@ import torch.distributed as dist
 from ops import CPUAdam, TorchAdam, FP16Adam
 from client import PatrickStarClient, setup_hybrid_ps_hooks, PSTensorStatus
 from manager import PatrickStarManager
-from utils import see_memory_usage, debug_flag
+from utils import see_memory_usage
 import utils.global_timer as global_timer
 
 from fp16 import configure_fp16_optimizer
@@ -33,13 +33,8 @@ from fp16 import FP16_Optimizer
 
 from tests.simple_net import SimpleModel, get_data_loader
 from runtime import initialize_engine, Init
-
-parser = argparse.ArgumentParser()
-parser.add_argument('--local_rank',
-                    default=-1,
-                    type=int,
-                    help='node rank for distributed training')
-args = parser.parse_args()
+from deepspeed_helper.global_vars import set_global_variables
+from deepspeed_helper.global_vars import get_args
 
 
 def test_simple_model(is_ps: bool = False,
@@ -47,26 +42,28 @@ def test_simple_model(is_ps: bool = False,
                       is_ckp: bool = True,
                       stop_iter: int = 10):
     logging.info(f'test a simple model with hybrid ps {is_ps} FP16 {is_fp16}')
+    args = get_args()
 
     hidden_dim = 4
     batch_size = 4
 
     if not torch.distributed.is_initialized():
-        dist.init_process_group(backend='gloo' if debug_flag else 'nccl')
+        dist.init_process_group(
+            backend='gloo' if args.use_fake_dist else 'nccl')
 
-    rank = torch.distributed.get_rank()
+    if args.use_fake_dist:
+        rank = 0
+    else:
+        rank = args.local_rank
+
     world_size = torch.distributed.get_world_size()
 
-    if debug_flag:
-        torch.cuda.set_device(0)
-        device = torch.device(f'cuda:0')
-    else:
-        torch.cuda.set_device(rank)
-        device = torch.device(f'cuda:{rank}')
+    torch.cuda.set_device(rank)
+    device = torch.device(f'cuda:{rank}')
 
     if not is_ps:
         model = SimpleModel(hidden_dim, is_ckp=is_ckp)
-        model.cuda()
+        model.cuda(rank)
         if is_fp16:
             model = FP16_Module(model)
         model.train()
@@ -74,14 +71,8 @@ def test_simple_model(is_ps: bool = False,
         if is_fp16:
             optimizer = FP16_Optimizer(optimizer)
         # TODO单卡模拟多卡
-        if debug_flag:
-            model.cuda(0)
-            model = torch.nn.parallel.DistributedDataParallel(model,
-                                                              device_ids=[0])
-        else:
-            model.cuda(rank)
-            model = torch.nn.parallel.DistributedDataParallel(
-                model, device_ids=[rank])
+        model = torch.nn.parallel.DistributedDataParallel(model,
+                                                          device_ids=[rank])
     else:
         default_chunk_size = 25
         manager = PatrickStarManager()
@@ -95,10 +86,7 @@ def test_simple_model(is_ps: bool = False,
 
             config = Config()
             model = SimpleModel(hidden_dim, is_ckp=is_ckp)
-            if debug_flag:
-                model.cuda(0)
-            else:
-                model.cuda(rank)
+            model.cuda(rank)
             model, optimizer, _, _ = initialize_engine(
                 args=None,
                 model=model,
@@ -106,7 +94,7 @@ def test_simple_model(is_ps: bool = False,
                 config=config)
         else:
             model = SimpleModel(hidden_dim, is_ckp=is_ckp)
-            client = PatrickStarClient(rank=0 if debug_flag else rank,
+            client = PatrickStarClient(rank=rank,
                                        default_chunk_size=20,
                                        warmup=True,
                                        is_fp16=is_fp16)
@@ -176,6 +164,8 @@ if __name__ == "__main__":
         '%(asctime)s,%(msecs)d %(levelname)-8s [%(filename)s:%(lineno)d] %(message)s',
         datefmt='%Y-%m-%d:%H:%M:%S',
         level=logging.INFO)
+    set_global_variables()
+
     torch.manual_seed(0)
     manager = PatrickStarManager()
     # 4 layer每层20个elem(20*4 bytes)，最少360 (360*4 bytes)内存

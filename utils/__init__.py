@@ -15,6 +15,4 @@ from .global_timer import *
 from .memory_monitor import see_memory_usage
 from .logging import log_dist, logger, print_rank
 from .distributed import init_distributed
-# 用单卡模拟多卡的标识
-debug_flag = True
 use_dist_flag = True

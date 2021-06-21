@@ -15,7 +15,7 @@ import os
 from utils import init_distributed, see_memory_usage
 import torch
 import functools
-from utils import logger, print_rank, debug_flag
+from utils import logger, print_rank
 from client.parameter import PSParameter, register_param
 
 _orig_torch_empty = torch.empty
@@ -176,7 +176,6 @@ class Init(InsertPostInitMethodToModuleSubClasses):
                          dtype=dtype)
         # TODO backend is not locked to nccl
         if not torch.distributed.is_initialized():
-            init_distributed(dist_backend="gloo" if debug_flag else "nccl")
             assert torch.distributed.is_initialized(
             ), "Parameters cannot be scattered without initializing torch.distributed"
         if data_parallel_group is None:

@@ -12,11 +12,12 @@
 # See the AUTHORS file for names of contributors.
 
 from utils import logger, init_distributed
-from utils import print_rank as print_rank_0, debug_flag
+from utils import print_rank as print_rank_0
 from torch.nn.modules import Module
 from client import PatrickStarClient, AccessType, PSChunkStatus, PSTensorStatus
 import torch
 from ops import FP16Adam
+from deepspeed_helper.global_vars import get_args
 
 
 class PatrickStarEngine(Module):
@@ -36,12 +37,12 @@ class PatrickStarEngine(Module):
                  config_params=None,
                  dont_change_device=False):
         super(PatrickStarEngine, self).__init__()
+        args = get_args()
         if not torch.distributed.is_initialized():
-            self.dist_backend = "gloo" if debug_flag else "nccl"
+            self.dist_backend = "gloo" if args.use_fake_dist else "nccl"
             init_distributed(dist_backend=self.dist_backend)
 
-        # TODO 和args的local_rank什么关系？等价么
-        self.rank = 0 if debug_flag else torch.distributed.get_rank()
+        self.rank = 0 if args.use_fake_dist else args.local_rank
         self.training_dataloader = None
         self.lr_scheduler = None
         self.module = model

@@ -26,9 +26,10 @@ import psutil
 import utils.global_timer as global_timer
 from utils.memory_monitor import see_memory_usage, get_memory_used
 import time
-from utils import logger, log_dist, debug_flag
+from utils import logger, log_dist
 
 from queue import PriorityQueue
+from deepspeed_helper.global_vars import get_args
 
 
 class ChunkList(object):
@@ -39,7 +40,8 @@ class ChunkList(object):
         self.chunk_id_to_chunk_dict: dict[int, Chunk] = {}
         self._time_profile = True
         # TODO单GPU不能启动太多stream
-        self.copy_stream = None if debug_flag else torch.cuda.Stream()
+        args = get_args()
+        self.copy_stream = None if args.use_fake_dist else torch.cuda.Stream()
         self.moments_cnt_of_iteration = None
         self.rank = rank
 

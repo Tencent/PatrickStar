@@ -31,33 +31,9 @@ from manager import PatrickStarManager
 from client import setup_hybrid_ps_hooks
 from ops import CPUAdam, TorchAdam, FP16Adam
 import utils.global_timer as global_timer
-from utils import debug_flag
 from runtime import Init, initialize_engine
-
-parser = argparse.ArgumentParser(
-    description="DeepSpeed distributed training launch"
-    " utility that creates multiple distributed"
-    " processes on a single node")
-parser.add_argument('--local_rank',
-                    default=0,
-                    type=int,
-                    help="rank number of the current process.")
-parser.add_argument('--use_ckp',
-                    dest='use_ckp',
-                    action='store_true',
-                    help='using checkpointing for memory saveing.')
-parser.add_argument('--res_check',
-                    dest='res_check',
-                    action='store_true',
-                    help='check results correctness of checkpointing.')
-parser.add_argument('--use_fp16',
-                    dest='use_fp16',
-                    action='store_true',
-                    help='using FP16 for training.')
-parser.add_argument('--use_ps',
-                    dest='use_ps',
-                    action='store_true',
-                    help='using Hybrid PS for training.')
+from deepspeed_helper.global_vars import set_global_variables
+from deepspeed_helper.global_vars import get_args
 
 
 def check_grads_status(model, status):
@@ -129,10 +105,14 @@ def test_bert_model(is_ckp: bool = False,
     logging.info(
         f'batch_size {batch_size}, hidden_dim {hidden_dim}, sequence_length {sequence_length}, num_layer {num_layer}'
     )
-    # rank = args.local_rank
-    rank = torch.distributed.get_rank()
-    if debug_flag:
+
+    args = get_args()
+
+    # 用单卡模拟多卡
+    if args.use_fake_dist:
         rank = 0
+    else:
+        rank = args.local_rank
 
     device = torch.device(f'cuda:{rank}')
 
@@ -152,22 +132,17 @@ def test_bert_model(is_ckp: bool = False,
 
     if not is_ps:
         model = BertForSequenceClassification(cfg)
-        model.cuda()
+        model.cuda(rank)
+
         if is_fp16:
             model = FP16_Module(model)
         model.train()
         optimizer = TorchAdam(model.parameters(), lr=0.001)
         if is_fp16:
             optimizer = FP16_Optimizer(optimizer)
-        # TODO单卡模拟多卡
-        if debug_flag:
-            model.cuda(0)
-            model = torch.nn.parallel.DistributedDataParallel(model,
-                                                              device_ids=[0])
-        else:
-            model.cuda(rank)
-            model = torch.nn.parallel.DistributedDataParallel(
-                model, device_ids=[rank])
+
+        model = torch.nn.parallel.DistributedDataParallel(model,
+                                                          device_ids=[rank])
     else:
         default_chunk_size = 1024 * 1024 * 10
         manager = PatrickStarManager()
@@ -181,9 +156,7 @@ def test_bert_model(is_ckp: bool = False,
 
             config = Config()
             model = BertForSequenceClassification(cfg)
-            if debug_flag:
-                model.cuda(0)
-            else:
+            if args.use_fake_dist:
                 model.cuda(rank)
             model, optimizer, _, _ = initialize_engine(
                 args=None,
@@ -192,7 +165,7 @@ def test_bert_model(is_ckp: bool = False,
                 config=config)
         else:
             model = BertForSequenceClassification(cfg)
-            client = PatrickStarClient(rank=0 if debug_flag else rank,
+            client = PatrickStarClient(rank=rank,
                                        default_chunk_size=default_chunk_size,
                                        warmup=True,
                                        is_fp16=is_fp16)
@@ -287,7 +260,9 @@ if __name__ == "__main__":
         datefmt='%Y-%m-%d:%H:%M:%S',
         level=logging.INFO)
 
-    args = parser.parse_args()
+    set_global_variables()
+
+    args = get_args()
     use_ckp = args.use_ckp
     use_fp16 = args.use_fp16
     use_ps = args.use_ps
@@ -298,9 +273,8 @@ if __name__ == "__main__":
 
     if not torch.distributed.is_initialized():
         torch.distributed.init_process_group(
-            backend='gloo' if debug_flag else 'nccl')
+            backend='gloo' if args.use_fake_dist else 'nccl')
 
-    rank = torch.distributed.get_rank()
     world_size = torch.distributed.get_world_size()
 
     plan = "B"
@@ -327,10 +301,10 @@ if __name__ == "__main__":
         manager = PatrickStarManager()
         manager.init([1024 * 1024 * 1024 * 8] * world_size,
                      [1024 * 1024 * 1024 * 4 * 4] * world_size)
-        hidden_dim = 1536
+        hidden_dim = 768
         batch_size = 1
         sequence_length = 1024
-        num_layer = 12
+        num_layer = 3  #12
     elif plan == 'C':
         # use ckp
         # PatrickStar and PyTorch is OK

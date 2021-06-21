@@ -30,7 +30,8 @@ import utils.global_timer as global_timer
 import time
 from .parameter import PSParameter, register_param, is_param_registed
 from utils.memory_monitor import get_memory_used
-from utils import logger, debug_flag
+from utils import logger
+from deepspeed_helper.global_vars import get_args
 
 
 class CachedFP32Buff(object):
@@ -624,7 +625,8 @@ class PatrickStarClient(object):
                     group_list.append(i)
                 group = torch.distributed.new_group(group_list)
 
-                if not debug_flag:
+                args = get_args()
+                if not args.use_fake_dist:
                     input_list = []
                     for i in chunk_id_list:
                         input_list.append(self.chunk_list[i].payload)
