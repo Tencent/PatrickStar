@@ -15,11 +15,13 @@ import torch
 from torch.utils.data import SequentialSampler
 # from checkpoint.torch_checkpoint import checkpoint
 from torch.utils.checkpoint import checkpoint
+from utils import logger
+from ops.embedding import ParallelBertEmbeddings, BertEmbeddings
 
 
-class SimpleModel(torch.nn.Module):
+class Encoder(torch.nn.Module):
     def __init__(self, hidden_dim, is_ckp=False):
-        super(SimpleModel, self).__init__()
+        super(Encoder, self).__init__()
         self.linear1 = torch.nn.Sequential(
             torch.nn.Linear(hidden_dim, hidden_dim),
             torch.nn.Linear(hidden_dim, hidden_dim),
@@ -28,20 +30,17 @@ class SimpleModel(torch.nn.Module):
         self.linear3 = torch.nn.Linear(hidden_dim, hidden_dim)
         self.linear4 = torch.nn.Linear(hidden_dim, hidden_dim)
         self.linear5 = torch.nn.Linear(hidden_dim, hidden_dim)
-        self.cross_entropy_loss = torch.nn.CrossEntropyLoss()
         self.is_ckp = is_ckp
 
-    def forward(self, x, y):
-        # h = x
-        h1 = x
-        h2 = self.linear1(h1)
+    def forward(self, x):
+        h2 = self.linear1(x)
         if self.is_ckp:
             h3 = checkpoint(self.linear3, h2)
         else:
             h3 = self.linear3(h2)
         h4 = self.linear4(h3)
         h5 = self.linear5(h4)
-        return self.cross_entropy_loss(h5, y)
+        return h5
 
 
 def get_data_loader(batch_size,
@@ -66,3 +65,44 @@ def get_data_loader(batch_size,
                                                batch_size=batch_size,
                                                sampler=sampler)
     return train_loader
+
+
+def get_bert_data_loader(batch_size,
+                         total_samples,
+                         sequence_length,
+                         device,
+                         is_distrbuted=False):
+    train_data = torch.randint(low=0,
+                               high=10,
+                               size=(total_samples, sequence_length),
+                               device=device,
+                               dtype=torch.long)
+    train_label = torch.zeros(total_samples, dtype=torch.long, device=device)
+    train_dataset = torch.utils.data.TensorDataset(train_data, train_label)
+    if is_distrbuted:
+        sampler = torch.utils.data.distributed.DistributedSampler(
+            train_dataset)
+    else:
+        sampler = SequentialSampler(train_dataset)
+    train_loader = torch.utils.data.DataLoader(train_dataset,
+                                               batch_size=batch_size,
+                                               sampler=sampler)
+    return train_loader
+
+
+class SimpleModel(torch.nn.Module):
+    def __init__(self, hidden_dim, is_ckp=False, is_embed_opt=False):
+        super(SimpleModel, self).__init__()
+
+        if is_embed_opt:
+            self.embeddings = ParallelBertEmbeddings(hidden_dim)
+        else:
+            self.embeddings = BertEmbeddings(hidden_dim)
+
+        self.encoder = Encoder(hidden_dim, is_ckp)
+        self.cross_entropy_loss = torch.nn.CrossEntropyLoss()
+
+    def forward(self, x, y):
+        h1 = self.embeddings(x)
+        h2 = self.encoder(h1)
+        return self.cross_entropy_loss(h2[:, 0], y)

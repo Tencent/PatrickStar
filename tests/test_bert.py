@@ -133,7 +133,6 @@ def test_bert_model(is_ckp: bool = False,
     if not is_ps:
         model = BertForSequenceClassification(cfg)
         model.cuda(rank)
-
         if is_fp16:
             model = FP16_Module(model)
         model.train()
@@ -141,6 +140,7 @@ def test_bert_model(is_ckp: bool = False,
         if is_fp16:
             optimizer = FP16_Optimizer(optimizer)
 
+        # DPP 不能要求模型部分在cpu部分在gpu
         model = torch.nn.parallel.DistributedDataParallel(model,
                                                           device_ids=[rank])
     else:
@@ -156,8 +156,7 @@ def test_bert_model(is_ckp: bool = False,
 
             config = Config()
             model = BertForSequenceClassification(cfg)
-            if args.use_fake_dist:
-                model.cuda(rank)
+            model.cuda(rank)
             model, optimizer, _, _ = initialize_engine(
                 args=None,
                 model=model,

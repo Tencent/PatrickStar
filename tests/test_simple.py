@@ -30,8 +30,10 @@ from fp16 import configure_fp16_optimizer
 from fp16 import FP16_Module
 from fp16 import FP16_Optimizer
 
-from tests.simple_net import SimpleModel, get_data_loader
+from tests.simple_net import SimpleModel, get_data_loader, get_bert_data_loader
 from runtime import initialize_engine, Init
+from deepspeed_helper.global_vars import set_global_variables
+from deepspeed_helper.global_vars import get_args
 
 
 def show_optim(optimizer):
@@ -43,21 +45,27 @@ def show_optim(optimizer):
 def test_simple_model(is_ps: bool = False,
                       is_fp16: bool = False,
                       is_ckp: bool = True,
+                      is_embed_opt: bool = False,
                       stop_iter: int = 10):
     logging.info(f'test a simple model with hybrid ps {is_ps} FP16 {is_fp16}')
-
+    args = get_args()
     hidden_dim = 4
     batch_size = 4
 
     if torch.distributed.is_initialized():
         rank = torch.distributed.get_rank()
     else:
-        rank = 0
+        torch.distributed.init_process_group(backend='nccl')
+        rank = args.local_rank
     device = torch.device(f'cuda:{rank}')
 
     if not is_ps:
-        model = SimpleModel(hidden_dim, is_ckp=is_ckp)
-        model.cuda()
+        if is_embed_opt:
+            model = SimpleModel(hidden_dim, is_ckp=is_ckp, is_embed_opt=True)
+            model.encoder.cuda(rank)
+        else:
+            model = SimpleModel(hidden_dim, is_ckp=is_ckp, is_embed_opt=False)
+            model.cuda(rank)
         if is_fp16:
             model = FP16_Module(model)
         model.train()
@@ -73,13 +81,13 @@ def test_simple_model(is_ps: bool = False,
                 def __init__(self):
                     self.default_chunk_size = 1024 * 1024
 
-            config = Config()
-            config.default_chunk_size = 20
+            self = Config()
+            self.default_chunk_size = 20
             model, optimizer, _, _ = initialize_engine(
                 args=None,
                 model=model,
                 model_parameters=model.parameters(),
-                config=config)
+                self=self)
         else:
             model = SimpleModel(hidden_dim, is_ckp=is_ckp)
             client = PatrickStarClient(rank=0,
@@ -91,16 +99,16 @@ def test_simple_model(is_ps: bool = False,
 
     see_memory_usage(f"PS {is_ps} after model init", force=True)
 
-    data_loader = get_data_loader(
-        batch_size=batch_size,
-        total_samples=1000,
-        hidden_dim=hidden_dim,
-        device=device,
-        data_type=torch.half if is_fp16 else torch.float)
+    data_loader = get_bert_data_loader(batch_size=batch_size,
+                                       total_samples=100000,
+                                       sequence_length=10,
+                                       device=device,
+                                       is_distrbuted=True)
 
     loss_res = []
 
     start_time = time.time()
+
     for n, batch in enumerate(data_loader):
         # if is_ps:
         #     client.pre_iter()
@@ -151,6 +159,7 @@ if __name__ == "__main__":
         '%(asctime)s,%(msecs)d %(levelname)-8s [%(filename)s:%(lineno)d] %(message)s',
         datefmt='%Y-%m-%d:%H:%M:%S',
         level=logging.INFO)
+    set_global_variables()
     torch.manual_seed(0)
     manager = PatrickStarManager()
     # 4 layer每层20个elem(20*4 bytes)，最少360 (360*4 bytes)内存
@@ -176,11 +185,17 @@ if __name__ == "__main__":
         # 需要 40和8两个chunk
         manager.reset([48 * 2 * 4] * 1, [160 * 4 * 2 + 2 * 160])
         torch.manual_seed(0)
-        loss_list = test_simple_model(True, is_fp16=True, is_ckp=True)
-        see_memory_usage("after PatrickStar simple model", force=True)
+        loss_list = test_simple_model(is_ps=False,
+                                      is_fp16=False,
+                                      is_ckp=True,
+                                      is_embed_opt=False)
+        # see_memory_usage("after PatrickStar simple model", force=True)
 
         torch.manual_seed(0)
-        loss_list_ref = test_simple_model(False, is_fp16=True, is_ckp=True)
+        loss_list_ref = test_simple_model(is_ps=False,
+                                          is_fp16=False,
+                                          is_ckp=True,
+                                          is_embed_opt=True)
 
         print('ps loss', loss_list)
         print('ref loss', loss_list_ref)
