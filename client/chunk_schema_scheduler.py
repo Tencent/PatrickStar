@@ -15,7 +15,7 @@ from .chunk_data import Chunk
 from .chunk_list import ChunkList
 from .chunk_tensor_index import ChunkTensorIndex
 from .const import AccessType, PSTensorStatus
-from .parameter import PSParameter, register_param
+from .parameter import PSParameter, register_param, is_param_registed
 import torch
 import logging
 import sys
@@ -51,12 +51,12 @@ class ChunkCreator(object):
         self.dummy_param_list = dummy_param_list
         logger.info(f'default chunk size {default_chunk_size}')
 
-    def add_tensor(self, tensor_id, numel, param, access_type: AccessType,
-                   data_type):
+    def _add_tensor(self, tensor_id, numel, param, access_type: AccessType,
+                    data_type):
         """
-        向chunk_tensor_index注册tensor，如果超过已有chunk size则新建一个chunk
-        相邻add_tensor的data type都是相同的
-        所有chunk size都是相同的
+        向chunk_tensor_index注册tensor，当新的Tensor大小超过Chunk剩余空间，
+        则开辟一个新的Chunk添加到ChunkList中，将Tensor分配在新Chunk的起始位置
+        返回chunk在chunk group中的位置
         """
         # data_type甚至可以和param不一致
         self.data_type = data_type
@@ -82,7 +82,10 @@ class ChunkCreator(object):
                                            access_type)
         self.acc_cnt += numel
 
-    def start_new_chunk_list(self):
+        # 返回tensor对应的chunk在chunk group的位置
+        return (self.list_id) % self.world_size, self.chunk_id
+
+    def _start_new_chunk_list(self, add_dummy_chunk_flag=False):
         """
         对构造中的chunk进行收尾
         """
@@ -99,38 +102,36 @@ class ChunkCreator(object):
             self.list_id += 1
 
         # 给不足world_size的global chunk补上dummy chunk，每个dummy chunk管理一个dummy param
+        if add_dummy_chunk_flag:
+            while self.list_id % self.world_size != 0:
+                logger.info('add dummy chunk')
+                self.chunk_list.new_chunk(self.chunk_id,
+                                          self.default_chunk_size,
+                                          self.data_type,
+                                          is_dummy=True)
+                self.chunk_tensor_index.add_chunk(self.chunk_id,
+                                                  self.default_chunk_size,
+                                                  self.data_type,
+                                                  self.global_chunk_id)
+                self.dummy_param_list.append(
+                    torch.nn.Parameter(torch.zeros(1, dtype=self.data_type),
+                                       requires_grad=False))
+                # 加入一个dummy param可以让dummy chunk状态被设置为hold
+                register_param(self.dummy_param_list[-1], "dummy")
+                self.chunk_tensor_index.add_tensor(
+                    self.chunk_id, self.dummy_param_list[-1].ps_attr.data_id(),
+                    0, 1, self.dummy_param_list[-1], AccessType.DATA)
 
-        while self.list_id % self.world_size != 0:
-            logger.info('add dummy chunk')
-            self.chunk_list.new_chunk(self.chunk_id,
-                                      self.default_chunk_size,
-                                      self.data_type,
-                                      is_dummy=True)
-            self.chunk_tensor_index.add_chunk(self.chunk_id,
-                                              self.default_chunk_size,
-                                              self.data_type,
-                                              self.global_chunk_id)
-            self.dummy_param_list.append(
-                torch.nn.Parameter(torch.zeros(1, dtype=self.data_type),
-                                   requires_grad=False))
-            # 加入一个dummy param可以让dummy chunk状态被设置为hold
-            register_param(self.dummy_param_list[-1], "dummy")
-            self.chunk_tensor_index.add_tensor(
-                self.chunk_id, self.dummy_param_list[-1].ps_attr.data_id(), 0,
-                1, self.dummy_param_list[-1], AccessType.DATA)
-
-            self.chunk_id += 1
-            self.list_id += 1
+                self.chunk_id += 1
+                self.list_id += 1
 
         self.list_id = 0
         self.global_chunk_id += 1
 
 
 class ChunkShemaScheduler(object):
-    def __init__(self, default_chunk_size, module, optimizer, chunk_list,
+    def __init__(self, default_chunk_size, chunk_list,
                  chunk_tensor_index: ChunkTensorIndex):
-        self.module = module
-        self.optimizer = optimizer
         self.default_chunk_size = default_chunk_size
         self.chunk_list = chunk_list
         self.chunk_tensor_index = chunk_tensor_index
@@ -140,20 +141,26 @@ class ChunkShemaScheduler(object):
                                           chunk_tensor_index,
                                           self.dummy_param_list)
 
-    def schedule(self):
+    def add_tensor(self, tensor_id, numel, param, access_type: AccessType,
+                   data_type):
+        """
+        返回chunk在process chunk group中的位置
+        """
+        return self.chunk_creator._add_tensor(tensor_id, numel, param,
+                                              access_type, data_type)
+
+    def start_new_chunk_list(self, add_dummy_chunk_flag=False):
+        self.chunk_creator._start_new_chunk_list(add_dummy_chunk_flag)
+
+    def schedule(self, module, optimizer):
         """
         为module和optimizer的参数指定chunk schema
         schedule过程为所有parameter注册成ps_tensor
         """
-        # 模型参数的data和grad间隔排列。
-        # Optimizer的M，V间隔排列
-        acc_cnt = 0
-        chunk_id = 0
-
         # 注册model和optimizer的param是否应该和chunk layout schedule耦合？
         # TODO(jiaruifang)用一次FWD来得到正确的执行顺序
         # FP16 和 FP32不一样
-        for name, param in self.module.named_parameters(recurse=True):
+        for name, param in module.named_parameters(recurse=True):
             register_param(param, name)
             numel = param.numel()
             data_type = torch.float
@@ -162,18 +169,18 @@ class ChunkShemaScheduler(object):
             self.chunk_creator.add_tensor(param.ps_attr.grad_id(), numel,
                                           param, AccessType.DATA, data_type)
 
-        self.chunk_creator.start_new_chunk_list()
+        self.chunk_creator.start_new_chunk_list(True)
 
         # layout for M, V
         # Parameters`tate[param_group][param]`尚未被初始化，它们在第一次step时候才出现
         # 这里提前计算它们的layout，因此需要将它们提前弄出来
         # TODO(jiaruifang) 不是FWD计算顺序，是init初始化顺序
-        for group in self.optimizer.param_groups:
+        for group in optimizer.param_groups:
             for p in group['params']:
                 # TODO(jiaruifang)应该执行一次backward计算，然后才能知道p的grad是否为None，不能用requires_grad来代替？
                 if p.requires_grad is True:
 
-                    state = self.optimizer.state[p]
+                    state = optimizer.state[p]
                     # Eager state initialization, different from Pytorch
                     if len(state) == 0:
                         state['step'] = 0
@@ -226,77 +233,71 @@ class ChunkShemaScheduler(object):
                     raise RuntimeError
         self.chunk_creator.start_new_chunk_list()
 
-    def schedule_fp16(self):
+    def schedule_fp16(self, module, optimizer):
         """
         为module和optimizer的参数指定chunk schema
         schedule过程为所有parameter注册成ps_tensor
         """
-
-        for name, param in self.module.named_parameters(recurse=True):
-            register_param(param, f"{name}")
-
-        # 注册param data fp16，按照初始化顺序
-        for group in self.optimizer.param_groups:
+        # 在初始化过程中已经注册param，则跳过
+        for group in optimizer.param_groups:
             for param in group['params']:
-                # register_param(param, "param_fp16")
+                if is_param_registed(param):
+                    continue
+
+                assert False
                 numel = param.ps_attr.ps_numel
                 data_type = torch.half
 
-                self.chunk_creator.add_tensor(param.ps_attr.data_id(), numel,
-                                              param, AccessType.DATA,
-                                              data_type)
+                self.add_tensor(param.ps_attr.data_id(), numel, param,
+                                AccessType.DATA, data_type)
 
-        self.chunk_creator.start_new_chunk_list()
+        self.start_new_chunk_list(True)
 
-        # 注册param data fp32
-        for group in self.optimizer.param_groups:
+        # 注册param data fp32，只有属于local chunk的param才初始化内存
+        for group in optimizer.param_groups:
             for p in group['params']:
-                state = self.optimizer.state[p]
+                state = optimizer.state[p]
                 data_type = torch.float
                 param_fp32 = torch.nn.Parameter(torch.zeros(
-                    p.ps_attr.ps_shape,
-                    dtype=data_type,
-                    device=torch.device('cpu:0')),
+                    1, dtype=data_type, device=torch.device('cpu:0')),
                                                 requires_grad=False)
+
                 state['fp32_param_data'] = param_fp32
                 register_param(param_fp32, f'{p.ps_attr.ps_name}_fp32')
+                param_fp32.ps_attr.reset_shape(p.ps_attr.ps_shape)
                 numel = param_fp32.ps_attr.ps_numel
-                self.chunk_creator.add_tensor(param_fp32.ps_attr.data_id(),
-                                              numel, param_fp32,
-                                              AccessType.DATA, data_type)
+                chunk_pos = self.add_tensor(param_fp32.ps_attr.data_id(),
+                                            numel, param_fp32, AccessType.DATA,
+                                            data_type)
 
-        self.chunk_creator.start_new_chunk_list()
+        self.start_new_chunk_list()
 
         # 注册M，V, param data fp32
-        for group in self.optimizer.param_groups:
+        for group in optimizer.param_groups:
             for p in group['params']:
                 if p.requires_grad is True:
-                    state = self.optimizer.state[p]
+                    state = optimizer.state[p]
                     state['step'] = 0
                     # 被PatrickStar管理
                     # Exponential moving average of gradient values
                     data_type = torch.float
                     state['exp_avg'] = torch.nn.Parameter(
                         torch.zeros(
-                            p.ps_attr.ps_shape,
+                            1,
                             dtype=data_type,
                             # memory_format=torch.preserve_format,
                             device=torch.device('cpu:0')),
                         requires_grad=False)
-
                     ps_name_prefix = p.ps_attr.ps_name
                     register_param(state['exp_avg'],
                                    f'{ps_name_prefix}.exp_avg')
+                    state['exp_avg'].ps_attr.reset_shape(p.ps_attr.ps_shape)
 
                     numel = p.ps_attr.ps_numel
 
-                    self.chunk_creator.add_tensor(
+                    chunk_pos = self.add_tensor(
                         state['exp_avg'].ps_attr.data_id(), numel,
                         state['exp_avg'], AccessType.DATA, data_type)
-
-                    # param.data不被需要，将他们的内存释放
-                    state['exp_avg'].data = torch.zeros(
-                        1, dtype=data_type, device=torch.device('cpu:0'))
 
                     if group['amsgrad']:
                         # Maintains max of all exp. moving avg. of sq. grad. values
@@ -304,13 +305,13 @@ class ChunkShemaScheduler(object):
                 else:
                     raise RuntimeError
 
-        self.chunk_creator.start_new_chunk_list()
+        self.start_new_chunk_list()
 
         # 注册exp_avg_sq
-        for group in self.optimizer.param_groups:
+        for group in optimizer.param_groups:
             for p in group['params']:
                 if p.requires_grad is True:
-                    state = self.optimizer.state[p]
+                    state = optimizer.state[p]
                     # Eager state initialization, different from Pytorch
                     state['step'] = 0
                     # 被PatrickStar管理
@@ -330,9 +331,9 @@ class ChunkShemaScheduler(object):
 
                     numel = p.ps_attr.ps_numel
 
-                    self.chunk_creator.add_tensor(
-                        state['exp_avg_sq'].ps_attr.data_id(), numel,
-                        state['exp_avg_sq'], AccessType.DATA, data_type)
+                    self.add_tensor(state['exp_avg_sq'].ps_attr.data_id(),
+                                    numel, state['exp_avg_sq'],
+                                    AccessType.DATA, data_type)
 
                     state['exp_avg_sq'].data = torch.zeros(
                         1, dtype=data_type, device=torch.device('cpu:0'))
@@ -344,6 +345,6 @@ class ChunkShemaScheduler(object):
                     raise RuntimeError
 
         # 收尾
-        self.chunk_creator.start_new_chunk_list()
+        self.start_new_chunk_list()
 
         logging.info('static schedule with FP16 finished')

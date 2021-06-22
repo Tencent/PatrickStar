@@ -16,7 +16,9 @@ from utils import init_distributed, see_memory_usage
 import torch
 import functools
 from utils import logger, print_rank
-from client.parameter import PSParameter, register_param
+from client import PatrickStarClient, AccessType
+from client.parameter import PSParameter, register_param, is_param_registed
+from deepspeed_helper.global_vars import get_args
 
 _orig_torch_empty = torch.empty
 
@@ -54,6 +56,8 @@ def empty_cuda_tensor(*size, **kwargs):
 
 
 def new_cuda_tensor(cls, *args):
+    # print_rank(f'new_cuda_tensor in {cls.__name__}',
+    #                force=True)
     device = torch.device('cpu:0')
     tensor = torch.ones((1, 1), device=device).new_empty(*args)
     return tensor
@@ -82,12 +86,12 @@ class InsertPostInitMethodToModuleSubClasses(object):
             @functools.wraps(f)
             def wrapper(module, *args, **kwargs):
                 print_rank(f'Before initializing {module.__class__.__name__}',
-                           force=False)
+                           force=True)
                 f(module, *args, **kwargs)
                 self._post_init_method(module)
                 print_rank(
                     f'After initializing followed by post init for {module.__class__.__name__}',
-                    force=False)
+                    force=True)
 
             return wrapper
 
@@ -148,10 +152,7 @@ class InsertPostInitMethodToModuleSubClasses(object):
         pass
 
     def _set_dtype(self, ds_config, dtype):
-        if ds_config is not None and dtype is None:
-            _ds_config = DeepSpeedConfig(ds_config)
-            self.dtype = torch.half if _ds_config.fp16_enabled else torch.float
-        elif dtype is None:
+        if dtype is None:
             self.dtype = torch.half
         else:
             self.dtype = dtype
@@ -159,10 +160,9 @@ class InsertPostInitMethodToModuleSubClasses(object):
 
 # Replaces all parameters in module with Scattered Parameters
 class Init(InsertPostInitMethodToModuleSubClasses):
-    param_id = 0
-
     def __init__(self,
                  module=None,
+                 client: PatrickStarClient = None,
                  data_parallel_group=None,
                  mem_efficient_linear=True,
                  remote_device=None,
@@ -187,6 +187,7 @@ class Init(InsertPostInitMethodToModuleSubClasses):
         self.world_size = torch.distributed.get_world_size(
             group=self.ps_process_group)
 
+        self._client = client
         #Local device is the device where the parameters are consumed
         #It is the device where parameters are fully instantiated using allgather
         self.local_device = torch.device('cuda:{}'.format(
@@ -208,29 +209,35 @@ class Init(InsertPostInitMethodToModuleSubClasses):
     def _post_init_method(self, module):
         """
         在构造model过程中的每个sub_module构造完毕后执行
-        1. 保留rank=0的模型内存，删除其他rank的模型内存。
-        2.
+        1. 保留本proc管理的模型内存，删除其他进程的模型。
         """
         #see_memory_usage(f"Before converting parmas in {module.__class__.__name__}", force=False)
         print_rank(f'Converting Params in {module.__class__.__name__}',
                    force=True)
+        args = get_args()
+        rank = args.local_rank
+        # 在模型初始化的过程构造模型，post_init_method调用粒度是大的BertAttention层次的字模块。
+        # 我们在所有进程初始化ps param
+        # TODO模型初始化顺序和optimizer parameter group遍历顺序一致么？
         for name, param in module.named_parameters(recurse=False):
+            assert not is_param_registed(param)
+            assert param.dtype == torch.float
+            print_rank(f'** Converting Params {name}', force=True)
+
             register_param(param, name)
-            #TODO(jiaruifang) 只有rank 0载入模型
-            # if self.rank != 0:
-            #     param.data = torch.zeros(1, device = torch.device('cpu:0'))
+            numel = param.ps_attr.ps_numel
+            data_type = torch.half
 
-        # see_memory_usage(
-        #     f"Before converting and partitioning parmas in {module.__class__.__name__}",
-        #     force=True)
-
-        # see_memory_usage(
-        #     f"After converting and partitioning parmas in {module.__class__.__name__}",
-        #     force=True)
-
-    def _aligned_size(self, param):
-        return param.ds_numel + self._padding_size(param)
-
-    def _padding_size(self, param):
-        remainder = param.ds_numel % self.world_size
-        return (self.world_size - remainder) if remainder else 0
+            chunk_index_in_group, chunk_id = self._client.chunk_schema_scheduler.add_tensor(
+                param.ps_attr.data_id(), numel, param, AccessType.DATA,
+                data_type)
+            # 将不属于本地Chunk param的data tensor删除掉
+            if chunk_index_in_group != rank:
+                param.ps_attr._is_local = False
+                # TODO(jiaruifang)下面这句将非local的param的内存清零会导致结果错误,
+                # 插入这句会影响模型初始化的值。
+                param.data = torch.zeros(1,
+                                         dtype=data_type,
+                                         device=param.device)
+            else:
+                param.ps_attr._is_local = True

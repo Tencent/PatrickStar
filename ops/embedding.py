@@ -22,7 +22,7 @@ class BertEmbeddings(nn.Module):
     def __init__(self, hidden_dim):
         super().__init__()
         self.vocab_size = 10
-        self.max_position_embeddings = 512
+        self.max_position_embeddings = 10
         self.hidden_size = hidden_dim
         self.type_vocab_size = 2
 
@@ -49,7 +49,8 @@ class BertEmbeddings(nn.Module):
                 token_type_ids=None,
                 position_ids=None,
                 inputs_embeds=None,
-                past_key_values_length=0):
+                past_key_values_length=0,
+                device=None):
         if input_ids is not None:
             input_shape = input_ids.size()
         else:
@@ -60,14 +61,14 @@ class BertEmbeddings(nn.Module):
         if position_ids is None:
             position_ids = self.position_ids[:, past_key_values_length:
                                              seq_length +
-                                             past_key_values_length]  #.cuda()
+                                             past_key_values_length].to(device)
 
         # TODO(jiaruifang)为了PS adam修改的，如果模型初始化在cpu上，并没有机制把ids显式移动到
         # cuda设备上。多机情况尚未考虑。
         if token_type_ids is None:
             token_type_ids = torch.zeros(
                 input_shape, dtype=torch.long,
-                device=self.position_ids.device)  #.cuda()
+                device=self.position_ids.device).to(device)
 
         if inputs_embeds is None:
             inputs_embeds = self.word_embeddings(input_ids)
@@ -137,7 +138,8 @@ class ParallelBertEmbeddings(nn.Module):
                 token_type_ids=None,
                 position_ids=None,
                 inputs_embeds=None,
-                past_key_values_length=0):
+                past_key_values_length=0,
+                device=None):
         if input_ids is not None:
             input_shape = input_ids.size()
         else:
@@ -154,7 +156,8 @@ class ParallelBertEmbeddings(nn.Module):
         args = get_args()
         if 0 == args.local_rank:
             output_parallel = self.bert_embedding(input_ids_parallel,
-                                                  token_type_ids, position_ids)
+                                                  token_type_ids, position_ids,
+                                                  device)
 
         output = gather_from_data_parallel_region(output_parallel)
         return output

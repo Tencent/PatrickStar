@@ -18,6 +18,7 @@ from .init_context import Init
 
 def initialize_engine(args=None,
                       model=None,
+                      client=None,
                       optimizer=None,
                       model_parameters=None,
                       training_data=None,
@@ -65,6 +66,7 @@ def initialize_engine(args=None,
 
     engine = PatrickStarEngine(args=args,
                                model=model,
+                               client=client,
                                optimizer=optimizer,
                                model_parameters=model_parameters,
                                training_data=training_data,

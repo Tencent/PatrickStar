@@ -208,9 +208,6 @@ class FP16Adam(torch.optim.Optimizer):
         # 将group参数放置到每个param内部，可以按照参数切分并行计算adam
         for group in self.param_groups:
             for p in group['params']:
-                # TODO(jiaruifang)将model的fp32->fp16
-                if p.dtype == torch.float:
-                    p.data = p.data.half()
                 self.state[p]['betas'] = group['betas']
                 self.state[p]['lr'] = group['lr']
                 self.state[p]['weight_decay'] = group['weight_decay']

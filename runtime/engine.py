@@ -26,6 +26,7 @@ class PatrickStarEngine(Module):
     def __init__(self,
                  args,
                  model,
+                 client,
                  optimizer=None,
                  model_parameters=None,
                  training_data=None,
@@ -49,11 +50,7 @@ class PatrickStarEngine(Module):
         self.module.train()
 
         logger.info(f'config.default_chunk_size {config.default_chunk_size}')
-        self.client = PatrickStarClient(
-            rank=self.rank,
-            default_chunk_size=config.default_chunk_size,
-            warmup=False,
-            is_fp16=True)
+        self.client = client
 
         # TODO(jiaruifang) prefer_device应该是自适应的
         self.optimizer = FP16Adam(self.client,

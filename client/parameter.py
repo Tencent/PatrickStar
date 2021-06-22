@@ -50,6 +50,14 @@ class PSParameter(object):
         self.data_tensor = PSTensor()
         if param.requires_grad:
             self.grad_tensor = PSTensor()
+        self._is_local = None
+
+    def is_local(self):
+        return self._is_local
+
+    def reset_shape(self, new_shape):
+        self.ps_shape = new_shape
+        self.ps_numel = new_shape.numel()
 
     def data_id(self):
         return self.get_tensor_id(AccessType.DATA)

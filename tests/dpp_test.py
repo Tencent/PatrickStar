@@ -31,7 +31,7 @@ from fp16 import configure_fp16_optimizer
 from fp16 import FP16_Module
 from fp16 import FP16_Optimizer
 
-from tests.simple_net import SimpleModel, get_data_loader
+from tests.simple_net import SimpleModel, get_bert_data_loader
 from runtime import initialize_engine, Init
 from deepspeed_helper.global_vars import set_global_variables
 from deepspeed_helper.global_vars import get_args
@@ -74,7 +74,7 @@ def test_simple_model(is_ps: bool = False,
         model = torch.nn.parallel.DistributedDataParallel(model,
                                                           device_ids=[rank])
     else:
-        default_chunk_size = 25
+        default_chunk_size = 50
         manager = PatrickStarManager()
         manager.reset([default_chunk_size * 2 * world_size] * world_size,
                       [default_chunk_size * 2 * 14 * 6] * world_size)
@@ -84,11 +84,16 @@ def test_simple_model(is_ps: bool = False,
                 def __init__(self):
                     self.default_chunk_size = default_chunk_size
 
+            client = PatrickStarClient(rank=rank,
+                                       default_chunk_size=default_chunk_size,
+                                       warmup=False,
+                                       is_fp16=True)
             config = Config()
-            model = SimpleModel(hidden_dim, is_ckp=is_ckp)
-            model.cuda(rank)
+            with Init(dtype=torch.float, client=client):
+                model = SimpleModel(hidden_dim, is_ckp=is_ckp)
             model, optimizer, _, _ = initialize_engine(
                 args=None,
+                client=client,
                 model=model,
                 model_parameters=model.parameters(),
                 config=config)
@@ -103,13 +108,11 @@ def test_simple_model(is_ps: bool = False,
 
     see_memory_usage(f"PS {is_ps} after model init", force=True)
 
-    data_loader = get_data_loader(
-        batch_size=batch_size,
-        total_samples=1000,
-        hidden_dim=hidden_dim,
-        device=device,
-        data_type=torch.half if is_fp16 else torch.float,
-        is_distrbuted=True)
+    data_loader = get_bert_data_loader(batch_size=batch_size,
+                                       total_samples=100000,
+                                       sequence_length=10,
+                                       device=device,
+                                       is_distrbuted=True)
 
     loss_res = []
 
@@ -201,4 +204,4 @@ if __name__ == "__main__":
         print('ref loss', loss_list_ref)
 
         for loss, loss_ref in zip(loss_list, loss_list_ref):
-            assert loss == loss_ref
+            assert loss == loss_ref, f"{loss - loss_ref}"

@@ -103,6 +103,6 @@ class SimpleModel(torch.nn.Module):
         self.cross_entropy_loss = torch.nn.CrossEntropyLoss()
 
     def forward(self, x, y):
-        h1 = self.embeddings(x)
+        h1 = self.embeddings(x, device=x.device)
         h2 = self.encoder(h1)
         return self.cross_entropy_loss(h2[:, 0], y)

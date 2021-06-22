@@ -117,7 +117,8 @@ class PatrickStarClient(object):
 
         # 解耦chunk和param的tensors
         self.chunk_tensor_index = ChunkTensorIndex()
-        self.chunk_schema_scheduler = None
+        self.chunk_schema_scheduler = ChunkShemaScheduler(
+            default_chunk_size, self.chunk_list, self.chunk_tensor_index)
         self.default_chunk_size = default_chunk_size
         self._time_profile = True
 
@@ -154,16 +155,18 @@ class PatrickStarClient(object):
         self.chunk_list.moments_cnt_of_iteration = timer.moment()
 
     def init(self, model, optimizer):
+        """
+        初始化client管理的model和optimizer
+        并完成model的参数的分配和拷贝
+        """
         self.module = model
         self.optimizer = optimizer
-
         self.static_chunk_schedule(model, optimizer)
 
-        if torch.distributed.is_initialized():
-            rank = torch.distributed.get_rank()
+        # self.chunk_tensor_index.visit_chunks(self.chunk_list)
+
         # TODO(jiaruifang) 目前仍是调试状态，每个进程有全部模型
         self._copy_model(model)
-        # self.chunk_tensor_index.visit_chunks(self.chunk_list)
 
         self.register_model_hook(model)
 
@@ -173,13 +176,10 @@ class PatrickStarClient(object):
         注册模型和优化器，相当于静态图的预处理过程
         执行chunk schema调取，为每个tensor找到对应的chunk和位置
         """
-        self.chunk_schema_scheduler = ChunkShemaScheduler(
-            self.default_chunk_size, model, optimizer, self.chunk_list,
-            self.chunk_tensor_index)
         if self._is_fp16:
-            self.chunk_schema_scheduler.schedule_fp16()
+            self.chunk_schema_scheduler.schedule_fp16(model, optimizer)
         else:
-            self.chunk_schema_scheduler.schedule()
+            self.chunk_schema_scheduler.schedule(model, optimizer)
         logging.info(f"static_chunk_schedule finished")
 
     def set_all_tensors_status_in_chunk(self, chunk_id, new_status):
@@ -200,30 +200,46 @@ class PatrickStarClient(object):
         setup_hybrid_ps_hooks(model, self)
 
     def _copy_model(self, model):
-        # 拷贝模型
+        # TODO(jiaruifang)模型参数的初始化顺序和如下循环访问的顺序相同。
         for i, group in enumerate(self.optimizer.param_groups):
             for j, param in enumerate(group['params']):
-                # TODO(jiaruifang) 目前：每个进程有一份model replica，释放掉非本地的param
-                # 改成rank 0有一份模型，p2p通信给其他进程传递它们需要的部分
                 if self.is_local_tensor(param, AccessType.DATA):
-                    self.access_data(param, torch.device('cpu:0'))
-                    data_tensor = param.ps_attr.access_tensor(AccessType.DATA)
-                    data_tensor.copy_(param.data)
-                    # chunk_id = self.chunk_tensor_index.get_chunk_id(param, AccessType.DATA)
-                    if self._is_fp16:
-                        param_fp32 = self.optimizer.state[param][
-                            'fp32_param_data']
-                        self.access_data(param_fp32, torch.device('cpu:0'))
-                        data_tensor_fp32 = param_fp32.ps_attr.access_tensor(
+                    if True:
+                        param.data = param.data.half()
+                        self.access_data(param, torch.device('cpu:0'))
+                        data_tensor = param.ps_attr.access_tensor(
                             AccessType.DATA)
-                        data_tensor_fp32.copy_(param.data.float())
+                        data_tensor.copy_(param.data)
+                        if self._is_fp16:
+                            param_fp32 = self.optimizer.state[param][
+                                'fp32_param_data']
+                            self.access_data(param_fp32, torch.device('cpu:0'))
+                            data_tensor_fp32 = param_fp32.ps_attr.access_tensor(
+                                AccessType.DATA)
+                            data_tensor_fp32.copy_(param.data.float())
+                            self.release_data(param_fp32, PSTensorStatus.HOLD)
+                        self.release_data(param, PSTensorStatus.HOLD)
+                    else:
+                        if self._is_fp16:
+                            param_fp32 = self.optimizer.state[param][
+                                'fp32_param_data']
+                            self.access_data(param_fp32, torch.device('cpu:0'))
+                            data_tensor_fp32 = param_fp32.ps_attr.access_tensor(
+                                AccessType.DATA)
+                            data_tensor_fp32.copy_(param.data)
+                            self.release_data(param_fp32, PSTensorStatus.HOLD)
 
-                        self.release_data(param_fp32, PSTensorStatus.HOLD)
-                    self.release_data(param, PSTensorStatus.HOLD)
+                        param.data = param.data.half()
+                        self.access_data(param, torch.device('cpu:0'))
+                        data_tensor = param.ps_attr.access_tensor(
+                            AccessType.DATA)
+                        data_tensor.copy_(param.data)
+                        self.release_data(param, PSTensorStatus.HOLD)
                 else:
                     param.data = torch.zeros(1,
-                                             dtype=param.dtype,
+                                             dtype=torch.half,
                                              device=param.device)
+
         for param in self.chunk_schema_scheduler.dummy_param_list:
             if self.is_local_tensor(param, AccessType.DATA):
                 self.access_data(param, torch.device('cpu:0'))
@@ -257,12 +273,10 @@ class PatrickStarClient(object):
         if chunk_id is None:
             chunk_id = self._generate_chunk_id()
             offset = 0
-            # logging.info(f"no gap need to new a chunk_id {chunk_id} numel {numel} data type {data_type}")
             chunk_size = max(self.default_chunk_size, numel)
             self.chunk_list.new_chunk(chunk_id, chunk_size, data_type)
             self.chunk_tensor_index.add_chunk(chunk_id, chunk_size, data_type)
         else:
-            # logging.info(f"find_gap chunk_id {chunk_id} numel {numel} data type {data_type}")
             pass
 
         if access_type == AccessType.DATA:
@@ -285,8 +299,6 @@ class PatrickStarClient(object):
         chunk_id_list = self.chunk_tensor_index.get_global_chunk_id_list(
             chunk_id)
         rank = torch.distributed.get_rank()
-        # if rank >= len(chunk_id_list):
-        #     return False
         assert rank < len(chunk_id_list)
         local_chunk_id = chunk_id_list[rank]
         return chunk_id == local_chunk_id

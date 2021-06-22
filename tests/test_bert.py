@@ -17,7 +17,7 @@ from transformers import BertConfig
 import enum
 import time
 import sys
-
+import copy
 from checkpoint import checkpoint
 import logging
 import torch
@@ -132,6 +132,7 @@ def test_bert_model(is_ckp: bool = False,
 
     if not is_ps:
         model = BertForSequenceClassification(cfg)
+
         model.cuda(rank)
         if is_fp16:
             model = FP16_Module(model)
@@ -155,11 +156,19 @@ def test_bert_model(is_ckp: bool = False,
                     self.default_chunk_size = default_chunk_size
 
             config = Config()
-            model = BertForSequenceClassification(cfg)
-            model.cuda(rank)
+
+            client = PatrickStarClient(rank=rank,
+                                       default_chunk_size=default_chunk_size,
+                                       warmup=False,
+                                       is_fp16=True)
+
+            with Init(dtype=torch.float, client=client):
+                model = BertForSequenceClassification(cfg)
+
             model, optimizer, _, _ = initialize_engine(
                 args=None,
                 model=model,
+                client=client,
                 model_parameters=model.parameters(),
                 config=config)
         else:
