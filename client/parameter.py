@@ -31,8 +31,8 @@ class PSTensor(object):
 class PSParameter(object):
     def __init__(self, param: torch.nn.Parameter, name: str = None):
         """
-      在torch.nn.Parameter的附加成员变量
-      """
+        在torch.nn.Parameter的附加成员变量
+        """
         self.ps_name = None
         self.ps_numel = None
         self.ps_shape = None
@@ -50,7 +50,11 @@ class PSParameter(object):
         self.data_tensor = PSTensor()
         if param.requires_grad:
             self.grad_tensor = PSTensor()
+
+        # 参数是否属于进程的本地Chunk
         self._is_local = None
+        # 参数是否交给Torch做内存管理，而不是Chunk
+        self._is_torch = False
 
     def is_local(self):
         return self._is_local
@@ -85,6 +89,8 @@ class PSParameter(object):
         if access_type == AccessType.DATA:
             return self.data_tensor.ps_tensor
         elif access_type == AccessType.GRAD:
+            if self._is_torch:
+                raise RuntimeError
             return self.grad_tensor.ps_tensor
         else:
             raise RuntimeError
@@ -99,10 +105,10 @@ class PSParameter(object):
 
     def set_status(self, status: PSTensorStatus, access_type: AccessType):
         """
-      只有COMPUTE状态tensor指向chunk payload
-      HOLD和FREE状态都悬空
-      TODO(jiaruifang)还需要param reset data和grad
-      """
+        只有COMPUTE状态tensor指向chunk payload
+        HOLD和FREE状态都悬空
+        TODO(jiaruifang)还需要param reset data和grad
+        """
         if access_type == AccessType.DATA:
             self.data_tensor.ps_status = status
             if status != PSTensorStatus.COMPUTE:
@@ -123,3 +129,17 @@ def register_param(param, name=None):
 
 def is_param_registed(param) -> bool:
     return hasattr(param, 'ps_attr')
+
+
+def register_torch_param(param, name=None):
+    if not hasattr(param, 'ps_attr'):
+        param.ps_attr = PSParameter(param, name)
+        param.ps_attr._is_torch = True
+        # param.ps_attr.data_tensor.ps_tensor = param.data
+
+
+def is_torch_param(param):
+    if hasattr(param, 'ps_attr'):
+        return param.ps_attr._is_torch
+    else:
+        return False

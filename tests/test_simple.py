@@ -45,7 +45,7 @@ def show_optim(optimizer):
 def test_simple_model(is_ps: bool = False,
                       is_fp16: bool = False,
                       is_ckp: bool = True,
-                      is_embed_opt: bool = False,
+                      use_cpu_embedding: bool = False,
                       stop_iter: int = 10):
     logging.info(f'test a simple model with hybrid ps {is_ps} FP16 {is_fp16}')
     args = get_args()
@@ -60,11 +60,15 @@ def test_simple_model(is_ps: bool = False,
     device = torch.device(f'cuda:{rank}')
 
     if not is_ps:
-        if is_embed_opt:
-            model = SimpleModel(hidden_dim, is_ckp=is_ckp, is_embed_opt=True)
+        if use_cpu_embedding:
+            model = SimpleModel(hidden_dim,
+                                is_ckp=is_ckp,
+                                use_cpu_embedding=True)
             model.encoder.cuda(rank)
         else:
-            model = SimpleModel(hidden_dim, is_ckp=is_ckp, is_embed_opt=False)
+            model = SimpleModel(hidden_dim,
+                                is_ckp=is_ckp,
+                                use_cpu_embedding=False)
             model.cuda(rank)
         if is_fp16:
             model = FP16_Module(model)
@@ -75,7 +79,9 @@ def test_simple_model(is_ps: bool = False,
     else:
         if is_fp16:
             with Init(dtype=torch.float):
-                model = SimpleModel(hidden_dim, is_ckp=is_ckp)
+                model = SimpleModel(hidden_dim,
+                                    is_ckp=is_ckp,
+                                    use_cpu_embedding=agrs.use_cpu_embedding)
 
             class Config(object):
                 def __init__(self):
@@ -188,14 +194,14 @@ if __name__ == "__main__":
         loss_list = test_simple_model(is_ps=False,
                                       is_fp16=False,
                                       is_ckp=True,
-                                      is_embed_opt=False)
+                                      use_cpu_embedding=False)
         # see_memory_usage("after PatrickStar simple model", force=True)
 
         torch.manual_seed(0)
         loss_list_ref = test_simple_model(is_ps=False,
                                           is_fp16=False,
                                           is_ckp=True,
-                                          is_embed_opt=True)
+                                          use_cpu_embedding=True)
 
         print('ps loss', loss_list)
         print('ref loss', loss_list_ref)

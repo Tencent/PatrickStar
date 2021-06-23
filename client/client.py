@@ -28,7 +28,7 @@ from .chunk_tensor_index import ChunkTensorIndex
 from .chunk_schema_scheduler import ChunkShemaScheduler
 import utils.global_timer as global_timer
 import time
-from .parameter import PSParameter, register_param, is_param_registed
+from .parameter import PSParameter, register_param, is_param_registed, is_torch_param
 from utils.memory_monitor import get_memory_used
 from utils import logger
 from deepspeed_helper.global_vars import get_args
@@ -203,6 +203,11 @@ class PatrickStarClient(object):
         # TODO(jiaruifang)模型参数的初始化顺序和如下循环访问的顺序相同。
         for i, group in enumerate(self.optimizer.param_groups):
             for j, param in enumerate(group['params']):
+                if is_torch_param(param):
+                    param.data = param.data.half()
+                    self.optimizer.state[param]['fp32_param_data'].copy_(
+                        param.data.float())
+                    continue
                 if self.is_local_tensor(param, AccessType.DATA):
                     if True:
                         param.data = param.data.half()
@@ -291,8 +296,12 @@ class PatrickStarClient(object):
 
     def is_local_tensor(self, param, access_type) -> bool:
         """
+        调用本接口前判断是否是torch_param
         判断tensor是否在本GPU之上
         """
+        # TODO(jiaruifang)不应该进入这个分支
+        if is_torch_param(param):
+            return False
         # 准备param所在chunk的内存，如果内存不在计算设备上需要分配或者移动
         chunk_id = self.chunk_tensor_index.get_chunk_id(param, access_type)
 
@@ -377,10 +386,17 @@ class PatrickStarClient(object):
 
         assert compute_device.type == "cuda"
         if not hasattr(param, 'ps_attr'):
-            register_param(param)
             raise RuntimeError(
                 "FP16 training shall not meet tensors not registered for PS")
 
+        # 如果是Torch管理的Tensor，则直接返回
+        if is_torch_param(param):
+            # if access_type == AccessType.DATA:
+            #     param.data.to(compute_device)
+            # elif access_type == AccessType.GRAD:
+            #     param.data.to(compute_device)
+            #     param.grad.to(compute_device)
+            return
         # 准备param所在chunk的内存，如果内存不在计算设备上需要分配或者移动
         chunk_id = self.chunk_tensor_index.get_chunk_id(param, access_type)
 
@@ -467,11 +483,13 @@ class PatrickStarClient(object):
         if self._time_profile:
             start_time = time.time()
 
+        if is_torch_param(param):
+            return
+
         if not hasattr(param, 'ps_attr'):
             # 第一次access，动态调度方案的预热过程会遇到
             # data 和 grad都有id
             # TODO(jiaruifang)可以在optimizer init过程把编号分配好
-            register_param(param)
             raise RuntimeError(
                 "FP16 training shall not meet tensors not registered for PS")
 
@@ -502,9 +520,6 @@ class PatrickStarClient(object):
             self.chunk_list[chunk_id].payload.narrow(0, start_offset, numel),
             access_type)
 
-        # logger.info(
-        #     f'rank {rank} fjr accesses chunk id {chunk_id} param {param.ps_attr.ps_name} {self.chunk_list[chunk_id].payload.narrow(0, start_offset, numel)}'
-        # )
         old_status = param.ps_attr.get_status(access_type)
 
         # 如果是从free状态转换的需要清零，或者从
@@ -574,8 +589,9 @@ class PatrickStarClient(object):
 
         assert isinstance(reset_to_status, PSTensorStatus)
         assert torch.distributed.is_initialized()
-        # if param.ps_attr.get_status(access_type) != PSTensorStatus.COMPUTE:
-        #     return
+
+        if is_torch_param(param):
+            return
 
         chunk_id = self.chunk_tensor_index.get_chunk_id(param, access_type)
         chunk_id_list = self.chunk_tensor_index.get_global_chunk_id_list(
@@ -691,6 +707,9 @@ class PatrickStarClient(object):
         """
         if self._time_profile:
             start_time = time.time()
+
+        if is_torch_param(param):
+            return
 
         rank = torch.distributed.get_rank()
         assert isinstance(reset_to_status, PSTensorStatus)

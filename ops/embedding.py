@@ -15,15 +15,17 @@ import torch
 import torch.nn as nn
 from deepspeed_helper.global_vars import get_args
 from utils import logger
+from client.parameter import is_torch_param, is_param_registed
+from client import AccessType
 
 
 class BertEmbeddings(nn.Module):
     """Construct the embeddings from word, position and token_type embeddings."""
-    def __init__(self, hidden_dim):
+    def __init__(self, config):
         super().__init__()
-        self.vocab_size = 10
-        self.max_position_embeddings = 10
-        self.hidden_size = hidden_dim
+        self.vocab_size = config.vocab_size
+        self.max_position_embeddings = config.max_position_embeddings
+        self.hidden_size = config.hidden_size
         self.type_vocab_size = 2
 
         self.word_embeddings = nn.Embedding(self.vocab_size, self.hidden_size)
@@ -49,14 +51,20 @@ class BertEmbeddings(nn.Module):
                 token_type_ids=None,
                 position_ids=None,
                 inputs_embeds=None,
-                past_key_values_length=0,
-                device=None):
+                past_key_values_length=0):
         if input_ids is not None:
             input_shape = input_ids.size()
         else:
             input_shape = inputs_embeds.size()[:-1]
 
         seq_length = input_shape[1]
+
+        # 让临时生成的ids的设备和模型设备一致
+        args = get_args()
+        if args.use_fake_dist:
+            device = torch.device('cuda:0')
+        else:
+            device = torch.device(f'cuda:{args.local_rank}')
 
         if position_ids is None:
             position_ids = self.position_ids[:, past_key_values_length:
@@ -71,12 +79,13 @@ class BertEmbeddings(nn.Module):
                 device=self.position_ids.device).to(device)
 
         if inputs_embeds is None:
+            assert input_ids.device == device, f"input_ids on {input_ids.device}, while computing device is {device}"
             inputs_embeds = self.word_embeddings(input_ids)
 
         # start computing
-
+        print('token_type_ids device', token_type_ids.device,
+              self.token_type_embeddings.weight.device)
         token_type_embeddings = self.token_type_embeddings(token_type_ids)
-
         embeddings = inputs_embeds + token_type_embeddings
         if self.position_embedding_type == "absolute":
             position_embeddings = self.position_embeddings(position_ids)
@@ -86,15 +95,79 @@ class BertEmbeddings(nn.Module):
         return embeddings
 
 
-class _CopyToDatalParallelRegion(torch.autograd.Function):
-    """Pass the input to the model parallel region."""
+class BertEmbeddingsWithoutLN(nn.Module):
+    """Construct the embeddings from word, position and token_type embeddings."""
+    def __init__(self, config):
+        super().__init__()
+        # TODO read them from config
+        self.vocab_size = config.vocab_size
+        self.max_position_embeddings = config.max_position_embeddings
+        self.hidden_size = config.hidden_size
+        self.type_vocab_size = 2
+
+        self.word_embeddings = nn.Embedding(self.vocab_size, self.hidden_size)
+        self.position_embeddings = nn.Embedding(self.max_position_embeddings,
+                                                self.hidden_size)
+        self.token_type_embeddings = nn.Embedding(self.type_vocab_size,
+                                                  self.hidden_size)
+
+        # position_ids (1, len position emb) is contiguous in memory and exported when serialized
+        self.register_buffer(
+            "position_ids",
+            torch.arange(self.max_position_embeddings).expand((1, -1)))
+        self.position_embedding_type = getattr(self, "position_embedding_type",
+                                               "absolute")
+
+    def forward(self,
+                input_ids=None,
+                token_type_ids=None,
+                position_ids=None,
+                inputs_embeds=None,
+                past_key_values_length=0):
+        if input_ids is not None:
+            input_shape = input_ids.size()
+        else:
+            input_shape = inputs_embeds.size()[:-1]
+
+        seq_length = input_shape[1]
+
+        # 让临时生成的ids的设备和模型设备一致
+        device = self.word_embeddings.weight.device
+
+        if position_ids is None:
+            position_ids = self.position_ids[:, past_key_values_length:
+                                             seq_length +
+                                             past_key_values_length].to(device)
+
+        # TODO(jiaruifang)为了PS adam修改的，如果模型初始化在cpu上，并没有机制把ids显式移动到
+        # cuda设备上。多机情况尚未考虑。
+        if token_type_ids is None:
+            token_type_ids = torch.zeros(
+                input_shape, dtype=torch.long,
+                device=self.position_ids.device).to(device)
+
+        if inputs_embeds is None:
+            assert input_ids.device == device, f"input_ids on {input_ids.device}, while computing device is {device}"
+            inputs_embeds = self.word_embeddings(input_ids)
+
+        # start computing
+        token_type_embeddings = self.token_type_embeddings(token_type_ids)
+        embeddings = inputs_embeds + token_type_embeddings
+        if self.position_embedding_type == "absolute":
+            position_embeddings = self.position_embeddings(position_ids)
+            embeddings += position_embeddings
+        return embeddings
+
+
+class _GatherActToRank0(torch.autograd.Function):
+    """gather activations from other proc to proc 0"""
     @staticmethod
     def symbolic(graph, input_):
         return input_.to(torch.device('cpu:0'))
 
     @staticmethod
     def forward(ctx, input_):
-        logger.info('copy input to cpu')
+        logger.info(f'copy input to cpu')
         return input_.to(torch.device('cpu:0'))
 
     @staticmethod
@@ -103,7 +176,7 @@ class _CopyToDatalParallelRegion(torch.autograd.Function):
         return grad_output.to(torch.device('cuda:0'))
 
 
-class _CopyFromDatalParallelRegion(torch.autograd.Function):
+class _BcastActFromRank0(torch.autograd.Function):
     """Pass the input to the model parallel region."""
     @staticmethod
     def symbolic(graph, input_):
@@ -120,26 +193,27 @@ class _CopyFromDatalParallelRegion(torch.autograd.Function):
         return grad_output.to(torch.device('cpu:0'))
 
 
-def copy_to_data_parallel_region(input_):
-    return _CopyToDatalParallelRegion.apply(input_)
+def copy_to_rank0(input_):
+    return _GatherActToRank0.apply(input_)
 
 
-def gather_from_data_parallel_region(input_):
-    return _CopyFromDatalParallelRegion.apply(input_)
+def fetch_from_rank0(input_):
+    return _BcastActFromRank0.apply(input_)
 
 
-class ParallelBertEmbeddings(nn.Module):
-    def __init__(self, hidden_dim):
-        super(ParallelBertEmbeddings, self).__init__()
-        self.bert_embedding = BertEmbeddings(hidden_dim)
+class CpuBertEmbeddings(nn.Module):
+    def __init__(self, config):
+        super(CpuBertEmbeddings, self).__init__()
+        self.bert_embedding = BertEmbeddingsWithoutLN(config)
+        self.LayerNorm = nn.LayerNorm(config.hidden_size)
+        self.dropout = nn.Dropout(0)
 
     def forward(self,
                 input_ids=None,
                 token_type_ids=None,
                 position_ids=None,
                 inputs_embeds=None,
-                past_key_values_length=0,
-                device=None):
+                past_key_values_length=0):
         if input_ids is not None:
             input_shape = input_ids.size()
         else:
@@ -151,13 +225,12 @@ class ParallelBertEmbeddings(nn.Module):
         assert token_type_ids is None
         assert position_ids is None
 
-        input_ids_parallel = copy_to_data_parallel_region(input_ids)
+        input_ids_parallel = copy_to_rank0(input_ids)
 
-        args = get_args()
-        if 0 == args.local_rank:
-            output_parallel = self.bert_embedding(input_ids_parallel,
-                                                  token_type_ids, position_ids,
-                                                  device)
+        output_parallel = self.bert_embedding(input_ids_parallel,
+                                              token_type_ids, position_ids)
 
-        output = gather_from_data_parallel_region(output_parallel)
-        return output
+        embeddings = fetch_from_rank0(output_parallel)
+        embeddings = self.LayerNorm(embeddings)
+        embeddings = self.dropout(embeddings)
+        return embeddings

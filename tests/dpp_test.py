@@ -64,6 +64,7 @@ def test_simple_model(is_ps: bool = False,
     if not is_ps:
         model = SimpleModel(hidden_dim, is_ckp=is_ckp)
         model.cuda(rank)
+
         if is_fp16:
             model = FP16_Module(model)
         model.train()
@@ -89,8 +90,11 @@ def test_simple_model(is_ps: bool = False,
                                        warmup=False,
                                        is_fp16=True)
             config = Config()
+
             with Init(dtype=torch.float, client=client):
-                model = SimpleModel(hidden_dim, is_ckp=is_ckp)
+                model = SimpleModel(hidden_dim,
+                                    is_ckp=is_ckp,
+                                    use_cpu_embedding=args.use_cpu_embedding)
             model, optimizer, _, _ = initialize_engine(
                 args=None,
                 client=client,
@@ -194,14 +198,34 @@ if __name__ == "__main__":
         # 需要 40和8两个chunk
 
         torch.manual_seed(0)
-        loss_list = test_simple_model(False, is_fp16=True, is_ckp=True)
+        loss_list = test_simple_model(is_ps=False, is_fp16=True, is_ckp=True)
         see_memory_usage("after PatrickStar simple model", force=True)
 
         torch.manual_seed(0)
-        loss_list_ref = test_simple_model(True, is_fp16=True, is_ckp=True)
+        loss_list_ref = test_simple_model(is_ps=True,
+                                          is_fp16=True,
+                                          is_ckp=True)
 
         print('ps loss', loss_list)
         print('ref loss', loss_list_ref)
 
         for loss, loss_ref in zip(loss_list, loss_list_ref):
             assert loss == loss_ref, f"{loss - loss_ref}"
+
+# embeddings.bert_embedding.word_embeddings.weight
+# embeddings.bert_embedding.position_embeddings.weight
+# embeddings.bert_embedding.token_type_embeddings.weight
+# embeddings.bert_embedding.LayerNorm.weight
+# embeddings.bert_embedding.LayerNorm.bias
+# encoder.linear1.0.weight
+# encoder.linear1.0.bias
+# encoder.linear1.1.weight
+# encoder.linear1.1.bias
+# encoder.linear1.2.weight
+# encoder.linear1.2.bias
+# encoder.linear3.weight
+# encoder.linear3.bias
+# encoder.linear4.weight
+# encoder.linear4.bias
+# encoder.linear5.weight
+# encoder.linear5.bias

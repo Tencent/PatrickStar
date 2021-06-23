@@ -185,6 +185,13 @@ def _add_patrick_star_args(parser):
                        dest='use_fake_dist',
                        action='store_true',
                        help='using one GPU to stimulate multiple card.')
+    group.add_argument(
+        '--use_cpu_embedding',
+        dest='use_cpu_embedding',
+        action='store_true',
+        help=
+        'using CPU to perform Embedding and do not assign embedding params to chunks'
+    )
     return parser
 
 

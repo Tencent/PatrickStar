@@ -16,6 +16,7 @@ import logging
 from .const import PSTensorStatus, AccessType, TrainingStage
 import utils.global_timer as global_timer
 from utils import logger, use_dist_flag
+from client.parameter import is_torch_param
 
 
 ############# HOOKS ####################
@@ -122,6 +123,8 @@ def pre_sub_module_forward_function(sub_module, client, name):
     for sub_name, param in sub_module.named_parameters(recurse=False):
         rank = torch.distributed.get_rank()
         logger.debug(f'rank {rank} FWD pre {name}.{sub_name} access data')
+        if is_torch_param(param):
+            continue
         if use_dist_flag:
             client.access_dist(param,
                                AccessType.DATA,
@@ -139,6 +142,8 @@ def pre_sub_module_forward_function(sub_module, client, name):
 def post_sub_module_forward_function(sub_module, client, name):
     timer = global_timer.IterationTimer()
     for sub_name, param in sub_module.named_parameters(recurse=False):
+        if is_torch_param(param):
+            continue
         rank = torch.distributed.get_rank()
         logger.debug(f'rank {rank} FWD post {name}.{sub_name}')
         client.release_dist(param,
@@ -152,6 +157,8 @@ def pre_sub_module_backward_function(sub_module, client, name):
     timer = global_timer.IterationTimer()
     flag = False
     for sub_name, param in sub_module.named_parameters(recurse=False):
+        if is_torch_param(param):
+            continue
         rank = torch.distributed.get_rank()
         logger.debug(f'rank {rank} BWD pre {name}.{sub_name}')
         if param.dtype == torch.half:
@@ -181,6 +188,17 @@ def pre_sub_module_backward_function(sub_module, client, name):
 def post_sub_module_backward_function(sub_module, client, name):
     timer = global_timer.IterationTimer()
     for sub_name, param in sub_module.named_parameters(recurse=False):
+        if is_torch_param(param):
+            # TODO allreduce
+            param.data = param.grad
+            param.grad = None
+            world_size = torch.distributed.get_world_size()
+            torch.distributed.all_reduce(param.data,
+                                         op=torch.distributed.ReduceOp.SUM,
+                                         async_op=False)
+            param.data /= world_size
+            logger.debug(f'rank {rank} allreduce grad {param.ps_attr.ps_name}')
+            continue
         if param.dtype == torch.half:
             tmp_tensor = param.ps_attr.access_tensor(AccessType.DATA)
             tmp_tensor.copy_(param.grad)

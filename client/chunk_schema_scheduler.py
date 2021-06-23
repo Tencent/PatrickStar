@@ -15,7 +15,7 @@ from .chunk_data import Chunk
 from .chunk_list import ChunkList
 from .chunk_tensor_index import ChunkTensorIndex
 from .const import AccessType, PSTensorStatus
-from .parameter import PSParameter, register_param, is_param_registed
+from .parameter import PSParameter, register_param, is_param_registed, is_torch_param, register_torch_param
 import torch
 import logging
 import sys
@@ -164,10 +164,10 @@ class ChunkShemaScheduler(object):
             register_param(param, name)
             numel = param.numel()
             data_type = torch.float
-            self.chunk_creator.add_tensor(param.ps_attr.data_id(), numel,
-                                          param, AccessType.DATA, data_type)
-            self.chunk_creator.add_tensor(param.ps_attr.grad_id(), numel,
-                                          param, AccessType.DATA, data_type)
+            self.add_tensor(param.ps_attr.data_id(), numel, param,
+                            AccessType.DATA, data_type)
+            self.add_tensor(param.ps_attr.grad_id(), numel, param,
+                            AccessType.DATA, data_type)
 
         self.chunk_creator.start_new_chunk_list(True)
 
@@ -210,13 +210,13 @@ class ChunkShemaScheduler(object):
                                        f'{ps_name_prefix}.exp_avg_sq')
 
                         numel = p.ps_attr.ps_numel
-                        self.chunk_creator.add_tensor(
-                            state['exp_avg'].ps_attr.data_id(), numel,
-                            state['exp_avg'], AccessType.DATA, data_type)
+                        self.add_tensor(state['exp_avg'].ps_attr.data_id(),
+                                        numel, state['exp_avg'],
+                                        AccessType.DATA, data_type)
 
-                        self.chunk_creator.add_tensor(
-                            state['exp_avg_sq'].ps_attr.data_id(), numel,
-                            state['exp_avg_sq'], AccessType.DATA, data_type)
+                        self.add_tensor(state['exp_avg_sq'].ps_attr.data_id(),
+                                        numel, state['exp_avg_sq'],
+                                        AccessType.DATA, data_type)
 
                         # param.data不被需要，将他们的内存释放
                         state['exp_avg'].data = torch.zeros(
@@ -239,17 +239,16 @@ class ChunkShemaScheduler(object):
         schedule过程为所有parameter注册成ps_tensor
         """
         # 在初始化过程中已经注册param，则跳过
-        for group in optimizer.param_groups:
-            for param in group['params']:
-                if is_param_registed(param):
-                    continue
+        # for group in optimizer.param_groups:
+        #     for param in group['params']:
+        #         if is_param_registed(param):
+        #             continue
 
-                assert False
-                numel = param.ps_attr.ps_numel
-                data_type = torch.half
+        #         numel = param.ps_attr.ps_numel
+        #         data_type = torch.half
 
-                self.add_tensor(param.ps_attr.data_id(), numel, param,
-                                AccessType.DATA, data_type)
+        #         self.add_tensor(param.ps_attr.data_id(), numel, param,
+        #                         AccessType.DATA, data_type)
 
         self.start_new_chunk_list(True)
 
@@ -258,6 +257,13 @@ class ChunkShemaScheduler(object):
             for p in group['params']:
                 state = optimizer.state[p]
                 data_type = torch.float
+                if is_torch_param(p):
+                    param_fp32 = torch.nn.Parameter(torch.zeros_like(
+                        p, dtype=data_type, device=torch.device('cpu:0')),
+                                                    requires_grad=False)
+                    state['fp32_param_data'] = param_fp32
+                    register_torch_param(state['fp32_param_data'])
+                    continue
                 param_fp32 = torch.nn.Parameter(torch.zeros(
                     1, dtype=data_type, device=torch.device('cpu:0')),
                                                 requires_grad=False)
@@ -281,6 +287,15 @@ class ChunkShemaScheduler(object):
                     # 被PatrickStar管理
                     # Exponential moving average of gradient values
                     data_type = torch.float
+                    if is_torch_param(p):
+                        state['exp_avg'] = torch.nn.Parameter(
+                            torch.zeros_like(p,
+                                             dtype=data_type,
+                                             device=torch.device('cpu:0')),
+                            requires_grad=False)
+                        register_torch_param(state['exp_avg'])
+                        continue
+
                     state['exp_avg'] = torch.nn.Parameter(
                         torch.zeros(
                             1,
@@ -317,6 +332,15 @@ class ChunkShemaScheduler(object):
                     # 被PatrickStar管理
                     # Exponential moving average of gradient values
                     data_type = torch.float
+                    if is_torch_param(p):
+                        state['exp_avg_sq'] = torch.nn.Parameter(
+                            torch.zeros_like(p,
+                                             dtype=data_type,
+                                             device=torch.device('cpu:0')),
+                            requires_grad=False)
+                        register_torch_param(state['exp_avg_sq'])
+                        continue
+
                     state['exp_avg_sq'] = torch.nn.Parameter(
                         torch.zeros(
                             p.ps_attr.ps_shape,

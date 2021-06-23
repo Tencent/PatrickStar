@@ -16,7 +16,8 @@ from torch.utils.data import SequentialSampler
 # from checkpoint.torch_checkpoint import checkpoint
 from torch.utils.checkpoint import checkpoint
 from utils import logger
-from ops.embedding import ParallelBertEmbeddings, BertEmbeddings
+from ops.embedding import CpuBertEmbeddings, BertEmbeddings
+from transformers import BertConfig
 
 
 class Encoder(torch.nn.Module):
@@ -91,18 +92,22 @@ def get_bert_data_loader(batch_size,
 
 
 class SimpleModel(torch.nn.Module):
-    def __init__(self, hidden_dim, is_ckp=False, is_embed_opt=False):
+    def __init__(self, hidden_dim, is_ckp=False, use_cpu_embedding=False):
         super(SimpleModel, self).__init__()
-
-        if is_embed_opt:
-            self.embeddings = ParallelBertEmbeddings(hidden_dim)
+        self._use_cpu_embedding = use_cpu_embedding
+        config = BertConfig()
+        config.vocab_size = 25
+        config.max_position_embeddings = 10
+        config.hidden_size = hidden_dim
+        if use_cpu_embedding:
+            self.embeddings = CpuBertEmbeddings(config)
         else:
-            self.embeddings = BertEmbeddings(hidden_dim)
+            self.embeddings = BertEmbeddings(config)
 
         self.encoder = Encoder(hidden_dim, is_ckp)
         self.cross_entropy_loss = torch.nn.CrossEntropyLoss()
 
     def forward(self, x, y):
-        h1 = self.embeddings(x, device=x.device)
+        h1 = self.embeddings(x)
         h2 = self.encoder(h1)
         return self.cross_entropy_loss(h2[:, 0], y)

@@ -96,6 +96,7 @@ def calucate_MAC(config, batch_size, sequence_length):
 def test_bert_model(is_ckp: bool = False,
                     is_fp16: bool = False,
                     is_ps: bool = False,
+                    use_cpu_embedding: bool = False,
                     batch_size=32,
                     hidden_dim=768,
                     sequence_length=256,
@@ -163,7 +164,8 @@ def test_bert_model(is_ckp: bool = False,
                                        is_fp16=True)
 
             with Init(dtype=torch.float, client=client):
-                model = BertForSequenceClassification(cfg)
+                model = BertForSequenceClassification(
+                    cfg, use_cpu_embedding=args.use_cpu_embedding)
 
             model, optimizer, _, _ = initialize_engine(
                 args=None,

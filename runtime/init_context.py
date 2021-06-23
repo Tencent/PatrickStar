@@ -17,7 +17,7 @@ import torch
 import functools
 from utils import logger, print_rank
 from client import PatrickStarClient, AccessType
-from client.parameter import PSParameter, register_param, is_param_registed
+from client.parameter import PSParameter, register_param, is_param_registed, register_torch_param
 from deepspeed_helper.global_vars import get_args
 
 _orig_torch_empty = torch.empty
@@ -137,12 +137,6 @@ class InsertPostInitMethodToModuleSubClasses(object):
         torch.Tensor.__new__ = torch.Tensor.__old_new__
         torch.empty = _orig_torch_empty
 
-        #un doing it here will undo it during training
-        #if self.mem_efficient_linear:
-        #    torch.nn.functional.linear = self.linear_bk
-        #        if self.mem_efficient_linear:
-        #            torch.nn.functional.linear = self.linear_bk
-
         # Now that we cleaned up the metaclass injection, raise the exception.
         if exc_type is not None:
             return False
@@ -188,37 +182,32 @@ class Init(InsertPostInitMethodToModuleSubClasses):
             group=self.ps_process_group)
 
         self._client = client
-        #Local device is the device where the parameters are consumed
-        #It is the device where parameters are fully instantiated using allgather
-        self.local_device = torch.device('cuda:{}'.format(
-            os.environ["LOCAL_RANK"]))
-
-        #Remote device is the device where parameter partiitons are stored
-        #It can be same as local_device or it could be CPU or NVMe.
-        self.remote_device = torch.device('cpu:0')
-
-        # If we are provided an already-allocated module to prepare.
-        # if module is not None:
-        #     assert isinstance(module, torch.nn.Module)
-        #     for param in module.parameters(recurse=True):
-        #         if is_zero_param(param):
-        #             continue
-        #         self._convert_to_deepspeed_param(param)
-        #         param.partition()
 
     def _post_init_method(self, module):
         """
         在构造model过程中的每个sub_module构造完毕后执行
         1. 保留本proc管理的模型内存，删除其他进程的模型。
         """
-        #see_memory_usage(f"Before converting parmas in {module.__class__.__name__}", force=False)
+        see_memory_usage(
+            f"Before converting parmas in {module.__class__.__name__}",
+            force=False)
+
+        args = get_args()
+
+        if args.use_cpu_embedding:
+            # cpu_embedding优化把embedding交给Torch管理而非Chunk
+            if module.__class__.__name__ == 'Embedding':
+                for name, param in module.named_parameters(recurse=False):
+                    register_torch_param(param, f'embedding_{name}')
+                return
+
         print_rank(f'Converting Params in {module.__class__.__name__}',
                    force=True)
-        args = get_args()
         rank = args.local_rank
-        # 在模型初始化的过程构造模型，post_init_method调用粒度是大的BertAttention层次的字模块。
-        # 我们在所有进程初始化ps param
-        # TODO模型初始化顺序和optimizer parameter group遍历顺序一致么？
+        # 在模型初始化的过程构造模型，post_init_method调用粒度是一个SubModule，比如BertAttention模块。
+        # 对于每个进程，将所有参数初始化出来。
+        # Excluded Parameter，不存储在Chunk中的parameter
+        # (TODO)模型初始化顺序和optimizer parameter group遍历顺序一致么？
         for name, param in module.named_parameters(recurse=False):
             assert not is_param_registed(param)
             assert param.dtype == torch.float
@@ -236,8 +225,9 @@ class Init(InsertPostInitMethodToModuleSubClasses):
                 param.ps_attr._is_local = False
                 # TODO(jiaruifang)下面这句将非local的param的内存清零会导致结果错误,
                 # 插入这句会影响模型初始化的值。
-                param.data = torch.zeros(1,
-                                         dtype=data_type,
-                                         device=param.device)
+                if not args.use_fake_dist:
+                    param.data = torch.zeros(1,
+                                             dtype=data_type,
+                                             device=param.device)
             else:
                 param.ps_attr._is_local = True
