@@ -200,12 +200,17 @@ class PatrickStarClient(object):
 
     def _copy_model(self, model):
         # TODO(jiaruifang)模型参数的初始化顺序和如下循环访问的顺序相同。
+        args = get_args()
         for i, group in enumerate(self.optimizer.param_groups):
             for j, param in enumerate(group['params']):
                 if is_torch_param(param):
-                    param.data = param.data.half()
-                    self.optimizer.state[param]['fp32_param_data'].copy_(
-                        param.data.float())
+                    if args.cpu_embedding_fp32:
+                        self.optimizer.state[param]['fp32_param_data'].copy_(
+                            param.data)
+                    else:
+                        param.data = param.data.half()
+                        self.optimizer.state[param]['fp32_param_data'].copy_(
+                            param.data.float())
                     continue
                 if self.is_local_tensor(param, AccessType.DATA):
                     if True:

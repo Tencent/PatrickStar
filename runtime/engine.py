@@ -56,7 +56,7 @@ class PatrickStarEngine(Module):
 
         # TODO(jiaruifang) prefer_device应该是自适应的
         if args.use_fake_dist:
-            prefer_device = torch.device(f'cuda:0')
+            prefer_device = torch.device(f'cpu:0')
         else:
             prefer_device = torch.device(f'cuda:{args.local_rank}')
 

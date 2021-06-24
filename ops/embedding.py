@@ -103,7 +103,7 @@ class BertEmbeddingsWithoutLN(nn.Module):
         self.vocab_size = config.vocab_size
         self.max_position_embeddings = config.max_position_embeddings
         self.hidden_size = config.hidden_size
-        self.type_vocab_size = 2
+        self.type_vocab_size = config.type_vocab_size
 
         self.word_embeddings = nn.Embedding(self.vocab_size, self.hidden_size)
         self.position_embeddings = nn.Embedding(self.max_position_embeddings,
@@ -163,34 +163,65 @@ class _GatherActToRank0(torch.autograd.Function):
     """gather activations from other proc to proc 0"""
     @staticmethod
     def symbolic(graph, input_):
-        return input_.to(torch.device('cpu:0'))
+        args = get_args()
+        if args.cpu_embedding_fp32:
+            return input_.to(torch.device('cpu:0'))
+        else:
+            return input_.to(torch.device('cpu:0'))
 
     @staticmethod
     def forward(ctx, input_):
-        logger.info(f'copy input to cpu')
-        return input_.to(torch.device('cpu:0'))
+        args = get_args()
+        if args.cpu_embedding_fp32:
+            logger.info(
+                f'Entrying CPU Emedding FWD, copy input to cpu and {input_.dtype}'
+            )
+            return input_.to(torch.device('cpu:0'))
+        else:
+            logger.info(f'Entrying CPU Emedding, copy input to cpu')
+            return input_.to(torch.device('cpu:0'))
 
     @staticmethod
     def backward(ctx, grad_output):
-        logger.info('copy grad_output to cuda')
-        return grad_output.to(torch.device('cuda:0'))
+        args = get_args()
+        if args.cpu_embedding_fp32:
+            logger.info(
+                'Entrying CPU Emedding BWD, copy grad_output to cuda, fp32->fp16'
+            )
+            return grad_output.to(torch.device('cuda:0'))
+        else:
+            logger.info('Entrying CPU Emedding BWD, copy grad_output to cuda')
+            return grad_output.to(torch.device('cuda:0'))
 
 
 class _BcastActFromRank0(torch.autograd.Function):
     """Pass the input to the model parallel region."""
     @staticmethod
     def symbolic(graph, input_):
-        return input_.to(torch.device('cuda:0'))
+        args = get_args()
+        if args.cpu_embedding_fp32:
+            return input_.to(torch.device('cuda:0')).half()
+        else:
+            return input_.to(torch.device('cuda:0'))
 
     @staticmethod
     def forward(ctx, input_):
-        logger.info('copy input to cuda')
-        return input_.to(torch.device('cuda:0'))
+        args = get_args()
+        if args.cpu_embedding_fp32:
+            logger.info(
+                f'Entrying CPU Emedding BWD, copy grad_output to cuda, {input_.dtype}->fp16'
+            )
+            return input_.to(torch.device('cuda:0')).half()
+        else:
+            return input_.to(torch.device('cuda:0'))
 
     @staticmethod
     def backward(ctx, grad_output):
-        logger.info('copy grad_output to cpu')
-        return grad_output.to(torch.device('cpu:0'))
+        args = get_args()
+        if args.cpu_embedding_fp32:
+            return grad_output.to(torch.device('cpu:0')).float()
+        else:
+            return grad_output.to(torch.device('cpu:0'))
 
 
 def copy_to_rank0(input_):

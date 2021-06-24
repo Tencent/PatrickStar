@@ -864,11 +864,15 @@ class BertModel(BertPreTrainedModel):
         if attention_mask is None:
             attention_mask = torch.ones(
                 ((batch_size, seq_length + past_key_values_length)),
-                device=device)
+                device=device,
+                dtype=torch.half)
         # if token_type_ids is None:
         #     token_type_ids = torch.zeros(input_shape,
         #                                  dtype=torch.long,
         #                                  device=device)
+        assert position_ids is None
+        assert token_type_ids is None
+        assert inputs_embeds is None
 
         embedding_output = self.embeddings(
             input_ids=input_ids,
@@ -876,6 +880,7 @@ class BertModel(BertPreTrainedModel):
             token_type_ids=token_type_ids,
             inputs_embeds=inputs_embeds,
             past_key_values_length=past_key_values_length)
+        assert embedding_output.dtype == torch.half
         # We can provide a self-attention mask of dimensions [batch_size, from_seq_length, to_seq_length]
         # ourselves in which case we just need to make it broadcastable to all heads.
         extended_attention_mask: torch.Tensor = self.get_extended_attention_mask(
@@ -890,7 +895,8 @@ class BertModel(BertPreTrainedModel):
                                     encoder_sequence_length)
             if encoder_attention_mask is None:
                 encoder_attention_mask = torch.ones(encoder_hidden_shape,
-                                                    device=device)
+                                                    device=device,
+                                                    dtype=torch.half)
             encoder_extended_attention_mask = self.invert_attention_mask(
                 encoder_attention_mask)
         else:
@@ -904,6 +910,8 @@ class BertModel(BertPreTrainedModel):
         head_mask = self.get_head_mask(head_mask,
                                        self.config.num_hidden_layers)
 
+        extended_attention_mask = extended_attention_mask.half()
+        assert extended_attention_mask.dtype == torch.half
         encoder_outputs = self.encoder(
             embedding_output,
             attention_mask=extended_attention_mask,
