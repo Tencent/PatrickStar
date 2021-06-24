@@ -56,8 +56,6 @@ def empty_cuda_tensor(*size, **kwargs):
 
 
 def new_cuda_tensor(cls, *args):
-    # print_rank(f'new_cuda_tensor in {cls.__name__}',
-    #                force=True)
     device = torch.device('cpu:0')
     tensor = torch.ones((1, 1), device=device).new_empty(*args)
     return tensor
@@ -86,12 +84,12 @@ class InsertPostInitMethodToModuleSubClasses(object):
             @functools.wraps(f)
             def wrapper(module, *args, **kwargs):
                 print_rank(f'Before initializing {module.__class__.__name__}',
-                           force=True)
+                           force=False)
                 f(module, *args, **kwargs)
                 self._post_init_method(module)
                 print_rank(
                     f'After initializing followed by post init for {module.__class__.__name__}',
-                    force=True)
+                    force=False)
 
             return wrapper
 
@@ -202,7 +200,7 @@ class Init(InsertPostInitMethodToModuleSubClasses):
                 return
 
         print_rank(f'Converting Params in {module.__class__.__name__}',
-                   force=True)
+                   force=False)
         rank = args.local_rank
         # 在模型初始化的过程构造模型，post_init_method调用粒度是一个SubModule，比如BertAttention模块。
         # 对于每个进程，将所有参数初始化出来。
@@ -211,7 +209,7 @@ class Init(InsertPostInitMethodToModuleSubClasses):
         for name, param in module.named_parameters(recurse=False):
             assert not is_param_registed(param)
             assert param.dtype == torch.float
-            print_rank(f'** Converting Params {name}', force=True)
+            print_rank(f'** Converting Params {name}', force=False)
 
             register_param(param, name)
             numel = param.ps_attr.ps_numel

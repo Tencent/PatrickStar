@@ -57,10 +57,6 @@ class Chunk(object):
             PSTensorStatus.FREE: 0
         }
 
-        self.ps_manager = PatrickStarManager()
-        if self.ps_manager.is_init() is False:
-            raise "init Manager first before init a Chunk"
-
         self.payload = None
         self._time_profile = True
 
@@ -118,8 +114,8 @@ class Chunk(object):
             self.payload = torch.zeros(payload_size,
                                        dtype=self.data_type,
                                        device=device)
-        self.ps_manager.add(device.type, device.index,
-                            self.get_payload_space())
+        ps_manager = PatrickStarManager()
+        ps_manager.add(device.type, self.get_payload_space())
 
         self.touch()
         if self._time_profile:
@@ -132,9 +128,8 @@ class Chunk(object):
         """
         # if self._time_profile:
         #     start_time = time.time()
-        self.ps_manager.delete(self.get_device().type,
-                               self.get_device().index,
-                               self.get_payload_space())
+        ps_manager = PatrickStarManager()
+        ps_manager.delete(self.get_device().type, self.get_payload_space())
 
         # 删除chunk的内存
         del self.payload
@@ -204,9 +199,8 @@ class Chunk(object):
             f'move chunk {self.chunk_id} numel {self.payload.numel()} from {self.get_device()} to {target_device}'
         )
         #TODO(jiaruifang)异步
-        self.ps_manager.delete(self.get_device().type,
-                               self.get_device().index,
-                               self.get_payload_space())
+        ps_manager = PatrickStarManager()
+        ps_manager.delete(self.get_device().type, self.get_payload_space())
         if is_async:
             if target_device.type == 'cpu':
                 pinned_payload_cpu = torch.ones(self.payload.shape,
@@ -243,8 +237,8 @@ class Chunk(object):
         else:
             self.payload = self.payload.to(target_device)
 
-        self.ps_manager.add(target_device.type, target_device.index,
-                            self.get_payload_space())
+        ps_manager = PatrickStarManager()
+        ps_manager.add(target_device.type, self.get_payload_space())
         self.touch()
 
         if self._time_profile:

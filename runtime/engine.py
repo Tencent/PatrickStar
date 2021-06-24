@@ -15,6 +15,7 @@ from utils import logger, init_distributed
 from utils import print_rank as print_rank_0
 from torch.nn.modules import Module
 from client import PatrickStarClient, AccessType, PSChunkStatus, PSTensorStatus
+from manager import PatrickStarManager
 import torch
 from ops import FP16Adam
 from deepspeed_helper.global_vars import get_args
@@ -34,7 +35,6 @@ class PatrickStarEngine(Module):
                  mpu=None,
                  dist_init_required=None,
                  collate_fn=None,
-                 config=None,
                  config_params=None,
                  dont_change_device=False):
         super(PatrickStarEngine, self).__init__()
@@ -43,30 +43,32 @@ class PatrickStarEngine(Module):
             self.dist_backend = "gloo" if args.use_fake_dist else "nccl"
             init_distributed(dist_backend=self.dist_backend)
 
+        manager = PatrickStarManager()
+        manager.init(args.max_gpu_memory, args.max_cpu_memory)
+
         self.rank = 0 if args.use_fake_dist else args.local_rank
         self.training_dataloader = None
         self.lr_scheduler = None
         self.module = model
         self.module.train()
 
-        logger.info(f'config.default_chunk_size {config.default_chunk_size}')
         self.client = client
 
         # TODO(jiaruifang) prefer_device应该是自适应的
+        if args.use_fake_dist:
+            prefer_device = torch.device(f'cpu:0')
+        else:
+            prefer_device = torch.device(f'cuda:{args.local_rank}')
         self.optimizer = FP16Adam(self.client,
                                   self.module.parameters(),
                                   lr=0.001,
-                                  prefer_device=torch.device(f'cpu:0'))
+                                  prefer_device=prefer_device)
         # prefer_device = torch.device(f'cuda:{self.rank}')
         # 这个hook并没啥意义，为何不能和postbwd hook一起？
         # self.create_reduce_and_remove_grad_hooks()
 
         self.client.init(self.module, self.optimizer)
         logger.info('init PatrickStarEngine')
-
-        # for param in self.module.named_parameters():
-        #     print(param)
-        #creates backward hooks for gradient partitioning
 
     def reduce_ready_partitions_and_remove_grads(self, param, i):
         pass
@@ -119,7 +121,6 @@ class PatrickStarEngine(Module):
         """
         loss = self.module(*inputs, **kwargs)
         for chunk_id, chunk in self.client.chunk_list.generate_chunk():
-            # chunk.fwd_used = False
             if chunk.get_status() == PSChunkStatus.HOLD_AFTER_FWD:
                 self.client.set_all_tensors_status_in_chunk(
                     chunk_id, PSTensorStatus.HOLD)

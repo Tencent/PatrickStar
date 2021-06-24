@@ -27,7 +27,6 @@ import time
 import argparse
 
 from client import PatrickStarClient, PSTensorStatus, AccessType
-from manager import PatrickStarManager
 from client import setup_hybrid_ps_hooks
 from ops import CPUAdam, TorchAdam, FP16Adam
 import utils.global_timer as global_timer
@@ -122,12 +121,10 @@ def test_bert_model(is_ckp: bool = False,
     if is_ckp:
         cfg = BertConfig(gradient_checkpointing=True,
                          hidden_dim=hidden_dim,
-                         vocab_size=10,
                          max_position_embeddings=sequence_length,
                          num_hidden_layers=num_layer)
     else:
         cfg = BertConfig(hidden_dim=hidden_dim,
-                         vocab_size=10,
                          max_position_embeddings=sequence_length,
                          num_hidden_layers=num_layer)
 
@@ -146,22 +143,12 @@ def test_bert_model(is_ckp: bool = False,
         model = torch.nn.parallel.DistributedDataParallel(model,
                                                           device_ids=[rank])
     else:
-        default_chunk_size = 1024 * 1024 * 10
-        manager = PatrickStarManager()
-        manager.reset([default_chunk_size * 4 * world_size] * world_size,
-                      [default_chunk_size * 2 * 14 * 6] * world_size)
         if is_fp16:
-
-            class Config(object):
-                def __init__(self):
-                    self.default_chunk_size = default_chunk_size
-
-            config = Config()
-
-            client = PatrickStarClient(rank=rank,
-                                       default_chunk_size=default_chunk_size,
-                                       warmup=False,
-                                       is_fp16=True)
+            client = PatrickStarClient(
+                rank=rank,
+                default_chunk_size=args.default_chunk_size,
+                warmup=False,
+                is_fp16=True)
 
             with Init(dtype=torch.float, client=client):
                 model = BertForSequenceClassification(
@@ -171,8 +158,7 @@ def test_bert_model(is_ckp: bool = False,
                 args=None,
                 model=model,
                 client=client,
-                model_parameters=model.parameters(),
-                config=config)
+                model_parameters=model.parameters())
         else:
             model = BertForSequenceClassification(cfg)
             client = PatrickStarClient(rank=rank,
@@ -248,9 +234,9 @@ def test_bert_model(is_ckp: bool = False,
     )
     logging.info(f"{total_macs/1e9/(elapse/(stop_step+1))} GFlops")
     logging.info(f"model numel {model_numel/1e9} B")
-    # if is_ps:
-    #     global_timer.time_profiler()
-    #     timer = global_timer.IterationTimer()
+    if is_ps:
+        global_timer.time_profiler()
+        timer = global_timer.IterationTimer()
     #     with open('gpu_used.txt', 'w') as fh:
     #         fh.write(
     #             f'gpu_ps_used_list {len(timer.gpu_ps_used_list)} \n f{timer.gpu_ps_used_list}'
@@ -287,30 +273,18 @@ if __name__ == "__main__":
 
     world_size = torch.distributed.get_world_size()
 
-    plan = "B"
+    plan = "A"
     if res_check:
         plan = "B"
     if plan == "A":
         # PatrickStar可以，PyTorch不可以
         # use_ckp: True, use_fp16: True, adam default on CPU, not interleave data and grad
-        if use_fp16:
-            # 精心挑选的参数
-            manager = PatrickStarManager()
-            manager.init([1024 * 1024 * 1024 * 2] * world_size,
-                         [1024 * 1024 * 1024 * 4 * 4] * world_size)
-        else:
-            manager = PatrickStarManager()
-            manager.init([1024 * 1024 * 512 * 4] * world_size,
-                         [1024 * 1024 * 1024 * 4 * 4] * world_size)
         hidden_dim = 3072
         batch_size = 8
         sequence_length = 1024
         num_layer = 60
     elif plan == 'B':
         # PatrickStar and Torch都可以
-        manager = PatrickStarManager()
-        manager.init([1024 * 1024 * 1024 * 8] * world_size,
-                     [1024 * 1024 * 1024 * 4 * 4] * world_size)
         hidden_dim = 768
         batch_size = 1
         sequence_length = 1024
@@ -319,17 +293,11 @@ if __name__ == "__main__":
         # use ckp
         # PatrickStar and PyTorch is OK
         # 没有prepare device开销
-        manager = PatrickStarManager()
-        manager.init([1024 * 1024 * 512 * 4] * world_size,
-                     [1024 * 1024 * 1024 * 4 * 4] * world_size)
         hidden_dim = 768
         batch_size = 8
         sequence_length = 1024
         num_layer = 12
     elif plan == 'D':
-        manager = PatrickStarManager()
-        manager.init([1024 * 1024 * 1024] * world_size,
-                     [1024 * 1024 * 1024 * 4 * 4] * world_size)
         hidden_dim = 4096  #2048
         batch_size = 2
         sequence_length = 1536
@@ -345,7 +313,7 @@ if __name__ == "__main__":
                                     hidden_dim=hidden_dim,
                                     sequence_length=sequence_length,
                                     num_layer=num_layer,
-                                    stop_step=3)
+                                    stop_step=10)
         print(loss_list)
     # calculate_mem_need(hidden_dim = hidden_dim, batch_size = batch_size, is_fp16 = use_fp16)
 

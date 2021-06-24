@@ -13,7 +13,6 @@
 
 import torch
 import os
-from manager import PatrickStarManager
 from typing import Dict
 import datetime
 import logging
@@ -95,8 +94,8 @@ class CachedFP32Buff(object):
 
 class PatrickStarClient(object):
     def __init__(self,
-                 rank: int = 0,
-                 default_chunk_size: int = 1024 * 1024,
+                 rank: int,
+                 default_chunk_size: int,
                  warmup=True,
                  is_fp16=False):
         """

@@ -25,7 +25,7 @@ import torch.distributed as dist
 def test_collective_comm():
     rank = torch.distributed.get_rank()
     manager = PatrickStarManager()
-    manager.init([10, 10], [10, 10])
+    manager.init([10, 10])
 
     # 每个进程都分配一个chunk
     chunk = Chunk(4, torch.half, 0)

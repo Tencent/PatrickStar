@@ -13,7 +13,7 @@
 
 import torch
 from torch.multiprocessing import Process, Manager
-import logging
+import logging as logger
 
 
 ######### Global Scheduler ###########
@@ -44,143 +44,73 @@ class PatrickStarManager(metaclass=SingletonMeta):
   拥有所有chunk信息的overview picture
   """
     def __init__(self):
-        mp_manager = Manager()
-        self._is_init_ = mp_manager.Value('_is_init_', False)
-        self.gpu_max_mem_list = mp_manager.list([])
-        self.cpu_max_mem_list = mp_manager.list([])
-        self.gpu_used_mem_list = mp_manager.list([])
-        self.cpu_used_mem_list = mp_manager.list([])
-
+        self.gpu_max_mem = 0
+        self.cpu_max_mem = 0
+        self.gpu_used_mem = 0
+        self.cpu_used_mem = 0
         self.cpu_mem_usage_curve = []
         self.gpu_mem_usage_curve = []
-
-    def init(self, gpu_info, cpu_info):
-        if self._is_init_.value:
-            self.reset(gpu_info, cpu_info)
-            return
-
-        for item in gpu_info:
-            self.gpu_max_mem_list.append(item)
-            self.gpu_used_mem_list.append(0)
-
-        for item in cpu_info:
-            self.cpu_max_mem_list.append(item)
-            self.cpu_used_mem_list.append(0)
-        self._is_init_.value = True
-
-    def reset(self, gpu_info, cpu_info):
-        mp_manager = Manager()
-        self._is_init_ = mp_manager.Value('_is_init_', False)
-        self.gpu_max_mem_list = mp_manager.list([])
-        self.cpu_max_mem_list = mp_manager.list([])
-        self.gpu_used_mem_list = mp_manager.list([])
-        self.cpu_used_mem_list = mp_manager.list([])
-        self.init(gpu_info, cpu_info)
+        self._is_init_ = False
 
     def is_init(self):
-        return self._is_init_.value
+        return self._is_init_
+
+    def init(self, max_gpu_memory, max_cpu_memory):
+        self.gpu_max_mem = max_gpu_memory
+        self.cpu_max_mem = max_cpu_memory
+        logger.info(
+            'Init Manager with gpu max mem {self.gpu_max_mem} and cpu max mem {self.cpu_max_mem}'
+        )
+        self._is_init_ = True
+
+    def reset(self, max_gpu_memory, max_cpu_memory):
+        self.init(max_gpu_memory, max_cpu_memory)
 
     def visit(self):
-        for idx, (used_mem, max_mem) in enumerate(
-                zip(self.gpu_used_mem_list, self.gpu_max_mem_list)):
-            print(f"GPU:{idx} used mem {used_mem} B max mem {max_mem} B")
-        for idx, (used_mem, max_mem) in enumerate(
-                zip(self.cpu_used_mem_list, self.cpu_max_mem_list)):
-            print(f"CPU:{idx} used mem {used_mem} B max mem {max_mem} B")
+        logger.info(
+            f"CPU used mem {self.cpu_used_mem} B, GPU used mem {self.gpu_used_mem} B"
+        )
 
-    def add(self, device_type: str, index: int, size: int):
+    def add(self, device_type: str, size_in_bytes: int):
         """
         登记，设备device_type:index增加size个bytes内存使用
         """
-        if index is None:
-            index = 0
-
         if device_type == "cpu":
-            self.cpu_used_mem_list[index] += size
-            self.cpu_mem_usage_curve.append(self.used_mem(device_type, index))
+            self.cpu_used_mem += size_in_bytes
+            self.cpu_mem_usage_curve.append(self.cpu_used_mem)
         elif device_type == "cuda":
-            self.gpu_used_mem_list[index] += size
-            self.gpu_mem_usage_curve.append(self.used_mem(device_type, index))
+            self.gpu_used_mem += size_in_bytes
+            self.gpu_mem_usage_curve.append(self.gpu_used_mem)
         else:
             raise f"device type {device_type} is not supported"
 
-    def delete(self, device_type, index, size):
+    def delete(self, device_type, size_in_bytes):
         """
         checkout，设备device_type:index减少size个bytes内存使用
         """
-        if index is None:
-            index = 0
-
         if device_type == "cpu":
-            self.cpu_used_mem_list[index] -= size
-            self.cpu_mem_usage_curve.append(
-                self.available_mem(device_type, index))
+            self.cpu_used_mem -= size_in_bytes
+            self.cpu_mem_usage_curve.append(self.cpu_used_mem)
         elif device_type == "cuda":
-            self.gpu_used_mem_list[index] -= size
-            self.gpu_mem_usage_curve.append(self.used_mem(device_type, index))
+            self.gpu_used_mem -= size_in_bytes
+            self.gpu_mem_usage_curve.append(self.gpu_used_mem)
         else:
             raise f"device type {device_type} is not supported"
 
-    def schedule(self, size_in_byte: int, refer_dev_idx: int):
-        """
-        找到一个设备，可以分配size_in_byte个bytes存储空间
-        refer_dev_idx, 调用进程管理的gpu编号
-        """
-        if self.available_mem("cpu", 0) >= size_in_byte:
-            return torch.device("cpu")
-        elif self.available_mem("cuda", refer_dev_idx) >= size_in_byte:
-            return torch.device(f"cuda:{refer_dev_idx}")
-        else:
-            for idx in range(self.gpu_num()):
-                if idx == refer_dev_idx:
-                    pass
-                if self.available_mem("cuda", idx) >= size_in_byte:
-                    # self.add("cuda", idx, size_in_byte)
-                    return torch.device(f"cuda:{idx}")
-        logging.error(f"PatrickStarManager can not find {size_in_byte} space")
-        raise RuntimeError
-
-    def available_mem(self, device_type, index):
-        index = 0 if index is None else index
+    def available_mem(self, device_type):
         if device_type == "cuda":
-            return self.gpu_max_mem_list[index] - self.gpu_used_mem_list[index]
+            return self.gpu_max_mem - self.gpu_used_mem
         elif device_type == "cpu":
-            return self.cpu_max_mem_list[index] - self.cpu_used_mem_list[index]
+            return self.cpu_max_mem - self.cpu_used_mem
 
-    def gpu_num(self):
-        return len(self.gpu_max_mem_list)
-
-    def cpu_num(self):
-        return len(self.cpu_max_mem_list)
-
-    def used_mem(self, device_type, index):
+    def used_mem(self, device_type):
         if device_type == "cpu":
-            return self.cpu_used_mem_list[index]
+            return self.cpu_used_mem
         elif device_type == "cuda":
-            return self.gpu_used_mem_list[index]
+            return self.gpu_used_mem
 
-    def max_mem(self, device_type, index):
-        index = 0 if index is None else index
+    def max_mem(self, device_type):
         if device_type == "cpu":
-            return self.cpu_max_mem_list[index]
+            return self.cpu_max_mem
         elif device_type == "cuda":
-            return self.gpu_max_mem_list[index]
-
-
-if __name__ == "__main__":
-    s1 = PatrickStarManager()
-    s1.init([64, 64], [128])
-
-    # do nothing if you initialize a singleton twice
-    s2 = PatrickStarManager()
-    s2.init([32, 32, 3], [32])
-    assert s2.gpu_num() == 2
-
-    if id(s1) == id(s2):
-        print(
-            "PatrickStarManager works, both variables contain the same instance."
-        )
-    else:
-        print(
-            "PatrickStarManager failed, variables contain different instances."
-        )
+            return self.gpu_max_mem

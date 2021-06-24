@@ -121,7 +121,7 @@ class ChunkList(object):
             f'prepare_device target device {target_device} need size {need_bytes} bytes'
         )
         ps_manager = PatrickStarManager()
-        max_mem = ps_manager.max_mem(target_device.type, target_device.index)
+        max_mem = ps_manager.max_mem(target_device.type)
         if max_mem < need_bytes:
             logger.error(
                 f"{target_device} has not enough space for {need_bytes} elements"
@@ -130,8 +130,7 @@ class ChunkList(object):
             raise RuntimeError(
                 f"{target_device} has not enough space for {need_bytes} Bytes")
 
-        available_size = ps_manager.available_mem(target_device.type,
-                                                  target_device.index)
+        available_size = ps_manager.available_mem(target_device.type)
 
         # 当前系统可用内存，需要减去activation消耗
         # available_size = get_memory_used(target_device)

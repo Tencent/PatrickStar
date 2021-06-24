@@ -26,7 +26,6 @@ def initialize_engine(args=None,
                       mpu=None,
                       dist_init_required=None,
                       collate_fn=None,
-                      config=None,
                       config_params=None):
     """Initialize the PatrickStar Engine.
     Arguments:
@@ -74,7 +73,6 @@ def initialize_engine(args=None,
                                mpu=mpu,
                                dist_init_required=dist_init_required,
                                collate_fn=collate_fn,
-                               config=config,
                                config_params=config_params)
 
     return_items = [

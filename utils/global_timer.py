@@ -76,11 +76,11 @@ class IterationTimer(metaclass=SingletonMeta):
             else:
                 rank = 0
             gpu_device = torch.device(f'cuda:{rank}')
-            gpu_ps_used = mgr.used_mem(gpu_device.type, gpu_device.index)
+            gpu_ps_used = mgr.used_mem(gpu_device.type)
             gpu_used = get_memory_used(gpu_device)
 
             cpu_device = torch.device('cpu:0')
-            cpu_ps_used = mgr.used_mem(gpu_device.type, gpu_device.index)
+            cpu_ps_used = mgr.used_mem(gpu_device.type)
             cpu_used = get_memory_used(cpu_device)
 
             self.cpu_used_list.append(cpu_used / 1e6)

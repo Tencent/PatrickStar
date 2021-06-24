@@ -26,7 +26,7 @@ class TestChunkList(unittest.TestCase):
         self.client = PatrickStarClient(
             rank=0, default_chunk_size=self.default_chunk_size)
         self.manager = PatrickStarManager()
-        self.manager.init([32 * 4], [1024])
+        self.manager.init(32 * 4, 1024)
         self.compute_device = torch.device(
             'cuda:0') if torch.cuda.is_available() else torch.device('cpu')
 

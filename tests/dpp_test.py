@@ -23,7 +23,6 @@ import torch.distributed as dist
 
 from ops import CPUAdam, TorchAdam, FP16Adam
 from client import PatrickStarClient, setup_hybrid_ps_hooks, PSTensorStatus
-from manager import PatrickStarManager
 from utils import see_memory_usage
 import utils.global_timer as global_timer
 
@@ -71,26 +70,15 @@ def test_simple_model(is_ps: bool = False,
         optimizer = TorchAdam(model.parameters(), lr=0.001)
         if is_fp16:
             optimizer = FP16_Optimizer(optimizer)
-        # TODO单卡模拟多卡
         model = torch.nn.parallel.DistributedDataParallel(model,
                                                           device_ids=[rank])
     else:
-        default_chunk_size = 50
-        manager = PatrickStarManager()
-        manager.reset([default_chunk_size * 2 * world_size] * world_size,
-                      [default_chunk_size * 2 * 14 * 6] * world_size)
         if is_fp16:
-
-            class Config(object):
-                def __init__(self):
-                    self.default_chunk_size = default_chunk_size
-
-            client = PatrickStarClient(rank=rank,
-                                       default_chunk_size=default_chunk_size,
-                                       warmup=False,
-                                       is_fp16=True)
-            config = Config()
-
+            client = PatrickStarClient(
+                rank=rank,
+                default_chunk_size=args.default_chunk_size,
+                warmup=False,
+                is_fp16=True)
             with Init(dtype=torch.float, client=client):
                 model = SimpleModel(hidden_dim,
                                     is_ckp=is_ckp,
@@ -99,8 +87,7 @@ def test_simple_model(is_ps: bool = False,
                 args=None,
                 client=client,
                 model=model,
-                model_parameters=model.parameters(),
-                config=config)
+                model_parameters=model.parameters())
         else:
             model = SimpleModel(hidden_dim, is_ckp=is_ckp)
             client = PatrickStarClient(rank=rank,
@@ -174,14 +161,11 @@ if __name__ == "__main__":
     set_global_variables()
 
     torch.manual_seed(0)
-    manager = PatrickStarManager()
     # 4 layer每层20个elem(20*4 bytes)，最少360 (360*4 bytes)内存
     # gpu内存至少为40，反向传播一层需要的最大内存。
 
     test_cpu_adam = False
     if test_cpu_adam:
-        manager.init([40 * world_size] * world_size,
-                     [40 * 14 * 6] * world_size)
         loss_ref_list = test_simple_model(False)
 
         torch.manual_seed(0)

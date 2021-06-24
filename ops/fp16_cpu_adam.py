@@ -56,10 +56,14 @@ def FP16_f_adamv2(client,
         adam_start_time = time.time()
     rank = torch.distributed.get_rank()
     world_size = torch.distributed.get_world_size()
-    # NOTE 因为每个参数计算计算后需要自增step，计算粒度只能是tensor而不是chunk
+
     for i, param in enumerate(fp32_params):
+        ##########################
+        ####### 准备ADAM数据 ######
+        ##########################
         if time_profile:
             adam_iter_access_start = time.time()
+
         compute_device = prefer_device
         client.access_data(param, compute_device)
         param_data = get_real_data_tensor(param)
@@ -74,16 +78,19 @@ def FP16_f_adamv2(client,
         else:
             # 以tensor为粒度拷贝grad fp16 -> grad fp32
             # 放在data位置上的grad
+            # print(f'access {param.ps_attr.ps_name} {param.ps_attr.ps_numel}')
             client.access_data(fp16_param, torch.device(f'cuda:{client.rank}'))
-            if is_torch_param(param):
-                fp16_param_grad = param_data
-            else:
-                fp16_param_grad = get_real_data_tensor(fp16_param)
+            fp16_param_grad = get_real_data_tensor(fp16_param)
             # print(f'PS {i} fp16_param {fp16_param_grad}')
             if time_profile:
                 start_time = time.time()
-            param_grad = param_grad_buff.narrow(0, 0, param_data.numel()).view(
-                param_data.shape)
+
+            if is_torch_param(fp16_param):
+                param_grad = fp16_param.float(
+                )  #torch.zeros_like(fp16_param, dtype = torch.float)
+            else:
+                param_grad = param_grad_buff.narrow(
+                    0, 0, param_data.numel()).view(param_data.shape)
             param_grad.copy_(fp16_param_grad, non_blocking=False)
             if time_profile:
                 global_timer.gpu_cpu_move_elapse += time.time() - start_time
@@ -100,6 +107,9 @@ def FP16_f_adamv2(client,
         exp_avg = get_real_data_tensor(exp_avg_param)
         exp_avg_sq = get_real_data_tensor(exp_avg_sq_param)
 
+        ##########################
+        ####### 开始ADAM计算 ######
+        ##########################
         if time_profile:
             global_timer.cpu_adam_access_elapse += time.time(
             ) - adam_iter_access_start
@@ -142,6 +152,10 @@ def FP16_f_adamv2(client,
             global_timer.cpu_adam_f_elapse += time.time(
             ) - f_adam_compute_start_time
             adam_iter_release_start = time.time()
+
+        ##########################
+        ####### 结束ADAM计算 ######
+        ##########################
 
         fp16_param = fp16_param_with_grad_list[i]
 
@@ -251,7 +265,6 @@ class FP16Adam(torch.optim.Optimizer):
         rank = torch.distributed.get_rank()
         for n, param in self.client.module.named_parameters():
             if is_torch_param(param) and param.grad is not None:
-                # TODO(jiaruifang) allreduce for torch param
                 param.data = param.grad
                 param.grad = None
                 world_size = torch.distributed.get_world_size()
@@ -355,6 +368,8 @@ class FP16Adam(torch.optim.Optimizer):
                                                    dtype=torch.float,
                                                    device=self.prefer_device)
             logging.info(f"adam max_chunk_size {buff_size}")
+
+        # self.client.chunk_tensor_index.visit_chunks(self.client.chunk_list)
         FP16_f_adamv2(self.client, fp32_param_list, fp16_param_with_grad_list,
                       exp_avgs, exp_avg_sqs, max_exp_avg_sqs, state_steps,
                       False, beta1_list, beta2_list, lr_list,
