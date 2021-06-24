@@ -56,9 +56,12 @@ class PatrickStarEngine(Module):
 
         # TODO(jiaruifang) prefer_device应该是自适应的
         if args.use_fake_dist:
-            prefer_device = torch.device(f'cpu:0')
+            prefer_device = torch.device(f'cuda:0')
         else:
             prefer_device = torch.device(f'cuda:{args.local_rank}')
+
+        if args.local_rank == 0:
+            logger.info(f'ADAM on {prefer_device}')
         self.optimizer = FP16Adam(self.client,
                                   self.module.parameters(),
                                   lr=0.001,
