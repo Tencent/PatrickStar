@@ -61,7 +61,7 @@ class PatrickStarEngine(Module):
             prefer_device = torch.device(f'cuda:{args.local_rank}')
 
         if args.local_rank == 0:
-            logger.info(f'ADAM on {prefer_device}')
+            logger.info(f'ADAM on device {prefer_device}')
         self.optimizer = FP16Adam(self.client,
                                   self.module.parameters(),
                                   lr=0.001,

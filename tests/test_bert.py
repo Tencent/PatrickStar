@@ -100,7 +100,7 @@ def test_bert_model(is_ckp: bool = False,
                     hidden_dim=768,
                     sequence_length=256,
                     num_layer=12,
-                    stop_step=10):
+                    stop_step=5):
     logging.info(f'test a bert model with checkpoit {is_ckp} FP16 {is_fp16}')
     logging.info(
         f'batch_size {batch_size}, hidden_dim {hidden_dim}, sequence_length {sequence_length}, num_layer {num_layer}'
@@ -313,7 +313,7 @@ if __name__ == "__main__":
                                     hidden_dim=hidden_dim,
                                     sequence_length=sequence_length,
                                     num_layer=num_layer,
-                                    stop_step=10)
+                                    stop_step=5)
         print(loss_list)
     # calculate_mem_need(hidden_dim = hidden_dim, batch_size = batch_size, is_fp16 = use_fp16)
 

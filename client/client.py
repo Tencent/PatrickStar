@@ -593,12 +593,9 @@ class PatrickStarClient(object):
             return
 
         chunk_id = self.chunk_tensor_index.get_chunk_id(param, access_type)
+        # 可以在tensor-chunk schema构造过程中获得local_chunk_id
         chunk_id_list = self.chunk_tensor_index.get_global_chunk_id_list(
             chunk_id)
-
-        # if rank >= len(chunk_id_list):
-        #     return
-        assert rank < len(chunk_id_list), f"rank {rank} < {len(chunk_id_list)}"
 
         local_chunk_id = chunk_id_list[rank]
 
@@ -615,15 +612,12 @@ class PatrickStarClient(object):
 
         # 找到需要删除的chunk，先删除chunk关联的tensors
         if access_type == AccessType.DATA:
-            # NOTE(jiaruifang) 必须to device它和param.grad_fn.next_functions[0][0]
-            param.data = torch.zeros(1,
-                                     dtype=param.dtype,
-                                     device=torch.device('cpu:0')).to(
-                                         param.device)
+            # NOTE(jiaruifang) 必须device和原来param一直，影响hook of param.grad_fn.next_functions[0][0]
+            param.data = torch.zeros(1, dtype=param.dtype, device=param.device)
         elif access_type == AccessType.GRAD:
             param.grad = None
 
-        # 判断global所有的chunk都被使用完毕，可以释放remote chunk
+        # 判断chunk group中所有的chunk都被使用完毕，可以释放remote chunk
         # FWD: 当所有非dummy的chunk都是HOLD_AFTER_FWD
         # BWD: 当所有非dummy的chunk都是HOLD_AFTER_BWD
         all_chunks_ready = True
@@ -640,7 +634,9 @@ class PatrickStarClient(object):
                     all_chunks_ready = False
                 # self.chunk_tensor_index.visit_chunk(self.chunk_list[i])
             else:
-                raise RuntimeError
+                raise RuntimeError(
+                    f"{training_stage} is neither TrainingStage.FWD nor TrainingStage.BWD"
+                )
 
         if all_chunks_ready:
             if is_allreduce:
@@ -664,6 +660,9 @@ class PatrickStarClient(object):
                         group=group,
                         async_op=False)
                 else:
+                    # Note()为了在开发机调试方便
+                    # 它非常慢 4.92 sec/5.89 sec (client_release_elapse)
+                    temp_start_time = time.time()
                     for rank_, chunk_id_ in enumerate(chunk_id_list):
                         if self.chunk_list[chunk_id_].is_dummy():
                             continue
@@ -673,6 +672,8 @@ class PatrickStarClient(object):
                             op=torch.distributed.ReduceOp.SUM,
                             group=group,
                             async_op=False)
+                    global_timer.temp_check_elapse += time.time(
+                    ) - temp_start_time
                 # NOTE把下面行注释了不影响最终结果？loss可能是有softmax算出，所以相对值不影响LOSS比较，但是影响了
                 # 不应该除以world_size,减去dummy chunk个数
                 self.chunk_list[local_chunk_id].payload /= world_size
@@ -706,14 +707,14 @@ class PatrickStarClient(object):
         """
         if self._time_profile:
             start_time = time.time()
+            # tmp_start_time = time.time()
 
         if is_torch_param(param):
             return
 
-        rank = torch.distributed.get_rank()
+        args = get_args()
+        rank = args.local_rank
         assert isinstance(reset_to_status, PSTensorStatus)
-        # if param.ps_attr.get_status(access_type) != PSTensorStatus.COMPUTE:
-        #     return
 
         chunk_id = self.chunk_tensor_index.get_chunk_id(param, access_type)
         logger.debug(
@@ -729,10 +730,7 @@ class PatrickStarClient(object):
         # 找到需要删除的chunk，先删除chunk关联的tensors
         if access_type == AccessType.DATA:
             # NOTE() 必须to device它和param.grad_fn.next_functions[0][0]
-            param.data = torch.zeros(1,
-                                     dtype=param.dtype,
-                                     device=torch.device('cpu:0')).to(
-                                         param.device)
+            param.data = torch.zeros(1, dtype=param.dtype, device=param.device)
         elif access_type == AccessType.GRAD:
             param.grad = None
 
@@ -760,6 +758,7 @@ class PatrickStarClient(object):
                 self.chunk_list[chunk_id].payload /= world_size
 
         if self._time_profile:
+            # global_timer.temp_check_elapse += time.time() - tmp_start_time
             global_timer.client_release_elapse += time.time() - start_time
 
     def release_data(self,

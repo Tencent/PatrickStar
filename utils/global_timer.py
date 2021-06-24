@@ -126,6 +126,9 @@ get_status_elapse = 0
 cpu_adam_release_elapse = 0
 cpu_adam_access_elapse = 0
 
+# 临时观察
+temp_check_elapse = 0
+
 
 def time_profiler():
     global client_access_elapse
@@ -154,6 +157,8 @@ def time_profiler():
     global get_status_elapse
     global cpu_adam_release_elapse
     global cpu_adam_access_elapse
+
+    global temp_check_elapse
 
     logging.info(f'CLIENT ACCESS ELAPSE')
     logging.info(f'* client_access_elapse {client_access_elapse} ')
@@ -186,3 +191,5 @@ def time_profiler():
     logging.info(f'* client_release_elapse {client_release_elapse}')
     logging.info(f'** memory_delete_elapse {memory_delete_elapse}')
     logging.info(f'*** get_status_elapse {get_status_elapse}')
+
+    logging.info(f'*** temp_check_elapse {temp_check_elapse}')
