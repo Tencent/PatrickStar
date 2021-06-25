@@ -22,6 +22,7 @@ from client.const import PSTensorStatus, AccessType, TrainingStage
 import utils.global_timer as global_timer
 from utils import print_rank, logger, use_dist_flag
 from client.parameter import register_param, is_torch_param
+from deepspeed_helper.global_vars import get_args
 
 
 def get_real_data_tensor(param):
@@ -262,16 +263,27 @@ class FP16Adam(torch.optim.Optimizer):
             closure (callable, optional): A closure that reevaluates the model
                 and returns the loss.
         """
+        args = get_args()
         rank = torch.distributed.get_rank()
         for n, param in self.client.module.named_parameters():
             if is_torch_param(param) and param.grad is not None:
                 param.data = param.grad
                 param.grad = None
                 world_size = torch.distributed.get_world_size()
-                torch.distributed.all_reduce(param.data,
-                                             op=torch.distributed.ReduceOp.SUM,
-                                             async_op=False)
-                param.data /= world_size
+                if args.use_fake_dist:
+                    torch.distributed.all_reduce(
+                        param.data,
+                        op=torch.distributed.ReduceOp.SUM,
+                        async_op=False)
+                    param.data /= world_size
+                else:
+                    param.data = param.data.to(torch.device(f'cuda:{rank}'))
+                    torch.distributed.all_reduce(
+                        param.data,
+                        op=torch.distributed.ReduceOp.SUM,
+                        async_op=False)
+                    param.data = param.data.cpu()
+                    param.data /= world_size
                 logger.info(
                     f'rank {rank} allreduce grad {param.ps_attr.ps_name}')
                 continue

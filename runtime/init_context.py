@@ -225,7 +225,7 @@ class Init(InsertPostInitMethodToModuleSubClasses):
                 # 插入这句会影响模型初始化的值。
                 if not args.use_fake_dist:
                     param.data = torch.zeros(1,
-                                             dtype=data_type,
+                                             dtype=param.dtype,
                                              device=param.device)
             else:
                 param.ps_attr._is_local = True
