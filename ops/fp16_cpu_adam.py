@@ -270,14 +270,22 @@ class FP16Adam(torch.optim.Optimizer):
                 param.data = param.grad
                 param.grad = None
                 world_size = torch.distributed.get_world_size()
-                if not args.use_fake_dist:
-                    param.data = param.data.cuda(rank)
-                torch.distributed.all_reduce(param.data,
-                                             op=torch.distributed.ReduceOp.SUM,
-                                             async_op=False)
-                param.data /= world_size
-                if not args.use_fake_dist:
+
+                if args.use_fake_dist:
+                    torch.distributed.all_reduce(
+                        param.data,
+                        op=torch.distributed.ReduceOp.SUM,
+                        async_op=False)
+                    param.data /= world_size
+                else:
+                    param.data = param.data.to(torch.device(f'cuda:{rank}'))
+                    torch.distributed.all_reduce(
+                        param.data,
+                        op=torch.distributed.ReduceOp.SUM,
+                        async_op=False)
                     param.data = param.data.cpu()
+                    param.data /= world_size
+
                 logger.info(
                     f'rank {rank} allreduce grad {param.ps_attr.ps_name}')
                 continue
