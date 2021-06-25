@@ -751,6 +751,7 @@ class BertPreTrainedModel(PreTrainedModel):
         if isinstance(module, nn.Linear):
             # Slightly different from the TF version which uses truncated_normal for initialization
             # cf https://github.com/pytorch/pytorch/pull/5617
+            # logging.info(f'init weight Linear {module.weight.data.dtype}')
             module.weight.data.normal_(mean=0.0,
                                        std=self.config.initializer_range)
             if module.bias is not None:
@@ -864,15 +865,11 @@ class BertModel(BertPreTrainedModel):
         if attention_mask is None:
             attention_mask = torch.ones(
                 ((batch_size, seq_length + past_key_values_length)),
-                device=device,
-                dtype=torch.half)
+                device=device)
         # if token_type_ids is None:
         #     token_type_ids = torch.zeros(input_shape,
         #                                  dtype=torch.long,
         #                                  device=device)
-        assert position_ids is None
-        assert token_type_ids is None
-        assert inputs_embeds is None
 
         embedding_output = self.embeddings(
             input_ids=input_ids,
@@ -880,12 +877,10 @@ class BertModel(BertPreTrainedModel):
             token_type_ids=token_type_ids,
             inputs_embeds=inputs_embeds,
             past_key_values_length=past_key_values_length)
-        assert embedding_output.dtype == torch.half
         # We can provide a self-attention mask of dimensions [batch_size, from_seq_length, to_seq_length]
         # ourselves in which case we just need to make it broadcastable to all heads.
         extended_attention_mask: torch.Tensor = self.get_extended_attention_mask(
             attention_mask, input_shape, device)
-
         # If a 2D or 3D attention mask is provided for the cross-attention
         # we need to make broadcastable to [batch_size, num_heads, seq_length, seq_length]
         if self.config.is_decoder and encoder_hidden_states is not None:
@@ -895,8 +890,7 @@ class BertModel(BertPreTrainedModel):
                                     encoder_sequence_length)
             if encoder_attention_mask is None:
                 encoder_attention_mask = torch.ones(encoder_hidden_shape,
-                                                    device=device,
-                                                    dtype=torch.half)
+                                                    device=device)
             encoder_extended_attention_mask = self.invert_attention_mask(
                 encoder_attention_mask)
         else:
@@ -910,11 +904,9 @@ class BertModel(BertPreTrainedModel):
         head_mask = self.get_head_mask(head_mask,
                                        self.config.num_hidden_layers)
 
-        extended_attention_mask = extended_attention_mask.half()
-        assert extended_attention_mask.dtype == torch.half
         encoder_outputs = self.encoder(
             embedding_output,
-            attention_mask=extended_attention_mask,
+            attention_mask=extended_attention_mask.to(embedding_output.dtype),
             head_mask=head_mask,
             encoder_hidden_states=encoder_hidden_states,
             encoder_attention_mask=encoder_extended_attention_mask,
