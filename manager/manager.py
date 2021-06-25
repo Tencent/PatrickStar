@@ -59,7 +59,7 @@ class PatrickStarManager(metaclass=SingletonMeta):
         self.gpu_max_mem = max_gpu_memory
         self.cpu_max_mem = max_cpu_memory
         logger.info(
-            'Init Manager with gpu max mem {self.gpu_max_mem} and cpu max mem {self.cpu_max_mem}'
+            f'Init Manager with gpu max mem {self.gpu_max_mem} and cpu max mem {self.cpu_max_mem}'
         )
         self._is_init_ = True
 
