@@ -164,22 +164,13 @@ class _GatherActToRank0(torch.autograd.Function):
     @staticmethod
     def symbolic(graph, input_):
         args = get_args()
-        if args.cpu_embedding_fp32:
-            return input_.to(torch.device('cpu:0'))
-        else:
-            return input_.to(torch.device('cpu:0'))
+        return input_.to(torch.device('cpu:0'))
 
     @staticmethod
     def forward(ctx, input_):
         args = get_args()
-        if args.cpu_embedding_fp32:
-            logger.info(
-                f'Entrying CPU Emedding FWD, copy input to cpu and {input_.dtype}'
-            )
-            return input_.to(torch.device('cpu:0'))
-        else:
-            logger.info(f'Entrying CPU Emedding, copy input to cpu')
-            return input_.to(torch.device('cpu:0'))
+        logger.info(f'Entrying CPU Emedding, copy input to cpu')
+        return input_.to(torch.device('cpu:0'))
 
     @staticmethod
     def backward(ctx, grad_output):
@@ -188,14 +179,8 @@ class _GatherActToRank0(torch.autograd.Function):
             target_device = torch.device('cuda:0')
         else:
             target_device = torch.device(f'cuda:{args.local_rank}')
-        if args.cpu_embedding_fp32:
-            logger.info(
-                'Entrying CPU Emedding BWD, copy grad_output to cuda, fp32->fp16'
-            )
-            return grad_output.to(target_device)
-        else:
-            logger.info('Entrying CPU Emedding BWD, copy grad_output to cuda')
-            return grad_output.to(target_device)
+        logger.info('Entrying CPU Emedding BWD, copy grad_output to cuda')
+        return grad_output.to(target_device)
 
 
 class _BcastActFromRank0(torch.autograd.Function):
@@ -207,10 +192,7 @@ class _BcastActFromRank0(torch.autograd.Function):
             target_device = torch.device('cuda:0')
         else:
             target_device = torch.device(f'cuda:{args.local_rank}')
-        if args.cpu_embedding_fp32:
-            return input_.to(target_device).half()
-        else:
-            return input_.to(target_device)
+        return input_.to(target_device)
 
     @staticmethod
     def forward(ctx, input_):
@@ -219,21 +201,12 @@ class _BcastActFromRank0(torch.autograd.Function):
             target_device = torch.device('cuda:0')
         else:
             target_device = torch.device(f'cuda:{args.local_rank}')
-        if args.cpu_embedding_fp32:
-            logger.info(
-                f'Entrying CPU Emedding BWD, copy grad_output to cuda, {input_.dtype}->fp16'
-            )
-            return input_.to(target_device).half()
-        else:
-            return input_.to(target_device)
+        return input_.to(target_device)
 
     @staticmethod
     def backward(ctx, grad_output):
         args = get_args()
-        if args.cpu_embedding_fp32:
-            return grad_output.to(torch.device('cpu:0')).float()
-        else:
-            return grad_output.to(torch.device('cpu:0'))
+        return grad_output.to(torch.device('cpu:0'))
 
 
 def copy_to_rank0(input_):
