@@ -129,6 +129,8 @@ class PatrickStarClient(object):
         self._chunk_id = -1
         self._cached_fp32_buff = CachedFP32Buff(default_chunk_size, rank)
 
+        self.cpu_comm_group = torch.distributed.new_group(backend='gloo')
+
     def _generate_chunk_id(self):
         self._chunk_id += 1
         return self._chunk_id
@@ -657,6 +659,9 @@ class PatrickStarClient(object):
                 if not args.use_fake_dist:
                     input_list = []
                     for i in chunk_id_list:
+                        self.chunk_list.access_chunk(
+                            i, torch.device(f'cuda:{args.local_rank}'))
+                        self.chunk_list[i].pin()
                         input_list.append(self.chunk_list[i].payload)
                     torch.distributed.reduce_scatter(
                         self.chunk_list[local_chunk_id].payload,
@@ -685,6 +690,7 @@ class PatrickStarClient(object):
 
             # 删除remote chunk的payload
             for i in chunk_id_list:
+                self.chunk_list[i].unpin()
                 if i != local_chunk_id:
                     logger.debug(f'rank {rank} remove payload of chunk_id {i}')
                     self.chunk_list[i].release_payload()

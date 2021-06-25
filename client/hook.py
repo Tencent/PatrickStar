@@ -195,6 +195,7 @@ def post_sub_module_backward_function(sub_module, client, name):
             world_size = torch.distributed.get_world_size()
             torch.distributed.all_reduce(param.data,
                                          op=torch.distributed.ReduceOp.SUM,
+                                         group=self.client.cpu_comm_group,
                                          async_op=False)
             param.data /= world_size
             logger.debug(f'rank {rank} allreduce grad {param.ps_attr.ps_name}')
