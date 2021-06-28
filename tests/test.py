@@ -102,13 +102,13 @@ def test_mgr_dist():
                 manager.delete("cuda", local_rank, 10)
 
         test_add()
-        assert (manager.used_mem("cuda", 0) == 32)
-        # assert (manager.used_mem("cuda", 1) == 64)
-        assert (manager.used_mem("cpu", 0) == 0)
+        assert (manager.used_chunk_mem("cuda", 0) == 32)
+        # assert (manager.used_chunk_mem("cuda", 1) == 64)
+        assert (manager.used_chunk_mem("cpu", 0) == 0)
         time.sleep(3)
         test_delete()
-        assert (manager.used_mem("cuda", 0) == 22)
-        # assert (manager.used_mem("cuda", 1) == 64)
+        assert (manager.used_chunk_mem("cuda", 0) == 22)
+        # assert (manager.used_chunk_mem("cuda", 1) == 64)
         print("pass test_mgr_update")
 
     test_dist_init()

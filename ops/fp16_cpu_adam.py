@@ -23,6 +23,7 @@ import utils.global_timer as global_timer
 from utils import print_rank, logger, use_dist_flag
 from client.parameter import register_param, is_torch_param
 from deepspeed_helper.global_vars import get_args
+from manager import PatrickStarManager
 
 
 def get_real_data_tensor(param):
@@ -52,7 +53,6 @@ def FP16_f_adamv2(client,
     按照在chunk内的存储顺序连续访问fp16_param_with_grad_list的参数，获取fp16 grad，
     以chunk为单位拷贝到一个tmp buff之中
     """
-    timer = global_timer.IterationTimer()
     if time_profile:
         adam_start_time = time.time()
     rank = torch.distributed.get_rank()
@@ -154,6 +154,8 @@ def FP16_f_adamv2(client,
             ) - f_adam_compute_start_time
             adam_iter_release_start = time.time()
 
+        mgr = PatrickStarManager()
+        mgr.tiktac()
         ##########################
         ####### 结束ADAM计算 ######
         ##########################
@@ -183,7 +185,8 @@ def FP16_f_adamv2(client,
             global_timer.cpu_adam_release_elapse += time.time(
             ) - adam_iter_release_start
 
-    timer.tik(device_type='all')
+        mgr = PatrickStarManager()
+        mgr.tiktac()
     global_timer.cpu_adam_elapse += time.time() - adam_start_time
 
 
@@ -303,6 +306,8 @@ class FP16Adam(torch.optim.Optimizer):
                                             True)
                 else:
                     self.client.release_data(param, PSTensorStatus.HOLD)
+        mgr = PatrickStarManager()
+        mgr.tiktac()
 
         loss = None
         if closure is not None:
@@ -380,4 +385,7 @@ class FP16Adam(torch.optim.Optimizer):
                       False, beta1_list, beta2_list, lr_list,
                       weight_decay_list, eps_list, self.prefer_device,
                       self.param_grad_buff)
+
+        mgr = PatrickStarManager()
+        mgr.reset_metronome()
         return loss

@@ -31,6 +31,7 @@ from .parameter import PSParameter, register_param, is_param_registed, is_torch_
 from utils.memory_monitor import get_memory_used
 from utils import logger
 from deepspeed_helper.global_vars import get_args
+from manager import PatrickStarManager
 
 
 class CachedFP32Buff(object):
@@ -121,8 +122,6 @@ class PatrickStarClient(object):
         self.default_chunk_size = default_chunk_size
         self._time_profile = True
 
-        self._is_warmup = warmup
-        self._warmup_phase = True
         # 通过运行一次迭代来动态进行chunk schduling
         self._is_fp16 = is_fp16
 
@@ -134,26 +133,6 @@ class PatrickStarClient(object):
     def _generate_chunk_id(self):
         self._chunk_id += 1
         return self._chunk_id
-
-    def pre_iter(self):
-        if self._is_warmup:
-            self.set_warmup_phase()
-        timer = global_timer.IterationTimer()
-        timer.reset()
-
-    def post_iter(self):
-        if self._is_warmup:
-            self._is_warmup = False
-            self.unset_warmup_phase()
-
-    def set_warmup_phase(self):
-        timer = global_timer.IterationTimer()
-        timer.warmup = True
-
-    def unset_warmup_phase(self):
-        timer = global_timer.IterationTimer()
-        timer.warmup = False
-        self.chunk_list.moments_cnt_of_iteration = timer.moment()
 
     def init(self, model, optimizer):
         """
@@ -553,14 +532,7 @@ class PatrickStarClient(object):
         """
         将param的ps_data_tensor的数据放置到compute_device上
         """
-        timer = global_timer.IterationTimer()
-        if timer.warmup:
-            self.access(param, AccessType.DATA, compute_device)
-            chunk_id = param.ps_attr.ps_data_chunk_id
-            # TODO(jiarufiang) 需要记录device信息
-            self.chunk_list[chunk_id].add_moment(timer.moment())
-        else:
-            self.access(param, AccessType.DATA, compute_device)
+        self.access(param, AccessType.DATA, compute_device)
 
     def access_grad(self, param: torch.nn.Parameter,
                     compute_device: torch.device):
@@ -569,14 +541,7 @@ class PatrickStarClient(object):
         NOTE，并没有正确设置param的grad，此时grad的数据无效。因为grad的设备属性并不自由，需要看data的脸色行事。我们使用grad时候，需要显式设置
         `param.grad = param.ps_grad_tensore`
         """
-        timer = global_timer.IterationTimer()
-        if timer.warmup:
-            self.access(param, AccessType.GRAD, compute_device)
-            # 更新chunk的访问时间
-            chunk_id = param.ps_attr.ps_grad_chunk_id
-            self.chunk_list[chunk_id].add_moment(timer.moment())
-        else:
-            self.access(param, AccessType.GRAD, compute_device)
+        self.access(param, AccessType.GRAD, compute_device)
 
     def release_dist(self, param: torch.nn.Parameter, access_type: AccessType,
                      reset_to_status: PSTensorStatus,
@@ -778,13 +743,11 @@ class PatrickStarClient(object):
         """
         可以把一个tensor释放成FREE，也可以成HOLD
         """
-        timer = global_timer.IterationTimer()
         self.release(param, AccessType.DATA, reset_to_status)
 
     def release_grad(self,
                      param: torch.nn.Parameter,
                      reset_to_status: PSTensorStatus = PSTensorStatus.HOLD):
-        timer = global_timer.IterationTimer()
         self.release(param, AccessType.GRAD, reset_to_status)
 
     def reset(self):

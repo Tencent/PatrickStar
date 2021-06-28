@@ -13,7 +13,10 @@
 
 import torch
 from torch.multiprocessing import Process, Manager
+from utils.memory_monitor import get_memory_used
+import psutil
 import logging as logger
+from deepspeed_helper.global_vars import get_args
 
 
 ######### Global Scheduler ###########
@@ -37,50 +40,108 @@ class SingletonMeta(type):
         return cls._instances[cls]
 
 
+class Metronome():
+    """节拍器"""
+    def __init__(self):
+        self._moment = 0
+        self._total_moment = None
+
+    def tiktac(self):
+        self._moment += 1
+
+    def moment(self):
+        return self._moment
+
+    def reset(self):
+        self._total_moment = self._moment
+        self._moment = 0
+
+    def next_moment(self):
+        assert self._total_moment is not None
+        return (self._moment + 1) % self._total_moment
+
+
 class PatrickStarManager(metaclass=SingletonMeta):
     """
-  知道所有设备的使用情况，来指导payload的迁移
-  singleton类，被所有进程访问
-  拥有所有chunk信息的overview picture
-  """
+    知道所有设备的使用情况，来指导payload的迁移
+    singleton类，被所有进程访问
+    拥有所有chunk信息的overview picture
+    """
     def __init__(self):
-        self.gpu_max_mem = 0
-        self.cpu_max_mem = 0
-        self.gpu_used_mem = 0
-        self.cpu_used_mem = 0
-        self.cpu_mem_usage_curve = []
-        self.gpu_mem_usage_curve = []
-        self._is_init_ = False
+        self.gpu_chunk_available_mem = 0
+        self.cpu_chunk_available_mem = 0
 
-    def is_init(self):
-        return self._is_init_
+        self.gpu_chunk_used_mem = 0
+        self.cpu_chunk_used_mem = 0
 
-    def init(self, max_gpu_memory, max_cpu_memory):
-        self.gpu_max_mem = max_gpu_memory
-        self.cpu_max_mem = max_cpu_memory
-        logger.info(
-            f'Init Manager with gpu max mem {self.gpu_max_mem} and cpu max mem {self.cpu_max_mem}'
-        )
-        self._is_init_ = True
+        args = get_args()
+        rank = args.local_rank
+        # 获得系统的存储信息
+        self._overall_gpu_mem = torch.cuda.get_device_properties(
+            rank).total_memory
+        self._overall_cpu_mem = psutil.virtual_memory().total
 
-    def reset(self, max_gpu_memory, max_cpu_memory):
-        self.init(max_gpu_memory, max_cpu_memory)
+        # 统计信息
+        self.cpu_used_list = []
+        self.cpu_chunk_used_list = []
+        # non-chunk memory
+        self.cpu_sys_used_list = []
 
-    def visit(self):
-        logger.info(
-            f"CPU used mem {self.cpu_used_mem} B, GPU used mem {self.gpu_used_mem} B"
-        )
+        self.gpu_used_list = []
+        self.gpu_chunk_used_list = []
+        self.gpu_sys_used_list = []
+
+        # 节拍器
+        self.metronome = Metronome()
+
+        # 预热标志
+        self.warmup = False
+        self._start_training = False
+
+    def start_train(self, is_warmup):
+        self.warmup = is_warmup
+        self._start_training = True
+        logger.info(f'Start to train. Manager sets warmup {is_warmup}')
+
+    def reset_metronome(self):
+        if self.warmup is True:
+            self.warmup = False
+        self.metronome.reset()
+        logger.info('Manager Resets Metronome')
+
+    def tiktac(self):
+        """
+        打节拍，同时记录此刻的内存使用情况
+        """
+        if self.warmup:
+            if torch.distributed.is_initialized():
+                rank = torch.distributed.get_rank()
+            else:
+                rank = 0
+            gpu_device = torch.device(f'cuda:{rank}')
+            gpu_used = get_memory_used(gpu_device)
+
+            cpu_device = torch.device('cpu:0')
+            cpu_used = get_memory_used(cpu_device)
+
+            self.cpu_used_list.append(cpu_used)
+            self.cpu_chunk_used_list.append(self.cpu_chunk_used_mem)
+            self.cpu_sys_used_list.append((cpu_used - self.cpu_chunk_used_mem))
+
+            self.gpu_used_list.append(gpu_used)
+            self.gpu_chunk_used_list.append(self.gpu_chunk_used_mem)
+            self.gpu_sys_used_list.append((gpu_used - self.gpu_chunk_used_mem))
+        self.metronome.tiktac()
 
     def add(self, device_type: str, size_in_bytes: int):
         """
         登记，设备device_type:index增加size个bytes内存使用
         """
         if device_type == "cpu":
-            self.cpu_used_mem += size_in_bytes
-            self.cpu_mem_usage_curve.append(self.cpu_used_mem)
+            self.cpu_chunk_used_mem += size_in_bytes
         elif device_type == "cuda":
-            self.gpu_used_mem += size_in_bytes
-            self.gpu_mem_usage_curve.append(self.gpu_used_mem)
+            logger.info(f'use chunk memory {size_in_bytes} on gpu')
+            self.gpu_chunk_used_mem += size_in_bytes
         else:
             raise f"device type {device_type} is not supported"
 
@@ -89,28 +150,68 @@ class PatrickStarManager(metaclass=SingletonMeta):
         checkout，设备device_type:index减少size个bytes内存使用
         """
         if device_type == "cpu":
-            self.cpu_used_mem -= size_in_bytes
-            self.cpu_mem_usage_curve.append(self.cpu_used_mem)
+            self.cpu_chunk_used_mem -= size_in_bytes
         elif device_type == "cuda":
-            self.gpu_used_mem -= size_in_bytes
-            self.gpu_mem_usage_curve.append(self.gpu_used_mem)
+            self.gpu_chunk_used_mem -= size_in_bytes
         else:
             raise f"device type {device_type} is not supported"
 
-    def available_mem(self, device_type):
-        if device_type == "cuda":
-            return self.gpu_max_mem - self.gpu_used_mem
-        elif device_type == "cpu":
-            return self.cpu_max_mem - self.cpu_used_mem
+    def free_chunk_mem(self, device_type):
+        """
+        可以用来分配的Chunk空闲内存，派出已经分配的内存
+        """
+        size = self.available_chunk_mem(device_type) - self.used_chunk_mem(
+            device_type)
+        logger.info(
+            f'free_chunk_mem on cuda {size/1e6} MB on mement {self.metronome.moment()}'
+        )
+        return size
 
-    def used_mem(self, device_type):
+    def used_chunk_mem(self, device_type):
         if device_type == "cpu":
-            return self.cpu_used_mem
+            return self.cpu_chunk_used_mem
         elif device_type == "cuda":
-            return self.gpu_used_mem
+            return self.gpu_chunk_used_mem
 
-    def max_mem(self, device_type):
+    def available_chunk_mem(self, device_type):
+        """
+        返回可以分配Chunk的最大内存，包括已经分配给Chunk的内存
+        """
         if device_type == "cpu":
-            return self.cpu_max_mem
+            if self.warmup or not self._start_training:
+                # TODO(jiaruifang)瞎拍一个数，预热阶段三分之一GPU显存用来存储chunk
+                return self._overall_cpu_mem
+            else:
+                next_mem = self.metronome.next_moment()
+                next_mom_ava_mem = self._overall_cpu_mem - self.cpu_sys_used_list[
+                    next_mem]
+                cur_mom_ava_mem = self._overall_cpu_mem - self.cpu_sys_used_list[
+                    self.metronome.moment()]
+                # TODO(jiaruifang）瞎拍一个数。0.8，留点富余
+                return min(next_mom_ava_mem, cur_mom_ava_mem) * 0.8
         elif device_type == "cuda":
-            return self.gpu_max_mem
+            if self.warmup or not self._start_training:
+                # TODO(jiaruifang)瞎拍一个数，预热阶段三分之一GPU显存用来存储chunk
+                return self._overall_gpu_mem / 3
+            else:
+                next_mom = self.metronome.next_moment()
+                cur_mom = self.metronome.moment()
+                next_mom_ava_mem = self._overall_gpu_mem - self.gpu_sys_used_list[
+                    next_mom]
+                cur_mom_ava_mem = self._overall_gpu_mem - self.gpu_sys_used_list[
+                    cur_mom]
+                size = min(next_mom_ava_mem, cur_mom_ava_mem) - 500 * 1e6
+                # TODO(jiaruifang）瞎拍一个数。0.8，留点富余
+                return max(size, 0)
+
+    def show_gpu_curve(self):
+        with open('gpu_used.txt', 'w') as fh:
+            fh.write(
+                f'gpu_chunk_used_list {len(self.gpu_chunk_used_list)} \n {list(map(lambda x : x/1e6, self.gpu_chunk_used_list))}\n'
+            )
+            fh.write(
+                f'gpu_sys_used_list {list(map(lambda x: x/1e6, self.gpu_sys_used_list))}\n'
+            )
+            fh.write(
+                f'gpu_used_list \n {list(map(lambda  x: x/1e6, self.gpu_used_list))}\n'
+            )

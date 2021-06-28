@@ -31,7 +31,6 @@ def F_adam(client, params: List[torch.nn.Parameter],
     r"""Functional API that performs Adam algorithm computation.
     See :class:`~torch.optim.Adam` for details.
     """
-    timer = global_timer.IterationTimer()
     adam_start_time = time.time()
     # TODO(jiaruifang)计算粒度为什么是tensor，而不是chunk
     for i, param in enumerate(params):
@@ -99,7 +98,6 @@ def F_adam(client, params: List[torch.nn.Parameter],
         global_timer.cpu_adam_release_elapse += time.time(
         ) - adam_iter_release_start
 
-    timer.tik(device_type='all')
     global_timer.cpu_adam_elapse += time.time() - adam_start_time
 
 

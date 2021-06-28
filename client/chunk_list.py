@@ -121,7 +121,7 @@ class ChunkList(object):
             f'prepare_device target device {target_device} need size {need_bytes} bytes'
         )
         ps_manager = PatrickStarManager()
-        max_mem = ps_manager.max_mem(target_device.type)
+        max_mem = ps_manager.available_chunk_mem(target_device.type)
         if max_mem < need_bytes:
             logger.error(
                 f"{target_device} has not enough space for {need_bytes} elements"
@@ -130,7 +130,7 @@ class ChunkList(object):
             raise RuntimeError(
                 f"{target_device} has not enough space for {need_bytes} Bytes")
 
-        available_size = ps_manager.available_mem(target_device.type)
+        available_size = ps_manager.free_chunk_mem(target_device.type)
 
         # 当前系统可用内存，需要减去activation消耗
         # available_size = get_memory_used(target_device)
@@ -250,23 +250,8 @@ class ChunkList(object):
         """
         找到chunk在本设备上下一次被访问的moment
         """
-        # 还没加入统计信息
-        timer = global_timer.IterationTimer()
-        cur_moment = timer.moment()
+        # TODO还没加入统计信息
         return 0
-        # 预热阶段，返回值固定
-        if timer.warmup:
-            return 0
-
-        # 非预热阶段
-        target_device_type = target_device.type
-
-        for mom in chunk.access_moments:
-            # 找到在当前mom之后的时刻，且该时刻计算设备不是target device
-            if mom >= cur_moment and timer.device_type(
-                    mom) == target_device_type:
-                return mom
-        return self.moments_cnt_of_iteration + chunk.access_moments[0]
 
     def _chunk_to_move_out_for_room_making(self, size_in_bytes: int,
                                            target_device: torch.device

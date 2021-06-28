@@ -218,7 +218,6 @@ def master_params_to_model_params(model_params,
                 _unflatten_dense_tensors(master_params[0].data, model_params)):
             model.data.copy_(master)
     else:
-        timer = global_timer.IterationTimer()
         for model, master in zip(model_params, master_params):
             model.data.copy_(master)
 

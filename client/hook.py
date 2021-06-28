@@ -17,6 +17,7 @@ from .const import PSTensorStatus, AccessType, TrainingStage
 import utils.global_timer as global_timer
 from utils import logger, use_dist_flag
 from client.parameter import is_torch_param
+from manager import PatrickStarManager
 
 
 ############# HOOKS ####################
@@ -118,7 +119,6 @@ class PostBackwardFunction(torch.autograd.Function):
 
 # 必须具备重复调用，第二次无效的能力 fetch submodule
 def pre_sub_module_forward_function(sub_module, client, name):
-    timer = global_timer.IterationTimer()
     flag = False
     for sub_name, param in sub_module.named_parameters(recurse=False):
         rank = torch.distributed.get_rank()
@@ -135,12 +135,12 @@ def pre_sub_module_forward_function(sub_module, client, name):
         param.data = param.ps_attr.access_tensor(AccessType.DATA)
         flag = True
     if flag:
-        timer.tik(device_type='cuda')
+        mgr = PatrickStarManager()
+        mgr.tiktac()
 
 
 # release submodule
 def post_sub_module_forward_function(sub_module, client, name):
-    timer = global_timer.IterationTimer()
     for sub_name, param in sub_module.named_parameters(recurse=False):
         if is_torch_param(param):
             continue
@@ -151,10 +151,11 @@ def post_sub_module_forward_function(sub_module, client, name):
                             PSTensorStatus.HOLD_AFTER_FWD,
                             training_stage=TrainingStage.FWD,
                             is_allreduce=False)
+    mgr = PatrickStarManager()
+    mgr.tiktac()
 
 
 def pre_sub_module_backward_function(sub_module, client, name):
-    timer = global_timer.IterationTimer()
     flag = False
     for sub_name, param in sub_module.named_parameters(recurse=False):
         if is_torch_param(param):
@@ -182,11 +183,11 @@ def pre_sub_module_backward_function(sub_module, client, name):
             param.grad = param.ps_attr.access_tensor(AccessType.GRAD)
         flag = True
     if flag:
-        timer.tik(device_type='cuda')
+        mgr = PatrickStarManager()
+        mgr.tiktac()
 
 
 def post_sub_module_backward_function(sub_module, client, name):
-    timer = global_timer.IterationTimer()
     for sub_name, param in sub_module.named_parameters(recurse=False):
         if is_torch_param(param):
             # TODO allreduce
@@ -228,6 +229,8 @@ def post_sub_module_backward_function(sub_module, client, name):
         elif param.dtype == torch.float:
             client.release_grad(param, PSTensorStatus.HOLD)
             client.release_data(param, PSTensorStatus.HOLD)
+    mgr = PatrickStarManager()
+    mgr.tiktac()
 
 
 def _register_hooks_recursively(module, client, count=[0], name=""):

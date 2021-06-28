@@ -43,9 +43,6 @@ class PatrickStarEngine(Module):
             self.dist_backend = "gloo" if args.use_fake_dist else "nccl"
             init_distributed(dist_backend=self.dist_backend)
 
-        manager = PatrickStarManager()
-        manager.init(args.max_gpu_memory, args.max_cpu_memory)
-
         self.rank = 0 if args.use_fake_dist else args.local_rank
         self.training_dataloader = None
         self.lr_scheduler = None
@@ -58,7 +55,8 @@ class PatrickStarEngine(Module):
         if args.use_fake_dist:
             prefer_device = torch.device(f'cpu:0')
         else:
-            prefer_device = torch.device(f'cuda:{args.local_rank}')
+            prefer_device = torch.device(f'cpu:0')
+            # prefer_device = torch.device(f'cuda:{args.local_rank}')
 
         if args.local_rank == 0:
             logger.info(f'ADAM on device {prefer_device}')

@@ -12,27 +12,7 @@
 # See the AUTHORS file for names of contributors.
 
 import unittest
-from utils.global_timer import IterationTimer
 import logging
-
-
-def helper():
-    timer = IterationTimer()
-    return timer.moment()
-
-
-class TestTimer(unittest.TestCase):
-    def test(self):
-        timer = IterationTimer()
-
-        assert timer.moment() == 0
-        timer.tik()
-
-        assert helper() == 1
-
-        timer.reset()
-        assert timer.moment() == 0
-
 
 if __name__ == "__main__":
     logging.basicConfig(

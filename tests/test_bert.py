@@ -33,6 +33,7 @@ import utils.global_timer as global_timer
 from runtime import Init, initialize_engine
 from deepspeed_helper.global_vars import set_global_variables
 from deepspeed_helper.global_vars import get_args
+from manager import PatrickStarManager
 
 
 def check_grads_status(model, status):
@@ -147,7 +148,7 @@ def test_bert_model(is_ckp: bool = False,
             client = PatrickStarClient(
                 rank=rank,
                 default_chunk_size=args.default_chunk_size,
-                warmup=False,
+                warmup=True,
                 is_fp16=True)
 
             with Init(dtype=torch.float, client=client):
@@ -186,10 +187,12 @@ def test_bert_model(is_ckp: bool = False,
     loss_res = []
 
     start_time = time.time()
-    for n, batch in enumerate(data_loader):
-        # if is_ps:
-        #     client.pre_iter()
 
+    # 开启预热优化
+    mgr = PatrickStarManager()
+    mgr.start_train(is_warmup=True)
+
+    for n, batch in enumerate(data_loader):
         step_start_time = time.time()
         output = model(input_ids=batch[0], labels=batch[1])
         loss = output.loss
@@ -198,6 +201,7 @@ def test_bert_model(is_ckp: bool = False,
         logging.info(f"LOSS of step {n}: {loss.item()}")
         loss_res.append(loss.item())
 
+        # logging.info(f'FWD finished moment {timer.moment()}')
         if not is_ps:
             if is_fp16:
                 optimizer.zero_grad(set_grads_to_None=True)
@@ -213,6 +217,7 @@ def test_bert_model(is_ckp: bool = False,
                 optimizer.zero_grad()
                 loss.backward()
 
+        # logging.info(f'BWD finished moment {timer.moment()}')
         optimizer.step()
 
         see_memory_usage(
@@ -223,8 +228,6 @@ def test_bert_model(is_ckp: bool = False,
         logging.info(
             f"ckp {is_ckp} fp16 {is_fp16} ps {is_ps}  elapse {setp_elapse}, sec/iter, {total_macs/1e9/setp_elapse} GFlops"
         )
-        # if is_ps:
-        #     client.post_iter()
         if n == stop_step: break
 
     elapse = time.time() - start_time
@@ -236,15 +239,9 @@ def test_bert_model(is_ckp: bool = False,
     logging.info(f"model numel {model_numel/1e9} B")
     if is_ps:
         global_timer.time_profiler()
-        timer = global_timer.IterationTimer()
-    #     with open('gpu_used.txt', 'w') as fh:
-    #         fh.write(
-    #             f'gpu_ps_used_list {len(timer.gpu_ps_used_list)} \n f{timer.gpu_ps_used_list}'
-    #         )
-    #         fh.write(
-    #             f'gpu_used_list {len(timer.gpu_used_list)} \n {timer.gpu_used_list}'
-    #         )
-    #         fh.write(f'gpu_sys_used_list \n {timer.gpu_sys_used_list}')
+        mgr = PatrickStarManager()
+        mgr.show_gpu_curve()
+
     logging.info("*" * 20)
     return loss_res
 
