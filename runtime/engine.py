@@ -55,8 +55,8 @@ class PatrickStarEngine(Module):
         if args.use_fake_dist:
             prefer_device = torch.device(f'cpu:0')
         else:
-            prefer_device = torch.device(f'cpu:0')
-            # prefer_device = torch.device(f'cuda:{args.local_rank}')
+            # prefer_device = torch.device(f'cpu:0')
+            prefer_device = torch.device(f'cuda:{args.local_rank}')
 
         if args.local_rank == 0:
             logger.info(f'ADAM on device {prefer_device}')

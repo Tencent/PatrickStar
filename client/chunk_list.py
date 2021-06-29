@@ -24,7 +24,7 @@ from typing import List
 import gc
 import psutil
 import utils.global_timer as global_timer
-from utils.memory_monitor import see_memory_usage, get_memory_used
+from utils.memory_monitor import see_memory_usage, get_sys_memory_used
 import time
 from utils import logger, log_dist
 
@@ -56,6 +56,17 @@ class ChunkList(object):
         返回chunk的个数
         """
         return len(self.chunk_id_to_chunk_dict)
+
+    def get_chunk_memory_used(self, device):
+        """
+        获得ChunkList中所有Chunk的payload占用的内存
+        """
+        mem_used = 0
+        for chunk_id, chunk in self.chunk_id_to_chunk_dict.items():
+            if chunk.get_device() is not None and chunk.get_device(
+            ).type == device.type:
+                mem_used += chunk.get_payload_space()
+        return mem_used
 
     def max_chunk_size(self):
         max_size = 0
@@ -132,9 +143,6 @@ class ChunkList(object):
 
         available_size = ps_manager.free_chunk_mem(target_device.type)
 
-        # 当前系统可用内存，需要减去activation消耗
-        # available_size = get_memory_used(target_device)
-
         extra_need_bytes = need_bytes - available_size
 
         logger.debug(
@@ -150,6 +158,31 @@ class ChunkList(object):
         # 需要在target_device上腾出空间
         moved_list = self._chunk_to_move_out_for_room_making(
             extra_need_bytes, target_device)
+
+        # TODO(jiaruifang)只考虑单卡情况，新设备只有gpu和cpu
+        new_device = torch.device(
+            'cpu') if target_device.type == 'cuda' else torch.device(
+                f'cuda:{self.rank}')
+
+        # 把他们移动到新设备上
+        for idx in moved_list:
+            self.chunk_move(idx, new_device)
+
+        if self._time_profile:
+            global_timer.client_prepare_device_elapse += time.time(
+            ) - start_time
+
+    def make_room(self, offload_size_in_bytes, target_device):
+        """
+        让target_device移动出offload size大小的Chunk。
+        不能移动compute状态的Chunk
+        """
+        if self._time_profile:
+            start_time = time.time()
+
+        # 需要在target_device上腾出空间
+        moved_list = self._chunk_to_move_out_for_room_making(
+            offload_size_in_bytes, target_device)
 
         # TODO(jiaruifang)只考虑单卡情况，新设备只有gpu和cpu
         new_device = torch.device(
@@ -293,9 +326,9 @@ class ChunkList(object):
 
         # 无法腾出足够空间，抛出异常
         if moved_bytes < still_need_bytes:
-            # self.visit()
+            self.visit()
             raise RuntimeError(
-                f"still need {still_need_bytes} bytes, but device {target_device} has not enough space for item."
+                f"device {target_device} still needs {still_need_bytes/1e6} MB, but  it has not enough space, only {moved_bytes/1e6} MB available. ChunkList used memory on {target_device} is {self.get_chunk_memory_used(target_device)/1e6} MB"
             )
 
         if self._time_profile:
@@ -308,8 +341,6 @@ class ChunkList(object):
             old_status, new_status)
 
     def visit(self):
-        ps_manager = PatrickStarManager()
-        ps_manager.visit()
         logging.info('* chunk list visit results:')
         logging.info('** chunk_id, device, size(B), ' 'type, device, status')
         for chunk_id, chunk in self.chunk_id_to_chunk_dict.items():
@@ -317,4 +348,3 @@ class ChunkList(object):
                 f'** {chunk_id}, {chunk.get_device()}, {chunk.get_chunk_space()}, '
                 f'{chunk.data_type}, {chunk.get_device()}, {chunk.get_status()}'
             )
-            chunk.show_life_cycle()

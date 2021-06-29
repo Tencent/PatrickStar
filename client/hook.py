@@ -136,7 +136,7 @@ def pre_sub_module_forward_function(sub_module, client, name):
         flag = True
     if flag:
         mgr = PatrickStarManager()
-        mgr.tiktac()
+        mgr.tiktac(client)
 
 
 # release submodule
@@ -152,7 +152,7 @@ def post_sub_module_forward_function(sub_module, client, name):
                             training_stage=TrainingStage.FWD,
                             is_allreduce=False)
     mgr = PatrickStarManager()
-    mgr.tiktac()
+    mgr.tiktac(client)
 
 
 def pre_sub_module_backward_function(sub_module, client, name):
@@ -184,7 +184,7 @@ def pre_sub_module_backward_function(sub_module, client, name):
         flag = True
     if flag:
         mgr = PatrickStarManager()
-        mgr.tiktac()
+        mgr.tiktac(client)
 
 
 def post_sub_module_backward_function(sub_module, client, name):
@@ -230,7 +230,7 @@ def post_sub_module_backward_function(sub_module, client, name):
             client.release_grad(param, PSTensorStatus.HOLD)
             client.release_data(param, PSTensorStatus.HOLD)
     mgr = PatrickStarManager()
-    mgr.tiktac()
+    mgr.tiktac(client)
 
 
 def _register_hooks_recursively(module, client, count=[0], name=""):

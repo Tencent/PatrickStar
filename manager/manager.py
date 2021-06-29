@@ -13,7 +13,7 @@
 
 import torch
 from torch.multiprocessing import Process, Manager
-from utils.memory_monitor import get_memory_used
+from utils.memory_monitor import get_sys_memory_used
 import psutil
 import logging as logger
 from deepspeed_helper.global_vars import get_args
@@ -75,11 +75,20 @@ class PatrickStarManager(metaclass=SingletonMeta):
         self.cpu_chunk_used_mem = 0
 
         args = get_args()
-        rank = args.local_rank
-        # 获得系统的存储信息
-        self._overall_gpu_mem = torch.cuda.get_device_properties(
-            rank).total_memory
-        self._overall_cpu_mem = psutil.virtual_memory().total
+        if args.use_fake_dist:
+            rank = 0
+            # 获得系统的存储信息
+            self._overall_gpu_mem = torch.cuda.get_device_properties(
+                rank).total_memory * 0.6 / torch.distributed.get_world_size()
+            self._overall_cpu_mem = psutil.virtual_memory(
+            ).total * 0.6 / torch.distributed.get_world_size()
+        else:
+            rank = args.local_rank
+            # 获得系统的存储信息
+            self._overall_gpu_mem = torch.cuda.get_device_properties(
+                rank).total_memory * 0.6
+            self._overall_cpu_mem = psutil.virtual_memory(
+            ).total * 0.6 / torch.distributed.get_world_size()
 
         # 统计信息
         self.cpu_used_list = []
@@ -109,20 +118,21 @@ class PatrickStarManager(metaclass=SingletonMeta):
         self.metronome.reset()
         logger.info('Manager Resets Metronome')
 
-    def tiktac(self):
+    def tiktac(self, client):
         """
         打节拍，同时记录此刻的内存使用情况
         """
-        if self.warmup:
-            if torch.distributed.is_initialized():
-                rank = torch.distributed.get_rank()
-            else:
-                rank = 0
-            gpu_device = torch.device(f'cuda:{rank}')
-            gpu_used = get_memory_used(gpu_device)
+        args = get_args()
+        if torch.distributed.is_initialized():
+            rank = args.local_rank
+        else:
+            rank = 0
+        gpu_device = torch.device(f'cuda:{rank}')
+        cpu_device = torch.device('cpu:0')
 
-            cpu_device = torch.device('cpu:0')
-            cpu_used = get_memory_used(cpu_device)
+        if self.warmup:
+            gpu_used = get_sys_memory_used(gpu_device)
+            cpu_used = get_sys_memory_used(cpu_device)
 
             self.cpu_used_list.append(cpu_used)
             self.cpu_chunk_used_list.append(self.cpu_chunk_used_mem)
@@ -131,6 +141,42 @@ class PatrickStarManager(metaclass=SingletonMeta):
             self.gpu_used_list.append(gpu_used)
             self.gpu_chunk_used_list.append(self.gpu_chunk_used_mem)
             self.gpu_sys_used_list.append((gpu_used - self.gpu_chunk_used_mem))
+        else:
+            # 非warmup需要对Chunk Memory调仓
+            # 如果下一刻的Chunk Memory可用空间小于当前Chunk Memory
+            # 则需要从设备内存移出Chunk
+            next_mom = self.metronome.next_moment()
+            cur_mom = self.metronome.moment()
+            next_mom_ava_gpu_mem = self._overall_gpu_mem - self.gpu_sys_used_list[
+                next_mom]
+            cur_mom_used_gpu_mem = client.chunk_list.get_chunk_memory_used(
+                gpu_device)
+            # logger.info(f'cur_mom_used_gpu_mem {cur_mom_used_gpu_mem/1e6} MB next_mom_ava_gpu_mem {next_mom_ava_gpu_mem/1e6} MB')
+            if next_mom_ava_gpu_mem < cur_mom_used_gpu_mem:
+                offload_size = cur_mom_used_gpu_mem - next_mom_ava_gpu_mem
+                logger.info(
+                    f'available memory before room making {(self._overall_gpu_mem - torch.cuda.memory_allocated())/1e6} MB on gpu'
+                )
+                logger.info(
+                    f'Making {offload_size/1e6} MB space on gpu, cur_mom_used_gpu_mem {cur_mom_used_gpu_mem/1e6} MB next_mom_ava_gpu_mem {next_mom_ava_gpu_mem/1e6} MB'
+                )
+                client.chunk_list.make_room(offload_size, gpu_device)
+
+            # CPU的内存空间是分隔的
+            next_mom_ava_cpu_mem = self._overall_cpu_mem - self.cpu_sys_used_list[
+                next_mom]
+            cur_mom_used_cpu_mem = client.chunk_list.get_chunk_memory_used(
+                cpu_device)
+            logger.info(
+                f'cur_mom_used_cpu_mem {cur_mom_used_cpu_mem/1e6} MB next_mom_ava_cpu_mem {next_mom_ava_cpu_mem/1e6} MB'
+            )
+            if next_mom_ava_cpu_mem < cur_mom_used_cpu_mem:
+                offload_size = cur_mom_used_cpu_mem - next_mom_ava_cpu_mem
+                client.chunk_list.make_room(offload_size, cpu_device)
+
+            # TODO 调仓CPU内存
+            # client.chunk_list.make_room(cpu_device)
+        # logger.info(f'available memory {(self._overall_gpu_mem - torch.cuda.memory_allocated())/1e6} MB on gpu')
         self.metronome.tiktac()
 
     def add(self, device_type: str, size_in_bytes: int):
@@ -140,7 +186,7 @@ class PatrickStarManager(metaclass=SingletonMeta):
         if device_type == "cpu":
             self.cpu_chunk_used_mem += size_in_bytes
         elif device_type == "cuda":
-            logger.info(f'use chunk memory {size_in_bytes} on gpu')
+            # logger.info(f'use chunk memory {size_in_bytes} on gpu')
             self.gpu_chunk_used_mem += size_in_bytes
         else:
             raise f"device type {device_type} is not supported"
@@ -162,9 +208,9 @@ class PatrickStarManager(metaclass=SingletonMeta):
         """
         size = self.available_chunk_mem(device_type) - self.used_chunk_mem(
             device_type)
-        logger.info(
-            f'free_chunk_mem on cuda {size/1e6} MB on mement {self.metronome.moment()}'
-        )
+        # logger.info(
+        #     f'free_chunk_mem on {device_type} {size/1e6} MB on mement {self.metronome.moment()}'
+        # )
         return size
 
     def used_chunk_mem(self, device_type):
@@ -175,7 +221,7 @@ class PatrickStarManager(metaclass=SingletonMeta):
 
     def available_chunk_mem(self, device_type):
         """
-        返回可以分配Chunk的最大内存，包括已经分配给Chunk的内存
+        返回可以用于分配Chunk的最大内存，包括已经分配给Chunk的内存
         """
         if device_type == "cpu":
             if self.warmup or not self._start_training:
@@ -187,8 +233,8 @@ class PatrickStarManager(metaclass=SingletonMeta):
                     next_mem]
                 cur_mom_ava_mem = self._overall_cpu_mem - self.cpu_sys_used_list[
                     self.metronome.moment()]
-                # TODO(jiaruifang）瞎拍一个数。0.8，留点富余
-                return min(next_mom_ava_mem, cur_mom_ava_mem) * 0.8
+                # TODO(jiaruifang）
+                return min(next_mom_ava_mem, cur_mom_ava_mem) - 500 * 1e6
         elif device_type == "cuda":
             if self.warmup or not self._start_training:
                 # TODO(jiaruifang)瞎拍一个数，预热阶段三分之一GPU显存用来存储chunk
@@ -200,9 +246,7 @@ class PatrickStarManager(metaclass=SingletonMeta):
                     next_mom]
                 cur_mom_ava_mem = self._overall_gpu_mem - self.gpu_sys_used_list[
                     cur_mom]
-                size = min(next_mom_ava_mem, cur_mom_ava_mem) - 500 * 1e6
-                # TODO(jiaruifang）瞎拍一个数。0.8，留点富余
-                return max(size, 0)
+                return min(next_mom_ava_mem, cur_mom_ava_mem) - 500 * 1e6
 
     def show_gpu_curve(self):
         with open('gpu_used.txt', 'w') as fh:

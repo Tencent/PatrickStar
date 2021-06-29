@@ -20,7 +20,7 @@ from typing import List, Optional
 import logging
 from client.const import PSTensorStatus, AccessType, TrainingStage
 import utils.global_timer as global_timer
-from utils import print_rank, logger, use_dist_flag
+from utils import print_rank, logger, use_dist_flag, get_sys_memory_used
 from client.parameter import register_param, is_torch_param
 from deepspeed_helper.global_vars import get_args
 from manager import PatrickStarManager
@@ -155,7 +155,7 @@ def FP16_f_adamv2(client,
             adam_iter_release_start = time.time()
 
         mgr = PatrickStarManager()
-        mgr.tiktac()
+        mgr.tiktac(client)
         ##########################
         ####### 结束ADAM计算 ######
         ##########################
@@ -186,7 +186,7 @@ def FP16_f_adamv2(client,
             ) - adam_iter_release_start
 
         mgr = PatrickStarManager()
-        mgr.tiktac()
+        mgr.tiktac(client)
     global_timer.cpu_adam_elapse += time.time() - adam_start_time
 
 
@@ -307,7 +307,7 @@ class FP16Adam(torch.optim.Optimizer):
                 else:
                     self.client.release_data(param, PSTensorStatus.HOLD)
         mgr = PatrickStarManager()
-        mgr.tiktac()
+        mgr.tiktac(self.client)
 
         loss = None
         if closure is not None:
@@ -377,6 +377,8 @@ class FP16Adam(torch.optim.Optimizer):
                 self.param_grad_buff = torch.zeros(buff_size,
                                                    dtype=torch.float,
                                                    device=self.prefer_device)
+                mgr = PatrickStarManager()
+                mgr.add('cuda', buff_size * 4)
             logging.info(f"adam max_chunk_size {buff_size}")
 
         # self.client.chunk_tensor_index.visit_chunks(self.client.chunk_list)

@@ -19,7 +19,10 @@ import logging
 from pynvml import *
 
 
-def get_memory_used(device):
+def get_sys_memory_used(device):
+    """
+    获得系统当前内存，对于CPU每个进程只拥有1/N内存
+    """
     if device.type == 'cuda':
         # nvmlInit()
         # h = nvmlDeviceGetHandleByIndex(device.index)
@@ -27,7 +30,10 @@ def get_memory_used(device):
         return torch.cuda.memory_allocated()
     elif device.type == 'cpu':
         vm_stats = psutil.virtual_memory()
-        return vm_stats.used  #available
+        if torch.distributed.is_initialized():
+            return vm_stats.used / torch.distributed.get_world_size()
+        else:
+            return vm_stats.used  #available
 
 
 def see_memory_usage(message, force=False, scale_name="MB"):

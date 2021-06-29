@@ -28,7 +28,7 @@ from .chunk_schema_scheduler import ChunkShemaScheduler
 import utils.global_timer as global_timer
 import time
 from .parameter import PSParameter, register_param, is_param_registed, is_torch_param
-from utils.memory_monitor import get_memory_used
+from utils.memory_monitor import get_sys_memory_used
 from utils import logger
 from deepspeed_helper.global_vars import get_args
 from manager import PatrickStarManager
