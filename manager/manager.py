@@ -167,9 +167,9 @@ class PatrickStarManager(metaclass=SingletonMeta):
                 next_mom]
             cur_mom_used_cpu_mem = client.chunk_list.get_chunk_memory_used(
                 cpu_device)
-            logger.info(
-                f'cur_mom_used_cpu_mem {cur_mom_used_cpu_mem/1e6} MB next_mom_ava_cpu_mem {next_mom_ava_cpu_mem/1e6} MB'
-            )
+            # logger.info(
+            #     f'cur_mom_used_cpu_mem {cur_mom_used_cpu_mem/1e6} MB next_mom_ava_cpu_mem {next_mom_ava_cpu_mem/1e6} MB'
+            # )
             if next_mom_ava_cpu_mem < cur_mom_used_cpu_mem:
                 offload_size = cur_mom_used_cpu_mem - next_mom_ava_cpu_mem
                 client.chunk_list.make_room(offload_size, cpu_device)

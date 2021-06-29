@@ -20,7 +20,6 @@ import sys
 import copy
 from checkpoint import checkpoint
 import logging
-import torch
 from utils import see_memory_usage
 from fp16 import FP16_Module, FP16_Optimizer
 import time
@@ -34,6 +33,7 @@ from runtime import Init, initialize_engine
 from deepspeed_helper.global_vars import set_global_variables
 from deepspeed_helper.global_vars import get_args
 from manager import PatrickStarManager
+from utils.model_size_calculator import get_ps_model_size, estimate_bert_MAC
 
 
 def check_grads_status(model, status):
@@ -51,48 +51,6 @@ def show_params(model, is_ps, step):
             param.shape, param.requires_grad)
 
 
-def get_model_size(model):
-    numel = 0
-    for name, param in model.named_parameters(recurse=True):
-        numel += param.numel()
-    print(f"model size {numel/1e9} B")
-    return numel
-
-
-def calculate_model_size(config):
-    V = config.vocab_size
-    N = config.num_attention_heads
-    H = config.hidden_size
-    L = config.num_hidden_layers
-    P = config.max_position_embeddings
-    numel = (V + P + (L + 1) * N + 5) * H + (L * N + 1) * (H**2)
-    Embedding_numel = H * (V + P + 4)
-    QKV_numel = (H * H + H) * 3
-    MLP_numel = H * (4 * H) + (4 * H) + (4 * H) * H + H
-    print(f"Embedding_numel layer {Embedding_numel/1e9} B")
-    print(f"QKV_numel layer {QKV_numel/1e9} B")
-    print(f"MLP_numel layer {MLP_numel/1e9} B")
-    print(f"calcalated model size {numel/1e9} B")
-
-
-def calucate_MAC(config, batch_size, sequence_length):
-    B = batch_size
-    S = sequence_length
-    V = config.vocab_size
-    N = config.num_attention_heads
-    H = config.hidden_size
-    L = config.num_hidden_layers
-    P = config.max_position_embeddings
-    cisg_total_macs = 72 * B * S * N * H**2 + 12 * B * N * H * S**2
-    nvidia_total_macs = 96 * B * S * L * H**2 * (1 + S / (6 * H) + V /
-                                                 (16 * L * H))
-
-    print(f'cisg_total_macs total MACs {cisg_total_macs}')
-    print(f'nvidia total MACs {nvidia_total_macs}')
-    print(f'diff csig/nvidia {cisg_total_macs / nvidia_total_macs}')
-    return nvidia_total_macs
-
-
 def test_bert_model(is_ckp: bool = False,
                     is_fp16: bool = False,
                     is_ps: bool = False,
@@ -101,6 +59,7 @@ def test_bert_model(is_ckp: bool = False,
                     hidden_dim=768,
                     sequence_length=256,
                     num_layer=12,
+                    num_head=12,
                     stop_step=5):
     logging.info(f'test a bert model with checkpoit {is_ckp} FP16 {is_fp16}')
     logging.info(
@@ -121,12 +80,16 @@ def test_bert_model(is_ckp: bool = False,
     # rank 0在cpu上计算？
     if is_ckp:
         cfg = BertConfig(gradient_checkpointing=True,
-                         hidden_dim=hidden_dim,
+                         hidden_size=hidden_dim,
+                         intermediate_size=hidden_dim * 4,
+                         num_attention_heads=num_head,
                          max_position_embeddings=sequence_length,
                          num_hidden_layers=num_layer)
     else:
-        cfg = BertConfig(hidden_dim=hidden_dim,
+        cfg = BertConfig(hidden_size=hidden_dim,
+                         intermediate_size=hidden_dim * 4,
                          max_position_embeddings=sequence_length,
+                         num_attention_heads=num_head,
                          num_hidden_layers=num_layer)
 
     if not is_ps:
@@ -169,9 +132,8 @@ def test_bert_model(is_ckp: bool = False,
             optimizer = CPUAdam(client, model.parameters(), lr=0.001)
             client.init(model, optimizer)
 
-    model_numel = get_model_size(model)
-    calculate_model_size(cfg)
-    total_macs = calucate_MAC(cfg, batch_size, sequence_length)
+    model_numel = get_ps_model_size(model)
+    total_macs = estimate_bert_MAC(cfg, batch_size, sequence_length)
 
     see_memory_usage(
         f"ckp {is_ckp} fp16 {is_fp16} ps {is_ps} after model init", force=True)
@@ -270,7 +232,7 @@ if __name__ == "__main__":
 
     world_size = torch.distributed.get_world_size()
 
-    plan = "A"
+    plan = "GPT3XL"
     if res_check:
         plan = "B"
     if plan == "A":
@@ -280,12 +242,14 @@ if __name__ == "__main__":
         batch_size = 8
         sequence_length = 1024
         num_layer = 60
+        num_head = 12
     elif plan == 'B':
         # PatrickStar and Torch都可以
         hidden_dim = 768
         batch_size = 1
         sequence_length = 1024
         num_layer = 3  #12
+        num_head = 12
     elif plan == 'C':
         # use ckp
         # PatrickStar and PyTorch is OK
@@ -294,11 +258,22 @@ if __name__ == "__main__":
         batch_size = 8
         sequence_length = 1024
         num_layer = 12
-    elif plan == 'D':
-        hidden_dim = 4096  #2048
-        batch_size = 2
-        sequence_length = 1536
-        num_layer = 120
+        num_head = 12
+    elif plan == 'GPT327B':
+        # 2.7B model
+        hidden_dim = 2560  #2048
+        batch_size = 8
+        sequence_length = 128
+        num_layer = 32
+        num_head = 32
+    elif plan == 'GPT3XL':
+        # 1.3B model
+        hidden_dim = 2048
+        batch_size = 8
+        sequence_length = 512
+        num_layer = 24
+        num_head = 32
+        assert hidden_dim % num_head == 0
 
     if not res_check:
         # 训练参数，可以自己定义
@@ -310,6 +285,7 @@ if __name__ == "__main__":
                                     hidden_dim=hidden_dim,
                                     sequence_length=sequence_length,
                                     num_layer=num_layer,
+                                    num_head=num_head,
                                     stop_step=5)
         print(loss_list)
     # calculate_mem_need(hidden_dim = hidden_dim, batch_size = batch_size, is_fp16 = use_fp16)
