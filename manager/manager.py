@@ -117,6 +117,7 @@ class PatrickStarManager(metaclass=SingletonMeta):
             self.warmup = False
         self.metronome.reset()
         logger.info('Manager Resets Metronome')
+        logger.info(f'***************** WARMUP PHASE OVER *****************')
 
     def tiktac(self, client):
         """
@@ -162,16 +163,19 @@ class PatrickStarManager(metaclass=SingletonMeta):
                 )
                 client.chunk_list.make_room(offload_size, gpu_device)
 
-            # CPU的内存空间是分隔的
-            next_mom_ava_cpu_mem = self._overall_cpu_mem - self.cpu_sys_used_list[
+            # 对CPU的Chunk Mem进行调仓
+            cpu_next_mom_ava_chunk_mem = self._overall_cpu_mem - self.cpu_sys_used_list[
                 next_mom]
-            cur_mom_used_cpu_mem = client.chunk_list.get_chunk_memory_used(
+            cpu_cur_mom_used_chunk_mem = client.chunk_list.get_chunk_memory_used(
                 cpu_device)
             # logger.info(
-            #     f'cur_mom_used_cpu_mem {cur_mom_used_cpu_mem/1e6} MB next_mom_ava_cpu_mem {next_mom_ava_cpu_mem/1e6} MB'
+            #     f'cpu_cur_mom_used_chunk_mem {cpu_cur_mom_used_chunk_mem/1e6} MB cpu_next_mom_ava_chunk_mem {cpu_next_mom_ava_chunk_mem/1e6} MB'
             # )
-            if next_mom_ava_cpu_mem < cur_mom_used_cpu_mem:
-                offload_size = cur_mom_used_cpu_mem - next_mom_ava_cpu_mem
+            # 当前时刻used chunk mem，下一时刻ava chunk mem = used chunk mem + free chunk mem
+            # 降低used chunk mem，使之可以达到下一时刻ava chunk mem
+            if cpu_next_mom_ava_chunk_mem < cpu_cur_mom_used_chunk_mem:
+                offload_size = cpu_cur_mom_used_chunk_mem - cpu_next_mom_ava_chunk_mem
+                # logger.info(f'chunk list has to make room {offload_size/1e6} MB')
                 client.chunk_list.make_room(offload_size, cpu_device)
 
             # TODO 调仓CPU内存
@@ -221,7 +225,10 @@ class PatrickStarManager(metaclass=SingletonMeta):
 
     def available_chunk_mem(self, device_type):
         """
-        返回可以用于分配Chunk的最大内存，包括已经分配给Chunk的内存
+        返回用可以于分配Chunk的内存，即可用内存。
+        可用内存包括已经分配被Chunk占据的内存和闲置(free)的内存。
+        预热阶段是三分之一GPU内存和全部CPU内存。
+        非预热阶段，是当前moment和下一moment可用内存的最小值。
         """
         if device_type == "cpu":
             if self.warmup or not self._start_training:
@@ -234,7 +241,11 @@ class PatrickStarManager(metaclass=SingletonMeta):
                 cur_mom_ava_mem = self._overall_cpu_mem - self.cpu_sys_used_list[
                     self.metronome.moment()]
                 # TODO(jiaruifang）
-                return min(next_mom_ava_mem, cur_mom_ava_mem) - 500 * 1e6
+                ava_cpu_chunk_mem = min(next_mom_ava_mem, cur_mom_ava_mem)
+                logger.info(
+                    f'available cpu chunk memory is {ava_cpu_chunk_mem/1e6} MB'
+                )
+                return ava_cpu_chunk_mem
         elif device_type == "cuda":
             if self.warmup or not self._start_training:
                 # TODO(jiaruifang)瞎拍一个数，预热阶段三分之一GPU显存用来存储chunk
@@ -246,7 +257,7 @@ class PatrickStarManager(metaclass=SingletonMeta):
                     next_mom]
                 cur_mom_ava_mem = self._overall_gpu_mem - self.gpu_sys_used_list[
                     cur_mom]
-                return min(next_mom_ava_mem, cur_mom_ava_mem) - 500 * 1e6
+                return min(next_mom_ava_mem, cur_mom_ava_mem)
 
     def show_gpu_curve(self):
         with open('gpu_used.txt', 'w') as fh:

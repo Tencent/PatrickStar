@@ -13,22 +13,16 @@
 
 import torch
 from deepspeed_helper.global_vars import get_args
-
-
-def get_model_size(model):
-    # args = get_args()
-    numel = 0
-    for name, param in model.named_parameters(recurse=True):
-        numel += param.numel()
-    # numel *= args.world_size
-    print(f"model size {numel/1e9} B")
-    return numel
+from client.parameter import is_param_registed
 
 
 def get_ps_model_size(model):
     numel = 0
     for name, param in model.named_parameters(recurse=True):
-        numel += param.ps_attr.ps_numel
+        if is_param_registed(param):
+            numel += param.ps_attr.ps_numel
+        else:
+            numel += param.numel()
     # numel *= args.world_size
     print(f"PS model size {numel/1e9} B")
     return numel

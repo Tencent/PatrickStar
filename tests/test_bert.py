@@ -232,33 +232,30 @@ if __name__ == "__main__":
 
     world_size = torch.distributed.get_world_size()
 
-    plan = "GPT3XL"
+    plan = "GPT3large"
     if res_check:
-        plan = "B"
-    if plan == "A":
+        plan = "GPTsmall"
+    if plan == "GPTsmall":
         # PatrickStar可以，PyTorch不可以
         # use_ckp: True, use_fp16: True, adam default on CPU, not interleave data and grad
-        hidden_dim = 3072
-        batch_size = 8
-        sequence_length = 1024
-        num_layer = 60
-        num_head = 12
-    elif plan == 'B':
-        # PatrickStar and Torch都可以
-        hidden_dim = 768
-        batch_size = 1
-        sequence_length = 1024
-        num_layer = 3  #12
-        num_head = 12
-    elif plan == 'C':
-        # use ckp
-        # PatrickStar and PyTorch is OK
-        # 没有prepare device开销
         hidden_dim = 768
         batch_size = 8
-        sequence_length = 1024
+        sequence_length = 128
         num_layer = 12
         num_head = 12
+    elif plan == 'GPT3mid':
+        # PatrickStar and Torch都可以
+        hidden_dim = 1024
+        batch_size = 8
+        sequence_length = 128
+        num_layer = 24
+        num_head = 16
+    elif plan == 'GPT3large':
+        hidden_dim = 1536
+        batch_size = 8
+        sequence_length = 128
+        num_layer = 24
+        num_head = 16
     elif plan == 'GPT327B':
         # 2.7B model
         hidden_dim = 2560  #2048
@@ -274,7 +271,7 @@ if __name__ == "__main__":
         num_layer = 24
         num_head = 32
         assert hidden_dim % num_head == 0
-
+    logging.info(f'Benchmarking {plan}')
     if not res_check:
         # 训练参数，可以自己定义
         torch.manual_seed(0)
