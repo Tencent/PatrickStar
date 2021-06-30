@@ -132,22 +132,21 @@ class ChunkList(object):
             f'prepare_device target device {target_device} need size {need_bytes} bytes'
         )
         ps_manager = PatrickStarManager()
-        max_mem = ps_manager.available_chunk_mem(target_device.type)
-        if max_mem < need_bytes:
+        ava_chunk_mem_size = ps_manager.available_chunk_mem(target_device.type)
+        if ava_chunk_mem_size < need_bytes:
             logger.error(
                 f"{target_device} has not enough space for {need_bytes} elements"
             )
             # TODO(jiaruifang)可以爆表时候再释放
             raise RuntimeError(
-                f"{target_device} has not enough space for {need_bytes/1e6} MB. Device used Chunk Memory is {self.get_chunk_memory_used(target_device)/1e6} MB. Avaibale Chunk Memory is {max_mem}"
+                f"{target_device} has not enough space for {need_bytes/1e6} MB. Device used Chunk Memory is {self.get_chunk_memory_used(target_device)/1e6} MB. Avaibale Chunk Memory is {ava_chunk_mem_size}"
             )
 
         free_chunk_mem_size = ps_manager.free_chunk_mem(target_device.type)
-
         extra_need_bytes = need_bytes - free_chunk_mem_size
 
         logger.debug(
-            f'{target_device} (max size {max_mem} B) now available size {free_chunk_mem_size} B needs {need_bytes} B'
+            f'{target_device} (ava_chunk_mem_size {ava_chunk_mem_size/1e6} MB) now free_chunk_mem_size size {free_chunk_mem_size/1e6} MB, needs {need_bytes/1e6} MB'
         )
         # 不需要新分配
         if extra_need_bytes <= 0:

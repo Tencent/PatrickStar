@@ -262,13 +262,16 @@ class PatrickStarManager(metaclass=SingletonMeta):
                     # TODO(jiaruifang)瞎拍一个数，预热阶段三分之一GPU显存用来存储chunk
                     return self._overall_gpu_mem / 3
             else:
-                next_mom = self.metronome.next_moment()
-                cur_mom = self.metronome.moment()
-                next_mom_ava_mem = self._overall_gpu_mem - self.gpu_sys_used_list[
-                    next_mom]
-                cur_mom_ava_mem = self._overall_gpu_mem - self.gpu_sys_used_list[
-                    cur_mom]
-                return min(next_mom_ava_mem, cur_mom_ava_mem)
+                if self._training_stage == TrainingStage.ADAM:
+                    return self._overall_gpu_mem
+                else:
+                    next_mom = self.metronome.next_moment()
+                    cur_mom = self.metronome.moment()
+                    next_mom_ava_mem = self._overall_gpu_mem - self.gpu_sys_used_list[
+                        next_mom]
+                    cur_mom_ava_mem = self._overall_gpu_mem - self.gpu_sys_used_list[
+                        cur_mom]
+                    return min(next_mom_ava_mem, cur_mom_ava_mem)
 
     def show_mem_curve(self):
         with open('gpu_used_curve.txt', 'w') as fh:

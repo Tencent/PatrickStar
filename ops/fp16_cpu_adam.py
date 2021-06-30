@@ -24,6 +24,8 @@ from utils import print_rank, logger, use_dist_flag, get_sys_memory_used
 from client.parameter import register_param, is_torch_param
 from deepspeed_helper.global_vars import get_args
 from manager import PatrickStarManager
+from client import ChunkList, ChunkTensorIndex
+from .chunk_io_buff import FP32ChunkReadBuffer, FP16ChunkWriteBuffer
 
 
 def get_real_data_tensor(param):
@@ -47,7 +49,8 @@ def FP16_f_adamv2(client,
                   weight_decay_list: List[float],
                   eps_list: List[float],
                   prefer_device,
-                  param_grad_buff,
+                  read_chunk_buff,
+                  write_chunk_buff,
                   time_profile=True):
     r"""Functional API that performs Adam algorithm computation.
     按照在chunk内的存储顺序连续访问fp16_param_with_grad_list的参数，获取fp16 grad，
@@ -58,6 +61,8 @@ def FP16_f_adamv2(client,
     rank = torch.distributed.get_rank()
     world_size = torch.distributed.get_world_size()
 
+    use_write_buff = True
+    use_read_buff = True
     for i, param in enumerate(fp32_params):
         ##########################
         ####### 准备ADAM数据 ######
@@ -71,38 +76,38 @@ def FP16_f_adamv2(client,
         param_data = get_real_data_tensor(param)
 
         fp16_param = fp16_param_with_grad_list[i]
-        if False:
+        if time_profile:
+            start_time = time.time()
+        if use_read_buff:
             # 以chunk为粒度拷贝grad fp16 (FWD+BWD计算设备CUDA) -> grad fp32 (Adam计算设备CPU)
             if is_torch_param(fp16_param):
                 param_grad = fp16_param.float(
                 )  #torch.zeros_like(fp16_param, dtype = torch.float)
             else:
-                param_grad = client.fp16_to_fp32_copy(
-                    fp16_param, AccessType.DATA).view(param_data.shape)
-            # necessary to reset grads
-            client.release_data(fp16_param, PSTensorStatus.FREE)
+                # 将FP16 GPU Chunk拷贝到compute_device的FP16 Chunk上。
+                # 如果是第一个tensor则拷贝Chunk，否则索引chunk
+                param_grad = read_chunk_buff.access_from_cache(
+                    fp16_param).view(param_data.shape)
         else:
             # 以tensor为粒度拷贝grad fp16 -> grad fp32
-            # 放在data位置上的grad
-            # print(f'access {param.ps_attr.ps_name} {param.ps_attr.ps_numel}')
             client.access_data(fp16_param, torch.device(f'cuda:{client.rank}'))
-            fp16_param_grad = get_real_data_tensor(fp16_param)
-            # print(f'PS {i} fp16_param {fp16_param_grad}')
-            if time_profile:
-                start_time = time.time()
+            fp16_grad_tensor = get_real_data_tensor(fp16_param)
 
             if is_torch_param(fp16_param):
-                param_grad = fp16_param.float(
-                )  #torch.zeros_like(fp16_param, dtype = torch.float)
+                param_grad = fp16_param.float()
             else:
-                param_grad = param_grad_buff.narrow(
-                    0, 0, param_data.numel()).view(param_data.shape)
-            param_grad.copy_(fp16_param_grad, non_blocking=False)
-            if time_profile:
-                global_timer.gpu_cpu_move_elapse += time.time() - start_time
-                global_timer.gpu_cpu_move_times += 1
-                global_timer.gpu_cpu_move_data_amount += param_grad.numel()
-            client.release_data(fp16_param, PSTensorStatus.FREE)
+                param_grad = torch.zeros(fp16_param.ps_attr.ps_shape,
+                                         dtype=torch.float)
+                param_grad.copy_(fp16_grad_tensor.view(
+                    fp16_param.ps_attr.ps_shape),
+                                 non_blocking=False)
+        # # 必须释放fp16_param的内存，以便复用
+        # client.release_data(fp16_param, PSTensorStatus.FREE)
+
+        if time_profile:
+            global_timer.gpu_cpu_move_elapse += time.time() - start_time
+            global_timer.gpu_cpu_move_times += 1
+            global_timer.gpu_cpu_move_data_amount += param_grad.numel()
 
         exp_avg_param = exp_avgs[i]
         exp_avg_sq_param = exp_avg_sqs[i]
@@ -165,23 +170,26 @@ def FP16_f_adamv2(client,
         ####### 结束ADAM计算 ######
         ##########################
 
-        fp16_param = fp16_param_with_grad_list[i]
+        # fp16_param = fp16_param_with_grad_list[i]
 
-        client.access_data(fp16_param, torch.device(f'cuda:{client.rank}'))
-
-        fp16_data = get_real_data_tensor(fp16_param)
         if time_profile:
             start_time = time.time()
 
-        # TODO(jiaruifang) 目前以tensor为粒度直接拷贝data fp32 (ADAM计算设备 CPU)-> data fp16 (FWD+BWD计算设备 CUDA)
-        # 可以改成以chunk为粒度
-        fp16_data.copy_(param_data, non_blocking=False)
+        # TODO(jiaruifang) param_data(在compute_device上) -> fp16_param对应的Chunk内存
+        if use_write_buff:
+            write_chunk_buff.write_from_cache(fp16_param, param_data)
+        else:
+            # fp16_param先弄到GPU上，然后把fp16_data拷贝过去
+            client.access_data(fp16_param, torch.device(f'cuda:{client.rank}'))
+            fp16_data = get_real_data_tensor(fp16_param)
+            fp16_data.copy_(param_data, non_blocking=False)
+            client.release_data(fp16_param, PSTensorStatus.HOLD)
+
         if time_profile:
             global_timer.cpu_gpu_move_elapse += time.time() - start_time
-            global_timer.cpu_gpu_move_data_amount += fp16_data.numel()
+            global_timer.cpu_gpu_move_data_amount += param_data.numel()
             global_timer.cpu_gpu_move_times += 1
 
-        client.release_data(fp16_param, PSTensorStatus.HOLD)
         client.release_data(param)
         client.release_data(exp_avg_param)
         client.release_data(exp_avg_sq_param)
@@ -192,6 +200,8 @@ def FP16_f_adamv2(client,
 
         mgr = PatrickStarManager()
         mgr.tiktac(client)
+    if use_write_buff:
+        write_chunk_buff.write_cached_chunk()
     global_timer.cpu_adam_elapse += time.time() - adam_start_time
 
 
@@ -242,7 +252,7 @@ class FP16Adam(torch.optim.Optimizer):
                 self.state[p]['eps'] = group['eps']
 
         # 用作fp16 grad 存储的buffer
-        self.param_grad_buff = None
+        self.read_chunk_buff = None
 
     def __setstate__(self, state):
         super(CPUAdam, self).__setstate__(state)
@@ -333,9 +343,6 @@ class FP16Adam(torch.optim.Optimizer):
         eps_list = []
         lr_list = []
 
-        # TODO(jiaruifang) 复用fp32 grad的buff
-        self.client._cached_fp32_buff.reset()
-
         max_param_size = 0
         for i, group in enumerate(self.param_groups):
             for j, p in enumerate(group['params']):
@@ -371,28 +378,23 @@ class FP16Adam(torch.optim.Optimizer):
                 else:
                     raise RuntimeError(f"tensor id {p.ps_attr.grad_id()}")
 
-        if self.param_grad_buff is None:
-            buff_size = max(self.client.chunk_list.max_chunk_size(),
-                            max_param_size)
-            if self.prefer_device.type == 'cpu':
-                self.param_grad_buff = torch.zeros(buff_size,
-                                                   dtype=torch.float,
-                                                   device=self.prefer_device,
-                                                   pin_memory=True)
-            else:
-                self.param_grad_buff = torch.zeros(buff_size,
-                                                   dtype=torch.float,
-                                                   device=self.prefer_device)
-                mgr = PatrickStarManager()
-                mgr.add('cuda', buff_size * 4)
-            logging.info(f"adam max_chunk_size {buff_size}")
+        if self.read_chunk_buff is None:
+            max_chunk_size = self.client.chunk_list.max_chunk_size()
+            self.read_chunk_buff = FP32ChunkReadBuffer(
+                self.client.chunk_list, self.client.chunk_tensor_index,
+                max_chunk_size, self.prefer_device)
+            logging.info(
+                f"Allocate fp32 Chunk Buffer of size {max_chunk_size/1e6} MB.")
+            self.write_chunk_buff = FP16ChunkWriteBuffer(
+                self.client.chunk_list, self.client.chunk_tensor_index,
+                max_chunk_size, self.prefer_device)
 
         # self.client.chunk_tensor_index.visit_chunks(self.client.chunk_list)
         FP16_f_adamv2(self.client, fp32_param_list, fp16_param_with_grad_list,
                       exp_avgs, exp_avg_sqs, max_exp_avg_sqs, state_steps,
                       False, beta1_list, beta2_list, lr_list,
                       weight_decay_list, eps_list, self.prefer_device,
-                      self.param_grad_buff)
+                      self.read_chunk_buff, self.write_chunk_buff)
 
         mgr = PatrickStarManager()
         mgr.reset_metronome()
