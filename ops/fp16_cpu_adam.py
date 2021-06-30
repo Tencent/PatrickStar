@@ -61,8 +61,6 @@ def FP16_f_adamv2(client,
     rank = torch.distributed.get_rank()
     world_size = torch.distributed.get_world_size()
 
-    use_write_buff = True
-    use_read_buff = False
     for i, param in enumerate(fp32_params):
         ##########################
         ####### 准备ADAM数据 ######
@@ -175,8 +173,8 @@ def FP16_f_adamv2(client,
 
         mgr = PatrickStarManager()
         mgr.tiktac(client)
-    if use_write_buff:
-        write_chunk_buff.write_cached_chunk()
+
+    write_chunk_buff.write_cached_chunk()
     global_timer.cpu_adam_elapse += time.time() - adam_start_time
 
 
