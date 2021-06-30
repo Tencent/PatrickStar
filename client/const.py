@@ -46,6 +46,7 @@ class PSTensorStatus(Enum):
 
 
 class TrainingStage(Enum):
-    FWD = 0
-    BWD = 1
-    ADAM = 2
+    UNSTART = 0
+    FWD = 1
+    BWD = 2
+    ADAM = 3

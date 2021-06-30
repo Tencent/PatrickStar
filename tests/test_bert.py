@@ -233,7 +233,7 @@ if __name__ == "__main__":
 
     world_size = torch.distributed.get_world_size()
 
-    plan = "GPT3large"
+    plan = "GPT3larger"
     if res_check:
         plan = "GPTsmall"
     if plan == "GPTsmall":
@@ -258,13 +258,13 @@ if __name__ == "__main__":
         sequence_length = 128
         num_layer = 24
         num_head = 16
-    elif plan == 'GPT327B':
-        # 2.7B model
-        hidden_dim = 2560  #2048
+    elif plan == 'GPT3larger':
+        # 1.27B
+        hidden_dim = 2048
         batch_size = 8
         sequence_length = 128
-        num_layer = 32
-        num_head = 32
+        num_layer = 24
+        num_head = 16
     elif plan == 'GPT3XL':
         # 1.3B model
         hidden_dim = 2048
@@ -272,7 +272,29 @@ if __name__ == "__main__":
         sequence_length = 512
         num_layer = 24
         num_head = 32
-        assert hidden_dim % num_head == 0
+    elif plan == 'GPT3_2B':
+        # 2.7B model
+        hidden_dim = 2560  #2048
+        batch_size = 8
+        sequence_length = 128
+        num_layer = 32
+        num_head = 32
+    elif plan == 'GPT3_6B':
+        # 6.7B model
+        hidden_dim = 4096
+        batch_size = 8
+        sequence_length = 512
+        num_layer = 32
+        num_head = 32
+    elif plan == 'GPT3_13B':
+        # 13B model
+        hidden_dim = 5140
+        batch_size = 8
+        sequence_length = 512
+        num_layer = 40
+        num_head = 40
+
+    assert hidden_dim % num_head == 0
     logging.info(f'Benchmarking {plan}')
     if not res_check:
         # 训练参数，可以自己定义

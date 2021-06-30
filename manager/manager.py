@@ -17,6 +17,7 @@ from utils.memory_monitor import get_sys_memory_used
 import psutil
 import logging as logger
 from deepspeed_helper.global_vars import get_args
+from client.const import TrainingStage
 
 
 ######### Global Scheduler ###########
@@ -106,10 +107,12 @@ class PatrickStarManager(metaclass=SingletonMeta):
         # 预热标志
         self.warmup = False
         self._start_training = False
+        self._training_stage = TrainingStage.UNSTART
 
     def start_train(self, is_warmup):
         self.warmup = is_warmup
         self._start_training = True
+        self._training_stage = TrainingStage.FWD
         logger.info(f'Start to train. Manager sets warmup {is_warmup}')
 
     def reset_metronome(self):
@@ -252,8 +255,12 @@ class PatrickStarManager(metaclass=SingletonMeta):
                 # return ava_cpu_chunk_mem
         elif device_type == "cuda":
             if self.warmup or not self._start_training:
-                # TODO(jiaruifang)瞎拍一个数，预热阶段三分之一GPU显存用来存储chunk
-                return self._overall_gpu_mem / 3
+                if self._training_stage == TrainingStage.ADAM:
+                    # ADAM时没有activation所以显存可以全部给Chunk
+                    return self._overall_gpu_mem
+                else:
+                    # TODO(jiaruifang)瞎拍一个数，预热阶段三分之一GPU显存用来存储chunk
+                    return self._overall_gpu_mem / 3
             else:
                 next_mom = self.metronome.next_moment()
                 cur_mom = self.metronome.moment()
@@ -279,9 +286,9 @@ class PatrickStarManager(metaclass=SingletonMeta):
             fh.write(
                 f'cpu_chunk_used_list {len(self.gpu_chunk_used_list)} \n {list(map(lambda x : x/1e6, self.cpu_chunk_used_list))}\n'
             )
-            fh.write(
-                f'cpu_sys_used_list {list(map(lambda x: x/1e6, self.cpu_sys_used_list))}\n'
-            )
-            fh.write(
-                f'cpu_used_list \n {list(map(lambda  x: x/1e6, self.cpu_used_list))}\n'
-            )
+            # fh.write(
+            #     f'cpu_sys_used_list {list(map(lambda x: x/1e6, self.cpu_sys_used_list))}\n'
+            # )
+            # fh.write(
+            #     f'cpu_used_list \n {list(map(lambda  x: x/1e6, self.cpu_used_list))}\n'
+            # )

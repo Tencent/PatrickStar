@@ -14,7 +14,7 @@
 from utils import logger, init_distributed
 from utils import print_rank as print_rank_0
 from torch.nn.modules import Module
-from client import PatrickStarClient, AccessType, PSChunkStatus, PSTensorStatus
+from client import PatrickStarClient, AccessType, PSChunkStatus, PSTensorStatus, TrainingStage
 from manager import PatrickStarManager
 import torch
 from ops import FP16Adam
@@ -120,6 +120,9 @@ class PatrickStarEngine(Module):
             *inputs: Variable length input list
             **kwargs: variable length keyword arguments
         """
+        mgr = PatrickStarManager()
+        mgr._training_stage == TrainingStage.FWD
+
         loss = self.module(*inputs, **kwargs)
         for chunk_id, chunk in self.client.chunk_list.generate_chunk():
             if chunk.get_status() == PSChunkStatus.HOLD_AFTER_FWD:
@@ -133,5 +136,7 @@ class PatrickStarEngine(Module):
             loss: Torch tensor on which to execute backward propagation
             allreduce_gradients: is deprecated, ignored, and will soon be removed'
         """
+        mgr = PatrickStarManager()
+        mgr._training_stage == TrainingStage.BWD
         self.optimizer.zero_grad()
         loss.backward()

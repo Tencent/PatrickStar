@@ -65,6 +65,7 @@ def FP16_f_adamv2(client,
         if time_profile:
             adam_iter_access_start = time.time()
 
+        # logging.info(f'fp16 cpu adam for param {i}')
         compute_device = prefer_device
         client.access_data(param, compute_device)
         param_data = get_real_data_tensor(param)
@@ -72,8 +73,12 @@ def FP16_f_adamv2(client,
         fp16_param = fp16_param_with_grad_list[i]
         if False:
             # 以chunk为粒度拷贝grad fp16 (FWD+BWD计算设备CUDA) -> grad fp32 (Adam计算设备CPU)
-            param_grad = client.fp16_to_fp32_copy(
-                fp16_param, AccessType.DATA).view(param_data.shape)
+            if is_torch_param(fp16_param):
+                param_grad = fp16_param.float(
+                )  #torch.zeros_like(fp16_param, dtype = torch.float)
+            else:
+                param_grad = client.fp16_to_fp32_copy(
+                    fp16_param, AccessType.DATA).view(param_data.shape)
             # necessary to reset grads
             client.release_data(fp16_param, PSTensorStatus.FREE)
         else:
@@ -307,6 +312,7 @@ class FP16Adam(torch.optim.Optimizer):
                 else:
                     self.client.release_data(param, PSTensorStatus.HOLD)
         mgr = PatrickStarManager()
+        mgr._training_stage == TrainingStage.ADAM
         mgr.tiktac(self.client)
 
         loss = None
