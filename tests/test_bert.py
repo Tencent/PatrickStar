@@ -151,8 +151,9 @@ def test_bert_model(is_ckp: bool = False,
     start_time = time.time()
 
     # 开启预热优化
-    mgr = PatrickStarManager()
-    mgr.start_train(is_warmup=True)
+    if is_ps:
+        mgr = PatrickStarManager()
+        mgr.start_train(is_warmup=True)
 
     for n, batch in enumerate(data_loader):
         step_start_time = time.time()
@@ -202,7 +203,7 @@ def test_bert_model(is_ckp: bool = False,
     if is_ps:
         global_timer.time_profiler()
         mgr = PatrickStarManager()
-        mgr.show_gpu_curve()
+        mgr.show_mem_curve()
 
     logging.info("*" * 20)
     return loss_res
@@ -236,14 +237,14 @@ if __name__ == "__main__":
     if res_check:
         plan = "GPTsmall"
     if plan == "GPTsmall":
-        # PatrickStar可以，PyTorch不可以
-        # use_ckp: True, use_fp16: True, adam default on CPU, not interleave data and grad
+        # 0.11B
         hidden_dim = 768
         batch_size = 8
         sequence_length = 128
         num_layer = 12
         num_head = 12
     elif plan == 'GPT3mid':
+        # 0.35B
         # PatrickStar and Torch都可以
         hidden_dim = 1024
         batch_size = 8
@@ -251,6 +252,7 @@ if __name__ == "__main__":
         num_layer = 24
         num_head = 16
     elif plan == 'GPT3large':
+        # 0.7B
         hidden_dim = 1536
         batch_size = 8
         sequence_length = 128

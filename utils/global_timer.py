@@ -17,6 +17,7 @@ import logging
 # param访问
 client_access_elapse = 0.
 client_prepare_device_elapse = 0.
+manager_room_make_elapse = 0.
 access_chunk_elapse = 0.
 chunk_move_elapse = 0.
 chunk_to_move_out_for_room_making_elapse = 0.
@@ -77,6 +78,7 @@ def time_profiler():
     global cpu_adam_access_elapse
 
     global temp_check_elapse
+    global manager_room_make_elapse
 
     logging.info(f'CLIENT ACCESS ELAPSE')
     logging.info(f'* client_access_elapse {client_access_elapse} ')
@@ -84,6 +86,7 @@ def time_profiler():
     logging.info(f'*** memory_allocate_elapse {memory_allocate_elapse}')
     logging.info(
         f'*** client_prepare_device_elapse {client_prepare_device_elapse}')
+    logging.info(f'*** manager_room_make_elapse {manager_room_make_elapse}')
     logging.info(
         f'**** chunk_to_move_out_for_room_making_elapse {chunk_to_move_out_for_room_making_elapse}'
     )

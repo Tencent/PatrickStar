@@ -18,13 +18,15 @@ from client.parameter import is_param_registed
 
 def get_ps_model_size(model):
     numel = 0
+    param_cnt = 0
     for name, param in model.named_parameters(recurse=True):
         if is_param_registed(param):
             numel += param.ps_attr.ps_numel
         else:
             numel += param.numel()
+        param_cnt += 1
     # numel *= args.world_size
-    print(f"PS model size {numel/1e9} B")
+    print(f"PS model size {numel/1e9} B, param cnt {param_cnt}")
     return numel
 
 

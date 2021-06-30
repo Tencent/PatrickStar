@@ -195,8 +195,7 @@ class ChunkList(object):
             self.chunk_move(idx, new_device)
 
         if self._time_profile:
-            global_timer.client_prepare_device_elapse += time.time(
-            ) - start_time
+            global_timer.manager_room_make_elapse += time.time() - start_time
 
     def chunk_move(self, chunk_id: int, device: torch.device):
         """
