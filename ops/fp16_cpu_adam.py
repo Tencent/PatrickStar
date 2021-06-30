@@ -62,7 +62,7 @@ def FP16_f_adamv2(client,
     world_size = torch.distributed.get_world_size()
 
     use_write_buff = True
-    use_read_buff = True
+    use_read_buff = False
     for i, param in enumerate(fp32_params):
         ##########################
         ####### 准备ADAM数据 ######
@@ -78,31 +78,15 @@ def FP16_f_adamv2(client,
         fp16_param = fp16_param_with_grad_list[i]
         if time_profile:
             start_time = time.time()
-        if use_read_buff:
-            # 以chunk为粒度拷贝grad fp16 (FWD+BWD计算设备CUDA) -> grad fp32 (Adam计算设备CPU)
-            if is_torch_param(fp16_param):
-                param_grad = fp16_param.float(
-                )  #torch.zeros_like(fp16_param, dtype = torch.float)
-            else:
-                # 将FP16 GPU Chunk拷贝到compute_device的FP16 Chunk上。
-                # 如果是第一个tensor则拷贝Chunk，否则索引chunk
-                param_grad = read_chunk_buff.access_from_cache(
-                    fp16_param).view(param_data.shape)
-        else:
-            # 以tensor为粒度拷贝grad fp16 -> grad fp32
-            client.access_data(fp16_param, torch.device(f'cuda:{client.rank}'))
-            fp16_grad_tensor = get_real_data_tensor(fp16_param)
 
-            if is_torch_param(fp16_param):
-                param_grad = fp16_param.float()
-            else:
-                param_grad = torch.zeros(fp16_param.ps_attr.ps_shape,
-                                         dtype=torch.float)
-                param_grad.copy_(fp16_grad_tensor.view(
-                    fp16_param.ps_attr.ps_shape),
-                                 non_blocking=False)
-        # # 必须释放fp16_param的内存，以便复用
-        # client.release_data(fp16_param, PSTensorStatus.FREE)
+        # 以chunk为粒度拷贝grad fp16 (FWD+BWD计算设备CUDA) -> grad fp32 (Adam计算设备CPU)
+        if is_torch_param(fp16_param):
+            param_grad = fp16_param.data.float()
+        else:
+            # 将FP16 GPU Chunk拷贝到compute_device的FP32 Chunk上。
+            # 如果是第一个tensor则拷贝Chunk，否则索引chunk
+            param_grad = read_chunk_buff.access_from_cache(fp16_param).view(
+                param_data.shape)
 
         if time_profile:
             global_timer.gpu_cpu_move_elapse += time.time() - start_time
@@ -170,20 +154,11 @@ def FP16_f_adamv2(client,
         ####### 结束ADAM计算 ######
         ##########################
 
-        # fp16_param = fp16_param_with_grad_list[i]
-
         if time_profile:
             start_time = time.time()
 
-        # TODO(jiaruifang) param_data(在compute_device上) -> fp16_param对应的Chunk内存
-        if use_write_buff:
-            write_chunk_buff.write_from_cache(fp16_param, param_data)
-        else:
-            # fp16_param先弄到GPU上，然后把fp16_data拷贝过去
-            client.access_data(fp16_param, torch.device(f'cuda:{client.rank}'))
-            fp16_data = get_real_data_tensor(fp16_param)
-            fp16_data.copy_(param_data, non_blocking=False)
-            client.release_data(fp16_param, PSTensorStatus.HOLD)
+        # Note param_data(在compute_device上) -> fp16_param对应的Chunk内存
+        write_chunk_buff.write_from_cache(fp16_param, param_data)
 
         if time_profile:
             global_timer.cpu_gpu_move_elapse += time.time() - start_time
