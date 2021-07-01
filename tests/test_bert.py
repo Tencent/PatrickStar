@@ -194,19 +194,15 @@ def test_bert_model(is_ckp: bool = False,
         logging.info(
             f"ckp {is_ckp} fp16 {is_fp16} ps {is_ps}: step elapse {step_elapse} sec/iter, {total_macs/1e9/step_elapse} GFlops"
         )
-        if n == stop_step: break
 
         if is_ps:
-            global_timer.time_profiler()
-            global_timer.reset_time_profiler()
-
             global_timer.my_timer.print()
             global_timer.my_timer.reset()
+        if n == stop_step: break
 
     elapse = time.time() - start_time
 
     if is_ps:
-        global_timer.time_profiler()
         mgr = PatrickStarManager()
         mgr.show_mem_curve()
 
@@ -262,6 +258,13 @@ if __name__ == "__main__":
         batch_size = 8
         sequence_length = 128
         num_layer = 24
+        num_head = 16
+    elif plan == 'GPT3_1B':
+        # 0.1B
+        hidden_dim = 1536
+        batch_size = 8
+        sequence_length = 128
+        num_layer = 36
         num_head = 16
     elif plan == 'GPT3larger':
         # 1.27B

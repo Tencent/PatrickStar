@@ -19,6 +19,7 @@ from manager import PatrickStarManager
 import torch
 from ops import FP16Adam
 from deepspeed_helper.global_vars import get_args
+from utils import global_timer
 
 
 class PatrickStarEngine(Module):
@@ -55,8 +56,8 @@ class PatrickStarEngine(Module):
         if args.use_fake_dist:
             prefer_device = torch.device(f'cpu:0')
         else:
-            # prefer_device = torch.device(f'cpu:0')
-            prefer_device = torch.device(f'cuda:{args.local_rank}')
+            prefer_device = torch.device(f'cpu:0')
+            # prefer_device = torch.device(f'cuda:{args.local_rank}')
 
         if args.local_rank == 0:
             logger.info(f'ADAM on device {prefer_device}')
@@ -120,6 +121,7 @@ class PatrickStarEngine(Module):
             *inputs: Variable length input list
             **kwargs: variable length keyword arguments
         """
+        global_timer.my_timer.start_profile("FWD")
         mgr = PatrickStarManager()
         mgr._training_stage = TrainingStage.FWD
 
@@ -128,6 +130,7 @@ class PatrickStarEngine(Module):
             if chunk.get_status() == PSChunkStatus.HOLD_AFTER_FWD:
                 self.client.set_all_tensors_status_in_chunk(
                     chunk_id, PSTensorStatus.HOLD)
+        global_timer.my_timer.finish_profile("FWD")
         return loss
 
     def backward(self, loss, allreduce_gradients=True, release_loss=False):
@@ -136,7 +139,9 @@ class PatrickStarEngine(Module):
             loss: Torch tensor on which to execute backward propagation
             allreduce_gradients: is deprecated, ignored, and will soon be removed'
         """
+        global_timer.my_timer.start_profile("BWD")
         mgr = PatrickStarManager()
         mgr._training_stage = TrainingStage.BWD
         self.optimizer.zero_grad()
         loss.backward()
+        global_timer.my_timer.finish_profile("BWD")

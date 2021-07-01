@@ -56,9 +56,6 @@ def FP16_f_adamv2(client,
     按照在chunk内的存储顺序连续访问fp16_param_with_grad_list的参数，获取fp16 grad，
     以chunk为单位拷贝到一个tmp buff之中
     """
-    if time_profile:
-        adam_start_time = time.time()
-
     rank = torch.distributed.get_rank()
     world_size = torch.distributed.get_world_size()
 
@@ -67,7 +64,7 @@ def FP16_f_adamv2(client,
         ####### 准备ADAM数据 ######
         ##########################
         if time_profile:
-            adam_iter_access_start = time.time()
+            global_timer.my_timer.start_profile('ADAM_prepare_data')
 
         # logging.info(f'fp16 cpu adam for param {i}')
         compute_device = prefer_device
@@ -76,7 +73,8 @@ def FP16_f_adamv2(client,
 
         fp16_param = fp16_param_with_grad_list[i]
         if time_profile:
-            start_time = time.time()
+            global_timer.my_timer.start_profile(
+                'ADAM_prepare_data_fp16_grad_to_fp32_grad_copy')
 
         # 以chunk为粒度拷贝grad fp16 (FWD+BWD计算设备CUDA) -> grad fp32 (Adam计算设备CPU)
         if is_torch_param(fp16_param):
@@ -88,10 +86,8 @@ def FP16_f_adamv2(client,
                 param_fp32_tensor.shape)
 
         if time_profile:
-            global_timer.my_timer.accumulate(
-                'adam_fp16_grad_to_fp32_grad_copy',
-                time.time() - start_time)
-            global_timer.gpu_cpu_move_elapse += time.time() - start_time
+            global_timer.my_timer.finish_profile(
+                'ADAM_prepare_data_fp16_grad_to_fp32_grad_copy')
             global_timer.gpu_cpu_move_times += 1
             global_timer.gpu_cpu_move_data_amount += param_grad.numel()
 
@@ -108,9 +104,8 @@ def FP16_f_adamv2(client,
         ####### 开始ADAM计算 ######
         ##########################
         if time_profile:
-            global_timer.cpu_adam_access_elapse += time.time(
-            ) - adam_iter_access_start
-            f_adam_compute_start_time = time.time()
+            global_timer.my_timer.finish_profile('ADAM_prepare_data')
+            global_timer.my_timer.start_profile('ADAM_compute')
 
         step = state_steps[i]
         beta1 = beta1_list[i]
@@ -146,41 +141,34 @@ def FP16_f_adamv2(client,
         param_fp32_tensor.addcdiv_(exp_avg, denom, value=-step_size)
 
         if time_profile:
-            global_timer.cpu_adam_f_elapse += time.time(
-            ) - f_adam_compute_start_time
-            adam_iter_release_start = time.time()
+            global_timer.my_timer.finish_profile('ADAM_compute')
+            global_timer.my_timer.start_profile('ADAM_param_fp32_to_fp16')
 
-        mgr = PatrickStarManager()
-        mgr.tiktac(client)
         ##########################
         ####### 结束ADAM计算 ######
         ##########################
-
-        if time_profile:
-            start_time = time.time()
 
         # Note fp16_param对应的Chunk内存 ->param对应的chunk内存
         write_chunk_buff.write_from_cache(fp16_param, param)
 
         if time_profile:
-            global_timer.cpu_gpu_move_elapse += time.time() - start_time
-            global_timer.cpu_gpu_move_data_amount += param_fp32_tensor.numel()
+            global_timer.my_timer.finish_profile('ADAM_param_fp32_to_fp16')
+            global_timer.cpu_gpu_move_data_amount += param_fp32_tensor.numel(
+            ) * 4
             global_timer.cpu_gpu_move_times += 1
+            global_timer.my_timer.start_profile('ADAM_release_data')
 
         client.release_data(param)
         client.release_data(exp_avg_param)
         client.release_data(exp_avg_sq_param)
 
         if time_profile:
-            global_timer.cpu_adam_release_elapse += time.time(
-            ) - adam_iter_release_start
+            global_timer.my_timer.finish_profile('ADAM_release_data')
 
         mgr = PatrickStarManager()
         mgr.tiktac(client)
 
     write_chunk_buff.write_cached_chunk()
-    if time_profile:
-        global_timer.cpu_adam_elapse += time.time() - adam_start_time
 
 
 class FP16Adam(torch.optim.Optimizer):
@@ -305,6 +293,7 @@ class FP16Adam(torch.optim.Optimizer):
 
         mgr.tiktac(self.client)
 
+        global_timer.my_timer.start_profile('ADAM')
         loss = None
         if closure is not None:
             with torch.enable_grad():
@@ -375,6 +364,7 @@ class FP16Adam(torch.optim.Optimizer):
                       weight_decay_list, eps_list, self.prefer_device,
                       self.read_chunk_buff, self.write_chunk_buff)
 
+        global_timer.my_timer.finish_profile('ADAM')
         mgr = PatrickStarManager()
         mgr.reset_metronome()
         return loss

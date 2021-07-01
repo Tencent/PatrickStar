@@ -34,65 +34,6 @@ from deepspeed_helper.global_vars import get_args
 from manager import PatrickStarManager
 
 
-class CachedFP32Buff(object):
-    # TODO release max_chunk_size
-    def __init__(self, default_chunk_size: int, rank: int):
-        self.cached_chunk_id = None
-        self.max_chunk_size = default_chunk_size
-        self.rank = rank
-        self.cpu_cached_fp32_payload = torch.zeros(self.max_chunk_size,
-                                                   dtype=torch.float,
-                                                   pin_memory=True)
-        logger.info(f'CachedFP32Buff init with rank {self.rank}')
-        self.cuda_cached_fp32_payload = torch.zeros(
-            self.max_chunk_size,
-            dtype=torch.float,
-            device=torch.device(f'cuda:{self.rank}'))
-
-    def reset(self):
-        self.cached_chunk_id = None
-        self.cpu_cached_fp32_payload.zero_()
-        self.cuda_cached_fp32_payload.zero_()
-
-    def update_chunk(self, chunk: Chunk, time_profile=True):
-        """
-        如果chunk id被cache住，则直接cached_buff上索引
-        chunk在cuda上，返回结果再cpu上
-        cuda fp16 -> cpu fp16 -> cpu fp32
-        cuda fp16 -> cpu fp32 慢！
-        """
-        chunk_id = chunk.chunk_id
-        if self.cached_chunk_id is None or self.cached_chunk_id != chunk_id:
-            if time_profile:
-                start_time = time.time()
-
-            self.cached_chunk_id = chunk_id
-            chunk_size = chunk.capacity
-            if chunk_size > self.max_chunk_size:
-                self.max_chunk_size = chunk_size
-                self.cpu_cached_fp32_payload = torch.zeros(self.max_chunk_size,
-                                                           dtype=torch.float,
-                                                           pin_memory=True)
-                self.cuda_cached_fp32_payload = torch.zeros(
-                    self.max_chunk_size,
-                    dtype=torch.float,
-                    device=torch.device(f'cuda:{self.rank}'))
-
-            cuda_buff = self.cuda_cached_fp32_payload.narrow(0, 0, chunk_size)
-            cuda_buff.copy_(chunk.payload)
-            cpu_buff = self.cpu_cached_fp32_payload.narrow(0, 0, chunk_size)
-            cpu_buff.copy_(cuda_buff)
-            # self.cpu_cached_fp32_payload.copy_(chunk.payload)
-
-            if time_profile:
-                global_timer.gpu_cpu_move_elapse += time.time() - start_time
-                global_timer.gpu_cpu_move_times += 1
-                global_timer.gpu_cpu_move_data_amount += chunk.capacity
-
-    def access_chunk(self, start_offset, numel):
-        return self.cpu_cached_fp32_payload.narrow(0, start_offset, numel)
-
-
 class PatrickStarClient(object):
     def __init__(self,
                  rank: int,
@@ -126,8 +67,6 @@ class PatrickStarClient(object):
         self._is_fp16 = is_fp16
 
         self._chunk_id = -1
-        self._cached_fp32_buff = CachedFP32Buff(default_chunk_size, rank)
-
         self.cpu_comm_group = torch.distributed.new_group(backend='gloo')
 
     def _generate_chunk_id(self):
@@ -240,13 +179,6 @@ class PatrickStarClient(object):
         生成当前chunk list中所有grad tensors
         """
         return self.chunk_tensor_index.generate_grad_tensor_param()
-
-    def fp16_to_fp32_copy(self, param, access_type):
-        tensor_id = param.ps_attr.get_tensor_id(access_type)
-        info = self.chunk_tensor_index.get_tensor_info(tensor_id)
-        self._cached_fp32_buff.update_chunk(self.chunk_list[info.chunk_id])
-        return self._cached_fp32_buff.access_chunk(info.start_offset,
-                                                   info.numel)
 
     def _assign_chunk_for_tensor(self, param, access_type):
         """
@@ -366,9 +298,6 @@ class PatrickStarClient(object):
     def access_dist(self, param: torch.nn.Parameter, access_type: AccessType,
                     compute_device: torch.device,
                     training_stage: TrainingStage):
-        if self._time_profile:
-            start_time = time.time()
-
         assert compute_device.type == "cuda"
         if not hasattr(param, 'ps_attr'):
             raise RuntimeError(
@@ -382,6 +311,10 @@ class PatrickStarClient(object):
             #     param.data.to(compute_device)
             #     param.grad.to(compute_device)
             return
+
+        if self._time_profile:
+            global_timer.my_timer.start_profile('CLIENT_access_dist')
+
         # 准备param所在chunk的内存，如果内存不在计算设备上需要分配或者移动
         chunk_id = self.chunk_tensor_index.get_chunk_id(param, access_type)
 
@@ -444,7 +377,7 @@ class PatrickStarClient(object):
         param.ps_attr.set_status(PSTensorStatus.COMPUTE, access_type)
 
         if self._time_profile:
-            global_timer.client_access_elapse += time.time() - start_time
+            global_timer.my_timer.finish_profile('CLIENT_access_dist')
 
     def access(self, param: torch.nn.Parameter, access_type: AccessType,
                compute_device: torch.device):
@@ -465,9 +398,6 @@ class PatrickStarClient(object):
         2. adam过程access_data
         只能访问本地chunk不需要通信
         """
-        if self._time_profile:
-            start_time = time.time()
-
         if is_torch_param(param):
             return
 
@@ -477,6 +407,9 @@ class PatrickStarClient(object):
             # TODO(jiaruifang)可以在optimizer init过程把编号分配好
             raise RuntimeError(
                 "FP16 training shall not meet tensors not registered for PS")
+
+        if self._time_profile:
+            global_timer.my_timer.start_profile('CLIENT_access')
 
         # 准备param所在chunk的内存，如果内存不在计算设备上需要分配或者移动
         chunk_id = self.chunk_tensor_index.get_chunk_id(param, access_type)
@@ -525,7 +458,7 @@ class PatrickStarClient(object):
 
         # Note并不设置parameter对应的tensor，因为adam可能直接访问pstensor
         if self._time_profile:
-            global_timer.client_access_elapse += time.time() - start_time
+            global_timer.my_timer.finish_profile('CLIENT_access')
 
     def access_data(self, param: torch.nn.Parameter,
                     compute_device: torch.device):
@@ -555,7 +488,7 @@ class PatrickStarClient(object):
         看看是否有chunk的状态为free，释放chunk内存
         """
         if self._time_profile:
-            start_time = time.time()
+            global_timer.my_timer.start_profile('CLIENT_release_dist')
         rank = torch.distributed.get_rank()
 
         assert isinstance(reset_to_status, PSTensorStatus)
@@ -637,7 +570,6 @@ class PatrickStarClient(object):
                 else:
                     # Note()为了在开发机调试方便
                     # 它非常慢 4.92 sec/5.89 sec (client_release_elapse)
-                    temp_start_time = time.time()
                     for rank_, chunk_id_ in enumerate(chunk_id_list):
                         if self.chunk_list[chunk_id_].is_dummy():
                             continue
@@ -647,8 +579,6 @@ class PatrickStarClient(object):
                             op=torch.distributed.ReduceOp.SUM,
                             group=group,
                             async_op=False)
-                    global_timer.temp_check_elapse += time.time(
-                    ) - temp_start_time
                 # NOTE把下面行注释了不影响最终结果？loss可能是有softmax算出，所以相对值不影响LOSS比较，但是影响了
                 # 不应该除以world_size,减去dummy chunk个数
                 self.chunk_list[local_chunk_id].payload /= world_size
@@ -663,7 +593,7 @@ class PatrickStarClient(object):
                         i, PSTensorStatus.FREE)
 
         if self._time_profile:
-            global_timer.client_release_elapse += time.time() - start_time
+            global_timer.my_timer.finish_profile('CLIENT_release_dist')
 
     def release(self,
                 param: torch.nn.Parameter,
@@ -681,13 +611,10 @@ class PatrickStarClient(object):
         在释放Parameter中tensor的内存，释放PSTensor中的内存
         看看是否有chunk的状态为free，释放chunk内存
         """
-        if self._time_profile:
-            start_time = time.time()
-            # tmp_start_time = time.time()
-
         if is_torch_param(param):
             return
-
+        if self._time_profile:
+            global_timer.my_timer.start_profile('CLIENT_release')
         args = get_args()
         rank = args.local_rank
         assert isinstance(reset_to_status, PSTensorStatus)
@@ -734,8 +661,7 @@ class PatrickStarClient(object):
                 self.chunk_list[chunk_id].payload /= world_size
 
         if self._time_profile:
-            # global_timer.temp_check_elapse += time.time() - tmp_start_time
-            global_timer.client_release_elapse += time.time() - start_time
+            global_timer.my_timer.finish_profile('CLIENT_release')
 
     def release_data(self,
                      param: torch.nn.Parameter,

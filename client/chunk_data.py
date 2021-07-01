@@ -102,7 +102,7 @@ class Chunk(object):
         NOTE()调用前保证compute有足够大的空间
         """
         if self._time_profile:
-            start_time = time.time()
+            global_timer.my_timer.start_profile('CHUNK_allocate_payload')
 
         payload_size = self.capacity
         if device.type == 'cpu':
@@ -119,7 +119,7 @@ class Chunk(object):
 
         self.touch()
         if self._time_profile:
-            global_timer.memory_allocate_elapse = time.time() - start_time
+            global_timer.my_timer.finish_profile('CHUNK_allocate_payload')
 
     def release_payload(self):
         """
@@ -187,13 +187,18 @@ class Chunk(object):
         """
         将这个chunk移动到target_device上。前提条件，target_device已经腾出足够的空间。
         """
-        if self._time_profile:
-            start_time = time.time()
         if self.get_device() is None:
             logging.warning(f"chunk move payload None to {target_device}")
             return
         if self.get_device() == target_device:
             return
+        if self._time_profile:
+            start_time = time.time()
+            if target_device.type == 'cuda':
+                global_timer.my_timer.start_profile('chunk_cpu_gpu_move')
+            else:
+                global_timer.my_timer.start_profile('chunk_gpu_cpu_move')
+
         src_device = self.get_device()
         #TODO(jiaruifang)异步
         ps_manager = PatrickStarManager()
@@ -239,15 +244,13 @@ class Chunk(object):
 
         if self._time_profile:
             if target_device.type == 'cuda':
-                global_timer.my_timer.accumulate('chunk_cpu_gpu_move',
-                                                 time.time() - start_time)
+                global_timer.my_timer.finish_profile('chunk_cpu_gpu_move')
                 global_timer.cpu_gpu_move_elapse += time.time() - start_time
                 global_timer.cpu_gpu_move_times += 1
                 global_timer.cpu_gpu_move_data_amount += self.get_payload_space(
                 )
             elif target_device.type == 'cpu':
-                global_timer.my_timer.accumulate('chunk_gpu_cpu_move',
-                                                 time.time() - start_time)
+                global_timer.my_timer.finish_profile('chunk_gpu_cpu_move')
                 global_timer.gpu_cpu_move_elapse += time.time() - start_time
                 global_timer.gpu_cpu_move_times += 1
                 global_timer.gpu_cpu_move_data_amount += self.get_payload_space(

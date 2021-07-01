@@ -13,6 +13,7 @@
 
 # 统计chunk的lifecycle开关
 import logging
+import time
 
 
 class GlobalTimer(object):
@@ -21,41 +22,33 @@ class GlobalTimer(object):
         存放时间统计，key命名规则 训练阶段_
         """
         self.elapse_stat = {}
-        self.elapse_stat['adam_fp16_grad_to_fp32_grad_copy'] = 0
-        self.elapse_stat['chunk_gpu_cpu_move'] = 0
-        self.elapse_stat['chunk_cpu_gpu_move'] = 0
 
-    def accumulate(self, key, value):
-        # assert key in self.elapse_stat
-        self.elapse_stat[key] += value
+        self.start_time = {}
+
+    def start_profile(self, key):
+        if key in self.start_time:
+            assert self.start_time[
+                key] == 0, f"Please Check {key} profiling function"
+        self.start_time[key] = time.time()
+
+    def finish_profile(self, key):
+        if key in self.elapse_stat:
+            self.elapse_stat[key] += time.time() - self.start_time[key]
+        else:
+            self.elapse_stat[key] = time.time() - self.start_time[key]
+        self.start_time[key] = 0
 
     def reset(self):
         for k, v in self.elapse_stat.items():
             self.elapse_stat[k] = 0
 
     def print(self):
+        logging.info('*********** PROFILE RESULTS *************')
         for k, v in self.elapse_stat.items():
             logging.info(f'{k}: {v}')
 
 
 my_timer = GlobalTimer()
-
-# param访问
-client_access_elapse = 0.
-client_prepare_device_elapse = 0.
-manager_room_make_elapse = 0.
-access_chunk_elapse = 0.
-chunk_move_elapse = 0.
-chunk_to_move_out_for_room_making_elapse = 0.
-memory_allocate_elapse = 0.
-
-# adam计算
-cpu_adam_elapse = 0.
-cpu_adam_f_elapse = 0.
-
-# param释放
-client_release_elapse = 0.
-memory_delete_elapse = 0.
 
 # 数据移动
 cpu_gpu_move_elapse = 0.
@@ -65,129 +58,3 @@ cpu_gpu_move_data_amount = 0
 gpu_cpu_move_elapse = 0.
 gpu_cpu_move_times = 0
 gpu_cpu_move_data_amount = 0
-
-get_status_elapse = 0
-cpu_adam_release_elapse = 0
-cpu_adam_access_elapse = 0
-
-# 临时观察
-temp_check_elapse = 0
-
-
-def reset_time_profiler():
-    global client_access_elapse
-    client_access_elapse = 0
-    global client_prepare_device_elapse
-    client_prepare_device_elapse = 0
-    global access_chunk_elapse
-    access_chunk_elapse = 0
-    global chunk_move_elapse
-    chunk_move_elapse = 0
-    global chunk_to_move_out_for_room_making_elapse
-    chunk_to_move_out_for_room_making_elapse = 0
-    global memory_allocate_elapse
-    memory_allocate_elapse = 0
-
-    global cpu_adam_elapse
-    cpu_adam_elapse = 0
-    global cpu_adam_f_elapse
-    cpu_adam_f_elapse = 0
-
-    global client_release_elapse
-    client_release_elapse = 0
-    global memory_delete_elapse
-    memory_delete_elapse = 0
-
-    # 数据移动
-    global cpu_gpu_move_elapse
-    cpu_gpu_move_elapse = 0
-    global cpu_gpu_move_times
-    cpu_gpu_move_times = 0
-    global cpu_gpu_move_data_amount
-    cpu_gpu_move_data_amount = 0
-
-    global gpu_cpu_move_elapse
-    gpu_cpu_move_elapse = 0
-    global gpu_cpu_move_times
-    gpu_cpu_move_times = 0
-    global gpu_cpu_move_data_amount
-    gpu_cpu_move_data_amount = 0
-
-    global get_status_elapse
-    get_status_elapse = 0
-    global cpu_adam_release_elapse
-    cpu_adam_release_elapse = 0
-    global cpu_adam_access_elapse
-    cpu_adam_access_elapse = 0
-
-    global temp_check_elapse
-    temp_check_elapse = 0
-    global manager_room_make_elapse
-    manager_room_make_elapse = 0
-
-
-def time_profiler():
-    global client_access_elapse
-    global client_prepare_device_elapse
-    global access_chunk_elapse
-    global chunk_move_elapse
-    global chunk_to_move_out_for_room_making_elapse
-    global memory_allocate_elapse
-
-    global cpu_adam_elapse
-    global cpu_adam_f_elapse
-    global cpu_adam_elapse
-
-    global client_release_elapse
-    global memory_delete_elapse
-
-    # 数据移动
-    global cpu_gpu_move_elapse
-    global cpu_gpu_move_times
-    global cpu_gpu_move_data_amount
-
-    global gpu_cpu_move_elapse
-    global gpu_cpu_move_times
-    global gpu_cpu_move_data_amount
-
-    global get_status_elapse
-    global cpu_adam_release_elapse
-    global cpu_adam_access_elapse
-
-    global temp_check_elapse
-    global manager_room_make_elapse
-
-    logging.info(f'CLIENT ACCESS ELAPSE')
-    logging.info(f'* client_access_elapse {client_access_elapse} ')
-    logging.info(f'** access_chunk_elapse {access_chunk_elapse}')
-    logging.info(f'*** memory_allocate_elapse {memory_allocate_elapse}')
-    logging.info(
-        f'*** client_prepare_device_elapse {client_prepare_device_elapse}')
-    logging.info(f'*** manager_room_make_elapse {manager_room_make_elapse}')
-    logging.info(
-        f'**** chunk_to_move_out_for_room_making_elapse {chunk_to_move_out_for_room_making_elapse}'
-    )
-    logging.info(f'**** chunk_move_elapse {chunk_move_elapse}')
-
-    logging.info("DATA MOVE STATISTICS")
-    logging.info(
-        f'*** cpu_gpu_move_elapse {cpu_gpu_move_elapse} sec, times {cpu_gpu_move_times}, amount {cpu_gpu_move_data_amount/1e6} MB, Bandwidth {cpu_gpu_move_data_amount/1e6/(cpu_gpu_move_elapse + 1e-10)} MB/s'
-    )
-    logging.info(
-        f'*** gpu_cpu_move_elapse {gpu_cpu_move_elapse} sec, times {gpu_cpu_move_times}, amount {gpu_cpu_move_data_amount/1e6} MB, Bandwidth {gpu_cpu_move_data_amount/1e6/(gpu_cpu_move_elapse + 1e-10)} MB/s'
-    )
-
-    logging.info("ADAM STATISTICS")
-    logging.info(
-        f'* cpu_adam_elapse {cpu_adam_elapse} cpu_adam_f_elapse {cpu_adam_f_elapse}'
-    )
-    logging.info(
-        f'* cpu_adam_release_elapse {cpu_adam_release_elapse} cpu_adam_access_elapse {cpu_adam_access_elapse}'
-    )
-
-    logging.info(f'CLIENT RELASE ELAPSE')
-    logging.info(f'* client_release_elapse {client_release_elapse}')
-    logging.info(f'** memory_delete_elapse {memory_delete_elapse}')
-    logging.info(f'*** get_status_elapse {get_status_elapse}')
-
-    logging.info(f'*** temp_check_elapse {temp_check_elapse}')

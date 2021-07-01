@@ -86,9 +86,6 @@ class ChunkList(object):
         2. distributed
         需要获取其他进程chunk，进行一次allgather获取一个完成的global chunk
         """
-        if self._time_profile:
-            start_time = time.time()
-
         chunk = self.chunk_id_to_chunk_dict[chunk_id]
         chunk_status = chunk.get_status()
 
@@ -104,16 +101,12 @@ class ChunkList(object):
             # TODO 在分布式环境应该准备
             self.prepare_device(compute_device, payload_space)
             chunk.allocate_payload(compute_device)
-            if self._time_profile:
-                global_timer.access_chunk_elapse += time.time() - start_time
             return
         elif chunk.get_device().type != compute_device.type:
             self.prepare_device(compute_device, payload_space)
             chunk.move(compute_device, self.copy_stream)
             assert chunk.get_device(
             ).type == compute_device.type, f"chunk device {chunk.get_device()} compute device {compute_device}"
-            if self._time_profile:
-                global_timer.access_chunk_elapse += time.time() - start_time
             return
         else:
             # 目标chunk已经在计算设备上了
@@ -126,7 +119,7 @@ class ChunkList(object):
         如果空间不足，需要在目标设备上释放或者移动出一些chunk。
         """
         if self._time_profile:
-            start_time = time.time()
+            global_timer.my_timer.start_profile('CHUNK_LIST_prepare_device')
 
         logger.debug(
             f'prepare_device target device {target_device} need size {need_bytes} bytes'
@@ -150,6 +143,9 @@ class ChunkList(object):
         )
         # 不需要新分配
         if extra_need_bytes <= 0:
+            if self._time_profile:
+                global_timer.my_timer.finish_profile(
+                    'CHUNK_LIST_prepare_device')
             return
 
         logger.debug(
@@ -169,8 +165,7 @@ class ChunkList(object):
             self.chunk_move(idx, new_device)
 
         if self._time_profile:
-            global_timer.client_prepare_device_elapse += time.time(
-            ) - start_time
+            global_timer.my_timer.finish_profile('CHUNK_LIST_prepare_device')
 
     def make_room(self, offload_size_in_bytes, target_device):
         """
@@ -178,7 +173,7 @@ class ChunkList(object):
         不能移动compute状态的Chunk
         """
         if self._time_profile:
-            start_time = time.time()
+            global_timer.my_timer.start_profile('CHUNK_LIST_make_room')
 
         # 需要在target_device上腾出空间
         moved_list = self._chunk_to_move_out_for_room_making(
@@ -194,14 +189,14 @@ class ChunkList(object):
             self.chunk_move(idx, new_device)
 
         if self._time_profile:
-            global_timer.manager_room_make_elapse += time.time() - start_time
+            global_timer.my_timer.finish_profile('CHUNK_LIST_make_room')
 
     def chunk_move(self, chunk_id: int, device: torch.device):
         """
         将chunk_id的chunk移动到device上
         """
         if self._time_profile:
-            start_time = time.time()
+            global_timer.my_timer.start_profile('CHUNK_LIST_chunk_move')
 
         chunk = self.chunk_id_to_chunk_dict[chunk_id]
         if chunk.get_device() != device:
@@ -211,7 +206,7 @@ class ChunkList(object):
             chunk.move(device, self.copy_stream)
 
         if self._time_profile:
-            global_timer.chunk_move_elapse += time.time() - start_time
+            global_timer.my_timer.finish_profile('CHUNK_LIST_chunk_move')
 
     def new_chunk(self,
                   chunk_id: int,
@@ -267,14 +262,8 @@ class ChunkList(object):
         # 释放cpu和gpu上所有free chunk，统计目标设备上腾出的空间
 
         for chunk_id, chunk in self.chunk_id_to_chunk_dict.items():
-            if self._time_profile:
-                sub_start_time = time.time()
             # TODO(jiaruifang) 耗时
             status = chunk.get_status()
-            if self._time_profile:
-                global_timer.memory_delete_elapse += time.time(
-                ) - sub_start_time
-
             self._delete_chunk(chunk)
 
     def get_next_access_moment(self, chunk: Chunk,
@@ -294,8 +283,6 @@ class ChunkList(object):
         返回一个chunk_id list
         """
         # 则需要将hold状态的chunk移出
-        if self._time_profile:
-            start_time = time.time()
         still_need_bytes = size_in_bytes
         moved_bytes = 0
         moved_list = []
@@ -330,9 +317,6 @@ class ChunkList(object):
                 f"device {target_device} still needs {still_need_bytes/1e6} MB, but  it has not enough space, only {moved_bytes/1e6} MB available. ChunkList used memory on {target_device} is {self.get_chunk_memory_used(target_device)/1e6} MB"
             )
 
-        if self._time_profile:
-            global_timer.chunk_to_move_out_for_room_making_elapse += time.time(
-            ) - start_time
         return moved_list
 
     def update_status(self, chunk_id, old_status, new_status):

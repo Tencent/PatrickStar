@@ -165,9 +165,9 @@ class PatrickStarManager(metaclass=SingletonMeta):
                 # logger.info(
                 #     f'available memory before room making {(self._overall_gpu_mem - torch.cuda.memory_allocated())/1e6} MB on gpu'
                 # )
-                logger.info(
-                    f'Making {offload_size/1e6} MB space on gpu, gpu_cur_mom_used_chunk_mem {gpu_cur_mom_used_chunk_mem/1e6} MB gpu_next_mom_ava_chunk_mem {gpu_next_mom_ava_chunk_mem/1e6} MB'
-                )
+                # logger.info(
+                #     f'Making {offload_size/1e6} MB space on gpu, gpu_cur_mom_used_chunk_mem {gpu_cur_mom_used_chunk_mem/1e6} MB gpu_next_mom_ava_chunk_mem {gpu_next_mom_ava_chunk_mem/1e6} MB'
+                # )
                 client.chunk_list.make_room(offload_size, gpu_device)
 
             # # 对CPU的Chunk Mem进行调仓
