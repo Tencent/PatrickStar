@@ -218,9 +218,9 @@ class PatrickStarManager(metaclass=SingletonMeta):
         """
         size = self.available_chunk_mem(device_type) - self.used_chunk_mem(
             device_type)
-        # logger.info(
-        #     f'free_chunk_mem on {device_type} {size/1e6} MB on mement {self.metronome.moment()}'
-        # )
+        logger.debug(
+            f'free_chunk_mem on {device_type} {size/1e6} MB on mement {self.metronome.moment()}'
+        )
         return size
 
     def used_chunk_mem(self, device_type):

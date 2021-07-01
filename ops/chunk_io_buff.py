@@ -15,50 +15,53 @@ import torch
 from client import ChunkList, ChunkTensorIndex
 from client.parameter import is_torch_param
 from manager import PatrickStarManager
+from utils import logger
 
 
 class FP16ChunkWriteBuffer(object):
     def __init__(self, chunk_list: ChunkList,
-                 chunk_tensor_index: ChunkTensorIndex, chunk_size: int,
-                 compute_device: torch.device):
+                 chunk_tensor_index: ChunkTensorIndex):
         self.chunk_list = chunk_list
         self.chunk_tensor_index = chunk_tensor_index
-        mgr = PatrickStarManager()
-        mgr.add(compute_device.type, chunk_size * 4)
-        self.payload = torch.zeros(chunk_size,
-                                   dtype=torch.half,
-                                   device=compute_device)
-        self.cached_chunk_id = None
+        self.cached_src_chunk_id = None
+        self.cached_target_chunk_id = None
 
-    def write_from_cache(self, param, data_tensor):
+    def write_from_cache(self, target_param, src_param):
         """
-        如果param是chunk中的最后一个tensor，则把data_tensor写到chunk中param对应的位置
-        data_tensor
+        如果src_param是chunk中的最后一个tensor，
+        则把src_param的chunk写到target_param所在的chunk中
         """
-        if is_torch_param(param):
-            return param.data.copy_(data_tensor)
+        if is_torch_param(src_param):
+            return target_param.data.copy_(src_param.data)
         else:
-            info = self.chunk_tensor_index.get_tensor_info(
-                param.ps_attr.data_id())
+            src_info = self.chunk_tensor_index.get_tensor_info(
+                src_param.ps_attr.data_id())
+            target_info = self.chunk_tensor_index.get_tensor_info(
+                target_param.ps_attr.data_id())
 
-            if self.cached_chunk_id is not None and info.chunk_id != self.cached_chunk_id:
+            if self.cached_src_chunk_id is not None and src_info.chunk_id != self.cached_src_chunk_id:
                 # TODO CPU->GPU拷贝需要优化
-                print(f'write chunk {self.cached_chunk_id}')
-                self.chunk_list[self.cached_chunk_id].payload.copy_(
-                    self.payload)
-
-            # print(f'data_tensor {data_tensor.shape} {data_tensor.view(-1).shape}')
-            self.payload.narrow(0, info.start_offset,
-                                info.numel).copy_(data_tensor.view(-1))
-            self.cached_chunk_id = info.chunk_id
+                target_device = self.chunk_list[
+                    self.cached_target_chunk_id].payload.device
+                src_device = self.chunk_list[
+                    self.cached_src_chunk_id].payload.device
+                logger.info(
+                    f'write src chunk {self.cached_src_chunk_id} to chunk {self.cached_target_chunk_id}, {src_device} -> {target_device}'
+                )
+                self.chunk_list[self.cached_target_chunk_id].payload.copy_(
+                    self.chunk_list[self.cached_src_chunk_id].payload)
+            self.cached_src_chunk_id = src_info.chunk_id
+            self.cached_target_chunk_id = target_info.chunk_id
 
     def write_cached_chunk(self):
         """
         将cache住的payload写到chunk里
         """
-        print(f'finally, write chunk {self.cached_chunk_id}')
-        self.chunk_list[self.cached_chunk_id].payload.copy_(self.payload)
-        self.cached_chunk_id = None
+        logger.info(f'finally, write chunk {self.cached_target_chunk_id}')
+        self.chunk_list[self.cached_target_chunk_id].payload.copy_(
+            self.chunk_list[self.cached_src_chunk_id].payload)
+        self.cached_src_chunk_id = None
+        self.cached_target_chunk_id = None
 
 
 class FP32ChunkReadBuffer(object):
@@ -73,8 +76,8 @@ class FP32ChunkReadBuffer(object):
         """
         self.chunk_list = chunk_list
         self.chunk_tensor_index = chunk_tensor_index
-        mgr = PatrickStarManager()
-        mgr.add(compute_device.type, chunk_size * 4)
+        # mgr = PatrickStarManager()
+        # mgr.add(compute_device.type, chunk_size * 4)
         self.payload = torch.zeros(chunk_size,
                                    dtype=torch.float,
                                    device=compute_device)
@@ -92,6 +95,9 @@ class FP32ChunkReadBuffer(object):
                 param.ps_attr.data_id())
             if info.start_offset == 0:
                 # TODO CPU->GPU拷贝需要优化
+                logger.info(
+                    f'read chunk to cache {self.cached_chunk_id} {self.chunk_list[info.chunk_id].payload.device} -> {self.payload.device}'
+                )
                 self.payload.copy_(self.chunk_list[info.chunk_id].payload)
                 self.cached_chunk_id = info.chunk_id
             else:

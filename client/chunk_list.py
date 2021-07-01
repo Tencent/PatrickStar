@@ -153,7 +153,7 @@ class ChunkList(object):
             return
 
         logger.debug(
-            f'the device {target_device} has no enough free space, extra size is {extra_need_bytes} bytes'
+            f'the device {target_device} has no enough free chunk memory, required size is {extra_need_bytes} bytes'
         )
         # 需要在target_device上腾出空间
         moved_list = self._chunk_to_move_out_for_room_making(

@@ -194,10 +194,7 @@ class Chunk(object):
             return
         if self.get_device() == target_device:
             return
-
-        logging.debug(
-            f'move chunk {self.chunk_id} numel {self.payload.numel()} from {self.get_device()} to {target_device}'
-        )
+        src_device = self.get_device()
         #TODO(jiaruifang)异步
         ps_manager = PatrickStarManager()
         ps_manager.delete(self.get_device().type, self.get_payload_space())
@@ -239,19 +236,25 @@ class Chunk(object):
 
         ps_manager = PatrickStarManager()
         ps_manager.add(target_device.type, self.get_payload_space())
-        self.touch()
 
         if self._time_profile:
-            if target_device.type == 'cpu':
+            if target_device.type == 'cuda':
+                global_timer.my_timer.accumulate('chunk_cpu_gpu_move',
+                                                 time.time() - start_time)
                 global_timer.cpu_gpu_move_elapse += time.time() - start_time
                 global_timer.cpu_gpu_move_times += 1
                 global_timer.cpu_gpu_move_data_amount += self.get_payload_space(
                 )
-            elif target_device.type == 'cuda':
+            elif target_device.type == 'cpu':
+                global_timer.my_timer.accumulate('chunk_gpu_cpu_move',
+                                                 time.time() - start_time)
                 global_timer.gpu_cpu_move_elapse += time.time() - start_time
                 global_timer.gpu_cpu_move_times += 1
                 global_timer.gpu_cpu_move_data_amount += self.get_payload_space(
                 )
+        logging.debug(
+            f'move chunk {self.chunk_id}, which has {self.payload.numel()/1e6} M {self.payload.dtype} elements, from {src_device} to {target_device}, elapse {time.time() - start_time}'
+        )
 
     def get_device(self):
         if self.payload is not None:

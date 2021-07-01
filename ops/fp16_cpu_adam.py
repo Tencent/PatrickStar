@@ -58,6 +58,7 @@ def FP16_f_adamv2(client,
     """
     if time_profile:
         adam_start_time = time.time()
+
     rank = torch.distributed.get_rank()
     world_size = torch.distributed.get_world_size()
 
@@ -71,7 +72,7 @@ def FP16_f_adamv2(client,
         # logging.info(f'fp16 cpu adam for param {i}')
         compute_device = prefer_device
         client.access_data(param, compute_device)
-        param_data = get_real_data_tensor(param)
+        param_fp32_tensor = get_real_data_tensor(param)
 
         fp16_param = fp16_param_with_grad_list[i]
         if time_profile:
@@ -84,9 +85,12 @@ def FP16_f_adamv2(client,
             # 将FP16 GPU Chunk拷贝到compute_device的FP32 Chunk上。
             # 如果是第一个tensor则拷贝Chunk，否则索引chunk
             param_grad = read_chunk_buff.access_from_cache(fp16_param).view(
-                param_data.shape)
+                param_fp32_tensor.shape)
 
         if time_profile:
+            global_timer.my_timer.accumulate(
+                'adam_fp16_grad_to_fp32_grad_copy',
+                time.time() - start_time)
             global_timer.gpu_cpu_move_elapse += time.time() - start_time
             global_timer.gpu_cpu_move_times += 1
             global_timer.gpu_cpu_move_data_amount += param_grad.numel()
@@ -119,7 +123,7 @@ def FP16_f_adamv2(client,
         weight_decay = weight_decay_list[i]
 
         if weight_decay != 0:
-            param_grad = param_grad.add(param_data, alpha=weight_decay)
+            param_grad = param_grad.add(param_fp32_tensor, alpha=weight_decay)
 
         exp_avg.mul_(beta1).add_(param_grad, alpha=1 - beta1)
         exp_avg_sq.mul_(beta2).addcmul_(param_grad,
@@ -139,7 +143,7 @@ def FP16_f_adamv2(client,
         lr = lr_list[i]
         step_size = lr / bias_correction1
 
-        param_data.addcdiv_(exp_avg, denom, value=-step_size)
+        param_fp32_tensor.addcdiv_(exp_avg, denom, value=-step_size)
 
         if time_profile:
             global_timer.cpu_adam_f_elapse += time.time(
@@ -155,12 +159,12 @@ def FP16_f_adamv2(client,
         if time_profile:
             start_time = time.time()
 
-        # Note param_data(在compute_device上) -> fp16_param对应的Chunk内存
-        write_chunk_buff.write_from_cache(fp16_param, param_data)
+        # Note fp16_param对应的Chunk内存 ->param对应的chunk内存
+        write_chunk_buff.write_from_cache(fp16_param, param)
 
         if time_profile:
             global_timer.cpu_gpu_move_elapse += time.time() - start_time
-            global_timer.cpu_gpu_move_data_amount += param_data.numel()
+            global_timer.cpu_gpu_move_data_amount += param_fp32_tensor.numel()
             global_timer.cpu_gpu_move_times += 1
 
         client.release_data(param)
@@ -175,7 +179,8 @@ def FP16_f_adamv2(client,
         mgr.tiktac(client)
 
     write_chunk_buff.write_cached_chunk()
-    global_timer.cpu_adam_elapse += time.time() - adam_start_time
+    if time_profile:
+        global_timer.cpu_adam_elapse += time.time() - adam_start_time
 
 
 class FP16Adam(torch.optim.Optimizer):
@@ -295,7 +300,9 @@ class FP16Adam(torch.optim.Optimizer):
                 else:
                     self.client.release_data(param, PSTensorStatus.HOLD)
         mgr = PatrickStarManager()
-        mgr._training_stage == TrainingStage.ADAM
+        mgr._training_stage = TrainingStage.ADAM
+        logger.info(f'Entering ADAM Stage')
+
         mgr.tiktac(self.client)
 
         loss = None
@@ -359,8 +366,7 @@ class FP16Adam(torch.optim.Optimizer):
             logging.info(
                 f"Allocate fp32 Chunk Buffer of size {max_chunk_size/1e6} MB.")
             self.write_chunk_buff = FP16ChunkWriteBuffer(
-                self.client.chunk_list, self.client.chunk_tensor_index,
-                max_chunk_size, self.prefer_device)
+                self.client.chunk_list, self.client.chunk_tensor_index)
 
         # self.client.chunk_tensor_index.visit_chunks(self.client.chunk_list)
         FP16_f_adamv2(self.client, fp32_param_list, fp16_param_with_grad_list,

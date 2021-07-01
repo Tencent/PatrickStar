@@ -155,6 +155,9 @@ def test_bert_model(is_ckp: bool = False,
         mgr = PatrickStarManager()
         mgr.start_train(is_warmup=True)
 
+    # logging.info(f"{total_macs/1e9/(elapse/(stop_step+1))} GFlops")
+    logging.info(f"model numel {model_numel/1e9} B")
+
     for n, batch in enumerate(data_loader):
         step_start_time = time.time()
         output = model(input_ids=batch[0], labels=batch[1])
@@ -187,19 +190,21 @@ def test_bert_model(is_ckp: bool = False,
             f"ckp {is_ckp} fp16 {is_fp16} ps {is_ps}  after step {n}",
             force=True)
 
-        setp_elapse = time.time() - step_start_time
+        step_elapse = time.time() - step_start_time
         logging.info(
-            f"ckp {is_ckp} fp16 {is_fp16} ps {is_ps}  elapse {setp_elapse}, sec/iter, {total_macs/1e9/setp_elapse} GFlops"
+            f"ckp {is_ckp} fp16 {is_fp16} ps {is_ps}: step elapse {step_elapse} sec/iter, {total_macs/1e9/step_elapse} GFlops"
         )
         if n == stop_step: break
 
+        if is_ps:
+            global_timer.time_profiler()
+            global_timer.reset_time_profiler()
+
+            global_timer.my_timer.print()
+            global_timer.my_timer.reset()
+
     elapse = time.time() - start_time
-    logging.info("*" * 20)
-    logging.info(
-        f"ckp {is_ckp} fp16 {is_fp16} ps {is_ps}  elapse {elapse/(stop_step+1)} sec/iter total elapse {elapse} sec"
-    )
-    logging.info(f"{total_macs/1e9/(elapse/(stop_step+1))} GFlops")
-    logging.info(f"model numel {model_numel/1e9} B")
+
     if is_ps:
         global_timer.time_profiler()
         mgr = PatrickStarManager()
@@ -233,7 +238,7 @@ if __name__ == "__main__":
 
     world_size = torch.distributed.get_world_size()
 
-    plan = "GPT3larger"
+    plan = "GPT3large"
     if res_check:
         plan = "GPTsmall"
     if plan == "GPTsmall":

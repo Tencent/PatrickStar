@@ -14,6 +14,32 @@
 # 统计chunk的lifecycle开关
 import logging
 
+
+class GlobalTimer(object):
+    def __init__(self):
+        """
+        存放时间统计，key命名规则 训练阶段_
+        """
+        self.elapse_stat = {}
+        self.elapse_stat['adam_fp16_grad_to_fp32_grad_copy'] = 0
+        self.elapse_stat['chunk_gpu_cpu_move'] = 0
+        self.elapse_stat['chunk_cpu_gpu_move'] = 0
+
+    def accumulate(self, key, value):
+        # assert key in self.elapse_stat
+        self.elapse_stat[key] += value
+
+    def reset(self):
+        for k, v in self.elapse_stat.items():
+            self.elapse_stat[k] = 0
+
+    def print(self):
+        for k, v in self.elapse_stat.items():
+            logging.info(f'{k}: {v}')
+
+
+my_timer = GlobalTimer()
+
 # param访问
 client_access_elapse = 0.
 client_prepare_device_elapse = 0.
@@ -26,7 +52,6 @@ memory_allocate_elapse = 0.
 # adam计算
 cpu_adam_elapse = 0.
 cpu_adam_f_elapse = 0.
-cpu_adam_elapse = 0.
 
 # param释放
 client_release_elapse = 0.
@@ -47,6 +72,58 @@ cpu_adam_access_elapse = 0
 
 # 临时观察
 temp_check_elapse = 0
+
+
+def reset_time_profiler():
+    global client_access_elapse
+    client_access_elapse = 0
+    global client_prepare_device_elapse
+    client_prepare_device_elapse = 0
+    global access_chunk_elapse
+    access_chunk_elapse = 0
+    global chunk_move_elapse
+    chunk_move_elapse = 0
+    global chunk_to_move_out_for_room_making_elapse
+    chunk_to_move_out_for_room_making_elapse = 0
+    global memory_allocate_elapse
+    memory_allocate_elapse = 0
+
+    global cpu_adam_elapse
+    cpu_adam_elapse = 0
+    global cpu_adam_f_elapse
+    cpu_adam_f_elapse = 0
+
+    global client_release_elapse
+    client_release_elapse = 0
+    global memory_delete_elapse
+    memory_delete_elapse = 0
+
+    # 数据移动
+    global cpu_gpu_move_elapse
+    cpu_gpu_move_elapse = 0
+    global cpu_gpu_move_times
+    cpu_gpu_move_times = 0
+    global cpu_gpu_move_data_amount
+    cpu_gpu_move_data_amount = 0
+
+    global gpu_cpu_move_elapse
+    gpu_cpu_move_elapse = 0
+    global gpu_cpu_move_times
+    gpu_cpu_move_times = 0
+    global gpu_cpu_move_data_amount
+    gpu_cpu_move_data_amount = 0
+
+    global get_status_elapse
+    get_status_elapse = 0
+    global cpu_adam_release_elapse
+    cpu_adam_release_elapse = 0
+    global cpu_adam_access_elapse
+    cpu_adam_access_elapse = 0
+
+    global temp_check_elapse
+    temp_check_elapse = 0
+    global manager_room_make_elapse
+    manager_room_make_elapse = 0
 
 
 def time_profiler():

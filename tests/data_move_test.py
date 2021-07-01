@@ -23,11 +23,6 @@ import time
 
 class TestAccess(unittest.TestCase):
     def setUp(self):
-        self.default_chunk_size = 20
-        self.client = PatrickStarClient(
-            rank=0, default_chunk_size=self.default_chunk_size)
-        self.manager = PatrickStarManager()
-        self.manager.init(32, 1024)
         self.compute_device = torch.device(
             'cuda') if torch.cuda.is_available() else torch.device('cpu')
         logging.info('SetUp finished')
@@ -62,6 +57,30 @@ class TestAccess(unittest.TestCase):
         BWD = size * 4 / t.elapsed / 1e9
         logging.info(
             f'Copy {src_device} to {target_device}, size {size * 4/1024} KB, bandwidth {BWD} GB/s'
+        )
+
+    def _copy_fp16_to_fp32_bandwidth_benchmark(self, size, src_device,
+                                               target_device):
+        src_buff = torch.ones(size, dtype=torch.half, device=src_device)
+        dest_buff = torch.zeros(size, dtype=torch.float, device=target_device)
+
+        with contexttimer.Timer() as t:
+            dest_buff.copy_(src_buff)
+        BWD = size * 4 / t.elapsed / 1e9
+        logging.info(
+            f'Copy FP16->FP32 {src_device} to {target_device}, size {size * 4/1024} KB, bandwidth {BWD} GB/s'
+        )
+
+    def _copy_fp32_to_fp16_bandwidth_benchmark(self, size, src_device,
+                                               target_device):
+        src_buff = torch.ones(size, dtype=torch.float, device=src_device)
+        dest_buff = torch.zeros(size, dtype=torch.half, device=target_device)
+
+        with contexttimer.Timer() as t:
+            dest_buff.copy_(src_buff)
+        BWD = size * 4 / t.elapsed / 1e9
+        logging.info(
+            f'Copy FP32->FP16 {src_device} to {target_device}, size {size * 4/1024} KB, bandwidth {BWD} GB/s'
         )
 
     def _inline_copy_bandwidth_benchmark(self, size, src_device,
@@ -156,16 +175,32 @@ class TestAccess(unittest.TestCase):
             #                                       torch.device('cuda'))
             # self._inline_copy_bandwidth_benchmark(size, torch.device('cuda'),
             #                                       torch.device('cpu'))
-
-            self._pinned_copy_bandwidth_benchmark(size, torch.device('cpu'),
-                                                  torch.device('cuda'))
-            self._pinned_copy_bandwidth_benchmark(size, torch.device('cuda'),
-                                                  torch.device('cpu'))
-
-            self._async_copy_inline_bandwidth_benchmark(
+            self._copy_fp16_to_fp32_bandwidth_benchmark(
                 size, torch.device('cpu'), torch.device('cuda'))
-            self._async_copy_inline_bandwidth_benchmark(
+            self._copy_fp16_to_fp32_bandwidth_benchmark(
                 size, torch.device('cuda'), torch.device('cpu'))
+            self._copy_fp16_to_fp32_bandwidth_benchmark(
+                size, torch.device('cuda'), torch.device('cuda'))
+            self._copy_fp16_to_fp32_bandwidth_benchmark(
+                size, torch.device('cpu'), torch.device('cpu'))
+
+            self._copy_fp32_to_fp16_bandwidth_benchmark(
+                size, torch.device('cpu'), torch.device('cuda'))
+            self._copy_fp32_to_fp16_bandwidth_benchmark(
+                size, torch.device('cuda'), torch.device('cpu'))
+            self._copy_fp32_to_fp16_bandwidth_benchmark(
+                size, torch.device('cuda'), torch.device('cuda'))
+            self._copy_fp32_to_fp16_bandwidth_benchmark(
+                size, torch.device('cpu'), torch.device('cpu'))
+            # self._pinned_copy_bandwidth_benchmark(size, torch.device('cpu'),
+            #                                       torch.device('cuda'))
+            # self._pinned_copy_bandwidth_benchmark(size, torch.device('cuda'),
+            #                                       torch.device('cpu'))
+
+            # self._async_copy_inline_bandwidth_benchmark(
+            #     size, torch.device('cpu'), torch.device('cuda'))
+            # self._async_copy_inline_bandwidth_benchmark(
+            #     size, torch.device('cuda'), torch.device('cpu'))
             logging.info(f'==========')
 
 
