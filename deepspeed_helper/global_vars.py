@@ -81,9 +81,9 @@ def set_global_variables(extra_args_provider=None,
                        defaults=args_defaults,
                        ignore_unknown_args=ignore_unknown_args)
     # _ = _build_tokenizer(args)
-    _set_tensorboard_writer(args)
-    _set_adlr_autoresume(args)
-    _set_timers()
+    # _set_tensorboard_writer(args)
+    # _set_adlr_autoresume(args)
+    # _set_timers()
 
 
 def _parse_args(extra_args_provider=None,

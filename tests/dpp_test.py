@@ -34,6 +34,7 @@ from tests.simple_net import SimpleModel, get_bert_data_loader
 from runtime import initialize_engine, Init
 from deepspeed_helper.global_vars import set_global_variables
 from deepspeed_helper.global_vars import get_args
+from manager import PatrickStarManager
 
 
 def test_simple_model(is_ps: bool = False,
@@ -60,6 +61,11 @@ def test_simple_model(is_ps: bool = False,
     torch.cuda.set_device(rank)
     device = torch.device(f'cuda:{rank}')
 
+    lr = 0.001
+    betas = (0.9, 0.999)
+    eps = 1e-6
+    weight_decay = 0
+
     if not is_ps:
         model = SimpleModel(hidden_dim, is_ckp=is_ckp)
         model.cuda(rank)
@@ -67,7 +73,11 @@ def test_simple_model(is_ps: bool = False,
         if is_fp16:
             model = FP16_Module(model)
         model.train()
-        optimizer = TorchAdam(model.parameters(), lr=0.001)
+        optimizer = TorchAdam(model.parameters(),
+                              lr=lr,
+                              betas=betas,
+                              eps=eps,
+                              weight_decay=weight_decay)
         if is_fp16:
             optimizer = FP16_Optimizer(optimizer)
         model = torch.nn.parallel.DistributedDataParallel(model,
@@ -77,25 +87,23 @@ def test_simple_model(is_ps: bool = False,
             client = PatrickStarClient(
                 rank=rank,
                 default_chunk_size=args.default_chunk_size,
-                warmup=False,
+                warmup=True,
                 is_fp16=True)
+
             with Init(dtype=torch.float, client=client):
                 model = SimpleModel(hidden_dim,
                                     is_ckp=is_ckp,
                                     use_cpu_embedding=args.use_cpu_embedding)
+
             model, optimizer, _, _ = initialize_engine(
                 args=None,
-                client=client,
                 model=model,
-                model_parameters=model.parameters())
-        else:
-            model = SimpleModel(hidden_dim, is_ckp=is_ckp)
-            client = PatrickStarClient(rank=rank,
-                                       default_chunk_size=20,
-                                       warmup=True,
-                                       is_fp16=is_fp16)
-            optimizer = CPUAdam(client, model.parameters(), lr=0.001)
-            client.init(model, optimizer)
+                client=client,
+                model_parameters=model.parameters(),
+                lr=lr,
+                betas=betas,
+                eps=eps,
+                weight_decay=weight_decay)
 
     see_memory_usage(f"PS {is_ps} after model init", force=True)
 
@@ -107,11 +115,12 @@ def test_simple_model(is_ps: bool = False,
 
     loss_res = []
 
+    if is_ps:
+        mgr = PatrickStarManager()
+        mgr.start_train(is_warmup=True)
+
     start_time = time.time()
     for n, batch in enumerate(data_loader):
-        # if is_ps:
-        #     client.pre_iter()
-
         loss = model(batch[0], batch[1])
 
         print(f"LOSS: {loss.item()} at {n}")
@@ -136,18 +145,14 @@ def test_simple_model(is_ps: bool = False,
 
         see_memory_usage(f"PS {is_ps} after step {n}", force=True)
 
-        # if is_ps:
-        #     client.post_iter()
-
+        if is_ps:
+            global_timer.my_timer.print()
+            global_timer.my_timer.reset()
         if n == stop_iter: break
 
     elapse = time.time() - start_time
     logging.info(f"is_ps {is_ps} elapse {elapse}")
     logging.info("======================" * 4)
-
-    if is_ps:
-        # client.chunk_list.visit()
-        global_timer.time_profiler()
 
     return loss_res
 
@@ -193,6 +198,8 @@ if __name__ == "__main__":
         print('ps loss', loss_list)
         print('ref loss', loss_list_ref)
 
+        import numpy as np
+        print('diff ', np.array(loss_list) - np.array(loss_list_ref))
         for loss, loss_ref in zip(loss_list, loss_list_ref):
             assert loss == loss_ref, f"{loss - loss_ref}"
 

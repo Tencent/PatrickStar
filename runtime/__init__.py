@@ -21,12 +21,10 @@ def initialize_engine(args=None,
                       client=None,
                       optimizer=None,
                       model_parameters=None,
-                      training_data=None,
-                      lr_scheduler=None,
-                      mpu=None,
-                      dist_init_required=None,
-                      collate_fn=None,
-                      config_params=None):
+                      lr=0.01,
+                      betas=(0.9, 0.999),
+                      eps=1e-8,
+                      weight_decay=0):
     """Initialize the PatrickStar Engine.
     Arguments:
         args: an object containing local_rank and deepspeed_config fields.
@@ -68,12 +66,10 @@ def initialize_engine(args=None,
                                client=client,
                                optimizer=optimizer,
                                model_parameters=model_parameters,
-                               training_data=training_data,
-                               lr_scheduler=lr_scheduler,
-                               mpu=mpu,
-                               dist_init_required=dist_init_required,
-                               collate_fn=collate_fn,
-                               config_params=config_params)
+                               lr=lr,
+                               betas=betas,
+                               eps=eps,
+                               weight_decay=weight_decay)
 
     return_items = [
         engine, engine.optimizer, engine.training_dataloader,

@@ -31,13 +31,10 @@ class PatrickStarEngine(Module):
                  client,
                  optimizer=None,
                  model_parameters=None,
-                 training_data=None,
-                 lr_scheduler=None,
-                 mpu=None,
-                 dist_init_required=None,
-                 collate_fn=None,
-                 config_params=None,
-                 dont_change_device=False):
+                 lr=0.01,
+                 betas=(0.9, 0.999),
+                 eps=1e-8,
+                 weight_decay=0):
         super(PatrickStarEngine, self).__init__()
         args = get_args()
         if not torch.distributed.is_initialized():
@@ -63,7 +60,10 @@ class PatrickStarEngine(Module):
             logger.info(f'ADAM on device {prefer_device}')
         self.optimizer = FP16Adam(self.client,
                                   self.module.parameters(),
-                                  lr=0.001,
+                                  lr=lr,
+                                  betas=betas,
+                                  eps=eps,
+                                  weight_decay=weight_decay,
                                   prefer_device=prefer_device)
         # prefer_device = torch.device(f'cuda:{self.rank}')
         # 这个hook并没啥意义，为何不能和postbwd hook一起？

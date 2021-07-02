@@ -92,6 +92,11 @@ def test_bert_model(is_ckp: bool = False,
                          num_attention_heads=num_head,
                          num_hidden_layers=num_layer)
 
+    lr = 0.001
+    betas = (0.9, 0.999)
+    eps = 1e-6
+    weight_decay = 0
+
     if not is_ps:
         model = BertForSequenceClassification(cfg)
 
@@ -99,7 +104,11 @@ def test_bert_model(is_ckp: bool = False,
         if is_fp16:
             model = FP16_Module(model)
         model.train()
-        optimizer = TorchAdam(model.parameters(), lr=0.001)
+        optimizer = TorchAdam(model.parameters(),
+                              lr=lr,
+                              betas=betas,
+                              eps=eps,
+                              weight_decay=weight_decay)
         if is_fp16:
             optimizer = FP16_Optimizer(optimizer)
 
@@ -122,14 +131,18 @@ def test_bert_model(is_ckp: bool = False,
                 args=None,
                 model=model,
                 client=client,
-                model_parameters=model.parameters())
+                model_parameters=model.parameters(),
+                lr=lr,
+                betas=betas,
+                eps=eps,
+                weight_decay=weight_decay)
         else:
             model = BertForSequenceClassification(cfg)
             client = PatrickStarClient(rank=rank,
                                        default_chunk_size=default_chunk_size,
                                        warmup=True,
                                        is_fp16=is_fp16)
-            optimizer = CPUAdam(client, model.parameters(), lr=0.001)
+            optimizer = CPUAdam(client, model.parameters(), lr=lr)
             client.init(model, optimizer)
 
     model_numel = get_ps_model_size(model)
@@ -234,7 +247,7 @@ if __name__ == "__main__":
 
     world_size = torch.distributed.get_world_size()
 
-    plan = "GPT3large"
+    plan = "GPT3_1B"
     if res_check:
         plan = "GPTsmall"
     if plan == "GPTsmall":

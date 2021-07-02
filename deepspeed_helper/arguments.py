@@ -44,21 +44,21 @@ def parse_args(extra_args_provider=None,
 
     # Standard arguments.
     parser = _add_patrick_star_args(parser)
-    parser = _add_network_size_args(parser)
-    parser = _add_regularization_args(parser)
-    parser = _add_training_args(parser)
-    parser = _add_initialization_args(parser)
-    parser = _add_learning_rate_args(parser)
-    parser = _add_checkpointing_args(parser)
-    parser = _add_mixed_precision_args(parser)
+    # parser = _add_network_size_args(parser)
+    # parser = _add_regularization_args(parser)
+    # parser = _add_training_args(parser)
+    # parser = _add_initialization_args(parser)
+    # parser = _add_learning_rate_args(parser)
+    # parser = _add_checkpointing_args(parser)
+    # parser = _add_mixed_precision_args(parser)
     parser = _add_distributed_args(parser)
-    parser = _add_validation_args(parser)
-    parser = _add_data_args(parser)
-    parser = _add_autoresume_args(parser)
-    parser = _add_realm_args(parser)
-    parser = _add_zero_args(parser)
-    parser = _add_memoryopt_args(parser)
-    parser = _add_activation_checkpoint_args(parser)
+    # parser = _add_validation_args(parser)
+    # parser = _add_data_args(parser)
+    # parser = _add_autoresume_args(parser)
+    # parser = _add_realm_args(parser)
+    # parser = _add_zero_args(parser)
+    # parser = _add_memoryopt_args(parser)
+    # parser = _add_activation_checkpoint_args(parser)
 
     # Custom arguments.
     if extra_args_provider is not None:
@@ -80,66 +80,6 @@ def parse_args(extra_args_provider=None,
     if args.rank == 0:
         print('using world size: {} and model-parallel size: {} '.format(
             args.world_size, args.model_parallel_size))
-
-    # Fp16 loss scaling.
-    args.dynamic_loss_scale = False
-    if args.loss_scale is None:
-        args.dynamic_loss_scale = True
-
-    # Parameters dtype.
-    args.params_dtype = torch.float
-    if args.fp16:
-        args.params_dtype = torch.half
-    if args.rank == 0:
-        print('using {} for parameters ...'.format(args.params_dtype),
-              flush=True)
-
-    # Set input defaults.
-    for key in defaults:
-        # For default to be valid, it should not be provided in the
-        # arguments that are passed to the program. We check this by
-        # ensuring the arg is set to None.
-        if getattr(args, key) is not None:
-            if args.rank == 0:
-                print('WARNING: overriding default arguments for {key}:{v} \
-                       with {key}:{v2}'.format(key=key,
-                                               v=defaults[key],
-                                               v2=getattr(args, key)),
-                      flush=True)
-        else:
-            setattr(args, key, defaults[key])
-
-    # Check required arguments.
-    required_args = []
-    for req_arg in required_args:
-        _check_arg_is_not_none(args, req_arg)
-
-    # Checks.
-    if False:
-        assert args.hidden_size % args.num_attention_heads == 0
-        if args.seq_length is not None:
-            assert args.max_position_embeddings >= args.seq_length
-        if args.lr is not None:
-            assert args.min_lr <= args.lr
-        if args.save is not None:
-            assert args.save_interval is not None
-        # Parameters sharing does not work with torch DDP.
-        if (args.num_unique_layers is not None) and (args.num_layers is
-                                                     not None):
-            assert args.num_unique_layers <= args.num_layers
-            assert args.num_layers % args.num_unique_layers == 0, \
-                'num-layers should be divisible by num-unique-layers.'
-            if args.num_unique_layers < args.num_layers:
-                assert args.DDP_impl == 'local', \
-                    'torch-DDP does not work with parameters sharing.'
-        # Mixed precision checks.
-        if args.fp16_lm_cross_entropy:
-            assert args.fp16, 'lm cross entropy in fp16 only support in fp16 mode.'
-        # Activation checkpointing.
-        if args.distribute_checkpointed_activations:
-            assert args.checkpoint_activations, \
-                'for distribute-checkpointed-activations to work you '\
-                'need to enable checkpoint-activations'
 
     _print_args(args)
     return args
@@ -210,6 +150,9 @@ def _add_patrick_star_args(parser):
                        dest='cpu_embedding_fp32',
                        action='store_true',
                        help='Embedding on CPU using FP32')
+    group.add_argument('--use_deepspeed_cpu_adam',
+                       action='store_true',
+                       help='Use deepspeed cpu adam')
     return parser
 
 
@@ -432,6 +375,7 @@ def _add_learning_rate_args(parser):
                        'number of iterations, and decay style from input '
                        'arguments and ignore values from checkpoints. Note'
                        'that all the above values will be reset.')
+
     group.add_argument(
         '--use-checkpoint-lr-scheduler',
         action='store_true',

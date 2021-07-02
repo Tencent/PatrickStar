@@ -78,22 +78,22 @@ def test_simple_model(is_ps: bool = False,
             optimizer = FP16_Optimizer(optimizer)
     else:
         if is_fp16:
+            client = PatrickStarClient(
+                rank=rank,
+                default_chunk_size=args.default_chunk_size,
+                warmup=True,
+                is_fp16=True)
+
             with Init(dtype=torch.float):
                 model = SimpleModel(hidden_dim,
                                     is_ckp=is_ckp,
                                     use_cpu_embedding=agrs.use_cpu_embedding)
 
-            class Config(object):
-                def __init__(self):
-                    self.default_chunk_size = 1024 * 1024
-
-            self = Config()
-            self.default_chunk_size = 20
             model, optimizer, _, _ = initialize_engine(
                 args=None,
                 model=model,
-                model_parameters=model.parameters(),
-                self=self)
+                client=client,
+                model_parameters=model.parameters())
         else:
             model = SimpleModel(hidden_dim, is_ckp=is_ckp)
             client = PatrickStarClient(rank=0,
@@ -115,10 +115,11 @@ def test_simple_model(is_ps: bool = False,
 
     start_time = time.time()
 
-    for n, batch in enumerate(data_loader):
-        # if is_ps:
-        #     client.pre_iter()
+    if is_ps:
+        mgr = PatrickStarManager()
+        mgr.start_train(is_warmup=True)
 
+    for n, batch in enumerate(data_loader):
         loss = model(batch[0], batch[1])
 
         # if torch.distributed.get_rank() == 0:
@@ -143,8 +144,9 @@ def test_simple_model(is_ps: bool = False,
 
         see_memory_usage(f"PS {is_ps} after step {n}", force=True)
 
-        # if is_ps:
-        #     client.post_iter()
+        if is_ps:
+            global_timer.my_timer.print()
+            global_timer.my_timer.reset()
 
         if n == stop_iter: break
 
