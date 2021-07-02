@@ -277,7 +277,7 @@ if __name__ == "__main__":
         hidden_dim = 1536
         batch_size = 8
         sequence_length = 128
-        num_layer = 36
+        num_layer = 30
         num_head = 16
     elif plan == 'GPT3larger':
         # 1.27B
