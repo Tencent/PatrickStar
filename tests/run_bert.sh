@@ -11,7 +11,7 @@ export PYTHONPATH=../:${PYTHONPATH}
 
 USE_DS_ADAM="--use_deepspeed_cpu_adam"
 
-python ../patrickstar/launcher/runner.py --num_nodes 1 \
+pstar --num_nodes 1 \
                              --num_gpus ${GPU_NUM} \
                              test_bert.py ${RES_CHECK_FLAG} \
                              --use_ckp \
