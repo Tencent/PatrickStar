@@ -13,10 +13,10 @@
 
 import torch
 import torch.nn as nn
-from deepspeed_helper.global_vars import get_args
-from utils import logger
-from client.parameter import is_torch_param, is_param_registed
-from client import AccessType
+from patrickstar.deepspeed_helper.global_vars import get_args
+from patrickstar.utils import logger
+from patrickstar.core.parameter import is_torch_param, is_param_registed
+from patrickstar.core import AccessType
 
 
 class BertEmbeddings(nn.Module):

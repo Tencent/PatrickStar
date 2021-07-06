@@ -18,13 +18,14 @@ from pathlib import Path
 from torch import Tensor
 from typing import List, Optional
 import logging
-from client.const import PSTensorStatus, AccessType, TrainingStage
-import utils.global_timer as global_timer
-from utils import print_rank, logger, use_dist_flag, get_sys_memory_used
-from client.parameter import register_param, is_torch_param
-from deepspeed_helper.global_vars import get_args
-from manager import PatrickStarManager
-from client import ChunkList, ChunkTensorIndex
+
+from patrickstar.core.const import PSTensorStatus, AccessType, TrainingStage
+import patrickstar.utils.global_timer as global_timer
+from patrickstar.utils import print_rank, logger, use_dist_flag, get_sys_memory_used
+from patrickstar.core.parameter import register_param, is_torch_param
+from patrickstar.deepspeed_helper.global_vars import get_args
+from patrickstar.manager import PatrickStarManager
+from patrickstar.core import ChunkList, ChunkTensorIndex
 from .chunk_io_buff import FP32ChunkReadBuffer, FP16ChunkWriteBuffer
 
 from deepspeed.ops.op_builder import CPUAdamBuilder

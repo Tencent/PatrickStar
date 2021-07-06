@@ -12,10 +12,10 @@
 # See the AUTHORS file for names of contributors.
 
 import torch
-from client import ChunkList, ChunkTensorIndex
-from client.parameter import is_torch_param
-from manager import PatrickStarManager
-from utils import logger
+from patrickstar.core import ChunkList, ChunkTensorIndex
+from patrickstar.core.parameter import is_torch_param
+from patrickstar.manager import PatrickStarManager
+from patrickstar.utils import logger
 
 
 class FP16ChunkWriteBuffer(object):

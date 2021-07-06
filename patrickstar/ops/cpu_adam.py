@@ -18,8 +18,8 @@ from pathlib import Path
 from torch import Tensor
 from typing import List, Optional
 import logging
-from client.const import PSTensorStatus, AccessType
-import utils.global_timer as global_timer
+from patrickstar.core.const import PSTensorStatus, AccessType
+import patrickstar.utils.global_timer as global_timer
 
 
 def F_adam(client, params: List[torch.nn.Parameter],

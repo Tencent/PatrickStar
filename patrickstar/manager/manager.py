@@ -12,12 +12,13 @@
 # See the AUTHORS file for names of contributors.
 
 import torch
-from torch.multiprocessing import Process, Manager
-from utils.memory_monitor import get_sys_memory_used
 import psutil
 import logging as logger
-from deepspeed_helper.global_vars import get_args
-from client.const import TrainingStage
+from torch.multiprocessing import Process, Manager
+
+from patrickstar.utils.memory_monitor import get_sys_memory_used
+from patrickstar.deepspeed_helper.global_vars import get_args
+from patrickstar.core.const import TrainingStage
 
 
 ######### Global Scheduler ###########

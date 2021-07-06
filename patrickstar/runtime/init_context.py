@@ -12,13 +12,14 @@
 # See the AUTHORS file for names of contributors.
 
 import os
-from utils import init_distributed, see_memory_usage
 import torch
 import functools
-from utils import logger, print_rank
-from client import PatrickStarClient, AccessType
-from client.parameter import PSParameter, register_param, is_param_registed, register_torch_param
-from deepspeed_helper.global_vars import get_args
+
+from patrickstar.utils import init_distributed, see_memory_usage
+from patrickstar.utils import logger, print_rank
+from patrickstar.core import PatrickStarClient, AccessType
+from patrickstar.core import PSParameter, register_param, is_param_registed, register_torch_param
+from patrickstar.deepspeed_helper.global_vars import get_args
 
 _orig_torch_empty = torch.empty
 

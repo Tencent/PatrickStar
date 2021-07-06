@@ -12,8 +12,8 @@
 # See the AUTHORS file for names of contributors.
 
 import torch
-from deepspeed_helper.global_vars import get_args
-from client.parameter import is_param_registed
+from patrickstar.deepspeed_helper.global_vars import get_args
+from patrickstar.core.parameter import is_param_registed
 
 
 def get_ps_model_size(model):

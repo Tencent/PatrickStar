@@ -10,16 +10,15 @@
 # implied. See the License for the specific language governing
 # permissions and limitations under the License.
 # See the AUTHORS file for names of contributors.
-
-from utils import logger, init_distributed
-from utils import print_rank as print_rank_0
-from torch.nn.modules import Module
-from client import PatrickStarClient, AccessType, PSChunkStatus, PSTensorStatus, TrainingStage
-from manager import PatrickStarManager
 import torch
-from ops import FP16Adam
-from deepspeed_helper.global_vars import get_args
-from utils import global_timer
+from torch.nn.modules import Module
+
+from patrickstar.utils import logger, init_distributed, global_timer
+from patrickstar.utils import print_rank as print_rank_0
+from patrickstar.core import PatrickStarClient, AccessType, PSChunkStatus, PSTensorStatus, TrainingStage
+from patrickstar.manager import PatrickStarManager
+from patrickstar.ops import FP16Adam
+from patrickstar.deepspeed_helper.global_vars import get_args
 
 
 class PatrickStarEngine(Module):

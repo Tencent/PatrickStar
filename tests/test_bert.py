@@ -18,28 +18,20 @@ import enum
 import time
 import sys
 import copy
-from checkpoint import checkpoint
 import logging
-from utils import see_memory_usage
-from fp16 import FP16_Module, FP16_Optimizer
 import time
 import argparse
 
-from client import PatrickStarClient, PSTensorStatus, AccessType
-from client import setup_hybrid_ps_hooks
-from ops import CPUAdam, TorchAdam, FP16Adam
-import utils.global_timer as global_timer
-from runtime import Init, initialize_engine
-from deepspeed_helper.global_vars import set_global_variables
-from deepspeed_helper.global_vars import get_args
-from manager import PatrickStarManager
-from utils.model_size_calculator import get_ps_model_size, estimate_bert_MAC
-
-
-def check_grads_status(model, status):
-    for name, param in model.named_parameters(recurse=True):
-        param_status = param.ps_attr.get_status(AccessType.GRAD)
-        assert param_status == status, f"{name} {param.ps_attr.ps_shape} {param_status} vs {status}"
+from patrickstar.utils import see_memory_usage
+from patrickstar.fp16 import FP16_Module, FP16_Optimizer
+from patrickstar.core import PatrickStarClient
+from patrickstar.ops import CPUAdam, TorchAdam, FP16Adam
+import patrickstar.utils.global_timer as global_timer
+from patrickstar.runtime import Init, initialize_engine
+from patrickstar.deepspeed_helper.global_vars import set_global_variables
+from patrickstar.deepspeed_helper.global_vars import get_args
+from patrickstar.manager import PatrickStarManager
+from patrickstar.utils.model_size_calculator import get_ps_model_size, estimate_bert_MAC
 
 
 def show_params(model, is_ps, step):
@@ -247,13 +239,13 @@ if __name__ == "__main__":
 
     world_size = torch.distributed.get_world_size()
 
-    plan = "GPT3_1B"
+    plan = "GPT3mid"
     if res_check:
         plan = "GPTsmall"
     if plan == "GPTsmall":
         # 0.11B
         hidden_dim = 768
-        batch_size = 8
+        batch_size = 128
         sequence_length = 128
         num_layer = 12
         num_head = 12
@@ -261,21 +253,21 @@ if __name__ == "__main__":
         # 0.35B
         # PatrickStar and Torch都可以
         hidden_dim = 1024
-        batch_size = 8
+        batch_size = 128
         sequence_length = 128
         num_layer = 24
         num_head = 16
     elif plan == 'GPT3large':
         # 0.7B
         hidden_dim = 1536
-        batch_size = 8
+        batch_size = 64
         sequence_length = 128
         num_layer = 24
         num_head = 16
     elif plan == 'GPT3_1B':
-        # 0.1B
+        # 0.9B
         hidden_dim = 1536
-        batch_size = 8
+        batch_size = 64
         sequence_length = 128
         num_layer = 30
         num_head = 16
@@ -307,12 +299,12 @@ if __name__ == "__main__":
         sequence_length = 512
         num_layer = 32
         num_head = 32
-    elif plan == 'GPT3_13B':
+    elif plan == 'GPT3_10B':
         # 13B model
         hidden_dim = 5140
         batch_size = 8
         sequence_length = 512
-        num_layer = 40
+        num_layer = 32
         num_head = 40
 
     assert hidden_dim % num_head == 0
