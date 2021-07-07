@@ -37,7 +37,7 @@ setup(
     author='Jiarui Fang',
     author_email='fangjiarui123@gmail.com',
     url='https://fangjiarui.github.io/',
-    # install_requires=install_requires,
+    install_requires=install_requires,
     # extras_require=extras_require,
     packages=['patrickstar'],
     include_package_data=True,
