@@ -5,13 +5,15 @@ GPU_NUM=1
 # FAKE_DIST="--use_fake_dist"
 # let MAX_CPU_MEMORY=12*1024*1024*1024
 # let MAX_GPU_MEMORY=4*1024*1024*1024
+
+# HYBRID_ADAM_FLAG="--use_hybrid_adam"
 let CHUNK_SIZE=32*1024*1024
 
 export PYTHONPATH=../:${PYTHONPATH}
 
 USE_DS_ADAM="--use_deepspeed_cpu_adam"
 
-pstar --num_nodes 1 \
+python ../patrickstar/launcher/runner.py --num_nodes 1 \
                              --num_gpus ${GPU_NUM} \
                              test_bert.py ${RES_CHECK_FLAG} \
                              --use_ckp \
@@ -22,5 +24,6 @@ pstar --num_nodes 1 \
                              --use_cpu_embedding \
                              --cpu_embedding_fp32 \
                              --use_deepspeed_cpu_adam \
+                             ${HYBRID_ADAM_FLAG} \
                              --default_chunk_size=${CHUNK_SIZE} \
                              2>&1 | tee log

@@ -101,6 +101,15 @@ class PatrickStarClient(object):
             self.chunk_schema_scheduler.schedule(model, optimizer)
         logging.info(f"static_chunk_schedule finished")
 
+    def get_param_fp16_chunks_mem_size(self):
+        """
+        获得param fp16使用Chunk所占的内存大小 (in Bytes)
+        """
+        world_size = torch.distributed.get_world_size()
+        # 本进程自己管理的Chunk，和Group Chunk Buff会分配的Chunk
+        return self.chunk_tensor_index.param_fp16_chunk_num * self.default_chunk_size * 2 / world_size + (
+            world_size - 1) * self.default_chunk_size * 2
+
     def set_all_tensors_status_in_chunk(self, chunk_id, new_status):
         """
         把一个chunk所有的tensor状态设置为status，chunk的状态也随之改变

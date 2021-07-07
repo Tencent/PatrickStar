@@ -17,7 +17,7 @@ python runner.py --num_nodes 1 --num_gpus 2 test.py
 
 from client import Chunk
 from manager import PatrickStarManager
-from utils import init_distributed
+from patrickstar.utils import init_distributed
 import torch
 import torch.distributed as dist
 

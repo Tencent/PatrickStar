@@ -153,6 +153,12 @@ def _add_patrick_star_args(parser):
     group.add_argument('--use_deepspeed_cpu_adam',
                        action='store_true',
                        help='Use deepspeed cpu adam')
+    group.add_argument(
+        '--use_hybrid_adam',
+        action='store_true',
+        help=
+        'Use hybrid adam optimization. By default ADAM is on CPU and run ADAM on GPU if possible.'
+    )
     return parser
 
 

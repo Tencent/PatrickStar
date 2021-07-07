@@ -130,10 +130,11 @@ def test_bert_model(is_ckp: bool = False,
                 weight_decay=weight_decay)
         else:
             model = BertForSequenceClassification(cfg)
-            client = PatrickStarClient(rank=rank,
-                                       default_chunk_size=default_chunk_size,
-                                       warmup=True,
-                                       is_fp16=is_fp16)
+            client = PatrickStarClient(
+                rank=rank,
+                default_chunk_size=args.default_chunk_size,
+                warmup=True,
+                is_fp16=is_fp16)
             optimizer = CPUAdam(client, model.parameters(), lr=lr)
             client.init(model, optimizer)
 
@@ -158,7 +159,10 @@ def test_bert_model(is_ckp: bool = False,
     # 开启预热优化
     if is_ps:
         mgr = PatrickStarManager()
-        mgr.start_train(is_warmup=True)
+        mgr.start_train(
+            is_warmup=True,
+            param_fp16_chunk_size=client.get_param_fp16_chunks_mem_size(),
+            chunk_size=args.default_chunk_size)
 
     # logging.info(f"{total_macs/1e9/(elapse/(stop_step+1))} GFlops")
     logging.info(f"model numel {model_numel/1e9} B")
@@ -239,7 +243,7 @@ if __name__ == "__main__":
 
     world_size = torch.distributed.get_world_size()
 
-    plan = "GPT3mid"
+    plan = "GPT3large"
     if res_check:
         plan = "GPTsmall"
     if plan == "GPTsmall":

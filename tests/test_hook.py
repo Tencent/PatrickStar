@@ -23,7 +23,7 @@ import sys
 from checkpoint import checkpoint
 import logging
 import torch
-from utils import see_memory_usage
+from patrickstar.utils import see_memory_usage
 from fp16 import FP16_Module
 from fp16 import FP16_Optimizer
 import time
@@ -31,7 +31,7 @@ import argparse
 
 from client import PatrickStarClient
 from manager import PatrickStarManager
-from utils import setup_hybrid_ps_hooks
+from patrickstar.utils import setup_hybrid_ps_hooks
 from ops import CPUAdam, TorchAdam
 
 logging.basicConfig(

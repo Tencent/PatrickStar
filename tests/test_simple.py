@@ -23,8 +23,8 @@ import time
 from ops import CPUAdam, TorchAdam, FP16Adam
 from client import PatrickStarClient, setup_hybrid_ps_hooks, PSTensorStatus
 from manager import PatrickStarManager
-from utils import see_memory_usage
-import utils.global_timer as global_timer
+from patrickstar.utils import see_memory_usage
+import patrickstar.utils.global_timer as global_timer
 
 from fp16 import configure_fp16_optimizer
 from fp16 import FP16_Module
@@ -87,7 +87,7 @@ def test_simple_model(is_ps: bool = False,
             with Init(dtype=torch.float):
                 model = SimpleModel(hidden_dim,
                                     is_ckp=is_ckp,
-                                    use_cpu_embedding=agrs.use_cpu_embedding)
+                                    use_cpu_embedding=args.use_cpu_embedding)
 
             model, optimizer, _, _ = initialize_engine(
                 args=None,

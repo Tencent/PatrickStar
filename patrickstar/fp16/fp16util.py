@@ -36,7 +36,7 @@ import amp_C
 
 # from megatron import mpu
 import logging
-import utils.global_timer as global_timer
+import patrickstar.utils.global_timer as global_timer
 
 
 class tofp16(nn.Module):

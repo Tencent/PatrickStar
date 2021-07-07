@@ -109,11 +109,16 @@ class PatrickStarManager(metaclass=SingletonMeta):
         self.warmup = False
         self._start_training = False
         self._training_stage = TrainingStage.UNSTART
+        # 总gpu可用内存 减去 峰值系统内存占用 减去 paramfp16峰值
+        self._margin_chunk_num_for_gpu_adam = 0
+        self._default_chunk_size = 0
 
-    def start_train(self, is_warmup):
+    def start_train(self, is_warmup, param_fp16_chunk_size, chunk_size):
         self.warmup = is_warmup
         self._start_training = True
         self._training_stage = TrainingStage.FWD
+        self._param_fp16_chunk_size = param_fp16_chunk_size
+        self._default_chunk_size = chunk_size
         logger.info(f'Start to train. Manager sets warmup {is_warmup}')
 
     def reset_metronome(self):
@@ -121,8 +126,23 @@ class PatrickStarManager(metaclass=SingletonMeta):
             self.warmup = False
             logger.info(
                 f'***************** WARMUP PHASE OVER *****************')
+            self._margin_chunk_num_for_gpu_adam = (
+                self._overall_gpu_mem -
+                self._param_fp16_chunk_size) / (self._default_chunk_size * 12)
+            logger.info(
+                f'Max GPU System Mem (non-chunk) Used During Warmup {max(self.gpu_sys_used_list)/1e6} MB'
+            )
+            logger.info(
+                f'Param FP16 Chunk Size {self._param_fp16_chunk_size/1e6} MB')
+            logger.info(
+                f'Margin Mem Size {(self._overall_gpu_mem - self._param_fp16_chunk_size)/1e6} MB, available chunk num for Optimizer States {self._margin_chunk_num_for_gpu_adam}'
+            )
+
         self.metronome.reset()
         logger.info('Manager Resets Metronome')
+
+    def get_margin_chunk_num_for_gpu_adam(self):
+        return self._margin_chunk_num_for_gpu_adam
 
     def tiktac(self, client):
         """

@@ -125,14 +125,16 @@ class FP16Adam(torch.optim.Optimizer):
                       prefer_device,
                       read_chunk_buff,
                       write_chunk_buff,
-                      time_profile=True):
+                      time_profile=True,
+                      margin_chunk_num_for_gpu_adam=0):
         r"""Functional API that performs Adam algorithm computation.
         按照在chunk内的存储顺序连续访问fp16_param_with_grad_list的参数，获取fp16 grad，
         以chunk为单位拷贝到一个tmp buff之中
         """
         rank = torch.distributed.get_rank()
         world_size = torch.distributed.get_world_size()
-
+        logger.info(
+            f'margin_chunk_num_for_gpu_adam {margin_chunk_num_for_gpu_adam}')
         for i, param in enumerate(fp32_params):
             ##########################
             ####### 准备ADAM数据 ######
@@ -141,7 +143,12 @@ class FP16Adam(torch.optim.Optimizer):
                 global_timer.my_timer.start_profile('ADAM_prepare_data')
 
             # logging.info(f'fp16 cpu adam for param {i}')
-            compute_device = prefer_device
+            if read_chunk_buff.get_cached_chunk_num(
+            ) < margin_chunk_num_for_gpu_adam:
+                compute_device = torch.device(f'cuda:{rank}')
+            else:
+                compute_device = prefer_device
+
             client.access_data(param, compute_device)
             fp32_data_tensor = get_real_data_tensor(param)
 
@@ -157,7 +164,7 @@ class FP16Adam(torch.optim.Optimizer):
                 # 将FP16 GPU Chunk拷贝到compute_device的FP32 Chunk上。
                 # 如果是第一个tensor则拷贝Chunk，否则索引chunk
                 fp32_grad_tensor = read_chunk_buff.access_from_cache(
-                    fp16_param).view(fp32_data_tensor.shape)
+                    fp16_param, compute_device).view(fp32_data_tensor.shape)
 
             if time_profile:
                 global_timer.my_timer.finish_profile(
@@ -194,7 +201,7 @@ class FP16Adam(torch.optim.Optimizer):
             lr = lr_list[i]
 
             # TODO(jiaruifang) use_ds_adam时，在生成的数据上正确性没有验证
-            if self.use_ds_adam:
+            if self.use_ds_adam and compute_device.type == 'cpu' and fp32_grad_tensor.device.type == 'cpu':
                 assert fp32_data_tensor.device.type == 'cpu'
                 assert fp32_grad_tensor.device.type == 'cpu'
                 assert exp_avg.device.type == 'cpu'
@@ -262,6 +269,7 @@ class FP16Adam(torch.optim.Optimizer):
             mgr.tiktac(client)
 
         write_chunk_buff.write_cached_chunk()
+        read_chunk_buff.reset()
 
     @torch.no_grad()
     def step(self, closure=None):
@@ -371,24 +379,28 @@ class FP16Adam(torch.optim.Optimizer):
                 else:
                     raise RuntimeError(f"tensor id {p.ps_attr.grad_id()}")
 
-        if self.read_chunk_buff is None:
-            max_chunk_size = self.client.chunk_list.max_chunk_size()
-            self.read_chunk_buff = FP32ChunkReadBuffer(
-                self.client.chunk_list, self.client.chunk_tensor_index,
-                max_chunk_size, self.prefer_device)
-            logging.info(
-                f"Allocate fp32 Chunk Buffer of size {max_chunk_size/1e6} MB on {self.prefer_device}."
+        # TODO 每次ADAM前都初始化一下Read和WriteBuff
+        if args.use_hybrid_adam:
+            margin_chunk_num_for_gpu_adam = mgr.get_margin_chunk_num_for_gpu_adam(
             )
-            self.write_chunk_buff = FP16ChunkWriteBuffer(
-                self.client.chunk_list, self.client.chunk_tensor_index)
+        else:
+            margin_chunk_num_for_gpu_adam = 0
 
-        # self.client.chunk_tensor_index.visit_chunks(self.client.chunk_list)
+        max_chunk_size = self.client.chunk_list.max_chunk_size()
+        self.read_chunk_buff = FP32ChunkReadBuffer(
+            self.client.chunk_list, self.client.chunk_tensor_index,
+            max_chunk_size, margin_chunk_num_for_gpu_adam > 0)
+        self.write_chunk_buff = FP16ChunkWriteBuffer(
+            self.client.chunk_list, self.client.chunk_tensor_index)
+
+        # 混合ADMA，根据预热获得的信息，放一部分Chunk在GPU上。
         self.FP16_f_adamv2(self.client, fp32_param_list,
                            fp16_param_with_grad_list, exp_avgs, exp_avg_sqs,
                            max_exp_avg_sqs, state_steps, False, beta1_list,
                            beta2_list, lr_list, weight_decay_list, eps_list,
                            self.prefer_device, self.read_chunk_buff,
-                           self.write_chunk_buff)
+                           self.write_chunk_buff, True,
+                           margin_chunk_num_for_gpu_adam)
 
         global_timer.my_timer.finish_profile('ADAM')
         mgr = PatrickStarManager()

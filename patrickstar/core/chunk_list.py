@@ -156,7 +156,7 @@ class ChunkList(object):
         args = get_args()
         new_device = torch.device(
             'cpu') if target_device.type == 'cuda' else torch.device(
-                f'cuda:{agrs.local_rank}')
+                f'cuda:{args.local_rank}')
 
         # 把他们移动到新设备上
         for idx in moved_list:

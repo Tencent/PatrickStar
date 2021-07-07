@@ -17,7 +17,7 @@ import logging
 import torch
 from manager import PatrickStarManager
 from client import PSChunkStatus
-import utils.global_timer as global_timer
+import patrickstar.utils.global_timer as global_timer
 
 
 class TestChunkList(unittest.TestCase):

@@ -11,7 +11,7 @@
 # permissions and limitations under the License.
 # See the AUTHORS file for names of contributors.
 
-from utils import log_dist, logger
+from patrickstar.utils import log_dist, logger
 from .engine import PatrickStarEngine
 from .init_context import Init
 

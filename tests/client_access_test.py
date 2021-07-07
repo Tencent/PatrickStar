@@ -16,7 +16,7 @@ from client import PatrickStarClient, ChunkList, PSTensorStatus, AccessType, Chu
 import logging
 import torch
 from manager import PatrickStarManager
-from utils import see_memory_usage
+from patrickstar.utils import see_memory_usage
 from client import register_param
 
 

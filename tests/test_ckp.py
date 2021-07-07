@@ -15,7 +15,7 @@ from checkpoint import checkpoint
 import logging
 import torch
 from tests.simple_net import SimpleCKPModel, SimpleModel, get_data_loader
-from utils import see_memory_usage
+from patrickstar.utils import see_memory_usage
 from fp16 import FP16_Module
 from fp16 import FP16_Optimizer
 import time

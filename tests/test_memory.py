@@ -19,7 +19,7 @@ import logging
 
 from manager import PatrickStarManager
 from client import PatrickStarClient, AccessType
-from utils import see_memory_usage
+from patrickstar.utils import see_memory_usage
 
 manager = PatrickStarManager()
 

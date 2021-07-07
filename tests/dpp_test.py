@@ -23,8 +23,8 @@ import torch.distributed as dist
 
 from ops import CPUAdam, TorchAdam, FP16Adam
 from client import PatrickStarClient, setup_hybrid_ps_hooks, PSTensorStatus
-from utils import see_memory_usage
-import utils.global_timer as global_timer
+from patrickstar.utils import see_memory_usage
+import patrickstar.utils.global_timer as global_timer
 
 from fp16 import configure_fp16_optimizer
 from fp16 import FP16_Module

@@ -43,6 +43,7 @@ class TensorInfo(object):
         self.tensor_name = f"{param_name}.data" if (
             access_type == AccessType.DATA) else f"{param_name}.grad"
         self.access_type = access_type
+        self.param_fp16_chunk_num = 0
 
     def status(self):
         """
@@ -67,9 +68,6 @@ class ChunkTensorIndex(object):
         self.dict_chunk_id_tensor_id: dict[int, List[int]] = {}
         self.dict_chunk_id_chunk_info: dict[int, tuple] = {}
 
-        world_size = 1
-        if torch.distributed.is_initialized():
-            world_size = torch.distributed.get_world_size()
         # global_chunk_id 对应的chunk_id_list
         self.global_chunk_id_chunk_id_list = {}
         self.dict_chunk_id_global_id = {}
@@ -81,6 +79,9 @@ class ChunkTensorIndex(object):
             self.global_chunk_id_chunk_id_list[global_chunk_id] = list()
         self.global_chunk_id_chunk_id_list[global_chunk_id].append(chunk_id)
         self.dict_chunk_id_global_id[chunk_id] = global_chunk_id
+
+    def get_cur_chunk_num(self):
+        return len(self.dict_chunk_id_chunk_info)
 
     def find_gap(self, numel, data_type):
         """

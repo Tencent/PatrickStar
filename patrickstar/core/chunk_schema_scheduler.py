@@ -19,7 +19,7 @@ from .parameter import PSParameter, register_param, is_param_registed, is_torch_
 import torch
 import logging
 import sys
-from utils import logger
+from patrickstar.utils import logger
 from typing import List
 
 
@@ -237,20 +237,11 @@ class ChunkShemaScheduler(object):
         """
         为module和optimizer的参数指定chunk schema
         schedule过程为所有parameter注册成ps_tensor
+        顺便统计param fp16有几个chunk
         """
-        # 在初始化过程中已经注册param，则跳过
-        # for group in optimizer.param_groups:
-        #     for param in group['params']:
-        #         if is_param_registed(param):
-        #             continue
-
-        #         numel = param.ps_attr.ps_numel
-        #         data_type = torch.half
-
-        #         self.add_tensor(param.ps_attr.data_id(), numel, param,
-        #                         AccessType.DATA, data_type)
-
         self.start_new_chunk_list(True)
+        self.chunk_tensor_index.param_fp16_chunk_num = self.chunk_tensor_index.get_cur_chunk_num(
+        )
 
         # 注册param data fp32，只有属于local chunk的param才初始化内存
         for group in optimizer.param_groups:
