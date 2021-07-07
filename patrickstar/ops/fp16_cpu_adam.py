@@ -131,10 +131,15 @@ class FP16Adam(torch.optim.Optimizer):
         按照在chunk内的存储顺序连续访问fp16_param_with_grad_list的参数，获取fp16 grad，
         以chunk为单位拷贝到一个tmp buff之中
         """
-        rank = torch.distributed.get_rank()
+        args = get_args()
+        if args.use_fake_dist:
+            rank = 0
+        else:
+            rank = args.local_rank
         world_size = torch.distributed.get_world_size()
         logger.info(
-            f'margin_chunk_num_for_gpu_adam {margin_chunk_num_for_gpu_adam}')
+            f'rank {rank} margin_chunk_num_for_gpu_adam {margin_chunk_num_for_gpu_adam} {len(fp32_params)}'
+        )
         for i, param in enumerate(fp32_params):
             ##########################
             ####### 准备ADAM数据 ######
@@ -142,12 +147,12 @@ class FP16Adam(torch.optim.Optimizer):
             if time_profile:
                 global_timer.my_timer.start_profile('ADAM_prepare_data')
 
-            # logging.info(f'fp16 cpu adam for param {i}')
             if read_chunk_buff.get_cached_chunk_num(
             ) < margin_chunk_num_for_gpu_adam:
                 compute_device = torch.device(f'cuda:{rank}')
             else:
                 compute_device = prefer_device
+            # logger.info(f'rank {args.local_rank} fp16 adam for param {i} on {compute_device}')
 
             client.access_data(param, compute_device)
             fp32_data_tensor = get_real_data_tensor(param)

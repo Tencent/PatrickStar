@@ -47,9 +47,9 @@ class FP16ChunkWriteBuffer(object):
                     self.cached_target_chunk_id].payload.device
                 src_device = self.chunk_list[
                     self.cached_src_chunk_id].payload.device
-                logger.info(
-                    f'write src chunk {self.cached_src_chunk_id} to chunk {self.cached_target_chunk_id}, {src_device} -> {target_device}'
-                )
+                # logger.info(
+                #     f'write src chunk {self.cached_src_chunk_id} to chunk {self.cached_target_chunk_id}, {src_device} -> {target_device}'
+                # )
                 self.chunk_list[self.cached_target_chunk_id].payload.copy_(
                     self.chunk_list[self.cached_src_chunk_id].payload)
             self.cached_src_chunk_id = src_info.chunk_id
@@ -59,9 +59,15 @@ class FP16ChunkWriteBuffer(object):
         """
         将cache住的payload写到chunk里
         """
-        logger.info(f'finally, write chunk {self.cached_target_chunk_id}')
-        self.chunk_list[self.cached_target_chunk_id].payload.copy_(
-            self.chunk_list[self.cached_src_chunk_id].payload)
+        args = get_args()
+        logger.info(
+            f'rank {args.local_rank} finally, write chunk {self.cached_target_chunk_id}'
+        )
+        # Note 有可能这一个进程只有一个Chunk，且该Chunk只有一个Embedding Layer，而它是Torch管理的
+        # 导致这个Chunk没有分配payload
+        if self.chunk_list[self.cached_src_chunk_id] is not None:
+            self.chunk_list[self.cached_target_chunk_id].payload.copy_(
+                self.chunk_list[self.cached_src_chunk_id].payload)
         self.cached_src_chunk_id = None
         self.cached_target_chunk_id = None
 
@@ -77,6 +83,7 @@ class FP32ChunkReadBuffer(object):
         """
         在compute_device分配一个FP32 Chunk作为缓存
         """
+        args = get_args()
         self.chunk_list = chunk_list
         self.chunk_tensor_index = chunk_tensor_index
         # mgr = PatrickStarManager()
@@ -88,7 +95,10 @@ class FP32ChunkReadBuffer(object):
         logger.info(
             f"Allocate fp32 Chunk Buffer of size {chunk_size/1e6} MB on CPU.")
         if has_gpu_payload:
-            gpu_device = torch.device(f'cuda:{get_args().local_rank}')
+            if args.use_fake_dist:
+                gpu_device = torch.device(f'cuda:0')
+            else:
+                gpu_device = torch.device(f'cuda:{args.local_rank}')
             self.gpu_payload = torch.empty(chunk_size,
                                            dtype=torch.float,
                                            device=gpu_device)
