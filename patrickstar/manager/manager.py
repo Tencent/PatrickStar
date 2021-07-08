@@ -165,10 +165,9 @@ class PatrickStarManager(metaclass=SingletonMeta):
             rank = 0
         gpu_device = torch.device(f'cuda:{rank}')
         cpu_device = torch.device('cpu:0')
+        gpu_used = get_sys_memory_used(gpu_device)
 
         if self.warmup:
-            gpu_used = get_sys_memory_used(gpu_device)
-
             self.gpu_used_list.append(gpu_used)
             # 精确地统计chunk used memory
             self.gpu_chunk_used_list.append(self.gpu_chunk_used_mem)
@@ -179,7 +178,8 @@ class PatrickStarManager(metaclass=SingletonMeta):
             self.cpu_chunk_used_list.append(self.cpu_chunk_used_mem)
             self.cpu_sys_used_list.append((cpu_used - self.cpu_chunk_used_mem))
 
-            # 确保非warmup迭代，cur_mom和此时更新的下标一直
+            # 非warmup迭代时按照cur_mom下标更新，warmup迭代更新在list末尾。
+            # 确保list最后一个元素和cur_mom和此时更新的下标一致
             cur_mom = self.metronome.moment()
             assert len(self.gpu_sys_used_list) - 1 == cur_mom
         else:
@@ -196,8 +196,8 @@ class PatrickStarManager(metaclass=SingletonMeta):
                 offload_size = gpu_cur_mom_used_chunk_mem - gpu_next_mom_ava_chunk_mem
                 # Note 触发GPU-CPU内存移动
                 client.chunk_list.make_room(offload_size, gpu_device)
-            # 每个节拍都更新gpu sys used
-            gpu_used = get_sys_memory_used(gpu_device)
+
+            # 每个节拍都校准gpu sys used
             self.gpu_sys_used_list[
                 cur_mom] = gpu_used - self.gpu_chunk_used_mem
 
@@ -259,8 +259,8 @@ class PatrickStarManager(metaclass=SingletonMeta):
         elif device_type == "cuda":
             if self.warmup or not self._start_training:
                 if self._training_stage == TrainingStage.ADAM:
-                    # ADAM时没有activation所以显存可以全部给Chunk
-                    return self._overall_gpu_mem
+                    # ADAM时没有activation所以显存可以全部给Chunk，需要两个default chunk size做buffer
+                    return self._overall_gpu_mem - 2 * self._default_chunk_size * 8
                 else:
                     # TODO(jiaruifang)瞎拍一个数，预热阶段三分之一GPU显存用来存储chunk
                     return self._overall_gpu_mem / 3
