@@ -50,3 +50,10 @@ class TrainingStage(Enum):
     FWD = 1
     BWD = 2
     ADAM = 3
+
+
+class ChunkListType(Enum):
+    PARAM_FP16 = 0
+    PARAM_FP32 = 1
+    MOMENTUM = 2
+    VARIANCE = 3

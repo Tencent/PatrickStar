@@ -113,6 +113,8 @@ class PatrickStarManager(metaclass=SingletonMeta):
         self._margin_chunk_num_for_gpu_adam = 0
         self._default_chunk_size = 0
 
+        self._margine_use_ratio = 0.6
+
     def start_train(self, is_warmup, param_fp16_chunk_size, chunk_size):
         self.warmup = is_warmup
         self._start_training = True
@@ -127,8 +129,8 @@ class PatrickStarManager(metaclass=SingletonMeta):
             logger.info(
                 f'***************** WARMUP PHASE OVER *****************')
             self._margin_chunk_num_for_gpu_adam = (
-                self._overall_gpu_mem -
-                self._param_fp16_chunk_size) / (self._default_chunk_size * 12)
+                self._overall_gpu_mem - self._param_fp16_chunk_size) / (
+                    self._default_chunk_size * 12) * self._margine_use_ratio
             logger.info(
                 f'Max GPU System Mem (non-chunk) Used During Warmup {max(self.gpu_sys_used_list)/1e6} MB'
             )

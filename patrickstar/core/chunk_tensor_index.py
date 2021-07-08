@@ -15,7 +15,7 @@ from typing import List
 import torch
 import time
 
-from .const import AccessType, PSChunkStatus, PSTensorStatus
+from .const import AccessType, PSChunkStatus, PSTensorStatus, ChunkListType
 from .chunk_list import ChunkList
 import patrickstar.utils.global_timer as global_timer
 from patrickstar.utils import logger
@@ -72,13 +72,31 @@ class ChunkTensorIndex(object):
         self.global_chunk_id_chunk_id_list = {}
         self.dict_chunk_id_global_id = {}
 
-    def add_chunk(self, chunk_id, chunk_size, data_type, global_chunk_id=0):
+        # 记录不同chunk_list信息，存放chunk_id信息
+        self.param_fp16_list = []
+        self.param_fp32_list = []
+        self.momentum_fp32_list = []
+        self.variance_fp32_list = []
+
+    def add_chunk(self, chunk_id, chunk_size, data_type, global_chunk_id,
+                  list_type: ChunkListType):
         self.dict_chunk_id_chunk_info[chunk_id] = (chunk_size, data_type)
 
         if global_chunk_id not in self.global_chunk_id_chunk_id_list:
             self.global_chunk_id_chunk_id_list[global_chunk_id] = list()
         self.global_chunk_id_chunk_id_list[global_chunk_id].append(chunk_id)
         self.dict_chunk_id_global_id[chunk_id] = global_chunk_id
+
+        if list_type == ChunkListType.PARAM_FP16:
+            self.param_fp16_list.append(chunk_id)
+        elif list_type == ChunkListType.PARAM_FP32:
+            self.param_fp32_list.append(chunk_id)
+        elif list_type == ChunkListType.MOMENTUM:
+            self.momentum_fp32_list.append(chunk_id)
+        elif list_type == ChunkListType.VARIANCE:
+            self.variance_fp32_list.append(chunk_id)
+        else:
+            raise RuntimeError
 
     def get_cur_chunk_num(self):
         return len(self.dict_chunk_id_chunk_info)

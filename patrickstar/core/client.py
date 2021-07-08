@@ -427,7 +427,8 @@ class PatrickStarClient(object):
         is_first_init = False
         if chunk_id is None:
             raise RuntimeError(
-                "FP16 training shall not meet tensors with no chunk assigned")
+                "FP16 training shall not meet tensors with no chunk assigned. Every tensor has to be assigned to a chunk during a tensor-chunk-mapping process before training."
+            )
             chunk_id = self._assign_chunk_for_tensor(param, access_type)
             is_first_init = True
         else:

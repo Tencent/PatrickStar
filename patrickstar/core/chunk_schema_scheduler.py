@@ -14,7 +14,7 @@
 from .chunk_data import Chunk
 from .chunk_list import ChunkList
 from .chunk_tensor_index import ChunkTensorIndex
-from .const import AccessType, PSTensorStatus
+from .const import AccessType, PSTensorStatus, ChunkListType
 from .parameter import PSParameter, register_param, is_param_registed, is_torch_param, register_torch_param
 import torch
 import logging
@@ -52,7 +52,7 @@ class ChunkCreator(object):
         logger.info(f'default chunk size {default_chunk_size}')
 
     def _add_tensor(self, tensor_id, numel, param, access_type: AccessType,
-                    data_type):
+                    data_type, chunk_list_type: ChunkListType):
         """
         向chunk_tensor_index注册tensor，当新的Tensor大小超过Chunk剩余空间，
         则开辟一个新的Chunk添加到ChunkList中，将Tensor分配在新Chunk的起始位置
@@ -67,7 +67,8 @@ class ChunkCreator(object):
             self.chunk_tensor_index.add_chunk(self.chunk_id,
                                               self.default_chunk_size,
                                               self.data_type,
-                                              self.global_chunk_id)
+                                              self.global_chunk_id,
+                                              chunk_list_type)
             # 标记chunk在global chunk中的位置
             self.list_id += 1
             if self.list_id % self.world_size == 0:
@@ -85,7 +86,8 @@ class ChunkCreator(object):
         # 返回tensor对应的chunk在chunk group的位置
         return (self.list_id) % self.world_size, self.chunk_id
 
-    def _start_new_chunk_list(self, add_dummy_chunk_flag=False):
+    def _start_new_chunk_list(self, add_dummy_chunk_flag: bool,
+                              chunk_list_type: ChunkListType):
         """
         对构造中的chunk进行收尾
         """
@@ -95,7 +97,8 @@ class ChunkCreator(object):
             self.chunk_tensor_index.add_chunk(self.chunk_id,
                                               self.default_chunk_size,
                                               self.data_type,
-                                              self.global_chunk_id)
+                                              self.global_chunk_id,
+                                              chunk_list_type)
             self.chunk_id += 1
             self.acc_cnt = 0
             # 下一个chunk的list_id
@@ -112,7 +115,8 @@ class ChunkCreator(object):
                 self.chunk_tensor_index.add_chunk(self.chunk_id,
                                                   self.default_chunk_size,
                                                   self.data_type,
-                                                  self.global_chunk_id)
+                                                  self.global_chunk_id,
+                                                  chunk_list_type)
                 self.dummy_param_list.append(
                     torch.nn.Parameter(torch.zeros(1, dtype=self.data_type),
                                        requires_grad=False))
@@ -142,15 +146,18 @@ class ChunkShemaScheduler(object):
                                           self.dummy_param_list)
 
     def add_tensor(self, tensor_id, numel, param, access_type: AccessType,
-                   data_type):
+                   data_type, chunk_list_type):
         """
         返回chunk在process chunk group中的位置
         """
         return self.chunk_creator._add_tensor(tensor_id, numel, param,
-                                              access_type, data_type)
+                                              access_type, data_type,
+                                              chunk_list_type)
 
-    def start_new_chunk_list(self, add_dummy_chunk_flag=False):
-        self.chunk_creator._start_new_chunk_list(add_dummy_chunk_flag)
+    def start_new_chunk_list(self, add_dummy_chunk_flag: bool,
+                             chunk_list_type: ChunkListType):
+        self.chunk_creator._start_new_chunk_list(add_dummy_chunk_flag,
+                                                 chunk_list_type)
 
     def schedule(self, module, optimizer):
         """
@@ -160,16 +167,16 @@ class ChunkShemaScheduler(object):
         # 注册model和optimizer的param是否应该和chunk layout schedule耦合？
         # TODO(jiaruifang)用一次FWD来得到正确的执行顺序
         # FP16 和 FP32不一样
+        raise NotImplementedError
         for name, param in module.named_parameters(recurse=True):
             register_param(param, name)
             numel = param.numel()
             data_type = torch.float
             self.add_tensor(param.ps_attr.data_id(), numel, param,
-                            AccessType.DATA, data_type)
-            self.add_tensor(param.ps_attr.grad_id(), numel, param,
-                            AccessType.DATA, data_type)
+                            AccessType.DATA, data_type,
+                            ChunkListType.PARAM_FP32)
 
-        self.chunk_creator.start_new_chunk_list(True)
+        self.chunk_creator.start_new_chunk_list(True, ChunkListType.PARAM_FP32)
 
         # layout for M, V
         # Parameters`tate[param_group][param]`尚未被初始化，它们在第一次step时候才出现
@@ -212,11 +219,13 @@ class ChunkShemaScheduler(object):
                         numel = p.ps_attr.ps_numel
                         self.add_tensor(state['exp_avg'].ps_attr.data_id(),
                                         numel, state['exp_avg'],
-                                        AccessType.DATA, data_type)
+                                        AccessType.DATA, data_type,
+                                        ChunkListType.VARIANCE)
 
                         self.add_tensor(state['exp_avg_sq'].ps_attr.data_id(),
                                         numel, state['exp_avg_sq'],
-                                        AccessType.DATA, data_type)
+                                        AccessType.DATA, data_type,
+                                        ChunkListType.MOMENTUM)
 
                         # param.data不被需要，将他们的内存释放
                         state['exp_avg'].data = torch.zeros(
@@ -231,7 +240,7 @@ class ChunkShemaScheduler(object):
                                 p, memory_format=torch.preserve_format)
                 else:
                     raise RuntimeError
-        self.chunk_creator.start_new_chunk_list()
+        self.chunk_creator.start_new_chunk_list(False, ChunkListType.MOMENTUM)
 
     def schedule_fp16(self, module, optimizer):
         """
@@ -239,7 +248,10 @@ class ChunkShemaScheduler(object):
         schedule过程为所有parameter注册成ps_tensor
         顺便统计param fp16有几个chunk
         """
-        self.start_new_chunk_list(True)
+        self.start_new_chunk_list(add_dummy_chunk_flag=True,
+                                  chunk_list_type=ChunkListType.PARAM_FP16)
+
+        # Note: param_fp16_chunk_num包括dummy chunk
         self.chunk_tensor_index.param_fp16_chunk_num = self.chunk_tensor_index.get_cur_chunk_num(
         )
 
@@ -265,9 +277,11 @@ class ChunkShemaScheduler(object):
                 numel = param_fp32.ps_attr.ps_numel
                 chunk_pos = self.add_tensor(param_fp32.ps_attr.data_id(),
                                             numel, param_fp32, AccessType.DATA,
-                                            data_type)
+                                            data_type,
+                                            ChunkListType.PARAM_FP32)
 
-        self.start_new_chunk_list()
+        self.start_new_chunk_list(add_dummy_chunk_flag=False,
+                                  chunk_list_type=ChunkListType.PARAM_FP32)
 
         # 注册M，V, param data fp32
         for group in optimizer.param_groups:
@@ -303,7 +317,8 @@ class ChunkShemaScheduler(object):
 
                     chunk_pos = self.add_tensor(
                         state['exp_avg'].ps_attr.data_id(), numel,
-                        state['exp_avg'], AccessType.DATA, data_type)
+                        state['exp_avg'], AccessType.DATA, data_type,
+                        ChunkListType.VARIANCE)
 
                     if group['amsgrad']:
                         # Maintains max of all exp. moving avg. of sq. grad. values
@@ -311,7 +326,8 @@ class ChunkShemaScheduler(object):
                 else:
                     raise RuntimeError
 
-        self.start_new_chunk_list()
+        self.start_new_chunk_list(add_dummy_chunk_flag=False,
+                                  chunk_list_type=ChunkListType.VARIANCE)
 
         # 注册exp_avg_sq
         for group in optimizer.param_groups:
@@ -348,7 +364,8 @@ class ChunkShemaScheduler(object):
 
                     self.add_tensor(state['exp_avg_sq'].ps_attr.data_id(),
                                     numel, state['exp_avg_sq'],
-                                    AccessType.DATA, data_type)
+                                    AccessType.DATA, data_type,
+                                    ChunkListType.MOMENTUM)
 
                     state['exp_avg_sq'].data = torch.zeros(
                         1, dtype=data_type, device=torch.device('cpu:0'))
@@ -360,6 +377,7 @@ class ChunkShemaScheduler(object):
                     raise RuntimeError
 
         # 收尾
-        self.start_new_chunk_list()
+        self.start_new_chunk_list(add_dummy_chunk_flag=False,
+                                  chunk_list_type=ChunkListType.MOMENTUM)
 
         logging.info('static schedule with FP16 finished')
