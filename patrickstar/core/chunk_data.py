@@ -246,16 +246,12 @@ class Chunk(object):
         if self._time_profile:
             if target_device.type == 'cuda':
                 global_timer.my_timer.finish_profile('chunk_cpu_gpu_move')
-                global_timer.cpu_gpu_move_elapse += time.time() - start_time
-                global_timer.cpu_gpu_move_times += 1
-                global_timer.cpu_gpu_move_data_amount += self.get_payload_space(
-                )
+                global_timer.data_move_cnter.update('chunk_cpu_gpu_move',
+                                                    self.get_payload_space())
             elif target_device.type == 'cpu':
                 global_timer.my_timer.finish_profile('chunk_gpu_cpu_move')
-                global_timer.gpu_cpu_move_elapse += time.time() - start_time
-                global_timer.gpu_cpu_move_times += 1
-                global_timer.gpu_cpu_move_data_amount += self.get_payload_space(
-                )
+                global_timer.data_move_cnter.update('chunk_gpu_cpu_move',
+                                                    self.get_payload_space())
         logging.debug(
             f'move chunk {self.chunk_id}, which has {self.payload.numel()/1e6} M {self.payload.dtype} elements, from {src_device} to {target_device}, elapse {time.time() - start_time}'
         )

@@ -22,7 +22,6 @@ class GlobalTimer(object):
         存放时间统计，key命名规则 训练阶段_
         """
         self.elapse_stat = {}
-
         self.start_time = {}
 
     def start_profile(self, key):
@@ -50,11 +49,41 @@ class GlobalTimer(object):
 
 my_timer = GlobalTimer()
 
-# 数据移动
-cpu_gpu_move_elapse = 0.
-cpu_gpu_move_times = 0
-cpu_gpu_move_data_amount = 0
 
-gpu_cpu_move_elapse = 0.
-gpu_cpu_move_times = 0
-gpu_cpu_move_data_amount = 0
+# 数据移动
+class DataMoveCnter(object):
+    def __init__(self):
+        # self.gpu_to_cpu_times = 0
+        # self.gpu_to_cpu_amount = 0
+        # self.param_fp32_to_fp16_copy_times = 0
+        # self.param_fp32_to_fp16_copy_amount = 0
+
+        # self.cpu_to_gpu_times = 0
+        # self.cpu_to_gpu_amount = 0
+        # self.grad_fp16_to_fp32_copy_times = 0
+        # self.grad_fp16_to_fp32_copy_data_amount = 0
+
+        self.amount_dict = {}
+        self.times_dict = {}
+
+    def update(self, key_name, tensor_size):
+        if key_name in self.times_dict:
+            self.times_dict[key_name] += 1
+            self.amount_dict[key_name] += tensor_size
+        else:
+            self.times_dict[key_name] = 1
+            self.amount_dict[key_name] = tensor_size
+
+    def reset(self):
+        for k, v in self.times_dict.items():
+            self.times_dict[k] = 0
+            self.amount_dict[k] = 0
+
+    def print(self):
+        logging.info('*********** DATA MOVE RESULTS *************')
+        for k, v in self.times_dict.items():
+            logging.info(f'{k}: {self.amount_dict[k]/1024/1024} MB, {v} times')
+        logging.info('\n\n')
+
+
+data_move_cnter = DataMoveCnter()

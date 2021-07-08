@@ -138,17 +138,16 @@ class FP16Adam(torch.optim.Optimizer):
             rank = args.local_rank
         world_size = torch.distributed.get_world_size()
         logger.info(
-            f'rank {rank} margin_chunk_num_for_gpu_adam {margin_chunk_num_for_gpu_adam} {len(fp32_params)}'
+            f'rank {rank} margin_chunk_num_for_gpu_adam {margin_chunk_num_for_gpu_adam}, param cnt {len(fp32_params)}'
         )
         for i, fp32_param in enumerate(fp32_params):
             ##########################
             ####### 准备ADAM数据 ######
             ##########################
-            if time_profile:
-                global_timer.my_timer.start_profile('ADAM_prepare_data')
             fp16_param = fp16_param_with_grad_list[i]
 
             if time_profile:
+                global_timer.my_timer.start_profile('ADAM_prepare_data')
                 global_timer.my_timer.start_profile(
                     'ADAM_prepare_data_fp16_grad_to_fp32_grad_copy')
 
@@ -170,9 +169,9 @@ class FP16Adam(torch.optim.Optimizer):
             if time_profile:
                 global_timer.my_timer.finish_profile(
                     'ADAM_prepare_data_fp16_grad_to_fp32_grad_copy')
-                global_timer.gpu_cpu_move_times += 1
-                global_timer.gpu_cpu_move_data_amount += fp32_grad_tensor.numel(
-                )
+                global_timer.data_move_cnter.update(
+                    'ADAM_prepare_data_fp16_grad_to_fp32_grad_copy',
+                    fp32_grad_tensor.numel() * 4)
 
             client.access_data(fp32_param, compute_device)
             fp32_data_tensor = get_real_data_tensor(fp32_param)
@@ -241,9 +240,6 @@ class FP16Adam(torch.optim.Optimizer):
 
                 fp32_data_tensor.addcdiv_(exp_avg, denom, value=-step_size)
 
-                # fp32_data_tensor_diff = torch.max(fp32_data_tensor - fp32_data_tensor_copy)
-                # assert fp32_data_tensor_diff < 1e-6, f'param {i} adam wrong {fp32_data_tensor_diff}.\n step {step}\n lr {lr}\n beta1 {beta1}\n beta2 {beta2}\n eps {eps}\n weight_decay {weight_decay}\n'
-
             if time_profile:
                 global_timer.my_timer.finish_profile('ADAM_compute')
                 global_timer.my_timer.start_profile('ADAM_param_fp32_to_fp16')
@@ -257,9 +253,9 @@ class FP16Adam(torch.optim.Optimizer):
 
             if time_profile:
                 global_timer.my_timer.finish_profile('ADAM_param_fp32_to_fp16')
-                global_timer.cpu_gpu_move_data_amount += fp32_data_tensor.numel(
-                ) * 4
-                global_timer.cpu_gpu_move_times += 1
+                global_timer.data_move_cnter.update(
+                    'ADAM_param_fp32_to_fp16',
+                    fp32_data_tensor.numel() * 4)
                 global_timer.my_timer.start_profile('ADAM_release_data')
 
             client.release_data(fp32_param)

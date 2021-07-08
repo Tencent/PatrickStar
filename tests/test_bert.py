@@ -207,6 +207,9 @@ def test_bert_model(is_ckp: bool = False,
         if is_ps:
             global_timer.my_timer.print()
             global_timer.my_timer.reset()
+
+            global_timer.data_move_cnter.print()
+            global_timer.data_move_cnter.reset()
         if n == stop_step: break
 
     elapse = time.time() - start_time
@@ -243,7 +246,7 @@ if __name__ == "__main__":
 
     world_size = torch.distributed.get_world_size()
 
-    plan = "GPT3large"
+    plan = "GPT3_1B"
     if res_check:
         plan = "GPTsmall"
     if plan == "GPTsmall":
