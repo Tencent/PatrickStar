@@ -174,12 +174,14 @@ class PatrickStarManager(metaclass=SingletonMeta):
             self.gpu_chunk_used_list.append(self.gpu_chunk_used_mem)
             self.gpu_sys_used_list.append((gpu_used - self.gpu_chunk_used_mem))
 
-            # 用来计算还可以分配多少内存
-            # 希望获得系统内存+chunk used memory的总和
             cpu_used = get_sys_memory_used(cpu_device)
             self.cpu_used_list.append(cpu_used)
             self.cpu_chunk_used_list.append(self.cpu_chunk_used_mem)
             self.cpu_sys_used_list.append((cpu_used - self.cpu_chunk_used_mem))
+
+            # 确保非warmup迭代，cur_mom和此时更新的下标一直
+            cur_mom = self.metronome.moment()
+            assert len(self.gpu_sys_used_list) - 1 == cur_mom
         else:
             # 非warmup需要对Chunk Memory调仓
             # 如果下一刻的Chunk Memory可用空间小于当前Chunk Memory
@@ -190,34 +192,15 @@ class PatrickStarManager(metaclass=SingletonMeta):
                 next_mom]
             gpu_cur_mom_used_chunk_mem = client.chunk_list.get_chunk_memory_used(
                 gpu_device)
-            # logger.info(f'gpu_cur_mom_used_chunk_mem {gpu_cur_mom_used_chunk_mem/1e6} MB gpu_next_mom_ava_chunk_mem {gpu_next_mom_ava_chunk_mem/1e6} MB')
             if gpu_next_mom_ava_chunk_mem < gpu_cur_mom_used_chunk_mem:
                 offload_size = gpu_cur_mom_used_chunk_mem - gpu_next_mom_ava_chunk_mem
-                # logger.info(
-                #     f'available memory before room making {(self._overall_gpu_mem - torch.cuda.memory_allocated())/1e6} MB on gpu'
-                # )
-                # logger.info(
-                #     f'Making {offload_size/1e6} MB space on gpu, gpu_cur_mom_used_chunk_mem {gpu_cur_mom_used_chunk_mem/1e6} MB gpu_next_mom_ava_chunk_mem {gpu_next_mom_ava_chunk_mem/1e6} MB'
-                # )
+                # Note 触发GPU-CPU内存移动
                 client.chunk_list.make_room(offload_size, gpu_device)
+            # 每个节拍都更新gpu sys used
+            gpu_used = get_sys_memory_used(gpu_device)
+            self.gpu_sys_used_list[
+                cur_mom] = gpu_used - self.gpu_chunk_used_mem
 
-            # # 对CPU的Chunk Mem进行调仓
-            # cpu_next_mom_ava_chunk_mem = self._overall_cpu_mem - self.cpu_sys_used_list[
-            #     next_mom]
-            # cpu_cur_mom_used_chunk_mem = client.chunk_list.get_chunk_memory_used(
-            #     cpu_device)
-            # # logger.info(
-            # #     f'cpu_cur_mom_used_chunk_mem {cpu_cur_mom_used_chunk_mem/1e6} MB cpu_next_mom_ava_chunk_mem {cpu_next_mom_ava_chunk_mem/1e6} MB'
-            # # )
-            # # 当前时刻used chunk mem，下一时刻ava chunk mem = used chunk mem + free chunk mem
-            # # 降低used chunk mem，使之可以达到下一时刻ava chunk mem
-            # if cpu_next_mom_ava_chunk_mem < cpu_cur_mom_used_chunk_mem:
-            #     offload_size = cpu_cur_mom_used_chunk_mem - cpu_next_mom_ava_chunk_mem
-            #     # logger.info(f'chunk list has to make room {offload_size/1e6} MB')
-            #     client.chunk_list.make_room(offload_size, cpu_device)
-
-            # client.chunk_list.make_room(cpu_device)
-        # logger.info(f'available memory {(self._overall_gpu_mem - torch.cuda.memory_allocated())/1e6} MB on gpu')
         self.metronome.tiktac()
 
     def add(self, device_type: str, size_in_bytes: int):
@@ -273,17 +256,6 @@ class PatrickStarManager(metaclass=SingletonMeta):
                 return self._overall_cpu_mem
             else:
                 return self._overall_cpu_mem
-                # next_mem = self.metronome.next_moment()
-                # next_mom_ava_mem = self._overall_cpu_mem - self.cpu_sys_used_list[
-                #     next_mem]
-                # cur_mom_ava_mem = self._overall_cpu_mem - self.cpu_sys_used_list[
-                #     self.metronome.moment()]
-                # # TODO(jiaruifang）
-                # ava_cpu_chunk_mem = min(next_mom_ava_mem, cur_mom_ava_mem)
-                # logger.info(
-                #     f'available cpu chunk memory is {ava_cpu_chunk_mem/1e6} MB'
-                # )
-                # return ava_cpu_chunk_mem
         elif device_type == "cuda":
             if self.warmup or not self._start_training:
                 if self._training_stage == TrainingStage.ADAM:
