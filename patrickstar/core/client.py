@@ -506,6 +506,7 @@ class PatrickStarClient(object):
 
         if is_torch_param(param):
             return
+        args = get_args()
 
         chunk_id = self.chunk_tensor_index.get_chunk_id(param, access_type)
         # 可以在tensor-chunk schema构造过程中获得local_chunk_id
@@ -535,72 +536,79 @@ class PatrickStarClient(object):
         # 判断chunk group中所有的chunk都被使用完毕，可以释放remote chunk
         # FWD: 当所有非dummy的chunk都是HOLD_AFTER_FWD
         # BWD: 当所有非dummy的chunk都是HOLD_AFTER_BWD
-        all_chunks_ready = True
-        for i in chunk_id_list:
-            if training_stage == TrainingStage.FWD:
-                if not self.chunk_list[i].all_tensor_status(
-                        PSTensorStatus.HOLD_AFTER_FWD
-                ) and not self.chunk_list[i].is_dummy():
-                    all_chunks_ready = False
-            elif training_stage == TrainingStage.BWD:
-                if not self.chunk_list[i].all_tensor_status(
-                        PSTensorStatus.HOLD_AFTER_BWD
-                ) and not self.chunk_list[i].is_dummy():
-                    all_chunks_ready = False
-                # self.chunk_tensor_index.visit_chunk(self.chunk_list[i])
-            else:
-                raise RuntimeError(
-                    f"{training_stage} is neither TrainingStage.FWD nor TrainingStage.BWD"
-                )
-
-        if all_chunks_ready:
-            if is_allreduce:
-                world_size = torch.distributed.get_world_size()
-                assert self.chunk_list[local_chunk_id].payload is not None
-
-                group_list = []
-                for i, _ in enumerate(chunk_id_list):
-                    group_list.append(i)
-                group = torch.distributed.new_group(group_list)
-
-                args = get_args()
-                if not args.use_fake_dist:
-                    input_list = []
-                    for i in chunk_id_list:
-                        self.chunk_list.access_chunk(
-                            i, torch.device(f'cuda:{args.local_rank}'))
-                        self.chunk_list[i].pin()
-                        input_list.append(self.chunk_list[i].payload)
-                    torch.distributed.reduce_scatter(
-                        self.chunk_list[local_chunk_id].payload,
-                        input_list,
-                        op=torch.distributed.ReduceOp.SUM,
-                        group=group,
-                        async_op=False)
+        if args.world_size > 1:
+            all_chunks_ready = True
+            for i in chunk_id_list:
+                if training_stage == TrainingStage.FWD:
+                    if not self.chunk_list[i].all_tensor_status(
+                            PSTensorStatus.HOLD_AFTER_FWD
+                    ) and not self.chunk_list[i].is_dummy():
+                        all_chunks_ready = False
+                elif training_stage == TrainingStage.BWD:
+                    if not self.chunk_list[i].all_tensor_status(
+                            PSTensorStatus.HOLD_AFTER_BWD
+                    ) and not self.chunk_list[i].is_dummy():
+                        all_chunks_ready = False
+                    # self.chunk_tensor_index.visit_chunk(self.chunk_list[i])
                 else:
-                    # Note()为了在开发机调试方便
-                    # 它非常慢 4.92 sec/5.89 sec (client_release_elapse)
-                    for rank_, chunk_id_ in enumerate(chunk_id_list):
-                        if self.chunk_list[chunk_id_].is_dummy():
-                            continue
-                        torch.distributed.reduce(
-                            self.chunk_list[chunk_id_].payload,
-                            rank_,
+                    raise RuntimeError(
+                        f"{training_stage} is neither TrainingStage.FWD nor TrainingStage.BWD"
+                    )
+
+            if all_chunks_ready:
+                if is_allreduce:
+                    if self._time_profile:
+                        global_timer.my_timer.start_profile(
+                            'CLIENT_release_dist_reduce_scatter')
+                    world_size = torch.distributed.get_world_size()
+                    assert self.chunk_list[local_chunk_id].payload is not None
+
+                    group_list = []
+                    for i, _ in enumerate(chunk_id_list):
+                        group_list.append(i)
+                    group = torch.distributed.new_group(group_list)
+
+                    if not args.use_fake_dist:
+                        input_list = []
+                        for i in chunk_id_list:
+                            self.chunk_list.access_chunk(
+                                i, torch.device(f'cuda:{args.local_rank}'))
+                            self.chunk_list[i].pin()
+                            input_list.append(self.chunk_list[i].payload)
+                        torch.distributed.reduce_scatter(
+                            self.chunk_list[local_chunk_id].payload,
+                            input_list,
                             op=torch.distributed.ReduceOp.SUM,
                             group=group,
                             async_op=False)
-                # NOTE把下面行注释了不影响最终结果？loss可能是有softmax算出，所以相对值不影响LOSS比较，但是影响了
-                # 不应该除以world_size,减去dummy chunk个数
-                self.chunk_list[local_chunk_id].payload /= world_size
+                    else:
+                        # Note()为了在开发机调试方便
+                        # 它非常慢 4.92 sec/5.89 sec (client_release_elapse)
+                        for rank_, chunk_id_ in enumerate(chunk_id_list):
+                            if self.chunk_list[chunk_id_].is_dummy():
+                                continue
+                            torch.distributed.reduce(
+                                self.chunk_list[chunk_id_].payload,
+                                rank_,
+                                op=torch.distributed.ReduceOp.SUM,
+                                group=group,
+                                async_op=False)
+                    # NOTE把下面行注释了不影响最终结果？loss可能是有softmax算出，所以相对值不影响LOSS比较，但是影响了
+                    # 不应该除以world_size,减去dummy chunk个数
+                    self.chunk_list[local_chunk_id].payload /= world_size
+                    if self._time_profile:
+                        global_timer.my_timer.finish_profile(
+                            'CLIENT_release_dist_reduce_scatter')
 
-            # 删除remote chunk的payload
-            for i in chunk_id_list:
-                self.chunk_list[i].unpin()
-                if i != local_chunk_id:
-                    logger.debug(f'rank {rank} remove payload of chunk_id {i}')
-                    self.chunk_list[i].release_payload()
-                    self.set_all_tensors_status_in_chunk(
-                        i, PSTensorStatus.FREE)
+                # 删除remote chunk的payload
+                for i in chunk_id_list:
+                    self.chunk_list[i].unpin()
+                    if i != local_chunk_id:
+                        logger.debug(
+                            f'rank {rank} remove payload of chunk_id {i}')
+                        self.chunk_list[i].release_payload()
+                        self.set_all_tensors_status_in_chunk(
+                            i, PSTensorStatus.FREE)
 
         if self._time_profile:
             global_timer.my_timer.finish_profile('CLIENT_release_dist')
