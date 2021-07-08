@@ -143,4 +143,5 @@ class PatrickStarEngine(Module):
         mgr._training_stage = TrainingStage.BWD
         self.optimizer.zero_grad()
         loss.backward()
+        mgr.update_margin_mem()
         global_timer.my_timer.finish_profile("BWD")

@@ -159,3 +159,4 @@ class FP32ChunkReadBuffer(object):
     def reset(self):
         self.cached_chunk_num = 0
         self.ret_payload = None
+        self.cached_chunk_id = None
