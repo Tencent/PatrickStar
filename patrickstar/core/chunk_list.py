@@ -112,27 +112,33 @@ class ChunkList(object):
 
     def prepare_device(self, target_device: torch.device, need_bytes: int):
         """
-        让target device做分配need_bytes大小空间的准备
+        让target device做腾出need_bytes大小
         如果空间不足，需要在目标设备上释放或者移动出一些chunk。
         """
         if self._time_profile:
             global_timer.my_timer.start_profile('CHUNK_LIST_prepare_device')
 
-        logger.debug(
-            f'prepare_device target device {target_device} need size {need_bytes} bytes'
-        )
         ps_manager = PatrickStarManager()
         ava_chunk_mem_size = ps_manager.available_chunk_mem(target_device.type)
+        free_chunk_mem_size = ps_manager.free_chunk_mem(target_device.type)
+
+        logger.debug(
+            f'prepare_target: device {target_device} need_bytes {need_bytes/1e6} MB, ava_chunk_mem_size {ava_chunk_mem_size/1e6} MB, free_chunk_mem_size {free_chunk_mem_size/1e6} MB.'
+        )
+
+        args = get_args()
+
+        # TODO(jiaruifang) 无法分配的情况
+        # 这个条件尚不充分，应该是如果cpu和gpu的的free_chunk都不足存放need bytes则放弃
         if ava_chunk_mem_size < need_bytes:
             logger.error(
                 f"{target_device} has not enough space for {need_bytes} elements"
             )
             # TODO(jiaruifang)可以爆表时候再释放
             raise RuntimeError(
-                f"{target_device} has not enough space for {need_bytes/1e6} MB. Device used Chunk Memory is {self.get_chunk_memory_used(target_device)/1e6} MB. Avaibale Chunk Memory is {ava_chunk_mem_size}"
+                f"{target_device} has not enough space for {need_bytes/1e6} MB. Device used Chunk Memory is {self.get_chunk_memory_used(target_device)/1e6} MB. Avaibale Chunk Memory is {ava_chunk_mem_size/1e6} MB"
             )
 
-        free_chunk_mem_size = ps_manager.free_chunk_mem(target_device.type)
         extra_need_bytes = need_bytes - free_chunk_mem_size
 
         logger.debug(
@@ -152,13 +158,12 @@ class ChunkList(object):
         moved_list = self._chunk_to_move_out_for_room_making(
             extra_need_bytes, target_device)
 
-        # TODO(jiaruifang)只考虑单卡情况，新设备只有gpu和cpu
-        args = get_args()
+        # TODO(jiaruifang) 这里默认新设备上有足够空间，强制把Chunk塞给新设备，可能会突破新设备上的ava_chunk_mem的上线，引起bug
         new_device = torch.device(
             'cpu') if target_device.type == 'cuda' else torch.device(
                 f'cuda:{args.local_rank}')
 
-        # 把他们移动到新设备上
+        # 把他们移动到新设备上，如果新设备上free_chunk空间不足，则放弃
         for idx in moved_list:
             self.chunk_move(idx, new_device)
 
@@ -193,11 +198,22 @@ class ChunkList(object):
     def chunk_move(self, chunk_id: int, device: torch.device):
         """
         将chunk_id的chunk移动到device上
+        Note(): 必须保证device上有足够的free_chunk_mem
         """
         if self._time_profile:
             global_timer.my_timer.start_profile('CHUNK_LIST_chunk_move')
 
         chunk = self.chunk_id_to_chunk_dict[chunk_id]
+
+        ps_manager = PatrickStarManager()
+        ava_chunk_mem_size = ps_manager.available_chunk_mem(device.type)
+        free_chunk_mem_size = ps_manager.free_chunk_mem(device.type)
+
+        chunk_mem_size = chunk.get_payload_space()
+        if free_chunk_mem_size < chunk_mem_size:
+            raise RuntimeError(
+                f"chunk move failed. {device} has not {chunk_mem_size} MB memory space. Free space is {free_chunk_mem_size/1e6} MB. This is because the overall memory of CPU and GPU is not enough for the model."
+            )
         if chunk.get_device() != device:
             logging.log(
                 logging.DEBUG,

@@ -127,8 +127,6 @@ class Chunk(object):
         释放负载
         确保此时所有tensor都是free
         """
-        # if self._time_profile:
-        #     start_time = time.time()
         ps_manager = PatrickStarManager()
         ps_manager.delete(self.get_device().type, self.get_payload_space())
 
@@ -199,8 +197,13 @@ class Chunk(object):
                 global_timer.my_timer.start_profile('chunk_cpu_gpu_move')
             else:
                 global_timer.my_timer.start_profile('chunk_gpu_cpu_move')
-
         src_device = self.get_device()
+        ps_manager = PatrickStarManager()
+
+        logging.debug(
+            f'move chunk {self.chunk_id}, which has {self.payload.numel()/1e6} M {self.payload.dtype} elements, from {src_device} to {target_device}, used mem {ps_manager.used_chunk_mem(target_device.type)/1e6} MB'
+        )
+
         #TODO(jiaruifang)异步
         ps_manager = PatrickStarManager()
         ps_manager.delete(self.get_device().type, self.get_payload_space())
@@ -240,7 +243,6 @@ class Chunk(object):
         else:
             self.payload = self.payload.to(target_device)
 
-        ps_manager = PatrickStarManager()
         ps_manager.add(target_device.type, self.get_payload_space())
 
         if self._time_profile:
@@ -252,9 +254,6 @@ class Chunk(object):
                 global_timer.my_timer.finish_profile('chunk_gpu_cpu_move')
                 global_timer.data_move_cnter.update('chunk_gpu_cpu_move',
                                                     self.get_payload_space())
-        logging.debug(
-            f'move chunk {self.chunk_id}, which has {self.payload.numel()/1e6} M {self.payload.dtype} elements, from {src_device} to {target_device}, elapse {time.time() - start_time}'
-        )
 
     def get_device(self):
         if self.payload is not None:

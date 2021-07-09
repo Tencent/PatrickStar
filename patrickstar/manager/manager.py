@@ -77,20 +77,29 @@ class PatrickStarManager(metaclass=SingletonMeta):
         self.cpu_chunk_used_mem = 0
 
         args = get_args()
+
+        # 可利用系统内存上限的比例
+        self._overall_gpu_mem_ratio = 0.6
+        self._overall_cpu_mem_ratio = 0.6
+
         if args.use_fake_dist:
             rank = 0
-            # 获得系统的存储信息
+            # 伪分布式训练是，大家共享一块GPU
             self._overall_gpu_mem = torch.cuda.get_device_properties(
-                rank).total_memory * 0.6 / torch.distributed.get_world_size()
+                rank
+            ).total_memory * self._overall_gpu_mem_ratio / torch.distributed.get_world_size(
+            )
             self._overall_cpu_mem = psutil.virtual_memory(
-            ).total * 0.6 / torch.distributed.get_world_size()
+            ).total * self._overall_cpu_mem_ratio / torch.distributed.get_world_size(
+            )
         else:
             rank = args.local_rank
             # 获得系统的存储信息
             self._overall_gpu_mem = torch.cuda.get_device_properties(
-                rank).total_memory * 0.6
+                rank).total_memory * self._overall_gpu_mem_ratio
             self._overall_cpu_mem = psutil.virtual_memory(
-            ).total * 0.6 / torch.distributed.get_world_size()
+            ).total * self._overall_cpu_mem_ratio / torch.distributed.get_world_size(
+            )
 
         # 统计信息
         self.cpu_used_list = []
@@ -114,6 +123,7 @@ class PatrickStarManager(metaclass=SingletonMeta):
         self._default_chunk_size = 0
 
         self._margine_use_ratio = 0.6
+        self.warmup_gpu_chunk_mem_ratio = 0.4
 
     def start_train(self, is_warmup, param_fp16_chunk_size, chunk_size):
         self.warmup = is_warmup
@@ -210,7 +220,6 @@ class PatrickStarManager(metaclass=SingletonMeta):
         if device_type == "cpu":
             self.cpu_chunk_used_mem += size_in_bytes
         elif device_type == "cuda":
-            # logger.info(f'use chunk memory {size_in_bytes} on gpu')
             self.gpu_chunk_used_mem += size_in_bytes
         else:
             raise f"device type {device_type} is not supported"
@@ -242,12 +251,15 @@ class PatrickStarManager(metaclass=SingletonMeta):
             return self.cpu_chunk_used_mem
         elif device_type == "cuda":
             return self.gpu_chunk_used_mem
+        else:
+            raise RuntimeError(f"used_chunk_mem {device_type}")
 
     def available_chunk_mem(self, device_type):
         """
         返回用可以于分配Chunk的内存，即可用内存。
         可用内存包括已经分配被Chunk占据的内存和闲置(free)的内存。
-        预热阶段是三分之一GPU内存和全部CPU内存。
+        available_chunk_mem = free_chunk_mem + used_chunk_mem
+        预热阶段是部分GPU内存和全部CPU内存。
         非预热阶段，是当前moment和下一moment可用内存的最小值。
         """
         if device_type == "cpu":
@@ -259,14 +271,16 @@ class PatrickStarManager(metaclass=SingletonMeta):
         elif device_type == "cuda":
             if self.warmup or not self._start_training:
                 if self._training_stage == TrainingStage.ADAM:
-                    # ADAM时没有activation所以显存可以全部给Chunk，需要两个default chunk size做buffer
-                    return self._overall_gpu_mem - 2 * self._default_chunk_size * 8
+                    # ADAM时没有activation所以显存可以全部给Chunk，需要两个default chunk size做buffer，这里先预留6个
+                    ava_mem = self._overall_gpu_mem - 4 * self._default_chunk_size * 4
+                    logger.info(f'available_chunk_mem is {ava_mem/1e6} MB')
+                    return ava_mem
                 else:
                     # TODO(jiaruifang)瞎拍一个数，预热阶段三分之一GPU显存用来存储chunk
-                    return self._overall_gpu_mem / 3
+                    return self._overall_gpu_mem * self.warmup_gpu_chunk_mem_ratio
             else:
                 if self._training_stage == TrainingStage.ADAM:
-                    return self._overall_gpu_mem
+                    return self._overall_gpu_mem - 4 * self._default_chunk_size * 4
                 else:
                     next_mom = self.metronome.next_moment()
                     cur_mom = self.metronome.moment()
