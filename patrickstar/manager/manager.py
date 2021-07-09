@@ -48,6 +48,10 @@ class Metronome():
         self._moment = 0
         self._total_moment = None
 
+    def get_total_mom(self):
+        assert self._total_moment is not None, f"Don not use get_total during warmup"
+        return self._total_moment
+
     def tiktac(self):
         self._moment += 1
 
@@ -101,6 +105,9 @@ class PatrickStarManager(metaclass=SingletonMeta):
             ).total * self._overall_cpu_mem_ratio / torch.distributed.get_world_size(
             )
 
+        logger.info(
+            f'Init Manager over all gpu mem {self._overall_gpu_mem/1e6} MB, cpu mem {self._overall_cpu_mem}'
+        )
         # 统计信息
         self.cpu_used_list = []
         self.cpu_chunk_used_list = []
@@ -125,6 +132,12 @@ class PatrickStarManager(metaclass=SingletonMeta):
         self._margine_use_ratio = 0.6
         self.warmup_gpu_chunk_mem_ratio = 0.4
 
+    def is_warmup_training(self):
+        return self._start_training and self.warmup
+
+    def is_nonwarmup_training(self):
+        return self._start_training and not self.warmup
+
     def start_train(self, is_warmup, param_fp16_chunk_size, chunk_size):
         self.warmup = is_warmup
         self._start_training = True
@@ -137,17 +150,22 @@ class PatrickStarManager(metaclass=SingletonMeta):
         """
         更新GPU内剩余的空间可存储的Chunk数目
         """
-        self._margin_chunk_num_for_gpu_adam = (
-            self._overall_gpu_mem - self._param_fp16_chunk_size) / (
-                self._default_chunk_size * 12) * self._margine_use_ratio
+        max_gpu_sys_used = max(self.gpu_sys_used_list)
+        margin_mem_size = self._overall_gpu_mem - max_gpu_sys_used - self._param_fp16_chunk_size
+        # 12 = 4 + 4 + 4 fp32 + m + v
+        self._margin_chunk_num_for_gpu_adam = (margin_mem_size) / (
+            self._default_chunk_size * 12) * self._margine_use_ratio
+
+        logger.info("*********** GPU INFO AFTER BWD ***************")
         logger.info(
             f'Max GPU System Mem (non-chunk) Used {max(self.gpu_sys_used_list)/1e6} MB'
         )
         logger.info(
             f'Param FP16 Chunk Size {self._param_fp16_chunk_size/1e6} MB')
         logger.info(
-            f'Margin Mem Size {(self._overall_gpu_mem - self._param_fp16_chunk_size)/1e6} MB, available chunk num for Optimizer States {self._margin_chunk_num_for_gpu_adam}'
+            f'Margin Mem Size {margin_mem_size/1e6} MB, available chunk num for Optimizer States {self._margin_chunk_num_for_gpu_adam}'
         )
+        logger.info(f'OVERALL GPU MEM {self._overall_gpu_mem}')
 
     def reset_metronome(self):
         """
@@ -212,6 +230,12 @@ class PatrickStarManager(metaclass=SingletonMeta):
                 cur_mom] = gpu_used - self.gpu_chunk_used_mem
 
         self.metronome.tiktac()
+
+    def get_cur_mom(self):
+        return self.metronome.moment()
+
+    def get_total_mom(self):
+        return self.metronome.get_total_mom()
 
     def add(self, device_type: str, size_in_bytes: int):
         """

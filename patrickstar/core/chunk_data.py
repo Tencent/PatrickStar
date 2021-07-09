@@ -25,6 +25,7 @@ import time
 
 from patrickstar.manager import PatrickStarManager
 import patrickstar.utils.global_timer as global_timer
+from patrickstar.utils import logger
 
 
 # chunk是否应该感知param？
@@ -61,17 +62,46 @@ class Chunk(object):
         self.payload = None
         self._time_profile = True
 
-        self.access_moments = []
+        self.gpu_access_moments = []
+        self.cpu_access_moments = []
         self._pin_flag = False
+
+    def append_moment(self, mom, compute_device):
+        mgr = PatrickStarManager()
+        assert mgr.is_warmup_training()
+
+        access_moments = self.gpu_access_moments if compute_device.type == 'cuda' else self.cpu_access_moments
+        if len(access_moments) > 0 and mom == access_moments[-1]:
+            return
+        else:
+            access_moments.append(mom)
+
+    def next_accessed_mom(self, compute_device):
+        """
+        非warmup时获得下一个访问时刻
+        """
+        mgr = PatrickStarManager()
+        access_moments = self.gpu_access_moments if compute_device.type == 'cuda' else self.cpu_access_moments
+        if mgr.is_nonwarmup_training():
+            cur_mom = mgr.get_cur_mom()
+            max_mom_small_than_cur = 0
+            for i in access_moments:
+                if i > cur_mom:
+                    return i
+                if i < cur_mom:
+                    max_mom_small_than_cur = i
+            return mgr.get_total_mom() + max_mom_small_than_cur
+        else:
+            return 0
+
+    def display_access_mom_info(self):
+        logger.info(
+            f'\t {self.chunk_id} cpu_access_moments {self.cpu_access_moments}')
+        logger.info(
+            f'\t {self.chunk_id} gpu_access_moments {self.gpu_access_moments}')
 
     def is_dummy(self):
         return self._is_dummy
-
-    def add_moment(self, mom):
-        if len(self.access_moments) > 0 and self.access_moments[-1] == mom:
-            return
-        else:
-            self.access_moments.append(mom)
 
     def get_chunk_space(self):
         """
@@ -140,9 +170,6 @@ class Chunk(object):
         """
         self._status_dict[old_status] -= 1
         self._status_dict[new_status] += 1
-
-    def show_life_cycle(self):
-        logging.info(f'access_moments: {self.access_moments}')
 
     def get_status(self):
         """

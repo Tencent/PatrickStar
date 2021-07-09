@@ -246,7 +246,7 @@ if __name__ == "__main__":
 
     world_size = torch.distributed.get_world_size()
 
-    plan = "GPT3_1B"
+    plan = "GPT3mid"
     if res_check:
         plan = "GPTsmall"
     if plan == "GPTsmall":
@@ -254,7 +254,7 @@ if __name__ == "__main__":
         hidden_dim = 768
         batch_size = 128
         sequence_length = 128
-        num_layer = 12
+        num_layer = 6
         num_head = 12
     elif plan == 'GPT3mid':
         # 0.35B
@@ -313,6 +313,8 @@ if __name__ == "__main__":
         sequence_length = 512
         num_layer = 32
         num_head = 40
+    if res_check:
+        batch_size = 2
 
     assert hidden_dim % num_head == 0
     logging.info(f'Benchmarking {plan}')
@@ -339,7 +341,8 @@ if __name__ == "__main__":
                                     hidden_dim=hidden_dim,
                                     batch_size=batch_size,
                                     sequence_length=sequence_length,
-                                    num_layer=num_layer)
+                                    num_layer=num_layer,
+                                    num_head=num_head)
 
         torch.cuda.empty_cache()
         print("*" * 50)
@@ -350,7 +353,8 @@ if __name__ == "__main__":
                                         hidden_dim=hidden_dim,
                                         batch_size=batch_size,
                                         sequence_length=sequence_length,
-                                        num_layer=num_layer)
+                                        num_layer=num_layer,
+                                        num_head=num_head)
 
         print('ps', loss_list)
         print('ref', loss_ref_list)

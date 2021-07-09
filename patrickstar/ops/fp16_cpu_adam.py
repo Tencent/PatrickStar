@@ -404,5 +404,11 @@ class FP16Adam(torch.optim.Optimizer):
 
         global_timer.my_timer.finish_profile('ADAM')
         mgr = PatrickStarManager()
+
+        if mgr.is_warmup_training():
+            logger.info('******** SHOW ACCESS INFO ********')
+            for idx, chunk in self.client.chunk_list.generate_chunk():
+                chunk.display_access_mom_info()
         mgr.reset_metronome()
+
         return loss

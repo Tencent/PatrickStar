@@ -83,7 +83,15 @@ class ChunkList(object):
         2. distributed
         需要获取其他进程chunk，进行一次allgather获取一个完成的global chunk
         """
+
         chunk = self.chunk_id_to_chunk_dict[chunk_id]
+
+        # 预热时注册chunk的访问时间
+        mgr = PatrickStarManager()
+        if mgr.is_warmup_training():
+            cur_mem = mgr.get_cur_mom()
+            chunk.append_moment(cur_mem, compute_device)
+
         chunk_status = chunk.get_status()
 
         payload_space = chunk.get_chunk_space()
@@ -212,7 +220,7 @@ class ChunkList(object):
         chunk_mem_size = chunk.get_payload_space()
         if free_chunk_mem_size < chunk_mem_size:
             raise RuntimeError(
-                f"chunk move failed. {device} has not {chunk_mem_size} MB memory space. Free space is {free_chunk_mem_size/1e6} MB. This is because the overall memory of CPU and GPU is not enough for the model."
+                f"chunk move failed. {device} has not {chunk_mem_size/1e6} MB memory space. Free space is {free_chunk_mem_size/1e6} MB. The reason may be that the overall memory of CPU and GPU is not enough for the model."
             )
         if chunk.get_device() != device:
             logging.log(
@@ -245,20 +253,6 @@ class ChunkList(object):
             f'allocate with new chunk chunk_id {chunk_id} size {chunk_size} data_type {data_type}'
         )
 
-    def least_used_chunk(self) -> int:
-        """"
-        返回最近被touch过的chunk
-        """
-        max_value = float('-inf')
-        pos = 0
-        for chunk_id, chunk in self.chunk_id_to_chunk_dict.items():
-            if chunk.get_timestamp() > max_value:
-                max_value = chunk.get_timestamp()
-                pos = chunk_id
-
-        logging.debug(f'least_used_chunk found chunk id {pos}')
-        return pos
-
     def generate_chunk(self) -> (int, Chunk):
         for chunk_id, chunk in self.chunk_id_to_chunk_dict.items():
             yield chunk_id, chunk
@@ -282,14 +276,6 @@ class ChunkList(object):
             status = chunk.get_status()
             self._delete_chunk(chunk)
 
-    def get_next_access_moment(self, chunk: Chunk,
-                               target_device: torch.device):
-        """
-        找到chunk在本设备上下一次被访问的moment
-        """
-        # TODO还没加入统计信息
-        return 0
-
     def _chunk_to_move_out_for_room_making(self, size_in_bytes: int,
                                            target_device: torch.device
                                            ) -> List:
@@ -304,18 +290,20 @@ class ChunkList(object):
         moved_list = []
 
         # TODO(jiaruifang)目前贪心地找到应该移动出去的chunk
-        # 不是最优策略？应该按照访问顺序。
         # 找到lifecycle被需要最晚的chunk换出
+
+        movable_chunk_info = []
+
         Q = PriorityQueue()
         for chunk_id, chunk in self.chunk_id_to_chunk_dict.items():
             if chunk.get_device() is not None and chunk.get_device(
             ).type == target_device.type and chunk.get_status(
             ) != PSChunkStatus.COMPUTE and chunk.is_pin() is False:
-                # 本设备下一次被需要的时刻？本设备下一次不被需要的时刻
-                # 如果target_device 是cuda，
-                next_mom = 0  #self.get_next_access_moment(chunk, target_device)
+                # Chunk在本设备下一次被需要的时刻
+                next_mom = chunk.next_accessed_mom(target_device)
                 # 按照next_mom从大到小排序，如果相同则按照chunk_id排序（只在预热阶段出现）
                 Q.put((-next_mom, chunk_id))
+                movable_chunk_info.append(f"{next_mom}_{chunk_id}")
             # TODO(jiaruifang)不立刻释放FREE chunk，而是让它参与复用
             # assert chunk.get_status() != PSChunkStatus.FREE
         while not Q.empty():
@@ -326,11 +314,15 @@ class ChunkList(object):
             if moved_bytes >= still_need_bytes:
                 break
 
+        mgr = PatrickStarManager()
+        logger.info(
+            f'**** EVICT INFO(next_mom, chunk_id): cur_mom {mgr.get_cur_mom()} movable_chunk_info {movable_chunk_info}, real moved_list {moved_list}'
+        )
         # 无法腾出足够空间，抛出异常
         if moved_bytes < still_need_bytes:
-            self.visit()
+            # self.visit()
             raise RuntimeError(
-                f"device {target_device} still needs {still_need_bytes/1e6} MB, but  it has not enough space, only {moved_bytes/1e6} MB available. ChunkList used memory on {target_device} is {self.get_chunk_memory_used(target_device)/1e6} MB"
+                f"device {target_device} still needs {still_need_bytes/1e6} MB, but there is not enough space on it, only {moved_bytes/1e6} MB available. chunk mem used memory on {target_device} is {self.get_chunk_memory_used(target_device)/1e6} MB"
             )
 
         return moved_list
