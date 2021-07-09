@@ -79,7 +79,7 @@ class PatrickStarManager(metaclass=SingletonMeta):
         args = get_args()
 
         # 可利用系统内存上限的比例
-        self._overall_gpu_mem_ratio = 0.6
+        self._overall_gpu_mem_ratio = 0.8
         self._overall_cpu_mem_ratio = 0.6
 
         if args.use_fake_dist:
@@ -273,7 +273,8 @@ class PatrickStarManager(metaclass=SingletonMeta):
                 if self._training_stage == TrainingStage.ADAM:
                     # ADAM时没有activation所以显存可以全部给Chunk，需要两个default chunk size做buffer，这里先预留6个
                     ava_mem = self._overall_gpu_mem - 4 * self._default_chunk_size * 4
-                    logger.info(f'available_chunk_mem is {ava_mem/1e6} MB')
+                    logger.debug(
+                        f'GPU available_chunk_mem is {ava_mem/1e6} MB')
                     return ava_mem
                 else:
                     # TODO(jiaruifang)瞎拍一个数，预热阶段三分之一GPU显存用来存储chunk
