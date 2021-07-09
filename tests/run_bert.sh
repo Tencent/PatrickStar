@@ -9,7 +9,7 @@ let CHUNK_SIZE=32*1024*1024
 
 export PYTHONPATH=../:${PYTHONPATH}
 
-# export HYBRID_ADAM_FLAG="--use_hybrid_adam"
+export HYBRID_ADAM_FLAG="--use_hybrid_adam"
 export USE_DS_ADAM="--use_deepspeed_cpu_adam"
 
 python ../patrickstar/launcher/runner.py --num_nodes 1 \
