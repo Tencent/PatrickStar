@@ -259,6 +259,9 @@ class PatrickStarClient(object):
         if not has_released_chunk:
             return
 
+        if self._time_profile:
+            global_timer.my_timer.start_profile('CLIENT_fetch_remote_chunks')
+
         logger.debug(
             f'rank {rank} fetch {param_name} remote chunks {chunk_id_list} local chunk {local_chunk_id}'
         )
@@ -290,11 +293,14 @@ class PatrickStarClient(object):
         world_size = torch.distributed.get_world_size()
         rank = torch.distributed.get_rank()
 
-        # TODO(jiaruifang) 部分process做allreduce，用dummy chunk！
         group_list = []
         for i, _ in enumerate(chunk_id_list):
             group_list.append(i)
         group = torch.distributed.new_group(group_list)
+
+        if self._time_profile:
+            global_timer.my_timer.start_profile(
+                'CLIENT_fetch_remote_chunks_allgather')
 
         logger.debug(f'rank {rank} allgather {chunk_id_list}')
         handle = torch.distributed.all_gather(allgather_payload_buff,
@@ -303,6 +309,10 @@ class PatrickStarClient(object):
                                               async_op=False)
 
         allgather_payload_buff = []
+        if self._time_profile:
+            global_timer.my_timer.finish_profile(
+                'CLIENT_fetch_remote_chunks_allgather')
+            global_timer.my_timer.finish_profile('CLIENT_fetch_remote_chunks')
 
     def access_dist(self, param: torch.nn.Parameter, access_type: AccessType,
                     compute_device: torch.device,
@@ -312,7 +322,7 @@ class PatrickStarClient(object):
             raise RuntimeError(
                 "FP16 training shall not meet tensors not registered for PS")
 
-        # 如果是Torch管理的Tensor，则直接返回
+        # 如果是Torch管理的Tensor，则直接返回，不管compute_device的意义
         if is_torch_param(param):
             # if access_type == AccessType.DATA:
             #     param.data.to(compute_device)
