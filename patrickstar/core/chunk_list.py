@@ -316,7 +316,7 @@ class ChunkList(object):
 
         mgr = PatrickStarManager()
         logger.info(
-            f'**** EVICT INFO(next_mom, chunk_id): cur_mom {mgr.get_cur_mom()} movable_chunk_info {movable_chunk_info}, real moved_list {moved_list}'
+            f'**** EVICT INFO(next_mom, chunk_id) {target_device}: cur_mom {mgr.get_cur_mom()} movable_chunk_info {movable_chunk_info}, real moved_list {moved_list}'
         )
         # 无法腾出足够空间，抛出异常
         if moved_bytes < still_need_bytes:

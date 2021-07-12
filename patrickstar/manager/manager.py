@@ -82,9 +82,11 @@ class PatrickStarManager(metaclass=SingletonMeta):
 
         args = get_args()
 
-        # 可利用系统内存上限的比例
+        # 需要设置的超参数
         self._overall_gpu_mem_ratio = 0.8
         self._overall_cpu_mem_ratio = 0.6
+        self._margin_use_ratio = 0.8
+        self.warmup_gpu_chunk_mem_ratio = 0.4
 
         if args.use_fake_dist:
             rank = 0
@@ -129,9 +131,6 @@ class PatrickStarManager(metaclass=SingletonMeta):
         self._margin_chunk_num_for_gpu_adam = 0
         self._default_chunk_size = 0
 
-        self._margine_use_ratio = 0.6
-        self.warmup_gpu_chunk_mem_ratio = 0.4
-
     def is_warmup_training(self):
         return self._start_training and self.warmup
 
@@ -154,7 +153,7 @@ class PatrickStarManager(metaclass=SingletonMeta):
         margin_mem_size = self._overall_gpu_mem - max_gpu_sys_used - self._param_fp16_chunk_size
         # 12 = 4 + 4 + 4 fp32 + m + v
         self._margin_chunk_num_for_gpu_adam = (margin_mem_size) / (
-            self._default_chunk_size * 12) * self._margine_use_ratio
+            self._default_chunk_size * 12) * self._margin_use_ratio
 
         logger.info("*********** GPU INFO AFTER BWD ***************")
         logger.info(
