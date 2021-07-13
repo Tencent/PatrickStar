@@ -43,8 +43,11 @@ class GlobalTimer(object):
 
     def print(self):
         logging.info('*********** PROFILE RESULTS *************')
+        overall_elapse = 0.
         for k, v in self.elapse_stat.items():
-            logging.info(f'{k}: {v}')
+            overall_elapse += v
+        for k, v in self.elapse_stat.items():
+            logging.info(f'{k}, {v}, {v/overall_elapse*100} %')
 
 
 my_timer = GlobalTimer()
@@ -53,16 +56,6 @@ my_timer = GlobalTimer()
 # 数据移动
 class DataMoveCnter(object):
     def __init__(self):
-        # self.gpu_to_cpu_times = 0
-        # self.gpu_to_cpu_amount = 0
-        # self.param_fp32_to_fp16_copy_times = 0
-        # self.param_fp32_to_fp16_copy_amount = 0
-
-        # self.cpu_to_gpu_times = 0
-        # self.cpu_to_gpu_amount = 0
-        # self.grad_fp16_to_fp32_copy_times = 0
-        # self.grad_fp16_to_fp32_copy_data_amount = 0
-
         self.amount_dict = {}
         self.times_dict = {}
 
@@ -81,8 +74,16 @@ class DataMoveCnter(object):
 
     def print(self):
         logging.info('*********** DATA MOVE RESULTS *************')
+        global my_timer
         for k, v in self.times_dict.items():
-            logging.info(f'{k}: {self.amount_dict[k]/1024/1024} MB, {v} times')
+            bwd = 0
+            if k in my_timer.elapse_stat and self.amount_dict[k] != 0:
+                bwd = self.amount_dict[k] / my_timer.elapse_stat[k]
+                logging.info(
+                    f'{k}: {self.amount_dict[k]/1024/1024} MB, {v} times, {bwd/1024/1024} MB/s'
+                )
+            else:
+                logging.info(f'{k}: {self.amount_dict[k]/1024/1024} MB')
         logging.info('\n\n')
 
 

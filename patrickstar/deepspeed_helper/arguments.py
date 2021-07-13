@@ -44,6 +44,7 @@ def parse_args(extra_args_provider=None,
 
     # Standard arguments.
     parser = _add_patrick_star_args(parser)
+    parser = _add_test_bert_args(parser)
     # parser = _add_network_size_args(parser)
     # parser = _add_regularization_args(parser)
     # parser = _add_training_args(parser)
@@ -103,8 +104,8 @@ def _check_arg_is_not_none(args, arg):
     assert getattr(args, arg) is not None, '{} argument is None'.format(arg)
 
 
-def _add_patrick_star_args(parser):
-    group = parser.add_argument_group(title='partickstar')
+def _add_test_bert_args(parser):
+    group = parser.add_argument_group(title='test_bert')
     group.add_argument('--use_ckp',
                        dest='use_ckp',
                        action='store_true',
@@ -121,6 +122,15 @@ def _add_patrick_star_args(parser):
                        dest='use_ps',
                        action='store_true',
                        help='using Hybrid PS for training.')
+    group.add_argument('--model_name',
+                       type=str,
+                       default='GPTsmall',
+                       help='The model name.')
+    return parser
+
+
+def _add_patrick_star_args(parser):
+    group = parser.add_argument_group(title='partickstar')
     group.add_argument('--use_fake_dist',
                        dest='use_fake_dist',
                        action='store_true',

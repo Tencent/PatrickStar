@@ -268,6 +268,7 @@ class PatrickStarClient(object):
         allgather_payload_buff = []
 
         local_chunk_payload = None
+        comm_data_amount = 0
         for chunk_id in chunk_id_list:
             if chunk_id == local_chunk_id:
                 local_chunk_payload = self.chunk_list[chunk_id].payload
@@ -283,15 +284,14 @@ class PatrickStarClient(object):
                                                      PSTensorStatus.HOLD)
                 allgather_payload_buff.append(
                     self.chunk_list[chunk_id].payload)
-
+        comm_data_amount = len(
+            allgather_payload_buff) * allgather_payload_buff[0].numel(
+            ) * 2  # half = 2 bytes
         for chunk_id in chunk_id_list:
             self.chunk_list[chunk_id].unpin()
 
         assert torch.distributed.is_initialized(
         ), "torch distributed is not initialized during allgather"
-
-        world_size = torch.distributed.get_world_size()
-        rank = torch.distributed.get_rank()
 
         group_list = []
         for i, _ in enumerate(chunk_id_list):
@@ -312,6 +312,8 @@ class PatrickStarClient(object):
         if self._time_profile:
             global_timer.my_timer.finish_profile(
                 'CLIENT_fetch_remote_chunks_allgather')
+            global_timer.data_move_cnter.update(
+                'CLIENT_fetch_remote_chunks_allgather', comm_data_amount)
             global_timer.my_timer.finish_profile('CLIENT_fetch_remote_chunks')
 
     def access_dist(self, param: torch.nn.Parameter, access_type: AccessType,
@@ -538,7 +540,7 @@ class PatrickStarClient(object):
 
         # 找到需要删除的chunk，先删除chunk关联的tensors
         if access_type == AccessType.DATA:
-            # NOTE(jiaruifang) 必须device和原来param一直，影响hook of param.grad_fn.next_functions[0][0]
+            # NOTE(jiaruifang) 必须device和原来param一致，影响hook of param.grad_fn.next_functions[0][0]
             param.data = torch.zeros(1, dtype=param.dtype, device=param.device)
         elif access_type == AccessType.GRAD:
             param.grad = None
@@ -607,6 +609,10 @@ class PatrickStarClient(object):
                     # 不应该除以world_size,减去dummy chunk个数
                     self.chunk_list[local_chunk_id].payload /= world_size
                     if self._time_profile:
+                        global_timer.data_move_cnter.update(
+                            'CLIENT_release_dist_reduce_scatter',
+                            self.chunk_list[local_chunk_id].payload.numel() *
+                            2 * world_size)
                         global_timer.my_timer.finish_profile(
                             'CLIENT_release_dist_reduce_scatter')
 

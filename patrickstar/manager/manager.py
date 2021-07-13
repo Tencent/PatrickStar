@@ -108,7 +108,7 @@ class PatrickStarManager(metaclass=SingletonMeta):
             )
 
         logger.info(
-            f'Init Manager over all gpu mem {self._overall_gpu_mem/1e6} MB, cpu mem {self._overall_cpu_mem}'
+            f'Init Manager over all gpu mem {self._overall_gpu_mem/1e6} MB, cpu mem {self._overall_cpu_mem/1e6} MB'
         )
         # 统计信息
         self.cpu_used_list = []
