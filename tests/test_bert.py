@@ -89,9 +89,9 @@ def test_bert_model(is_ckp: bool = False,
     eps = 1e-6
     weight_decay = 0
 
+    # torch version
     if not is_ps:
         model = BertForSequenceClassification(cfg)
-
         model.cuda(rank)
         if is_fp16:
             model = FP16_Module(model)
@@ -108,35 +108,25 @@ def test_bert_model(is_ckp: bool = False,
         model = torch.nn.parallel.DistributedDataParallel(model,
                                                           device_ids=[rank])
     else:
-        if is_fp16:
-            client = PatrickStarClient(
-                rank=rank,
-                default_chunk_size=args.default_chunk_size,
-                warmup=True,
-                is_fp16=True)
+        assert is_fp16, f"use_ps must use fp16"
+        client = PatrickStarClient(rank=rank,
+                                   default_chunk_size=args.default_chunk_size,
+                                   warmup=True,
+                                   is_fp16=True)
 
-            with Init(dtype=torch.float, client=client):
-                model = BertForSequenceClassification(
-                    cfg, use_cpu_embedding=args.use_cpu_embedding)
+        with Init(dtype=torch.float, client=client):
+            model = BertForSequenceClassification(
+                cfg, use_cpu_embedding=args.use_cpu_embedding)
 
-            model, optimizer, _, _ = initialize_engine(
-                args=None,
-                model=model,
-                client=client,
-                model_parameters=model.parameters(),
-                lr=lr,
-                betas=betas,
-                eps=eps,
-                weight_decay=weight_decay)
-        else:
-            model = BertForSequenceClassification(cfg)
-            client = PatrickStarClient(
-                rank=rank,
-                default_chunk_size=args.default_chunk_size,
-                warmup=True,
-                is_fp16=is_fp16)
-            optimizer = CPUAdam(client, model.parameters(), lr=lr)
-            client.init(model, optimizer)
+        model, optimizer, _, _ = initialize_engine(
+            args=None,
+            model=model,
+            client=client,
+            model_parameters=model.parameters(),
+            lr=lr,
+            betas=betas,
+            eps=eps,
+            weight_decay=weight_decay)
 
     model_numel = get_ps_model_size(model)
     total_macs = estimate_bert_MAC(cfg, batch_size, sequence_length)
@@ -146,7 +136,7 @@ def test_bert_model(is_ckp: bool = False,
 
     data_loader = get_bert_data_loader(
         batch_size=batch_size,
-        total_samples=1000,
+        total_samples=10000,
         sequence_length=sequence_length,
         device=device,
         data_type=torch.half if is_fp16 else torch.float,
@@ -206,9 +196,9 @@ def test_bert_model(is_ckp: bool = False,
 
         if is_ps:
             global_timer.my_timer.print()
-            global_timer.my_timer.reset()
-
             global_timer.data_move_cnter.print()
+
+            global_timer.my_timer.reset()
             global_timer.data_move_cnter.reset()
         if n == stop_step: break
 
@@ -246,7 +236,7 @@ if __name__ == "__main__":
 
     world_size = torch.distributed.get_world_size()
 
-    plan = "GPT3mid"
+    plan = args.model_name
     if res_check:
         plan = "GPTsmall"
     if plan == "GPTsmall":
@@ -313,6 +303,8 @@ if __name__ == "__main__":
         sequence_length = 512
         num_layer = 32
         num_head = 40
+    else:
+        raise RuntimeError("The model name is not valid!")
     if res_check:
         batch_size = 2
 
