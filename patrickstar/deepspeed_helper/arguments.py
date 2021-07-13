@@ -32,7 +32,7 @@ import os
 
 import torch
 
-# import deepspeed
+import deepspeed
 
 
 def parse_args(extra_args_provider=None,
@@ -57,7 +57,7 @@ def parse_args(extra_args_provider=None,
     # parser = _add_data_args(parser)
     # parser = _add_autoresume_args(parser)
     # parser = _add_realm_args(parser)
-    # parser = _add_zero_args(parser)
+    parser = _add_zero_args(parser)
     # parser = _add_memoryopt_args(parser)
     # parser = _add_activation_checkpoint_args(parser)
 
@@ -66,7 +66,7 @@ def parse_args(extra_args_provider=None,
         parser = extra_args_provider(parser)
 
     # Include DeepSpeed configuration arguments
-    # parser = deepspeed.add_config_arguments(parser)
+    parser = deepspeed.add_config_arguments(parser)
 
     # Parse.
     if ignore_unknown_args:
@@ -122,6 +122,10 @@ def _add_test_bert_args(parser):
                        dest='use_ps',
                        action='store_true',
                        help='using Hybrid PS for training.')
+    group.add_argument('--use_ds',
+                       dest='use_ds',
+                       action='store_true',
+                       help='using DeepSpeed for training.')
     group.add_argument('--model_name',
                        type=str,
                        default='GPTsmall',

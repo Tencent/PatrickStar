@@ -46,6 +46,7 @@ def show_params(model, is_ps, step):
 def test_bert_model(is_ckp: bool = False,
                     is_fp16: bool = False,
                     is_ps: bool = False,
+                    is_ds: bool = False,
                     use_cpu_embedding: bool = False,
                     batch_size=32,
                     hidden_dim=768,
@@ -90,7 +91,19 @@ def test_bert_model(is_ckp: bool = False,
     weight_decay = 0
 
     # torch version
-    if not is_ps:
+    if is_ds:
+        import deepspeed
+        model = BertForSequenceClassification(cfg)
+        model.cuda(rank)
+        optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+        model, optimizer, _, lr_scheduler = deepspeed.initialize(
+            model=model,
+            optimizer=optimizer,
+            args=args,
+            lr_scheduler=None,
+            mpu=None,
+            dist_init_required=True)
+    elif not is_ps:
         model = BertForSequenceClassification(cfg)
         model.cuda(rank)
         if is_fp16:
@@ -107,7 +120,7 @@ def test_bert_model(is_ckp: bool = False,
         # DPP 不能要求模型部分在cpu部分在gpu
         model = torch.nn.parallel.DistributedDataParallel(model,
                                                           device_ids=[rank])
-    else:
+    elif is_ps:
         assert is_fp16, f"use_ps must use fp16"
         client = PatrickStarClient(rank=rank,
                                    default_chunk_size=args.default_chunk_size,
@@ -127,6 +140,8 @@ def test_bert_model(is_ckp: bool = False,
             betas=betas,
             eps=eps,
             weight_decay=weight_decay)
+    else:
+        raise RuntimeError
 
     model_numel = get_ps_model_size(model)
     total_macs = estimate_bert_MAC(cfg, batch_size, sequence_length)
@@ -167,7 +182,9 @@ def test_bert_model(is_ckp: bool = False,
         loss_res.append(loss.item())
 
         # logging.info(f'FWD finished moment {timer.moment()}')
-        if not is_ps:
+        if is_ds:
+            model.backward(loss)
+        elif not is_ps:
             if is_fp16:
                 optimizer.zero_grad(set_grads_to_None=True)
                 optimizer.backward(loss, update_master_grads=False)
@@ -175,7 +192,7 @@ def test_bert_model(is_ckp: bool = False,
             else:
                 optimizer.zero_grad()
                 loss.backward()
-        else:
+        elif is_ps:
             if is_fp16:
                 model.backward(loss)
             else:
@@ -183,7 +200,10 @@ def test_bert_model(is_ckp: bool = False,
                 loss.backward()
 
         # logging.info(f'BWD finished moment {timer.moment()}')
-        optimizer.step()
+        if is_ds:
+            model.step()
+        else:
+            optimizer.step()
 
         see_memory_usage(
             f"ckp {is_ckp} fp16 {is_fp16} ps {is_ps}  after step {n}",
@@ -204,9 +224,9 @@ def test_bert_model(is_ckp: bool = False,
 
     elapse = time.time() - start_time
 
-    if is_ps:
-        mgr = PatrickStarManager()
-        mgr.show_mem_curve()
+    # if is_ps:
+    #     mgr = PatrickStarManager()
+    #     mgr.show_mem_curve()
 
     logging.info("*" * 20)
     return loss_res
@@ -225,6 +245,7 @@ if __name__ == "__main__":
     use_ckp = args.use_ckp
     use_fp16 = args.use_fp16
     use_ps = args.use_ps
+    use_ds = args.use_ds
     # 检查结果正确性
     res_check = args.res_check
     # hidden_dim 1024, batch 16, seqence_leng 1024, ckp True.
@@ -238,7 +259,7 @@ if __name__ == "__main__":
 
     plan = args.model_name
     if res_check:
-        plan = "GPTsmall"
+        plan = "GPT3larger"
     if plan == "GPTsmall":
         # 0.11B
         hidden_dim = 768
@@ -316,6 +337,7 @@ if __name__ == "__main__":
         loss_list = test_bert_model(is_ckp=use_ckp,
                                     is_fp16=use_fp16,
                                     is_ps=use_ps,
+                                    is_ds=use_ds,
                                     batch_size=batch_size,
                                     hidden_dim=hidden_dim,
                                     sequence_length=sequence_length,
