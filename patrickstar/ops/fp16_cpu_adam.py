@@ -153,7 +153,7 @@ class FP16Adam(torch.optim.Optimizer):
 
             # 以chunk为粒度拷贝grad fp16 (FWD+BWD计算设备GPU, CPU如果被换出了) -> grad fp32 (Adam计算设备CPU or GPU如果margin空间足够)
             if is_torch_param(fp16_param):
-                # 如果fp16_param被Torc管理，则它肯定在cpu上，cpu_embedding优化引起的
+                # 如果fp16_param被Torch管理，则它肯定在cpu上，cpu_embedding优化引起的
                 assert fp16_param.data.device.type == 'cpu'
                 fp32_grad_tensor = fp16_param.data.float()
             else:

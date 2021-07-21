@@ -277,6 +277,7 @@ class PatrickStarClient(object):
                 self.chunk_list.prepare_device(
                     compute_device,
                     self.chunk_list[chunk_id].get_chunk_space())
+                # TODO(jiaruifang) 此处不应现分配空间，用一个复用的comm_buffer
                 self.chunk_list[chunk_id].allocate_payload(compute_device)
                 # 刚分配的chunk，以备allgather使用，allgather之前不要被换出。
                 self.chunk_list[chunk_id].pin()

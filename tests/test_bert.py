@@ -69,8 +69,6 @@ def test_bert_model(is_ckp: bool = False,
 
     device = torch.device(f'cuda:{rank}')
 
-    # TODO(jiaruifang) 把vocab size调小，WE层需要特殊处理？
-    # rank 0在cpu上计算？
     if is_ckp:
         cfg = BertConfig(gradient_checkpointing=True,
                          hidden_size=hidden_dim,
@@ -92,6 +90,7 @@ def test_bert_model(is_ckp: bool = False,
 
     # torch version
     if is_ds:
+        # TODO 测试并不正确
         import deepspeed
         model = BertForSequenceClassification(cfg)
         model.cuda(rank)
@@ -146,6 +145,11 @@ def test_bert_model(is_ckp: bool = False,
     model_numel = get_ps_model_size(model)
     total_macs = estimate_bert_MAC(cfg, batch_size, sequence_length)
 
+    # deepspeed profiler
+    prof = FlopsProfiler(model)
+    profile_step = 1
+    print_profile = False
+
     see_memory_usage(
         f"ckp {is_ckp} fp16 {is_fp16} ps {is_ps} after model init", force=True)
 
@@ -169,17 +173,32 @@ def test_bert_model(is_ckp: bool = False,
             param_fp16_chunk_size=client.get_param_fp16_chunks_mem_size(),
             chunk_size=args.default_chunk_size)
 
-    # logging.info(f"{total_macs/1e9/(elapse/(stop_step+1))} GFlops")
-    logging.info(f"model numel {model_numel/1e9} B")
+    logging.info(
+        f"MAC {total_macs/1e9} GFlop, model numel {model_numel/1e9} B")
 
     for n, batch in enumerate(data_loader):
         step_start_time = time.time()
+        if n % profile_step == 0:
+            prof.start_profile()
+
         output = model(input_ids=batch[0], labels=batch[1])
         loss = output.loss
         logits = output.logits
         # if torch.distributed.get_rank() == 0:
         logging.info(f"LOSS of step {n}: {loss.item()}")
         loss_res.append(loss.item())
+
+        if n % profile_step == 0:  # if using multi nodes, check global_rank == 0 as well
+            prof.stop_profile()
+            ds_flops = prof.get_total_flops(as_string=False) * 2 * 3
+            ds_params = prof.get_total_params(as_string=False)
+            logging.info(
+                f'ds flops {ds_flops/1e9}, nvidia flops {total_macs/1e9}')
+            logging.info(
+                f'ds models {ds_params/1e9}, nvidia model {model_numel/1e9}')
+            if print_profile:
+                prof.print_model_profile(profile_step=profile_step)
+            prof.end_profile()
 
         # logging.info(f'FWD finished moment {timer.moment()}')
         if is_ds:
@@ -213,6 +232,7 @@ def test_bert_model(is_ckp: bool = False,
         logging.info(
             f"ckp {is_ckp} fp16 {is_fp16} ps {is_ps}: step elapse {step_elapse} sec/iter, {total_macs/1e9/step_elapse} GFlops"
         )
+        logging.info(f" {ds_flops/1e9/step_elapse} GFlops")
 
         if is_ps:
             global_timer.my_timer.print()
@@ -260,74 +280,77 @@ if __name__ == "__main__":
     plan = args.model_name
     if res_check:
         plan = "GPT3larger"
-    if plan == "GPTsmall":
+    if plan == "Bert":
         # 0.11B
         hidden_dim = 768
-        batch_size = 128
-        sequence_length = 128
+        sequence_length = 512
         num_layer = 6
         num_head = 12
-    elif plan == 'GPT3mid':
+    elif plan == 'Bertlarge':
         # 0.35B
         # PatrickStar and Torch都可以
         hidden_dim = 1024
-        batch_size = 128
-        sequence_length = 128
+        sequence_length = 512
         num_layer = 24
         num_head = 16
-    elif plan == 'GPT3large':
+    elif plan == 'GPT2small':
         # 0.7B
         hidden_dim = 1536
-        batch_size = 64
         sequence_length = 128
         num_layer = 24
         num_head = 16
-    elif plan == 'GPT3_1B':
+    elif plan == 'GPT2_1B':
         # 0.9B
-        hidden_dim = 1536
-        batch_size = 64
-        sequence_length = 128
-        num_layer = 30
-        num_head = 16
-    elif plan == 'GPT3larger':
-        # 1.27B
         hidden_dim = 2048
-        batch_size = 8
-        sequence_length = 128
-        num_layer = 24
+        sequence_length = 1024
+        num_layer = 20
         num_head = 16
-    elif plan == 'GPT3XL':
-        # 1.3B model
+    elif plan == 'megatron_1.3B':
         hidden_dim = 2048
-        batch_size = 8
-        sequence_length = 512
+        sequence_length = 1024
         num_layer = 24
         num_head = 32
-    elif plan == 'GPT3_2B':
-        # 2.7B model
-        hidden_dim = 2560  #2048
-        batch_size = 8
-        sequence_length = 128
-        num_layer = 32
-        num_head = 32
+    elif plan == 'GPT2_2B':
+        # zero-offload
+        hidden_dim = 2048
+        sequence_length = 1024
+        num_layer = 40
+        num_head = 16
+    elif plan == 'megatron_3.9B':
+        # Table 4 in Megatron Paper
+        hidden_dim = 2560
+        sequence_length = 1024
+        num_layer = 24
+        num_head = 40
+    elif plan == 'GPT2_4B':
+        hidden_dim = 2304  #2048
+        sequence_length = 1024
+        num_layer = 64
+        num_head = 16
     elif plan == 'GPT3_6B':
         # 6.7B model
-        hidden_dim = 4096
-        batch_size = 8
-        sequence_length = 512
-        num_layer = 32
-        num_head = 32
+        hidden_dim = 3072
+        sequence_length = 1024
+        num_layer = 53
+        num_head = 16
+    elif plan == 'GPT3_8B':
+        # 6.7B model
+        hidden_dim = 3072
+        sequence_length = 1024
+        num_layer = 72
+        num_head = 16
     elif plan == 'GPT3_10B':
         # 13B model
-        hidden_dim = 5140
-        batch_size = 8
-        sequence_length = 512
+        hidden_dim = 4096
+        sequence_length = 1024
         num_layer = 32
-        num_head = 40
+        num_head = 16
     else:
-        raise RuntimeError("The model name is not valid!")
+        raise RuntimeError(f"The model name {plan} is not valid!")
     if res_check:
         batch_size = 2
+    else:
+        batch_size = args.batch_size
 
     assert hidden_dim % num_head == 0
     logging.info(f'Benchmarking {plan}')
@@ -343,7 +366,7 @@ if __name__ == "__main__":
                                     sequence_length=sequence_length,
                                     num_layer=num_layer,
                                     num_head=num_head,
-                                    stop_step=5)
+                                    stop_step=20)
         print(loss_list)
     # calculate_mem_need(hidden_dim = hidden_dim, batch_size = batch_size, is_fp16 = use_fp16)
 

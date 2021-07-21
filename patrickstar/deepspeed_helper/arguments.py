@@ -139,17 +139,13 @@ def _add_patrick_star_args(parser):
                        dest='use_fake_dist',
                        action='store_true',
                        help='using one GPU to stimulate multiple card.')
-    group.add_argument('--max_gpu_memory',
+    group.add_argument('--batch_size',
                        type=int,
-                       default=None,
-                       help='Max GPU Memory.')
-    group.add_argument('--max_cpu_memory',
-                       type=int,
-                       default=None,
-                       help='Max CPU Memory.')
+                       default=32,
+                       help='Batch size of input.')
     group.add_argument('--default_chunk_size',
                        type=int,
-                       default=1024 * 1024,
+                       default=32 * 1024 * 1024,
                        help='Default Chunk Size in elements.')
 
     group.add_argument(

@@ -101,7 +101,7 @@ fi
 full_options="${deepspeed_options}"
 
 #  ${chkp_opt} ${tile_opt}
-export MODEL_NAME="GPTsmall"
+export MODEL_NAME="Bert"
 
 run_cmd="deepspeed --num_nodes ${NUM_WORKERS} --num_gpus ${NUM_GPUS_PER_WORKER} test_bert.py --use_ckp --use_ds ${@:2} ${full_options} --model_name=${MODEL_NAME}"
 echo ${run_cmd}
