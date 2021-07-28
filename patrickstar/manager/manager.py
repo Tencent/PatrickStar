@@ -83,10 +83,10 @@ class PatrickStarManager(metaclass=SingletonMeta):
         args = get_args()
 
         # 需要设置的超参数
-        self._overall_gpu_mem_ratio = 0.8
-        self._overall_cpu_mem_ratio = 0.6
-        self._margin_use_ratio = 0.8
-        self.warmup_gpu_chunk_mem_ratio = 0.4
+        self._overall_gpu_mem_ratio = args.overall_gpu_mem_ratio
+        self._overall_cpu_mem_ratio = args.overall_cpu_mem_ratio
+        self._margin_use_ratio = args.margin_use_ratio
+        self.warmup_gpu_chunk_mem_ratio = args.warmup_gpu_chunk_mem_ratio
 
         if args.use_fake_dist:
             rank = 0

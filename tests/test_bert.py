@@ -32,6 +32,7 @@ from patrickstar.deepspeed_helper.global_vars import set_global_variables
 from patrickstar.deepspeed_helper.global_vars import get_args
 from patrickstar.manager import PatrickStarManager
 from patrickstar.utils.model_size_calculator import get_ps_model_size, estimate_bert_MAC
+from deepspeed.profiling.flops_profiler import FlopsProfiler
 
 
 def show_params(model, is_ps, step):
@@ -143,12 +144,8 @@ def test_bert_model(is_ckp: bool = False,
         raise RuntimeError
 
     model_numel = get_ps_model_size(model)
-    total_macs = estimate_bert_MAC(cfg, batch_size, sequence_length)
-
-    # deepspeed profiler
-    prof = FlopsProfiler(model)
-    profile_step = 1
-    print_profile = False
+    total_macs = estimate_bert_MAC(cfg, batch_size, sequence_length,
+                                   model_numel)
 
     see_memory_usage(
         f"ckp {is_ckp} fp16 {is_fp16} ps {is_ps} after model init", force=True)
@@ -178,8 +175,6 @@ def test_bert_model(is_ckp: bool = False,
 
     for n, batch in enumerate(data_loader):
         step_start_time = time.time()
-        if n % profile_step == 0:
-            prof.start_profile()
 
         output = model(input_ids=batch[0], labels=batch[1])
         loss = output.loss
@@ -187,18 +182,6 @@ def test_bert_model(is_ckp: bool = False,
         # if torch.distributed.get_rank() == 0:
         logging.info(f"LOSS of step {n}: {loss.item()}")
         loss_res.append(loss.item())
-
-        if n % profile_step == 0:  # if using multi nodes, check global_rank == 0 as well
-            prof.stop_profile()
-            ds_flops = prof.get_total_flops(as_string=False) * 2 * 3
-            ds_params = prof.get_total_params(as_string=False)
-            logging.info(
-                f'ds flops {ds_flops/1e9}, nvidia flops {total_macs/1e9}')
-            logging.info(
-                f'ds models {ds_params/1e9}, nvidia model {model_numel/1e9}')
-            if print_profile:
-                prof.print_model_profile(profile_step=profile_step)
-            prof.end_profile()
 
         # logging.info(f'FWD finished moment {timer.moment()}')
         if is_ds:
@@ -232,7 +215,6 @@ def test_bert_model(is_ckp: bool = False,
         logging.info(
             f"ckp {is_ckp} fp16 {is_fp16} ps {is_ps}: step elapse {step_elapse} sec/iter, {total_macs/1e9/step_elapse} GFlops"
         )
-        logging.info(f" {ds_flops/1e9/step_elapse} GFlops")
 
         if is_ps:
             global_timer.my_timer.print()
@@ -343,7 +325,7 @@ if __name__ == "__main__":
         # 13B model
         hidden_dim = 4096
         sequence_length = 1024
-        num_layer = 32
+        num_layer = 50
         num_head = 16
     else:
         raise RuntimeError(f"The model name {plan} is not valid!")

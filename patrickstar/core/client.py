@@ -28,7 +28,7 @@ from .chunk_tensor_index import ChunkTensorIndex
 from .chunk_schema_scheduler import ChunkShemaScheduler
 from .parameter import PSParameter, register_param, is_param_registed, is_torch_param
 import patrickstar.utils.global_timer as global_timer
-from patrickstar.utils.memory_monitor import get_sys_memory_used
+from patrickstar.utils.memory_monitor import get_sys_memory_used, see_memory_usage
 from patrickstar.utils import logger
 from patrickstar.deepspeed_helper.global_vars import get_args
 from patrickstar.manager import PatrickStarManager
@@ -277,7 +277,7 @@ class PatrickStarClient(object):
                 self.chunk_list.prepare_device(
                     compute_device,
                     self.chunk_list[chunk_id].get_chunk_space())
-                # TODO(jiaruifang) 此处不应现分配空间，用一个复用的comm_buffer
+                # TODO(jiaruifang) 此处可以不分配空间，用一个复用的comm_buffer
                 self.chunk_list[chunk_id].allocate_payload(compute_device)
                 # 刚分配的chunk，以备allgather使用，allgather之前不要被换出。
                 self.chunk_list[chunk_id].pin()
@@ -594,6 +594,7 @@ class PatrickStarClient(object):
                             op=torch.distributed.ReduceOp.SUM,
                             group=group,
                             async_op=False)
+                        input_list = []
                     else:
                         # Note()为了在开发机调试方便
                         # 它非常慢 4.92 sec/5.89 sec (client_release_elapse)
