@@ -3,7 +3,7 @@ export GPU_NUM=${GPU_NUM:-1}
 export CS=${CS:-64}
 export BS=${BS:-16}
 export CPU_EBD=${CPU_EBD:-1}
-export MODEL_NAME=${MODEL_NAME:-"GPT3_10B"}
+export MODEL_NAME=${MODEL_NAME:-"Bertlarge"}
 
 export margin_use_ratio=${margin_use_ratio:-0.8}
 # if warmup fails, lower the ratio
