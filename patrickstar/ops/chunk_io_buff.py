@@ -21,11 +21,17 @@ from patrickstar.deepspeed_helper.global_vars import get_args
 
 class FP16ChunkWriteBuffer(object):
     def __init__(self, chunk_list: ChunkList,
-                 chunk_tensor_index: ChunkTensorIndex):
+                 chunk_tensor_index: ChunkTensorIndex, chunk_size: int):
         self.chunk_list = chunk_list
         self.chunk_tensor_index = chunk_tensor_index
         self.cached_src_chunk_id = None
         self.cached_target_chunk_id = None
+        args = get_args()
+        if args.use_gpu_fp32_convert_for_adam:
+            self.gpu_fp16_buff = torch.zeros(
+                chunk_size,
+                dtype=torch.half,
+                device=torch.device(f'cuda:{args.local_rank}'))
 
     def write_from_cache(self, target_param, src_param):
         """
@@ -33,6 +39,7 @@ class FP16ChunkWriteBuffer(object):
         则把src_param的chunk写到target_param所在的chunk中
         可能是cpu向gpu移动
         """
+        args = get_args()
         if is_torch_param(src_param):
             return target_param.data.copy_(src_param.data)
         else:
@@ -50,8 +57,14 @@ class FP16ChunkWriteBuffer(object):
                 logger.info(
                     f'Write chunk {self.cached_src_chunk_id} -> {self.cached_target_chunk_id}, {src_device} -> {target_device}'
                 )
-                self.chunk_list[self.cached_target_chunk_id].payload.copy_(
-                    self.chunk_list[self.cached_src_chunk_id].payload)
+                if args.use_gpu_fp32_convert_for_adam and target_device.type == 'cuda' and src_device.type == 'cpu':
+                    self.gpu_fp16_buff.copy_(
+                        self.chunk_list[self.cached_src_chunk_id].payload)
+                    self.chunk_list[self.cached_target_chunk_id].payload.copy_(
+                        self.gpu_fp16_buff)
+                else:
+                    self.chunk_list[self.cached_target_chunk_id].payload.copy_(
+                        self.chunk_list[self.cached_src_chunk_id].payload)
             self.cached_src_chunk_id = src_info.chunk_id
             self.cached_target_chunk_id = target_info.chunk_id
 
@@ -92,6 +105,10 @@ class FP32ChunkReadBuffer(object):
                                        dtype=torch.float,
                                        device=torch.device('cpu:0'),
                                        pin_memory=True)
+        self.fp32_gpu_buffer = torch.empty(
+            chunk_size,
+            dtype=torch.float,
+            device=torch.device(f'cuda:{args.local_rank}'))
         logger.info(
             f"Allocate fp32 Chunk Buffer of size {chunk_size/1e6} MB on CPU.")
         if margin_chunk_num_for_gpu_adam > 0:
@@ -145,8 +162,13 @@ class FP32ChunkReadBuffer(object):
                         self.chunk_list[info.chunk_id].payload)
                     self.ret_payload = self.gpu_payload
                 elif target_device.type == 'cpu':
-                    self.cpu_payload.copy_(
-                        self.chunk_list[info.chunk_id].payload)
+                    if args.use_gpu_fp32_convert_for_adam:
+                        self.fp32_gpu_buffer.copy_(
+                            self.chunk_list[info.chunk_id].payload)
+                        self.cpu_payload.copy_(self.fp32_gpu_buffer)
+                    else:
+                        self.cpu_payload.copy_(
+                            self.chunk_list[info.chunk_id].payload)
                     self.ret_payload = self.cpu_payload
                 logger.info(
                     f'read chunk to cache {self.cached_chunk_id} {self.chunk_list[info.chunk_id].payload.device} ({self.chunk_list[info.chunk_id].payload.dtype}) -> {self.ret_payload.device} (Float)'

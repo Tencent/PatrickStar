@@ -391,7 +391,8 @@ class FP16Adam(torch.optim.Optimizer):
             self.client.chunk_list, self.client.chunk_tensor_index,
             max_chunk_size, margin_chunk_num_for_gpu_adam)
         self.write_chunk_buff = FP16ChunkWriteBuffer(
-            self.client.chunk_list, self.client.chunk_tensor_index)
+            self.client.chunk_list, self.client.chunk_tensor_index,
+            max_chunk_size)
 
         # 混合ADMA，根据预热获得的信息，放一部分Chunk在GPU上。
         self.FP16_f_adamv2(self.client, fp32_param_list,

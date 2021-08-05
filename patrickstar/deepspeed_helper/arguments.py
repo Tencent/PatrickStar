@@ -185,9 +185,14 @@ def _add_patrick_star_args(parser):
                        type=float,
                        default=0.7,
                        help='GPu margin use ratio')
-    group.add_argument('--always_warmup',
-                       action='store_true',
-                       help='always warmup.')
+    group.add_argument(
+        '--always_warmup',
+        action='store_true',
+        help='always warmup cancel dynamic GPU chunkable memory.')
+    group.add_argument(
+        '--use_gpu_fp32_convert_for_adam',
+        action='store_true',
+        help='use gpu fp32 convert for adam grad fp16 -> grad fp32.')
     return parser
 
 

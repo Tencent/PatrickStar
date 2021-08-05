@@ -29,7 +29,7 @@ for CS in 128 64 48 32
 do
 for CPU_EBD in 1 0
 do
-for AW in 0 1 
+for AW in 0 1
 do
 let CHUNK_SIZE=${CS}*1024*1024
 
@@ -48,6 +48,13 @@ else
 export always_warmup=""
 fi
 
+export GPU_BOOST_ADAM=1
+
+if [[ ${GPU_BOOST_ADAM} == 1 ]]; then
+export use_gpu_fp32_convert_for_adam="--use_gpu_fp32_convert_for_adam"
+else
+export use_gpu_fp32_convert_for_adam=""
+fi
 
 echo "${CS} ${BS} ${MODEL_NAME}"
 python ../patrickstar/launcher/runner.py --num_nodes 1 \
@@ -56,6 +63,7 @@ python ../patrickstar/launcher/runner.py --num_nodes 1 \
                              --use_ckp \
                              --use_fp16 \
                              --use_ps \
+                             ${use_gpu_fp32_convert_for_adam} \
                              --batch_size=${BS} \
                              --margin_use_ratio=${margin_use_ratio} \
                              --warmup_gpu_chunk_mem_ratio=${warmup_gpu_chunk_mem_ratio} \
