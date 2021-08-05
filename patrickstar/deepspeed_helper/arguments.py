@@ -169,7 +169,6 @@ def _add_patrick_star_args(parser):
         help=
         'Use hybrid adam optimization. By default ADAM is on CPU and run ADAM on GPU if possible.'
     )
-
     group.add_argument('--overall_gpu_mem_ratio',
                        type=float,
                        default=0.8,
@@ -186,6 +185,9 @@ def _add_patrick_star_args(parser):
                        type=float,
                        default=0.7,
                        help='GPu margin use ratio')
+    group.add_argument('--always_warmup',
+                       action='store_true',
+                       help='always warmup.')
     return parser
 
 

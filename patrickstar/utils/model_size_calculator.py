@@ -43,7 +43,7 @@ def estimate_bert_MAC(config, batch_size, sequence_length, model_size):
                                                  (16 * L * H))
 
     tera_flops = model_size * batch_size * sequence_length * 2 * 4
-    print(f'cisg_total_macs total MACs {cisg_total_macs}')
+    print(f'tera_flops total MACs {tera_flops}')
     print(f'nvidia total MACs {nvidia_total_macs}')
-    print(f'diff csig/nvidia {cisg_total_macs / nvidia_total_macs}')
+    print(f'diff csig/nvidia {tera_flops / nvidia_total_macs}')
     return tera_flops

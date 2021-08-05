@@ -32,6 +32,8 @@ from patrickstar.deepspeed_helper.global_vars import set_global_variables
 from patrickstar.deepspeed_helper.global_vars import get_args
 from patrickstar.manager import PatrickStarManager
 from patrickstar.utils.model_size_calculator import get_ps_model_size, estimate_bert_MAC
+import os
+
 from deepspeed.profiling.flops_profiler import FlopsProfiler
 
 
@@ -212,9 +214,15 @@ def test_bert_model(is_ckp: bool = False,
             force=True)
 
         step_elapse = time.time() - step_start_time
-        logging.info(
-            f"ckp {is_ckp} fp16 {is_fp16} ps {is_ps}: step elapse {step_elapse} sec/iter, {total_macs/1e9/step_elapse} GFlops"
-        )
+        if n == 0:
+            logging.info(
+                f"warmup ckp {is_ckp} fp16 {is_fp16} ps {is_ps}: step elapse {step_elapse} sec/iter, {total_macs/1e12/step_elapse} GFlops"
+            )
+        else:
+            logging.info(
+                f"ckp {is_ckp} fp16 {is_fp16} ps {is_ps}: step elapse {step_elapse} sec/iter, {total_macs/1e12/step_elapse} Tflops"
+            )
+        logging.info(f'model {model_numel/1e9}')
 
         if is_ps:
             global_timer.my_timer.print()
@@ -240,7 +248,7 @@ if __name__ == "__main__":
         '%(asctime)s,%(msecs)d %(levelname)-8s [%(filename)s:%(lineno)d] %(message)s',
         datefmt='%Y-%m-%d:%H:%M:%S',
         level=logging.INFO)
-
+    os.environ["NCCL_DEBUG"] = "INFO"
     set_global_variables()
 
     args = get_args()
@@ -322,11 +330,31 @@ if __name__ == "__main__":
         num_layer = 72
         num_head = 16
     elif plan == 'GPT3_10B':
-        # 13B model
         hidden_dim = 4096
         sequence_length = 1024
         num_layer = 50
         num_head = 16
+    elif plan == 'GPT3_11B':
+        hidden_dim = 4096
+        sequence_length = 1024
+        num_layer = 55
+        num_head = 16
+    elif plan == 'GPT3_12B':
+        hidden_dim = 4096
+        sequence_length = 1024
+        num_layer = 60
+        num_head = 16
+    elif plan == 'GPT3_13B':
+        hidden_dim = 4096
+        sequence_length = 1024
+        num_layer = 65
+        num_head = 16
+    elif plan == 'GPT3_15B':
+        hidden_dim = 4096
+        sequence_length = 1024
+        num_layer = 78
+        num_head = 16
+
     else:
         raise RuntimeError(f"The model name {plan} is not valid!")
     if res_check:
@@ -348,7 +376,7 @@ if __name__ == "__main__":
                                     sequence_length=sequence_length,
                                     num_layer=num_layer,
                                     num_head=num_head,
-                                    stop_step=20)
+                                    stop_step=5)
         print(loss_list)
     # calculate_mem_need(hidden_dim = hidden_dim, batch_size = batch_size, is_fp16 = use_fp16)
 
