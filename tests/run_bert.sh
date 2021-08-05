@@ -11,15 +11,19 @@ export warmup_gpu_chunk_mem_ratio=${warmup_gpu_chunk_mem_ratio:-0.2}
 export overall_gpu_mem_ratio=${overall_gpu_mem_ratio:-0.8}
 
 # Check result correctness
-# RES_CHECK_FLAG="--res_check"
+RES_CHECK_FLAG="--res_check"
 # Use a single GPU card to simulate multiple-GPU training.
 # FAKE_DIST="--use_fake_dist"
 
 let CHUNK_SIZE=${CS}*1024*1024
 export PYTHONPATH=../:${PYTHONPATH}
 
+if [ ${RES_CHECK_FLAG} ]; then
 export HYBRID_ADAM_FLAG="--use_hybrid_adam"
-export USE_DS_ADAM="--use_deepspeed_cpu_adam"
+else
+export HYBRID_ADAM_FLAG=""
+fi
+# export USE_DS_ADAM="--use_deepspeed_cpu_adam"
 
 if [[ ${CPU_EBD} == 1 ]];  then
 export CPU_EMBED="--use_cpu_embedding"

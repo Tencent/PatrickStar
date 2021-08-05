@@ -269,7 +269,7 @@ if __name__ == "__main__":
 
     plan = args.model_name
     if res_check:
-        plan = "GPT3larger"
+        plan = "Bert"
     if plan == "Bert":
         # 0.11B
         hidden_dim = 768
