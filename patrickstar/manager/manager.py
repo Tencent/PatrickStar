@@ -83,10 +83,10 @@ class PatrickStarManager(metaclass=SingletonMeta):
         args = get_args()
 
         # 需要设置的超参数
-        self._overall_gpu_mem_ratio = 0.8
-        self._overall_cpu_mem_ratio = 0.6
-        self._margin_use_ratio = 0.8
-        self.warmup_gpu_chunk_mem_ratio = 0.4
+        self._overall_gpu_mem_ratio = args.overall_gpu_mem_ratio
+        self._overall_cpu_mem_ratio = args.overall_cpu_mem_ratio
+        self._margin_use_ratio = args.margin_use_ratio 
+        self.warmup_gpu_chunk_mem_ratio = args.warmup_gpu_chunk_mem_ratio
 
         if args.use_fake_dist:
             rank = 0
@@ -285,6 +285,7 @@ class PatrickStarManager(metaclass=SingletonMeta):
         预热阶段是部分GPU内存和全部CPU内存。
         非预热阶段，是当前moment和下一moment可用内存的最小值。
         """
+        args = get_args()
         if device_type == "cpu":
             if self.warmup or not self._start_training:
                 # TODO(jiaruifang)瞎拍一个数，预热阶段三分之一GPU显存用来存储chunk
@@ -292,7 +293,7 @@ class PatrickStarManager(metaclass=SingletonMeta):
             else:
                 return self._overall_cpu_mem
         elif device_type == "cuda":
-            if self.warmup or not self._start_training:
+            if args.always_warmup or self.warmup or not self._start_training:
                 if self._training_stage == TrainingStage.ADAM:
                     # ADAM时没有activation所以显存可以全部给Chunk，需要两个default chunk size做buffer，这里先预留6个
                     ava_mem = self._overall_gpu_mem - 4 * self._default_chunk_size * 4
@@ -305,14 +306,22 @@ class PatrickStarManager(metaclass=SingletonMeta):
             else:
                 if self._training_stage == TrainingStage.ADAM:
                     return self._overall_gpu_mem - 4 * self._default_chunk_size * 4
-                else:
+                elif self._training_stage == TrainingStage.FWD:
                     next_mom = self.metronome.next_moment()
                     cur_mom = self.metronome.moment()
-                    next_mom_ava_mem = self._overall_gpu_mem - self.gpu_sys_used_list[
+                    next_mom_ava_mem = self._overall_gpu_mem - 1.5 * self.gpu_sys_used_list[
                         next_mom]
-                    cur_mom_ava_mem = self._overall_gpu_mem - self.gpu_sys_used_list[
+                    cur_mom_ava_mem = self._overall_gpu_mem - 1.5 * self.gpu_sys_used_list[
                         cur_mom]
-                    return min(next_mom_ava_mem, cur_mom_ava_mem)
+                    return min(next_mom_ava_mem, cur_mom_ava_mem) - args.world_size * 2 * self._default_chunk_size
+                elif self._training_stage == TrainingStage.BWD:
+                    next_mom = self.metronome.next_moment()
+                    cur_mom = self.metronome.moment()
+                    next_mom_ava_mem = self._overall_gpu_mem - 2 * self.gpu_sys_used_list[
+                        next_mom]
+                    cur_mom_ava_mem = self._overall_gpu_mem - 2 * self.gpu_sys_used_list[
+                        cur_mom]
+                    return min(next_mom_ava_mem, cur_mom_ava_mem) - args.world_size * 2 * self._default_chunk_size
 
     def show_mem_curve(self):
         with open('gpu_used_curve.txt', 'w') as fh:

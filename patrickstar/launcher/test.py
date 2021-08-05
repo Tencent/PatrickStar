@@ -15,34 +15,96 @@ run this script with
 python runner.py --num_nodes 1 --num_gpus 2 test.py
 """
 
-from client import Chunk
-from manager import PatrickStarManager
 from patrickstar.utils import init_distributed
 import torch
 import torch.distributed as dist
+import time
+from patrickstar.utils import see_memory_usage, get_sys_memory_used
 
-
-def test_collective_comm():
+def test_reduce_scatter(numel, repeat = 10):
     rank = torch.distributed.get_rank()
-    manager = PatrickStarManager()
-    manager.init([10, 10])
+    world_size = torch.distributed.get_world_size()
+    device = torch.device(f'cuda:{rank}')
+    payload = torch.randn(numel, dtype = torch.half, device=device)
+    input_list = []
+    group_list = []
+    for i in range(world_size):
+        if i == rank:
+            input_list.append(payload)
+        else:
+            input_list.append(torch.randn(numel, dtype = torch.half, device=device))
+        group_list.append(i)
+    # group = torch.distributed.new_group(group_list)
 
-    # 每个进程都分配一个chunk
-    chunk = Chunk(4, torch.half, 0)
-    chunk.allocate_payload(torch.device(f'cuda:{rank}'))
-    chunk.payload.random_()
+    if rank == 0:
+        print(f'before reduce_scatter gpu mem {get_sys_memory_used(device)/1e6} MN')
+    start_time = time.time()
+    for i in range(repeat):
+        torch.distributed.reduce_scatter(
+                                payload,
+                                input_list,
+                                op=torch.distributed.ReduceOp.SUM,
+                                #group=group,
+                                async_op=False)
+        
+    elapse = time.time() - start_time
+    input_list = []
+    if rank == 0:
+        print(f'after reduce_scatter gpu mem {get_sys_memory_used(device)/1e6} MB')
+        print(f"rank {rank} test reduce_scatter finished {numel/1024/1024} MB {world_size* numel*2*repeat/1e6/elapse} MB/s")
 
-    # 不同进程chunk执行allgather，每个进程获得一个allgather的chunk
-    print(f'before allgather, rank {rank}', chunk.payload)
 
-    chunk.allgather()
+def test_allgather(numel, repeat = 10, is_async = False):
+    rank = torch.distributed.get_rank()
+    world_size = torch.distributed.get_world_size()
+    device = torch.device(f'cuda:{rank}')
+    payload = torch.randn(numel, dtype = torch.half, device=device)
+    input_list = []
+    group_list = []
+    for i in range(world_size):
+        if i == rank:
+            input_list.append(payload)
+        else:
+            input_list.append(torch.zeros(numel, dtype = torch.half, device=device))
+        group_list.append(i)
+    group = torch.distributed.new_group(group_list)
+    if rank == 0:
+        print(f'before allgather gpu mem {get_sys_memory_used(device)/1e6} MB')
+    start_time = time.time()
+    for i in range(repeat):
+        handle = torch.distributed.all_gather(input_list,
+                                              payload,
+   					      #group=group,
+                                              async_op=is_async)
 
-    print(f'after allgather, rank {rank}', chunk.payload)
+    elapse = time.time() - start_time
+    if rank == 0:
+        print(f'after allgather gpu mem {get_sys_memory_used(device)/1e6} MB')
+        print(f"rank {rank} test allgather finished {numel/1024/1024} MB {world_size* numel*2*repeat/1e6/elapse} MB/s")
 
-    chunk.reduce_scatter()
+    payload_new = torch.randn(numel, dtype = torch.half, device=device)
+    input_list_new = []
+    for i in range(world_size):
+        if i == rank:
+            input_list_new.append(payload_new)
+        else:
+            input_list_new.append(torch.zeros(numel, dtype = torch.half, device=device))
+    torch.cuda.empty_cache()
+    start_time = time.time()
+    for i in range(repeat):
+        handle = torch.distributed.all_gather(input_list_new,
+                                              payload_new,
+   					      #group=group,
+                                              async_op=is_async)
 
-    print(f'after reduce_scatter, rank {rank}', chunk.payload)
+    elapse = time.time() - start_time
+    input_list = []
+    if rank == 0:
+        print(f'[repeat] after allgather gpu mem {get_sys_memory_used(device)/1e6} MB')
+        print(f"[repeat] rank {rank} test allgather finished {numel/1024/1024} MB {world_size* numel*2*repeat/1e6/elapse} MB/s")
 
+
+    return handle
 
 def test_p2p():
     rank = torch.distributed.get_rank()
@@ -59,5 +121,23 @@ def test_p2p():
 
 
 if __name__ == "__main__":
-    init_distributed(dist_backend='gloo')
-    test_p2p()
+    init_distributed(dist_backend='nccl')
+    # cpu_comm_group = torch.distributed.new_group(backend='gloo')
+    # test_p2p()
+    handle_list = []
+    handle = test_allgather(128*1024*1024, repeat = 1, is_async = False)
+    handle_list.append(handle)
+    handle = test_allgather(128*1024*1024, repeat = 1, is_async = False)
+    handle_list.append(handle)
+    handle = test_allgather(128*1024*1024, repeat = 3, is_async = False)
+    handle_list.append(handle)
+    for handle in handle_list:
+        if handle is not None:
+            handle.wait()
+    test_allgather(128*1024*1024, repeat = 4)
+    # test_reduce_scatter(512*1024*1024)
+    # for numel in [1, 2, 4, 8, 16, 32, 64, 128, 256, 512]:
+    #     test_reduce_scatter(numel*1024*1024)
+    # for numel in [1, 2, 4, 8, 16, 32, 64, 128, 256, 512]:
+    #     test_allgather(numel*1024*1024)
+

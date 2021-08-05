@@ -30,26 +30,7 @@ def get_ps_model_size(model):
     return numel
 
 
-def estimate_bert_size(config):
-    V = config.vocab_size
-    N = config.num_attention_heads
-    I = config.intermediate_size
-    H = config.hidden_size
-    L = config.num_hidden_layers
-    P = config.max_position_embeddings
-    alpha = I / H
-    numel = (V + P + (L + 1) * N + 5) * H + (L * N + 1) * (H**2)
-    Embedding_numel = H * (V + P + 4)
-    QKV_numel = (H * H + H) * 3
-    MLP_numel = H * (4 * H) + (4 * H) + (4 * H) * H + H
-    print(f"Embedding_numel layer {Embedding_numel/1e9} B")
-    print(f"QKV_numel layer {QKV_numel/1e9} B")
-    print(f"MLP_numel layer {MLP_numel/1e9} B")
-    print(f"calcalated model size {numel/1e9} B")
-    return numel
-
-
-def estimate_bert_MAC(config, batch_size, sequence_length):
+def estimate_bert_MAC(config, batch_size, sequence_length, model_size):
     B = batch_size
     S = sequence_length
     V = config.vocab_size
@@ -61,7 +42,8 @@ def estimate_bert_MAC(config, batch_size, sequence_length):
     nvidia_total_macs = 96 * B * S * L * H**2 * (1 + S / (6 * H) + V /
                                                  (16 * L * H))
 
-    print(f'cisg_total_macs total MACs {cisg_total_macs}')
+    tera_flops = model_size * batch_size * sequence_length * 2 * 4
+    print(f'tera_flops total MACs {tera_flops}')
     print(f'nvidia total MACs {nvidia_total_macs}')
-    print(f'diff csig/nvidia {cisg_total_macs / nvidia_total_macs}')
-    return nvidia_total_macs
+    print(f'diff csig/nvidia {tera_flops / nvidia_total_macs}')
+    return tera_flops 

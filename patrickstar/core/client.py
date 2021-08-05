@@ -293,12 +293,6 @@ class PatrickStarClient(object):
 
         assert torch.distributed.is_initialized(
         ), "torch distributed is not initialized during allgather"
-
-        group_list = []
-        for i, _ in enumerate(chunk_id_list):
-            group_list.append(i)
-        group = torch.distributed.new_group(group_list)
-
         if self._time_profile:
             global_timer.my_timer.start_profile(
                 'CLIENT_fetch_remote_chunks_allgather')
@@ -306,7 +300,6 @@ class PatrickStarClient(object):
         logger.debug(f'rank {rank} allgather {chunk_id_list}')
         handle = torch.distributed.all_gather(allgather_payload_buff,
                                               local_chunk_payload,
-                                              group=group,
                                               async_op=False)
 
         allgather_payload_buff = []
@@ -575,12 +568,6 @@ class PatrickStarClient(object):
                             'CLIENT_release_dist_reduce_scatter')
                     world_size = torch.distributed.get_world_size()
                     assert self.chunk_list[local_chunk_id].payload is not None
-
-                    group_list = []
-                    for i, _ in enumerate(chunk_id_list):
-                        group_list.append(i)
-                    group = torch.distributed.new_group(group_list)
-
                     if not args.use_fake_dist:
                         input_list = []
                         for i in chunk_id_list:
@@ -592,11 +579,14 @@ class PatrickStarClient(object):
                             self.chunk_list[local_chunk_id].payload,
                             input_list,
                             op=torch.distributed.ReduceOp.SUM,
-                            group=group,
                             async_op=False)
                     else:
                         # Note()为了在开发机调试方便
                         # 它非常慢 4.92 sec/5.89 sec (client_release_elapse)
+                        group_list = []
+                        for i, _ in enumerate(chunk_id_list):
+                            group_list.append(i)
+                        group = torch.distributed.new_group(group_list)
                         for rank_, chunk_id_ in enumerate(chunk_id_list):
                             if self.chunk_list[chunk_id_].is_dummy():
                                 continue
