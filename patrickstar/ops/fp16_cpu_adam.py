@@ -210,11 +210,12 @@ class FP16Adam(torch.optim.Optimizer):
                 assert exp_avg.device.type == 'cpu'
                 assert exp_avg_sq.device.type == 'cpu'
 
+                # Inputs of DS CPU Adam need to be flattened.
                 self.ds_opt_adam.adam_update(self.opt_id, step, lr, beta1,
                                              beta2, eps, weight_decay, True,
-                                             fp32_data_tensor,
-                                             fp32_grad_tensor, exp_avg,
-                                             exp_avg_sq)
+                                             fp32_data_tensor.view(-1),
+                                             fp32_grad_tensor.view(-1), exp_avg.view(-1),
+                                             exp_avg_sq.view(-1))
             else:
                 if weight_decay != 0:
                     fp32_grad_tensor = fp32_grad_tensor.add(fp32_data_tensor,
