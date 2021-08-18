@@ -33,26 +33,21 @@ class PSParameter(object):
         """
         在torch.nn.Parameter的附加成员变量
         """
-        self.ps_name = None
-        self.ps_numel = None
-        self.ps_shape = None
-
-        self.ps_data_chunk_id = None
-        self.ps_grad_chunk_id = None
-        # id, status, tensor_data
-        self.data_tensor = None
-        self.grad_tensor = None
-
         self.ps_name = name
         self.ps_numel = param.numel()
         self.ps_shape = param.shape
 
+        self.ps_data_chunk_id = None
+        self.ps_grad_chunk_id = None        
+
         self.data_tensor = PSTensor()
         if param.requires_grad:
             self.grad_tensor = PSTensor()
+        else:
+            self.grad_tensor = None
 
         # 参数是否属于进程的本地Chunk
-        self._is_local = None
+        self._is_local = True
         # 参数是否交给Torch做内存管理，而不是Chunk
         self._is_torch = False
 
