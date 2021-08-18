@@ -68,7 +68,7 @@ class PSParameter(object):
         elif access_type == AccessType.GRAD:
             return self.grad_tensor.ps_id
         else:
-            raise RuntimeError
+            raise ValueError
 
     def set_tensor(self, tensor: torch.Tensor, access_type: AccessType):
         if access_type == AccessType.DATA:
@@ -76,7 +76,7 @@ class PSParameter(object):
         elif access_type == AccessType.GRAD:
             self.grad_tensor.ps_tensor = tensor.view(self.ps_shape)
         else:
-            raise RuntimeError
+            raise ValueError
 
     def access_tensor(self, access_type: AccessType):
         if access_type == AccessType.DATA:
@@ -86,7 +86,7 @@ class PSParameter(object):
                 raise RuntimeError
             return self.grad_tensor.ps_tensor
         else:
-            raise RuntimeError
+            raise ValueError
 
     def get_status(self, access_type: AccessType):
         if access_type == AccessType.DATA:
@@ -94,7 +94,7 @@ class PSParameter(object):
         elif access_type == AccessType.GRAD:
             return self.grad_tensor.ps_status
         else:
-            raise RuntimeError
+            raise ValueError
 
     def set_status(self, status: PSTensorStatus, access_type: AccessType):
         """
@@ -111,7 +111,7 @@ class PSParameter(object):
             if status != PSTensorStatus.COMPUTE:
                 self.grad_tensor.ps_tensor = None
         else:
-            raise RuntimeError(
+            raise ValueError(
                 f'set status {status} when access type is {access_type}')
 
 
