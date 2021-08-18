@@ -24,16 +24,7 @@ from patrickstar.deepspeed_helper.global_vars import get_args
 class PatrickStarEngine(Module):
     r"""DeepSpeed engine for training.
     """
-    def __init__(self,
-                 args,
-                 model,
-                 client,
-                 optimizer=None,
-                 model_parameters=None,
-                 lr=0.01,
-                 betas=(0.9, 0.999),
-                 eps=1e-8,
-                 weight_decay=0):
+    def __init__(self, model, client, config):
         super(PatrickStarEngine, self).__init__()
         args = get_args()
         if not torch.distributed.is_initialized():
@@ -41,8 +32,6 @@ class PatrickStarEngine(Module):
             init_distributed(dist_backend=self.dist_backend)
 
         self.rank = 0 if args.use_fake_dist else args.local_rank
-        self.training_dataloader = None
-        self.lr_scheduler = None
         self.module = model
         self.module.train()
 
@@ -57,12 +46,27 @@ class PatrickStarEngine(Module):
 
         if args.local_rank == 0:
             logger.info(f'ADAM on device {prefer_device}')
+        if config is not None:
+            optim_type = config["optimizer"]["type"]
+            if optim_type != "Adam":
+                raise ValueError(
+                    f"Only support adam at the moment. "
+                    f"Get optimizer type {optim_type}")
+            optim_params = config["optimizer"]["params"]
+        else:
+            # default parameter for adam.
+            optim_params = {
+                "lr": 0.01,
+                "betas": (0.9, 0.999),
+                "eps": 1e-8,
+                "weight_decay": 0
+            }
         self.optimizer = FP16Adam(self.client,
                                   self.module.parameters(),
-                                  lr=lr,
-                                  betas=betas,
-                                  eps=eps,
-                                  weight_decay=weight_decay,
+                                  lr=optim_params["lr"],
+                                  betas=optim_params["betas"],
+                                  eps=optim_params["eps"],
+                                  weight_decay=optim_params["weight_decay"],
                                   prefer_device=prefer_device)
         # prefer_device = torch.device(f'cuda:{self.rank}')
         # 这个hook并没啥意义，为何不能和postbwd hook一起？

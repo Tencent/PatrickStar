@@ -65,22 +65,13 @@ def new_cuda_tensor(cls, *args):
 # Inserts _post_init_method at the end of init method
 # for all sub classes of torch.nn.Module
 class InsertPostInitMethodToModuleSubClasses(object):
-    def __init__(self,
-                 enabled=True,
-                 mem_efficient_linear=True,
-                 config=None,
-                 dtype=None):
-        self.mem_efficient_linear = mem_efficient_linear
-        self.enabled = enabled
+    def __init__(self, config=None, dtype=None):
         self._set_dtype(config, dtype)
         assert self.dtype in [
             torch.half, torch.float
         ], f"Invalid data type {self.dtype}, allowed values are [torch.half, torch.float]"
 
     def __enter__(self):
-        if not self.enabled:
-            return
-
         def partition_after(f):
             @functools.wraps(f)
             def wrapper(module, *args, **kwargs):
@@ -120,9 +111,6 @@ class InsertPostInitMethodToModuleSubClasses(object):
             torch.empty = empty_cuda_tensor
 
     def __exit__(self, exc_type, exc_value, traceback):
-        if not self.enabled:
-            return
-
         def _disable_class(cls):
             cls.__init__ = cls._old_init
 
@@ -151,22 +139,13 @@ class InsertPostInitMethodToModuleSubClasses(object):
             self.dtype = dtype
 
 
-# Replaces all parameters in module with Scattered Parameters
 class Init(InsertPostInitMethodToModuleSubClasses):
     def __init__(self,
-                 module=None,
-                 client: PatrickStarClient = None,
+                 client: PatrickStarClient,
+                 dtype=None,
                  data_parallel_group=None,
-                 mem_efficient_linear=True,
-                 remote_device=None,
-                 pin_memory=False,
-                 config=None,
-                 enabled=True,
-                 dtype=None):
-        super().__init__(enabled=enabled,
-                         mem_efficient_linear=mem_efficient_linear,
-                         config=config,
-                         dtype=dtype)
+                 config=None):
+        super().__init__(config=config, dtype=dtype)
         # TODO backend is not locked to nccl
         if not torch.distributed.is_initialized():
             assert torch.distributed.is_initialized(
