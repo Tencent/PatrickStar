@@ -20,7 +20,7 @@ from .chunk_list import ChunkList
 import patrickstar.utils.global_timer as global_timer
 from patrickstar.utils import logger
 
-from .parameter import PSParameter
+from .parameter import PSParameter, is_param_registed
 
 
 class TensorInfo(object):
@@ -60,7 +60,9 @@ class TensorInfo(object):
 class ChunkTensorIndex(object):
     def __init__(self):
         """
-        存储parameter和chunk的检索信息
+        一个存储tensor和chunk的检索信息的数据库，每个进程维护一个ChunkTensorIndex实例
+        它在预处理阶段根据DNN定义被创建出来
+        只有增查功能，无删改
         """
         # 1-1 dict, tensor_id -> TensorInfo
         self.dict_tensor_id_info: dict[int, TensorInfo] = {}
@@ -68,9 +70,9 @@ class ChunkTensorIndex(object):
         self.dict_chunk_id_tensor_id: dict[int, List[int]] = {}
         self.dict_chunk_id_chunk_info: dict[int, tuple] = {}
 
-        # global_chunk_id 对应的chunk_id_list
-        self.global_chunk_id_chunk_id_list = {}
-        self.dict_chunk_id_global_id = {}
+        # comm_group_id 对应的chunk_id_list
+        self.comm_group_id_chunk_id_list = {}
+        self.dict_chunk_id_comm_group_id = {}
 
         # 记录不同chunk_list信息，存放chunk_id信息
         self.param_fp16_list = []
@@ -78,14 +80,22 @@ class ChunkTensorIndex(object):
         self.momentum_fp32_list = []
         self.variance_fp32_list = []
 
-    def add_chunk(self, chunk_id, chunk_size, data_type, global_chunk_id,
+    def add_chunk(self, chunk_id, chunk_size, data_type, comm_group_id,
                   list_type: ChunkListType):
+        """
+        注册一个chunk信息
+        @chunk_id: chunk的id
+        @chunk_size: chunk尺寸
+        @data_type: chunk中存储数据类型，由于PyTorch限制，再次说明不能在chunk里混合存储两种类型数据，或者将chunk内存以不同类型转换
+        @comm_group_id: communication group id，历史原因名字不一致
+        @list_type: chunk做在list的类型
+        """
         self.dict_chunk_id_chunk_info[chunk_id] = (chunk_size, data_type)
 
-        if global_chunk_id not in self.global_chunk_id_chunk_id_list:
-            self.global_chunk_id_chunk_id_list[global_chunk_id] = list()
-        self.global_chunk_id_chunk_id_list[global_chunk_id].append(chunk_id)
-        self.dict_chunk_id_global_id[chunk_id] = global_chunk_id
+        if comm_group_id not in self.comm_group_id_chunk_id_list:
+            self.comm_group_id_chunk_id_list[comm_group_id] = list()
+        self.comm_group_id_chunk_id_list[comm_group_id].append(chunk_id)
+        self.dict_chunk_id_comm_group_id[chunk_id] = comm_group_id
 
         if list_type == ChunkListType.PARAM_FP16:
             self.param_fp16_list.append(chunk_id)
@@ -210,18 +220,20 @@ class ChunkTensorIndex(object):
         pos = self._binary_search(tensor_id_list, start_offset, 0,
                                   len(tensor_id_list) - 1)
         tensor_id_list.insert(pos, tensor_id)
-        if not hasattr(param, 'ps_attr'):
+        if not is_param_registed(param):
             param_name = None
         else:
             param_name = param.ps_attr.ps_name
+
         self.dict_tensor_id_info[tensor_id] = TensorInfo(
             chunk_id, tensor_id, start_offset, numel, param, access_type,
             param_name)
 
-        if access_type == AccessType.DATA:
-            param.ps_attr.ps_data_chunk_id = chunk_id
-        elif access_type == AccessType.GRAD:
-            param.ps_attr.ps_grad_chunk_id = chunk_id
+        if is_param_registed(param):
+            if access_type == AccessType.DATA:
+                param.ps_attr.ps_data_chunk_id = chunk_id
+            elif access_type == AccessType.GRAD:
+                param.ps_attr.ps_grad_chunk_id = chunk_id
 
     def delete_chunk_id(self, chunk_id):
         """
@@ -237,24 +249,6 @@ class ChunkTensorIndex(object):
             del self.dict_tensor_id_info[tid]
 
         del self.dict_chunk_id_tensor_id[chunk_id]
-
-    def delete_tensor(self, tensor_id):
-        """
-        删除一个tensor，可能导致一个chunk也被删除，应对内存进行释放
-        """
-        raise NotImplementedError
-        cid_delete_list = []
-        for cid, tid_list in self.dict_chunk_id_tensor_id.items():
-            if tensor_id in tid_list:
-                tid_list.remove(tensor_id)
-
-            if len(tid_list) == 0:
-                cid_delete_list.append(cid)
-
-        for cid in cid_delete_list:
-            del self.dict_chunk_id_tensor_id[cid]
-
-        del self.dict_tensor_id_info[tensor_id]
 
     def tensor_id_to_chunk_id(self, tensor_id) -> int:
         """
@@ -275,24 +269,24 @@ class ChunkTensorIndex(object):
             return None
         return info.chunk_id
 
-    def get_global_chunk_id_list(self, chunk_id: int) -> List[int]:
-        return self.global_chunk_id_chunk_id_list[
-            self.dict_chunk_id_global_id[chunk_id]]
+    def get_comm_group_id(self, chunk_id: int) -> List[int]:
+        return self.comm_group_id_chunk_id_list[
+            self.dict_chunk_id_comm_group_id[chunk_id]]
 
     def generate_all_chunks(self, chunk_list):
         for chunk_id, _ in self.dict_chunk_id_tensor_id.items():
             chunk = chunk_list[chunk_id]
-            global_chunk_id = self.dict_chunk_id_global_id[chunk_id]
-            yield chunk_id, global_chunk_id, chunk
+            comm_group_id = self.dict_chunk_id_comm_group_id[chunk_id]
+            yield chunk_id, comm_group_id, chunk
 
     def visit_chunk(self, chunk):
         rank = torch.distributed.get_rank()
         if rank != 1:
             return
         chunk_id = chunk.chunk_id
-        global_chunk_id = self.dict_chunk_id_global_id[chunk_id]
+        comm_group_id = self.dict_chunk_id_comm_group_id[chunk_id]
         logger.info(
-            f'rank {rank} Chunk id {chunk.chunk_id}, status, {chunk.get_status()} global chunk id {global_chunk_id}, capacity {chunk.capacity} elems, dtype {chunk.data_type}, size {chunk.get_chunk_space()} B, device {chunk.get_device()}'
+            f'rank {rank} Chunk id {chunk.chunk_id}, status, {chunk.get_status()} global chunk id {comm_group_id}, capacity {chunk.capacity} elems, dtype {chunk.data_type}, size {chunk.get_chunk_space()} B, device {chunk.get_device()}'
         )
         for info in self.generate_tensor_info_in_order(chunk_id):
             assert info.chunk_id == chunk_id, f'{info.chunk_id} vs {chunk_id}'
@@ -308,11 +302,11 @@ class ChunkTensorIndex(object):
         logger.info(f'visit chunks')
         for chunk_id, _ in self.dict_chunk_id_tensor_id.items():
             chunk = chunk_list[chunk_id]
-            global_chunk_id = self.dict_chunk_id_global_id[chunk_id]
-            assert global_chunk_id is not None
+            comm_group_id = self.dict_chunk_id_comm_group_id[chunk_id]
+            assert comm_group_id is not None
 
             logger.info(
-                f'rank {rank} Chunk id {chunk.chunk_id}, status, {chunk.get_status()} global chunk id {global_chunk_id}, capacity {chunk.capacity} elems, dtype {chunk.data_type}, size {chunk.get_chunk_space()} B, device {chunk.get_device()}'
+                f'rank {rank} Chunk id {chunk.chunk_id}, status, {chunk.get_status()} global chunk id {comm_group_id}, capacity {chunk.capacity} elems, dtype {chunk.data_type}, size {chunk.get_chunk_space()} B, device {chunk.get_device()}'
             )
             for info in self.generate_tensor_info_in_order(chunk_id):
                 assert info.chunk_id == chunk_id, f'{info.chunk_id} vs {chunk_id}'

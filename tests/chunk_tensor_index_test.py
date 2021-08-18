@@ -12,21 +12,14 @@
 # See the AUTHORS file for names of contributors.
 
 import unittest
-from client import PatrickStarClient, ChunkList, PSTensorStatus, AccessType, ChunkTensorIndex
+from patrickstar.core import ChunkTensorIndex, ChunkListType, AccessType
 import logging
 import torch
-from manager import PatrickStarManager
 
 
 class TestAccess(unittest.TestCase):
     def setUp(self):
-        self.default_chunk_size = 20
-        self.client = PatrickStarClient(
-            rank=0, default_chunk_size=self.default_chunk_size)
-        self.manager = PatrickStarManager()
-        self.manager.init([32, 32], [1024])
-        self.compute_device = torch.device(
-            'cuda') if torch.cuda.is_available() else torch.device('cpu')
+        pass
 
     def _check_order(self, chunk_tensor_index, chunk_id):
         start_offset_list = []
@@ -36,50 +29,32 @@ class TestAccess(unittest.TestCase):
             if len(start_offset_list) > 0:
                 assert (start_offset > start_offset_list[-1])
             start_offset_list.append(start_offset)
-            info.showme()
 
     def test_add_tensor(self):
         chunk_tensor_index = ChunkTensorIndex()
-        param1 = torch.nn.Parameter(torch.zeros(10))
-        chunk_tensor_index.add_tensor(0, 10, 0, param1.numel(), param1,
-                                      AccessType.DATA)
 
-        param2 = torch.nn.Parameter(torch.zeros(15))
-        chunk_tensor_index.add_tensor(0, 11, 20, param2.numel(), param2,
-                                      AccessType.DATA)
+        chunk_tensor_index.add_chunk(chunk_id=0,
+                                     chunk_size=1000,
+                                     data_type=torch.float,
+                                     comm_group_id=0,
+                                     list_type=ChunkListType.PARAM_FP32)
 
-        param3 = torch.nn.Parameter(torch.zeros(5))
-        chunk_tensor_index.add_tensor(0, 12, 15, param3.numel(), param3,
-                                      AccessType.DATA)
-
-        param4 = torch.nn.Parameter(torch.zeros(7))
-        chunk_tensor_index.add_tensor(0, 13, 35, param3.numel(), param4,
-                                      AccessType.DATA)
-
-        chunk_tensor_index.delete_tensor(11)
-
-        param5 = torch.nn.Parameter(torch.zeros(13))
-        chunk_tensor_index.add_tensor(1, 14, 7, param5.numel(), param5,
-                                      AccessType.DATA)
-
-        param6 = torch.nn.Parameter(torch.zeros(3))
-        chunk_tensor_index.add_tensor(1, 15, 2, param6.numel(), param6,
-                                      AccessType.DATA)
-
-        chunk_tensor_index.delete_tensor(14)
-        assert (chunk_tensor_index.tensor_id_to_chunk_id(14) is None)
-
-        chunk_tensor_index.delete_tensor(15)
-        assert (chunk_tensor_index.tensor_id_to_chunk_id(14) is None)
+        param_numel_list = [10, 20, 30, 20, 7, 2]
+        param_list = []
+        offset = 0
+        for param_id, numel in enumerate(param_numel_list):
+            param = torch.nn.Parameter(torch.zeros(10))
+            chunk_tensor_index.add_tensor(chunk_id=0,
+                                          tensor_id=param_id,
+                                          start_offset=offset,
+                                          numel=numel,
+                                          param=param,
+                                          access_type=AccessType.DATA)
+            offset += numel
+            param_list.append(param)
 
         self._check_order(chunk_tensor_index, 0)
-        self._check_order(chunk_tensor_index, 1)
 
 
 if __name__ == "__main__":
-    logging.basicConfig(
-        format=
-        '%(asctime)s,%(msecs)d %(levelname)-8s [%(filename)s:%(lineno)d] %(message)s',
-        datefmt='%Y-%m-%d:%H:%M:%S',
-        level=logging.DEBUG)
     unittest.main()
