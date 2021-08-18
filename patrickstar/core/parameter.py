@@ -15,17 +15,15 @@ import torch
 from .const import PSTensorStatus, AccessType
 import logging
 
-global_id = 0
 
-
-#TODO如何产生全局id？
 class PSTensor(object):
+    global_id = 0
+
     def __init__(self):
-        global global_id
         self.ps_tensor = None
-        self.ps_id = global_id
+        self.ps_id = PSTensor.global_id
         self.ps_status = PSTensorStatus.FREE
-        global_id += 1
+        PSTensor.global_id += 1
 
 
 class PSParameter(object):
