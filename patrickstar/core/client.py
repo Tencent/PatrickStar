@@ -38,7 +38,6 @@ class PatrickStarClient(object):
     def __init__(self,
                  rank: int,
                  default_chunk_size: int,
-                 warmup=True,
                  is_fp16=False):
         """
         管理一个Process的Param, AccGrad, OS数据。
@@ -63,7 +62,7 @@ class PatrickStarClient(object):
         self.default_chunk_size = default_chunk_size
         self._time_profile = True
 
-        # 通过运行一次迭代来动态进行chunk schduling
+        # 通过运行一次迭代来动态进行chunk scheduling
         self._is_fp16 = is_fp16
 
         self._chunk_id = -1

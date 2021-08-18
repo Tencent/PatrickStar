@@ -119,29 +119,37 @@ def test_bert_model(is_ckp: bool = False,
         if is_fp16:
             optimizer = FP16_Optimizer(optimizer)
 
-        # DPP 不能要求模型部分在cpu部分在gpu
+        # DDP 不能要求模型部分在cpu部分在gpu
         model = torch.nn.parallel.DistributedDataParallel(model,
                                                           device_ids=[rank])
     elif is_ps:
         assert is_fp16, f"use_ps must use fp16"
         client = PatrickStarClient(rank=rank,
                                    default_chunk_size=args.default_chunk_size,
-                                   warmup=True,
                                    is_fp16=True)
 
-        with Init(dtype=torch.float, client=client):
-            model = BertForSequenceClassification(
+        def model_func():
+            return BertForSequenceClassification(
                 cfg, use_cpu_embedding=args.use_cpu_embedding)
 
-        model, optimizer, _, _ = initialize_engine(
-            args=None,
-            model=model,
+        config = {
+          # The same format as optimizer config of DeepSpeed
+          # https://www.deepspeed.ai/docs/config-json/#optimizer-parameters
+          "optimizer": {
+            "type": "Adam",
+            "params": {
+              "lr": lr,
+              "betas": betas,
+              "eps": eps,
+              "weight_decay": weight_decay
+            }
+          }
+        }
+
+        model, optimizer = initialize_engine(
+            model_func=model_func,
             client=client,
-            model_parameters=model.parameters(),
-            lr=lr,
-            betas=betas,
-            eps=eps,
-            weight_decay=weight_decay)
+            config=config)
     else:
         raise RuntimeError
 
@@ -163,14 +171,6 @@ def test_bert_model(is_ckp: bool = False,
     loss_res = []
 
     start_time = time.time()
-
-    # 开启预热优化
-    if is_ps:
-        mgr = PatrickStarManager()
-        mgr.start_train(
-            is_warmup=True,
-            param_fp16_chunk_size=client.get_param_fp16_chunks_mem_size(),
-            chunk_size=args.default_chunk_size)
 
     logging.info(
         f"MAC {total_macs/1e9} GFlop, model numel {model_numel/1e9} B")

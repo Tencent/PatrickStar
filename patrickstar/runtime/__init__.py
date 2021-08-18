@@ -11,68 +11,38 @@
 # permissions and limitations under the License.
 # See the AUTHORS file for names of contributors.
 
-from patrickstar.utils import log_dist, logger
+import torch
 from .engine import PatrickStarEngine
 from .init_context import Init
+from ..manager import PatrickStarManager
 
-
-def initialize_engine(args=None,
-                      model=None,
-                      client=None,
-                      optimizer=None,
-                      model_parameters=None,
-                      lr=0.01,
-                      betas=(0.9, 0.999),
-                      eps=1e-8,
-                      weight_decay=0):
+def initialize_engine(model_func, client, config=None):
     """Initialize the PatrickStar Engine.
     Arguments:
-        args: an object containing local_rank and deepspeed_config fields.
-            This is optional if `config` is passed.
-        model: Required: nn.module class before apply any wrappers
-        optimizer: Optional: a user defined optimizer, this is typically used instead of defining
-            an optimizer in the DeepSpeed json config.
-        model_parameters: Optional: An iterable of torch.Tensors or dicts.
-            Specifies what Tensors should be optimized.
-        training_data: Optional: Dataset of type torch.utils.data.Dataset
-        lr_scheduler: Optional: Learning Rate Scheduler Object. It should define a get_lr(),
-            step(), state_dict(), and load_state_dict() methods
-        mpu: Optional: A model parallelism unit object that implements
-            get_{model,data}_parallel_{rank,group,world_size}()
-        dist_init_required: Optional: None will auto-initialize torch.distributed if needed,
-            otherwise the user can force it to be initialized or not via boolean.
-        collate_fn: Optional: Merges a list of samples to form a
-            mini-batch of Tensor(s).  Used when using batched loading from a
-            map-style dataset.
-        config: Optional: Instead of requiring args.deepspeed_config you can pass your deepspeed config
-            as an argument instead, as a path or a dictionary.
-        config_params: Optional: Same as `config`, kept for backwards compatibility.
+        model_func: Required: nn.module class before apply any wrappers
+        client: Required: PatrickStarClient for orchestrating chunks.
+        config: Optional: config json for optimizer.
     Returns:
-        A tuple of ``engine``, ``optimizer``, ``training_dataloader``, ``lr_scheduler``
-        * ``engine``: DeepSpeed runtime engine which wraps the client model for distributed training.
+        A tuple of ``engine`` and ``optimizer``
+        * ``engine``: PatrickStar runtime engine which wraps the client model for distributed training.
         * ``optimizer``: Wrapped optimizer if a user defined ``optimizer`` is supplied, or if
           optimizer is specified in json config else ``None``.
-        * ``training_dataloader``: DeepSpeed dataloader if ``training_data`` was supplied,
-          otherwise ``None``.
-        * ``lr_scheduler``: Wrapped lr scheduler if user ``lr_scheduler`` is passed, or
-          if ``lr_scheduler`` specified in JSON configuration. Otherwise ``None``.
     """
-    log_dist("DeepSpeed info", ranks=[0])
+    if not callable(model_func):
+        raise ValueError("model_func need to be callable.")
 
-    assert model is not None, "deepspeed.initialize requires a model"
+    with Init(client=client, dtype=torch.float):
+        model = model_func()
 
-    engine = PatrickStarEngine(args=args,
-                               model=model,
+    engine = PatrickStarEngine(model=model,
                                client=client,
-                               optimizer=optimizer,
-                               model_parameters=model_parameters,
-                               lr=lr,
-                               betas=betas,
-                               eps=eps,
-                               weight_decay=weight_decay)
+                               config=config)
 
-    return_items = [
-        engine, engine.optimizer, engine.training_dataloader,
-        engine.lr_scheduler
-    ]
-    return tuple(return_items)
+    # 开启预热优化
+    mgr = PatrickStarManager()
+    mgr.start_train(
+        is_warmup=True,
+        param_fp16_chunk_size=client.get_param_fp16_chunks_mem_size(),
+        chunk_size=client.default_chunk_size)
+
+    return (engine, engine.optimizer)
