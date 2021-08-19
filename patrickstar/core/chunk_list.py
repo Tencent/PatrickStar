@@ -270,10 +270,10 @@ class ChunkList(object):
     def is_empty(self, chunk_type: ChunkListType):
         return len(self.chunk_type_to_id_dict[chunk_type]) == 0
 
-    def last_chunk_in_list(self, chunk_type: ChunkListType):
+    def last_chunk_id(self, chunk_type: ChunkListType):
         if self.is_empty(chunk_type):
             raise RuntimeError(
-                f"Call last_chunk_in_list on an empty {chunk_type} chunk list")
+                f"Call last_chunk_id on an empty {chunk_type} chunk list")
         return self.chunk_type_to_id_dict[chunk_type][-1]
 
     def generate_chunk(self) -> (int, Chunk):

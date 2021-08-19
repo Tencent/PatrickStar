@@ -63,9 +63,8 @@ class TestChunkData(unittest.TestCase):
 
         assert (chunk_list[new_chunk_id].get_status() == PSChunkStatus.FREE)
 
-        self.assertEqual(
-            chunk_list.last_chunk_in_list(ChunkListType.PARAM_FP32),
-            new_chunk_id, "check last_chunk_in_list")
+        self.assertEqual(chunk_list.last_chunk_id(ChunkListType.PARAM_FP32),
+                         new_chunk_id, "check last_chunk_id")
 
         chunk_list.new_chunk(chunk_id=1,
                              chunk_size=20,
@@ -75,9 +74,8 @@ class TestChunkData(unittest.TestCase):
 
         self.assertEqual(chunk_list.size(), 2)
 
-        self.assertEqual(
-            chunk_list.last_chunk_in_list(ChunkListType.PARAM_FP32), 1,
-            "check last_chunk_in_list")
+        self.assertEqual(chunk_list.last_chunk_id(ChunkListType.PARAM_FP32), 1,
+                         "check last_chunk_id")
 
 
 if __name__ == "__main__":
