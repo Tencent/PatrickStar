@@ -29,16 +29,22 @@ from patrickstar.utils.memory_monitor import see_memory_usage, get_sys_memory_us
 from patrickstar.utils import logger, log_dist
 from patrickstar.manager import PatrickStarManager
 from patrickstar.deepspeed_helper.global_vars import get_args
+from patrickstar.core.const import ChunkListType
 
 
 class ChunkList(object):
     """
-    管理一个chunk链表
+    管理一个chunk链表，
+    需要区分四种chunk list，param fp16, param fp32, momentum, variance
     """
     def __init__(self, rank: int = 0):
         self.chunk_id_to_chunk_dict: dict[int, Chunk] = {}
+        self.chunk_type_to_id_dict: dict[ChunkListType, int] = {}
+        for ct in ChunkListType:
+            self.chunk_type_to_id_dict[ct] = []
+
         self._time_profile = True
-        # TODO单GPU不能启动太多stream
+        # TODO(jiaruifang) 单GPU不能启动太多stream
         self.copy_stream = torch.cuda.Stream()
         self.moments_cnt_of_iteration = None
 
@@ -134,8 +140,7 @@ class ChunkList(object):
         logger.debug(
             f'prepare_target: device {target_device} need_bytes {need_bytes/1e6} MB, '
             f'ava_chunk_mem_size {ava_chunk_mem_size/1e6} MB, '
-            f'free_chunk_mem_size {free_chunk_mem_size/1e6} MB.'
-        )
+            f'free_chunk_mem_size {free_chunk_mem_size/1e6} MB.')
 
         args = get_args()
 
@@ -149,16 +154,14 @@ class ChunkList(object):
             raise RuntimeError(
                 f'{target_device} has not enough space for {need_bytes/1e6} MB. '
                 f'Device used Chunk Memory is {self.get_chunk_memory_used(target_device)/1e6} MB. '
-                f'Avaibale Chunk Memory is {ava_chunk_mem_size/1e6} MB'
-            )
+                f'Avaibale Chunk Memory is {ava_chunk_mem_size/1e6} MB')
 
         extra_need_bytes = need_bytes - free_chunk_mem_size
 
         logger.debug(
             f'{target_device} (ava_chunk_mem_size {ava_chunk_mem_size/1e6} MB) '
             f'now free_chunk_mem_size size {free_chunk_mem_size/1e6} MB, '
-            f'needs {need_bytes/1e6} MB'
-        )
+            f'needs {need_bytes/1e6} MB')
         # 不需要新分配
         if extra_need_bytes <= 0:
             if self._time_profile:
@@ -168,8 +171,7 @@ class ChunkList(object):
 
         logger.debug(
             f'the device {target_device} has no enough free chunk memory, '
-            f'required size is {extra_need_bytes} bytes'
-        )
+            f'required size is {extra_need_bytes} bytes')
         # 需要在target_device上腾出空间
         moved_list = self._chunk_to_move_out_for_room_making(
             extra_need_bytes, target_device)
@@ -245,7 +247,8 @@ class ChunkList(object):
                   chunk_id: int,
                   chunk_size: int,
                   data_type: torch.dtype,
-                  is_dummy: bool = False) -> int:
+                  is_dummy: bool = False,
+                  chunk_type: ChunkListType = ChunkListType.UNDEF) -> int:
         """
         新建一个chunk，并未初始化内存
         """
@@ -259,9 +262,19 @@ class ChunkList(object):
                                                       chunk_id=chunk_id,
                                                       rank=args.local_rank,
                                                       is_dummy=is_dummy)
+        self.chunk_type_to_id_dict[chunk_type].append(chunk_id)
         logging.debug(
             f'allocate with new chunk chunk_id {chunk_id} size {chunk_size} data_type {data_type}'
         )
+
+    def is_empty_list(self, chunk_type: ChunkListType):
+        return len(self.chunk_type_to_id_dict[chunk_type]) == 0
+
+    def last_chunk_in_list(self, chunk_type: ChunkListType):
+        if self.is_empty_list(chunk_type):
+            raise RuntimeError(
+                f"Call last_chunk_in_list on an empty {chunk_type} chunk list")
+        return self.chunk_type_to_id_dict[chunk_type][-1]
 
     def generate_chunk(self) -> (int, Chunk):
         for chunk_id, chunk in self.chunk_id_to_chunk_dict.items():
@@ -328,8 +341,7 @@ class ChunkList(object):
         logger.info(
             f'**** EVICT INFO(next_mom, chunk_id) {target_device}: '
             f'cur_mom {mgr.get_cur_mom()} movable_chunk_info {movable_chunk_info}, '
-            f'real moved_list {moved_list}'
-        )
+            f'real moved_list {moved_list}')
         # 无法腾出足够空间，抛出异常
         if moved_bytes < still_need_bytes:
             # self.visit()
@@ -337,8 +349,7 @@ class ChunkList(object):
                 f'device {target_device} still needs {still_need_bytes/1e6} MB, '
                 f'but there is not enough space on it, only {moved_bytes/1e6} MB available. '
                 f'chunk mem used memory on {target_device} is '
-                f'{self.get_chunk_memory_used(target_device)/1e6} MB'
-            )
+                f'{self.get_chunk_memory_used(target_device)/1e6} MB')
 
         return moved_list
 
