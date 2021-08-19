@@ -53,7 +53,9 @@ class TensorInfo(object):
 
     def showme(self):
         logger.info(
-            f'tensor_id {self.tensor_id}, name {self.tensor_name}, shape {self.param.ps_shape}, chunk_id {self.chunk_id}, start_offset {self.start_offset}, nueml {self.numel}, status {self.status()}'
+            f'tensor_id {self.tensor_id}, name {self.tensor_name}, '
+            f'shape {self.param.ps_shape}, chunk_id {self.chunk_id}, '
+            f'start_offset {self.start_offset}, nueml {self.numel}, status {self.status()}'
         )
 
 
@@ -286,12 +288,16 @@ class ChunkTensorIndex(object):
         chunk_id = chunk.chunk_id
         comm_group_id = self.dict_chunk_id_comm_group_id[chunk_id]
         logger.info(
-            f'rank {rank} Chunk id {chunk.chunk_id}, status, {chunk.get_status()} global chunk id {comm_group_id}, capacity {chunk.capacity} elems, dtype {chunk.data_type}, size {chunk.get_chunk_space()} B, device {chunk.get_device()}'
+            f'rank {rank} Chunk id {chunk.chunk_id}, status {chunk.get_status()}, '
+            f'global chunk id {comm_group_id}, capacity {chunk.capacity} elems, '
+            f'dtype {chunk.data_type}, size {chunk.get_chunk_space()} B, device {chunk.get_device()}'
         )
         for info in self.generate_tensor_info_in_order(chunk_id):
             assert info.chunk_id == chunk_id, f'{info.chunk_id} vs {chunk_id}'
             logger.info(
-                f"** tensor: chunk_id {chunk_id}, start {info.start_offset}, end {info.start_offset + info.numel}, size {info.numel}, tensor_id {info.tensor_id}, status {info.status()}, name {info.tensor_name}"
+                f'** tensor: chunk_id {chunk_id}, start {info.start_offset}, '
+                f'end {info.start_offset + info.numel}, size {info.numel}, '
+                f'tensor_id {info.tensor_id}, status {info.status()}, name {info.tensor_name}'
             )
 
     def visit_chunks(self, chunk_list: ChunkList):
@@ -306,12 +312,16 @@ class ChunkTensorIndex(object):
             assert comm_group_id is not None
 
             logger.info(
-                f'rank {rank} Chunk id {chunk.chunk_id}, status, {chunk.get_status()} global chunk id {comm_group_id}, capacity {chunk.capacity} elems, dtype {chunk.data_type}, size {chunk.get_chunk_space()} B, device {chunk.get_device()}'
+                f'rank {rank} Chunk id {chunk.chunk_id}, status {chunk.get_status()}, '
+                f'global chunk id {comm_group_id}, capacity {chunk.capacity} elems, '
+                f'dtype {chunk.data_type}, size {chunk.get_chunk_space()} B, device {chunk.get_device()}'
             )
             for info in self.generate_tensor_info_in_order(chunk_id):
                 assert info.chunk_id == chunk_id, f'{info.chunk_id} vs {chunk_id}'
                 logger.info(
-                    f"** tensor: chunk_id {chunk_id}, start {info.start_offset}, end {info.start_offset + info.numel}, size {info.numel}, tensor_id {info.tensor_id}, status {info.status()}, name {info.tensor_name}"
+                    f'** tensor: chunk_id {chunk_id}, start {info.start_offset}, '
+                    f'end {info.start_offset + info.numel}, size {info.numel}, '
+                    f'tensor_id {info.tensor_id}, status {info.status()}, name {info.tensor_name}'
                 )
             total_bytes += chunk.get_chunk_space()
         logger.info(f'OVERALL CHUNK SIZE {total_bytes/1e9} GB')

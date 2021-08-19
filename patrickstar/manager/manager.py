@@ -108,7 +108,8 @@ class PatrickStarManager(metaclass=SingletonMeta):
             )
 
         logger.info(
-            f'Init Manager over all gpu mem {self._overall_gpu_mem/1e6} MB, cpu mem {self._overall_cpu_mem/1e6} MB'
+            f'Init Manager over all gpu mem {self._overall_gpu_mem/1e6} MB, '
+            f'cpu mem {self._overall_cpu_mem/1e6} MB'
         )
         # 统计信息
         self.cpu_used_list = []
@@ -162,7 +163,8 @@ class PatrickStarManager(metaclass=SingletonMeta):
         logger.info(
             f'Param FP16 Chunk Size {self._param_fp16_chunk_size/1e6} MB')
         logger.info(
-            f'Margin Mem Size {margin_mem_size/1e6} MB, available chunk num for Optimizer States {self._margin_chunk_num_for_gpu_adam}'
+            f'Margin Mem Size {margin_mem_size/1e6} MB, '
+            f'available chunk num for Optimizer States {self._margin_chunk_num_for_gpu_adam}'
         )
         logger.info(f'OVERALL GPU MEM {self._overall_gpu_mem}')
 

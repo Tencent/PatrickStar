@@ -55,7 +55,8 @@ class FP16ChunkWriteBuffer(object):
                 src_device = self.chunk_list[
                     self.cached_src_chunk_id].payload.device
                 logger.info(
-                    f'Write chunk {self.cached_src_chunk_id} -> {self.cached_target_chunk_id}, {src_device} -> {target_device}'
+                    f'Write chunk {self.cached_src_chunk_id} -> {self.cached_target_chunk_id}, '
+                    f'{src_device} -> {target_device}'
                 )
                 if args.use_gpu_fp32_convert_for_adam and target_device.type == 'cuda' and src_device.type == 'cpu':
                     self.gpu_fp16_buff.copy_(
@@ -171,7 +172,8 @@ class FP32ChunkReadBuffer(object):
                             self.chunk_list[info.chunk_id].payload)
                     self.ret_payload = self.cpu_payload
                 logger.info(
-                    f'read chunk to cache {self.cached_chunk_id} {self.chunk_list[info.chunk_id].payload.device} ({self.chunk_list[info.chunk_id].payload.dtype}) -> {self.ret_payload.device} (Float)'
+                    f'read chunk to cache {self.cached_chunk_id} {self.chunk_list[info.chunk_id].payload.device} '
+                    f'({self.chunk_list[info.chunk_id].payload.dtype}) -> {self.ret_payload.device} (Float)'
                 )
                 self.cached_chunk_id = info.chunk_id
             else:

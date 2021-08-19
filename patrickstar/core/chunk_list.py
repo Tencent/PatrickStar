@@ -100,7 +100,8 @@ class ChunkList(object):
         # 分布式情况，需要分配一个全局的payload
         if chunk_status == PSChunkStatus.RELEASED:
             logger.debug(
-                f'rank {torch.distributed.get_rank()} access_chunk chunk {chunk_id}, need to allocate {payload_space} B memory on {compute_device}'
+                f'rank {torch.distributed.get_rank()} access_chunk chunk {chunk_id}, '
+                f'need to allocate {payload_space} B memory on {compute_device}'
             )
 
             # TODO 在分布式环境应该准备
@@ -131,7 +132,9 @@ class ChunkList(object):
         free_chunk_mem_size = ps_manager.free_chunk_mem(target_device.type)
 
         logger.debug(
-            f'prepare_target: device {target_device} need_bytes {need_bytes/1e6} MB, ava_chunk_mem_size {ava_chunk_mem_size/1e6} MB, free_chunk_mem_size {free_chunk_mem_size/1e6} MB.'
+            f'prepare_target: device {target_device} need_bytes {need_bytes/1e6} MB, '
+            f'ava_chunk_mem_size {ava_chunk_mem_size/1e6} MB, '
+            f'free_chunk_mem_size {free_chunk_mem_size/1e6} MB.'
         )
 
         args = get_args()
@@ -144,13 +147,17 @@ class ChunkList(object):
             )
             # TODO(jiaruifang)可以爆表时候再释放
             raise RuntimeError(
-                f"{target_device} has not enough space for {need_bytes/1e6} MB. Device used Chunk Memory is {self.get_chunk_memory_used(target_device)/1e6} MB. Avaibale Chunk Memory is {ava_chunk_mem_size/1e6} MB"
+                f'{target_device} has not enough space for {need_bytes/1e6} MB. '
+                f'Device used Chunk Memory is {self.get_chunk_memory_used(target_device)/1e6} MB. '
+                f'Avaibale Chunk Memory is {ava_chunk_mem_size/1e6} MB'
             )
 
         extra_need_bytes = need_bytes - free_chunk_mem_size
 
         logger.debug(
-            f'{target_device} (ava_chunk_mem_size {ava_chunk_mem_size/1e6} MB) now free_chunk_mem_size size {free_chunk_mem_size/1e6} MB, needs {need_bytes/1e6} MB'
+            f'{target_device} (ava_chunk_mem_size {ava_chunk_mem_size/1e6} MB) '
+            f'now free_chunk_mem_size size {free_chunk_mem_size/1e6} MB, '
+            f'needs {need_bytes/1e6} MB'
         )
         # 不需要新分配
         if extra_need_bytes <= 0:
@@ -160,7 +167,8 @@ class ChunkList(object):
             return
 
         logger.debug(
-            f'the device {target_device} has no enough free chunk memory, required size is {extra_need_bytes} bytes'
+            f'the device {target_device} has no enough free chunk memory, '
+            f'required size is {extra_need_bytes} bytes'
         )
         # 需要在target_device上腾出空间
         moved_list = self._chunk_to_move_out_for_room_making(
@@ -220,7 +228,9 @@ class ChunkList(object):
         chunk_mem_size = chunk.get_payload_space()
         if free_chunk_mem_size < chunk_mem_size:
             raise RuntimeError(
-                f"chunk move failed. {device} has not {chunk_mem_size/1e6} MB memory space. Free space is {free_chunk_mem_size/1e6} MB. The reason may be that the overall memory of CPU and GPU is not enough for the model."
+                f'chunk move failed. {device} has not {chunk_mem_size/1e6} MB memory space. '
+                f'Free space is {free_chunk_mem_size/1e6} MB. '
+                f'The reason may be that the overall memory of CPU and GPU is not enough for the model.'
             )
         if chunk.get_device() != device:
             logging.log(
@@ -316,13 +326,18 @@ class ChunkList(object):
 
         mgr = PatrickStarManager()
         logger.info(
-            f'**** EVICT INFO(next_mom, chunk_id) {target_device}: cur_mom {mgr.get_cur_mom()} movable_chunk_info {movable_chunk_info}, real moved_list {moved_list}'
+            f'**** EVICT INFO(next_mom, chunk_id) {target_device}: '
+            f'cur_mom {mgr.get_cur_mom()} movable_chunk_info {movable_chunk_info}, '
+            f'real moved_list {moved_list}'
         )
         # 无法腾出足够空间，抛出异常
         if moved_bytes < still_need_bytes:
             # self.visit()
             raise RuntimeError(
-                f"device {target_device} still needs {still_need_bytes/1e6} MB, but there is not enough space on it, only {moved_bytes/1e6} MB available. chunk mem used memory on {target_device} is {self.get_chunk_memory_used(target_device)/1e6} MB"
+                f'device {target_device} still needs {still_need_bytes/1e6} MB, '
+                f'but there is not enough space on it, only {moved_bytes/1e6} MB available. '
+                f'chunk mem used memory on {target_device} is '
+                f'{self.get_chunk_memory_used(target_device)/1e6} MB'
             )
 
         return moved_list

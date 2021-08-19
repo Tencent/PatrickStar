@@ -150,9 +150,8 @@ class FP16_UnfusedOptimizer(object):
         if self.overflow:
             if self.verbose:
                 logger.info(
-                    "[deepspeed] fp16 dynamic loss scale overflow! Skipping step. Attempted loss "
-                    "scale: {}, reducing to {}".format(prev_scale,
-                                                       self.cur_scale))
+                    f"[deepspeed] fp16 dynamic loss scale overflow! Skipping step. Attempted loss "
+                    f"scale: {prev_scale}, reducing to {self.cur_scale}")
             return self.overflow
 
         combined_scale = self.unscale_and_clip_grads(norm_groups,
@@ -177,9 +176,8 @@ class FP16_UnfusedOptimizer(object):
         if self.overflow:
             if self.verbose:
                 logger.info(
-                    "[deepspeed] fp16 dynamic loss scale overflow! Skipping step. Attempted loss "
-                    "scale: {}, reducing to {}".format(prev_scale,
-                                                       self.cur_scale))
+                    f"[deepspeed] fp16 dynamic loss scale overflow! Skipping step. Attempted loss "
+                    f"scale: {prev_scale}, reducing to {self.cur_scale}")
             return self.overflow
 
         norm_groups = []
@@ -251,8 +249,7 @@ class FP16_UnfusedOptimizer(object):
                                      self.min_loss_scale)
                 self.last_overflow_iter = self.cur_iter
                 if self.verbose:
-                    logger.info("Grad overflow on iteration: %s",
-                                self.cur_iter)
+                    logger.info(f"Grad overflow on iteration: {self.cur_iter}")
                     logger.info(
                         f"Reducing dynamic loss scale from {prev_scale} to {self.cur_scale}"
                     )
