@@ -53,7 +53,8 @@ def init_distributed(dist_backend="nccl",
             map(lambda v: v in os.environ, required_env)):
         if verbose:
             logger.info(
-                "Not using the DeepSpeed or torch.distributed launchers, attempting to detect MPI environment..."
+                "Not using the DeepSpeed or torch.distributed launchers, "
+                "attempting to detect MPI environment..."
             )
         if in_aml() and not in_dlts():
             patch_aml_env_for_torch_nccl_backend(verbose=verbose)

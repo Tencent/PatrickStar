@@ -21,7 +21,7 @@ def get_ps_model_size(model):
     param_cnt = 0
     for name, param in model.named_parameters(recurse=True):
         if is_param_registed(param):
-            numel += param.ps_attr.ps_numel
+            numel += param.ps_attr.numel
         else:
             numel += param.numel()
         param_cnt += 1

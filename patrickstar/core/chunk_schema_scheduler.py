@@ -196,7 +196,7 @@ class ChunkShemaScheduler(object):
                         data_type = p.dtype
                         state['exp_avg'] = torch.nn.Parameter(
                             torch.zeros(
-                                p.ps_attr.ps_shape,
+                                p.ps_attr.shape,
                                 dtype=data_type,
                                 # memory_format=torch.preserve_format,
                                 device=torch.device('cpu:0')),
@@ -204,19 +204,19 @@ class ChunkShemaScheduler(object):
                         # Exponential moving average of squared gradient values
                         state['exp_avg_sq'] = torch.nn.Parameter(
                             torch.zeros(
-                                p.ps_attr.ps_shape,
+                                p.ps_attr.shape,
                                 dtype=data_type,
                                 # memory_format=torch.preserve_format,
                                 device=torch.device('cpu:0')),
                             requires_grad=False)
 
-                        ps_name_prefix = p.ps_attr.ps_name
+                        ps_name_prefix = p.ps_attr.name
                         register_param(state['exp_avg'],
                                        f'{ps_name_prefix}.exp_avg')
                         register_param(state['exp_avg_sq'],
                                        f'{ps_name_prefix}.exp_avg_sq')
 
-                        numel = p.ps_attr.ps_numel
+                        numel = p.ps_attr.numel
                         self.add_tensor(state['exp_avg'].ps_attr.data_id(),
                                         numel, state['exp_avg'],
                                         AccessType.DATA, data_type,
@@ -272,9 +272,9 @@ class ChunkShemaScheduler(object):
                                                 requires_grad=False)
 
                 state['fp32_param_data'] = param_fp32
-                register_param(param_fp32, f'{p.ps_attr.ps_name}_fp32')
-                param_fp32.ps_attr.reset_shape(p.ps_attr.ps_shape)
-                numel = param_fp32.ps_attr.ps_numel
+                register_param(param_fp32, f'{p.ps_attr.name}_fp32')
+                param_fp32.ps_attr.reset_shape(p.ps_attr.shape)
+                numel = param_fp32.ps_attr.numel
                 chunk_pos = self.add_tensor(param_fp32.ps_attr.data_id(),
                                             numel, param_fp32, AccessType.DATA,
                                             data_type,
@@ -308,12 +308,12 @@ class ChunkShemaScheduler(object):
                             # memory_format=torch.preserve_format,
                             device=torch.device('cpu:0')),
                         requires_grad=False)
-                    ps_name_prefix = p.ps_attr.ps_name
+                    ps_name_prefix = p.ps_attr.name
                     register_param(state['exp_avg'],
                                    f'{ps_name_prefix}.exp_avg')
-                    state['exp_avg'].ps_attr.reset_shape(p.ps_attr.ps_shape)
+                    state['exp_avg'].ps_attr.reset_shape(p.ps_attr.shape)
 
-                    numel = p.ps_attr.ps_numel
+                    numel = p.ps_attr.numel
 
                     chunk_pos = self.add_tensor(
                         state['exp_avg'].ps_attr.data_id(), numel,
@@ -350,17 +350,17 @@ class ChunkShemaScheduler(object):
 
                     state['exp_avg_sq'] = torch.nn.Parameter(
                         torch.zeros(
-                            p.ps_attr.ps_shape,
+                            p.ps_attr.shape,
                             dtype=data_type,
                             # memory_format=torch.preserve_format,
                             device=torch.device('cpu:0')),
                         requires_grad=False)
 
-                    ps_name_prefix = p.ps_attr.ps_name
+                    ps_name_prefix = p.ps_attr.name
                     register_param(state['exp_avg_sq'],
                                    f'{ps_name_prefix}.exp_avg_sq')
 
-                    numel = p.ps_attr.ps_numel
+                    numel = p.ps_attr.numel
 
                     self.add_tensor(state['exp_avg_sq'].ps_attr.data_id(),
                                     numel, state['exp_avg_sq'],
