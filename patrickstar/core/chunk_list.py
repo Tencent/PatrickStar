@@ -267,11 +267,11 @@ class ChunkList(object):
             f'allocate with new chunk chunk_id {chunk_id} size {chunk_size} data_type {data_type}'
         )
 
-    def is_empty_list(self, chunk_type: ChunkListType):
+    def is_empty(self, chunk_type: ChunkListType):
         return len(self.chunk_type_to_id_dict[chunk_type]) == 0
 
     def last_chunk_in_list(self, chunk_type: ChunkListType):
-        if self.is_empty_list(chunk_type):
+        if self.is_empty(chunk_type):
             raise RuntimeError(
                 f"Call last_chunk_in_list on an empty {chunk_type} chunk list")
         return self.chunk_type_to_id_dict[chunk_type][-1]
