@@ -341,7 +341,8 @@ class PatrickStarClient(object):
         local_chunk_id = chunk_id_list[rank]
 
         logger.debug(
-            f'rank {rank} access_dist access tensor {param.ps_attr.ps_name} local_chunk_id {local_chunk_id} chunk_id_list {chunk_id_list}'
+            f'rank {rank} access_dist access tensor {param.ps_attr.ps_name} '
+            f'local_chunk_id {local_chunk_id} chunk_id_list {chunk_id_list}'
         )
 
         # 每个进程把local_chunk_id都弄到本地

@@ -138,7 +138,8 @@ class FP16Adam(torch.optim.Optimizer):
             rank = args.local_rank
         world_size = torch.distributed.get_world_size()
         logger.info(
-            f'rank {rank} margin_chunk_num_for_gpu_adam {margin_chunk_num_for_gpu_adam}, param cnt {len(fp32_params)}'
+            f'rank {rank} margin_chunk_num_for_gpu_adam {margin_chunk_num_for_gpu_adam}, '
+            f'param cnt {len(fp32_params)}'
         )
         for i, fp32_param in enumerate(fp32_params):
             ##########################
