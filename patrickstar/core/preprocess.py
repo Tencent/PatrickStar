@@ -313,7 +313,7 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
             print_rank(f'** Converting Params {name}', force=False)
 
             register_param(param, name)
-            numel = param.ps_attr.ps_numel
+            numel = param.ps_attr.numel
 
             # Append a tensor to the param fp16 chunk list
             comm_group_idx_fp16, chunk_id_fp16 = self.chunk_creator.append_tensor(
@@ -327,7 +327,7 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
                                             requires_grad=False)
 
             register_param(param_fp32, name)
-            numel = param_fp32.ps_attr.ps_numel
+            numel = param_fp32.ps_attr.numel
 
             comm_group_idx_fp32, chunk_id_fp32 = self.chunk_creator.append_tensor(
                 param_fp32.ps_attr.data_id(), numel, param_fp32,
@@ -351,8 +351,7 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
             # copy the pytorch data to chunk
             # 者必须在model全部初始化完毕才能调用，因为on-the-fly chunk是无法被access赋值。
             else:
-                pass
-                # param.ps_attr._is_local = True
+                param.ps_attr._is_local = True
                 # self.client.access_data(param, torch.device('cpu:0'))
                 # data_tensor = param.ps_attr.access_tensor(
                 #     AccessType.DATA)

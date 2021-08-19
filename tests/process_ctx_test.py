@@ -19,32 +19,25 @@ import torch
 from tests.simple_net import SimpleModel
 from patrickstar.utils import init_distributed
 from patrickstar.deepspeed_helper.global_vars import set_global_variables
+from common import distributed_test
 
-# class TestAccess(unittest.TestCase):
-#     def setUp(self):
-#         init_distributed(dist_backend='nccl')
 
-#     def test_model_init(self):
-#         def model_provider():
-#             return SimpleModel(12, False, False)
+class TestModelInitContext(unittest.TestCase):
+    def setUp(self):
+        pass
 
-#         chunk_tensor_index = ChunkTensorIndex()
-#         chunkmgr = ChunkList()
-#         client = PatrickStarClient(0, 1000, is_fp16=True)
-#         with PSPreProcessCtx(chunk_tensor_index, chunkmgr, client):
-#             model_provider()
+    @distributed_test(world_size=[1])
+    def test_model_init(self):
+        def model_provider():
+            return SimpleModel(12, False, False)
+
+        chunk_tensor_index = ChunkTensorIndex()
+        chunkmgr = ChunkList()
+        client = PatrickStarClient(0, 1000, is_fp16=True)
+        with PSPreProcessCtx(chunk_tensor_index, chunkmgr, client):
+            model_provider()
+
 
 if __name__ == "__main__":
     set_global_variables()
-    init_distributed(dist_backend='nccl')
-
-    def model_provider():
-        return SimpleModel(12, False, False)
-
-    chunk_tensor_index = ChunkTensorIndex()
-    chunkmgr = ChunkList()
-    client = PatrickStarClient(0, 1000, is_fp16=True)
-    with PSPreProcessCtx(chunk_tensor_index, chunkmgr, client):
-        model_provider()
-
-    # unittest.main()
+    unittest.main()

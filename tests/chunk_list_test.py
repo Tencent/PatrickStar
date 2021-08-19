@@ -15,7 +15,6 @@ import unittest
 from patrickstar.core import PatrickStarClient, ChunkList, PSTensorStatus, AccessType, ChunkTensorIndex, Chunk, PSChunkStatus, ChunkListType
 import logging
 import torch
-import patrickstar.utils.global_timer as global_timer
 from common import distributed_test
 from patrickstar.deepspeed_helper.global_vars import set_global_variables, get_args
 
