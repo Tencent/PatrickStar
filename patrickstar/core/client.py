@@ -173,9 +173,8 @@ class PatrickStarClient(object):
                         data_tensor.copy_(param.data)
                         self.release_data(param, PSTensorStatus.HOLD)
                 else:
-                    param.data = torch.zeros(1,
-                                             dtype=torch.half,
-                                             device=param.device)
+                    param.data = torch.tensor([], dtype=torch.half,
+                                              device=param.device)
 
         for param in self.chunk_schema_scheduler.dummy_param_list:
             if self.is_local_tensor(param, AccessType.DATA):
@@ -532,7 +531,7 @@ class PatrickStarClient(object):
         # 找到需要删除的chunk，先删除chunk关联的tensors
         if access_type == AccessType.DATA:
             # NOTE(jiaruifang) 必须device和原来param一致，影响hook of param.grad_fn.next_functions[0][0]
-            param.data = torch.zeros(1, dtype=param.dtype, device=param.device)
+            param.data = torch.tensor([], dtype=param.dtype, device=param.device)
         elif access_type == AccessType.GRAD:
             param.grad = None
 
@@ -656,7 +655,7 @@ class PatrickStarClient(object):
         # 找到需要删除的chunk，先删除chunk关联的tensors
         if access_type == AccessType.DATA:
             # NOTE() 必须to device它和param.grad_fn.next_functions[0][0]
-            param.data = torch.zeros(1, dtype=param.dtype, device=param.device)
+            param.data = torch.tensor([], dtype=param.dtype, device=param.device)
         elif access_type == AccessType.GRAD:
             param.grad = None
 

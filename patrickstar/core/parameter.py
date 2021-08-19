@@ -116,15 +116,18 @@ class PSParameter(object):
 
 
 def register_param(param, name=None):
+    assert isinstance(param, torch.nn.Parameter)
     if not hasattr(param, 'ps_attr'):
         param.ps_attr = PSParameter(param, name)
 
 
 def is_param_registed(param) -> bool:
+    assert isinstance(param, torch.nn.Parameter)
     return hasattr(param, 'ps_attr')
 
 
 def register_torch_param(param, name=None):
+    assert isinstance(param, torch.nn.Parameter)
     if not hasattr(param, 'ps_attr'):
         param.ps_attr = PSParameter(param, name)
         param.ps_attr._is_torch = True
@@ -132,6 +135,7 @@ def register_torch_param(param, name=None):
 
 
 def is_torch_param(param):
+    assert isinstance(param, torch.nn.Parameter)
     if hasattr(param, 'ps_attr'):
         return param.ps_attr._is_torch
     else:

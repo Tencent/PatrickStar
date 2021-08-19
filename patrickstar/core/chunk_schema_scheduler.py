@@ -117,11 +117,11 @@ class ChunkCreator(object):
                                                   self.data_type,
                                                   self.global_chunk_id,
                                                   chunk_list_type)
-                self.dummy_param_list.append(
-                    torch.nn.Parameter(torch.zeros(1, dtype=self.data_type),
-                                       requires_grad=False))
+                dummy = torch.nn.Parameter(torch.tensor([], dtype=self.data_type),
+                                           requires_grad=False)
                 # 加入一个dummy param可以让dummy chunk状态被设置为hold
-                register_param(self.dummy_param_list[-1], "dummy")
+                register_param(dummy, "dummy")
+                self.dummy_param_list.append(dummy)
                 self.chunk_tensor_index.add_tensor(
                     self.chunk_id, self.dummy_param_list[-1].ps_attr.data_id(),
                     0, 1, self.dummy_param_list[-1], AccessType.DATA)
@@ -228,10 +228,10 @@ class ChunkShemaScheduler(object):
                                         ChunkListType.MOMENTUM)
 
                         # param.data不被需要，将他们的内存释放
-                        state['exp_avg'].data = torch.zeros(
-                            1, dtype=data_type, device=torch.device('cpu:0'))
-                        state['exp_avg_sq'].data = torch.zeros(
-                            1, dtype=data_type, device=torch.device('cpu:0'))
+                        state['exp_avg'].data = torch.tensor(
+                            [], dtype=data_type, device=torch.device('cpu:0'))
+                        state['exp_avg_sq'].data = torch.tensor(
+                            [], dtype=data_type, device=torch.device('cpu:0'))
 
                         if group['amsgrad']:
                             # Maintains max of all exp. moving avg. of sq. grad. values
@@ -252,33 +252,18 @@ class ChunkShemaScheduler(object):
                                   chunk_list_type=ChunkListType.PARAM_FP16)
 
         # Note: param_fp16_chunk_num包括dummy chunk
-        self.chunk_tensor_index.param_fp16_chunk_num = self.chunk_tensor_index.get_cur_chunk_num(
-        )
+        self.chunk_tensor_index.param_fp16_chunk_num = self.chunk_tensor_index.get_cur_chunk_num()
 
         # 注册param data fp32，只有属于local chunk的param才初始化内存
         for group in optimizer.param_groups:
             for p in group['params']:
                 state = optimizer.state[p]
-                data_type = torch.float
-                if is_torch_param(p):
-                    param_fp32 = torch.nn.Parameter(torch.zeros_like(
-                        p, dtype=data_type, device=torch.device('cpu:0')),
-                                                    requires_grad=False)
-                    state['fp32_param_data'] = param_fp32
-                    register_torch_param(state['fp32_param_data'])
-                    continue
-                param_fp32 = torch.nn.Parameter(torch.zeros(
-                    1, dtype=data_type, device=torch.device('cpu:0')),
-                                                requires_grad=False)
-
-                state['fp32_param_data'] = param_fp32
-                register_param(param_fp32, f'{p.ps_attr.name}_fp32')
-                param_fp32.ps_attr.reset_shape(p.ps_attr.shape)
-                numel = param_fp32.ps_attr.numel
-                chunk_pos = self.add_tensor(param_fp32.ps_attr.data_id(),
-                                            numel, param_fp32, AccessType.DATA,
-                                            data_type,
-                                            ChunkListType.PARAM_FP32)
+                if not is_torch_param(p):
+                    param_fp32 = state['fp32_param_data']
+                    numel = param_fp32.ps_attr.numel
+                    chunk_pos = self.add_tensor(param_fp32.ps_attr.data_id(),
+                                                numel, param_fp32, AccessType.DATA,
+                                                torch.float, ChunkListType.PARAM_FP32)
 
         self.start_new_chunk_list(add_dummy_chunk_flag=False,
                                   chunk_list_type=ChunkListType.PARAM_FP32)
@@ -286,43 +271,20 @@ class ChunkShemaScheduler(object):
         # 注册M，V, param data fp32
         for group in optimizer.param_groups:
             for p in group['params']:
-                if p.requires_grad is True:
+                if p.requires_grad:
                     state = optimizer.state[p]
-                    state['step'] = 0
-                    # 被PatrickStar管理
                     # Exponential moving average of gradient values
-                    data_type = torch.float
-                    if is_torch_param(p):
-                        state['exp_avg'] = torch.nn.Parameter(
-                            torch.zeros_like(p,
-                                             dtype=data_type,
-                                             device=torch.device('cpu:0')),
-                            requires_grad=False)
-                        register_torch_param(state['exp_avg'])
-                        continue
+                    if not is_torch_param(p):
+                        numel = p.ps_attr.numel
 
-                    state['exp_avg'] = torch.nn.Parameter(
-                        torch.zeros(
-                            1,
-                            dtype=data_type,
-                            # memory_format=torch.preserve_format,
-                            device=torch.device('cpu:0')),
-                        requires_grad=False)
-                    ps_name_prefix = p.ps_attr.name
-                    register_param(state['exp_avg'],
-                                   f'{ps_name_prefix}.exp_avg')
-                    state['exp_avg'].ps_attr.reset_shape(p.ps_attr.shape)
+                        chunk_pos = self.add_tensor(
+                            state['exp_avg'].ps_attr.data_id(), numel,
+                            state['exp_avg'], AccessType.DATA, torch.float,
+                            ChunkListType.VARIANCE)
 
-                    numel = p.ps_attr.numel
-
-                    chunk_pos = self.add_tensor(
-                        state['exp_avg'].ps_attr.data_id(), numel,
-                        state['exp_avg'], AccessType.DATA, data_type,
-                        ChunkListType.VARIANCE)
-
-                    if group['amsgrad']:
-                        # Maintains max of all exp. moving avg. of sq. grad. values
-                        raise NotImplementedError
+                        if group['amsgrad']:
+                            # Maintains max of all exp. moving avg. of sq. grad. values
+                            raise NotImplementedError
                 else:
                     raise RuntimeError
 
@@ -332,47 +294,19 @@ class ChunkShemaScheduler(object):
         # 注册exp_avg_sq
         for group in optimizer.param_groups:
             for p in group['params']:
-                if p.requires_grad is True:
+                if p.requires_grad:
                     state = optimizer.state[p]
-                    # Eager state initialization, different from Pytorch
-                    state['step'] = 0
-                    # 被PatrickStar管理
                     # Exponential moving average of gradient values
-                    data_type = torch.float
-                    if is_torch_param(p):
-                        state['exp_avg_sq'] = torch.nn.Parameter(
-                            torch.zeros_like(p,
-                                             dtype=data_type,
-                                             device=torch.device('cpu:0')),
-                            requires_grad=False)
-                        register_torch_param(state['exp_avg_sq'])
-                        continue
+                    if not is_torch_param(p):
+                        numel = p.ps_attr.numel
+                        self.add_tensor(state['exp_avg_sq'].ps_attr.data_id(),
+                                        numel, state['exp_avg_sq'],
+                                        AccessType.DATA, torch.float,
+                                        ChunkListType.MOMENTUM)
 
-                    state['exp_avg_sq'] = torch.nn.Parameter(
-                        torch.zeros(
-                            p.ps_attr.shape,
-                            dtype=data_type,
-                            # memory_format=torch.preserve_format,
-                            device=torch.device('cpu:0')),
-                        requires_grad=False)
-
-                    ps_name_prefix = p.ps_attr.name
-                    register_param(state['exp_avg_sq'],
-                                   f'{ps_name_prefix}.exp_avg_sq')
-
-                    numel = p.ps_attr.numel
-
-                    self.add_tensor(state['exp_avg_sq'].ps_attr.data_id(),
-                                    numel, state['exp_avg_sq'],
-                                    AccessType.DATA, data_type,
-                                    ChunkListType.MOMENTUM)
-
-                    state['exp_avg_sq'].data = torch.zeros(
-                        1, dtype=data_type, device=torch.device('cpu:0'))
-
-                    if group['amsgrad']:
-                        # Maintains max of all exp. moving avg. of sq. grad. values
-                        raise NotImplementedError
+                        if group['amsgrad']:
+                            # Maintains max of all exp. moving avg. of sq. grad. values
+                            raise NotImplementedError
                 else:
                     raise RuntimeError
 
