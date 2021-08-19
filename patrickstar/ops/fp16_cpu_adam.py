@@ -22,7 +22,7 @@ import logging
 from patrickstar.core.const import PSTensorStatus, AccessType, TrainingStage
 import patrickstar.utils.global_timer as global_timer
 from patrickstar.utils import print_rank, logger, use_dist_flag, get_sys_memory_used
-from patrickstar.core.parameter import register_param, is_torch_param
+from patrickstar.core.parameter import register_param, is_torch_param, register_torch_param
 from patrickstar.deepspeed_helper.global_vars import get_args
 from patrickstar.manager import PatrickStarManager
 from patrickstar.core import ChunkList, ChunkTensorIndex
@@ -78,13 +78,57 @@ class FP16Adam(torch.optim.Optimizer):
         self.client = client
         self.prefer_device = prefer_device
 
-        # 将group参数放置到每个param内部，可以按照参数切分并行计算adam
+        # Eager state initialization, different from Pytorch
         for group in self.param_groups:
             for p in group['params']:
+                state = self.state[p]
+                # 将group参数放置到每个param内部，可以按照参数切分并行计算adam
                 self.state[p]['betas'] = group['betas']
                 self.state[p]['lr'] = group['lr']
                 self.state[p]['weight_decay'] = group['weight_decay']
                 self.state[p]['eps'] = group['eps']
+
+                state['step'] = 0
+
+                if is_torch_param(p):
+                    state['fp32_param_data'] = torch.nn.Parameter(
+                        torch.zeros_like(p, dtype=torch.float, device=torch.device('cpu:0')),
+                                         requires_grad=False)
+                    register_torch_param(state['fp32_param_data'])
+
+                    if p.requires_grad:
+                        state['exp_avg'] = torch.nn.Parameter(
+                            torch.zeros_like(p, dtype=torch.float, device=torch.device('cpu:0')),
+                                            requires_grad=False)
+                        register_torch_param(state['exp_avg'])
+                        state['exp_avg_sq'] = torch.nn.Parameter(
+                            torch.zeros_like(p, dtype=torch.float, device=torch.device('cpu:0')),
+                                            requires_grad=False)
+                        register_torch_param(state['exp_avg_sq'])
+                else:
+                    state['fp32_param_data'] = torch.nn.Parameter(
+                        torch.tensor([], dtype=torch.float, device=torch.device('cpu:0')),
+                                     requires_grad=False)
+                    register_param(state['fp32_param_data'], f'{p.ps_attr.name}_fp32')
+                    state['fp32_param_data'].ps_attr.reset_shape(p.ps_attr.shape)
+
+                    if p.requires_grad:
+                        state['exp_avg'] = torch.nn.Parameter(
+                            torch.tensor([], dtype=torch.float,
+                                        # memory_format=torch.preserve_format,
+                                        device=torch.device('cpu:0')),
+                                        requires_grad=False)
+                        register_param(state['exp_avg'], f'{p.ps_attr.name}.exp_avg')
+                        state['exp_avg'].ps_attr.reset_shape(p.ps_attr.shape)
+
+                        state['exp_avg_sq'] = torch.nn.Parameter(
+                            torch.tensor([], dtype=torch.float,
+                                        # memory_format=torch.preserve_format,
+                                        device=torch.device('cpu:0')),
+                            requires_grad=False)
+                        register_param(state['exp_avg_sq'], f'{p.ps_attr.name}.exp_avg_sq')
+                        state['exp_avg_sq'].ps_attr.reset_shape(p.ps_attr.shape)
+
 
         # 用作fp16 grad 存储的buffer
         self.read_chunk_buff = None
@@ -284,6 +328,8 @@ class FP16Adam(torch.optim.Optimizer):
         """
         args = get_args()
         rank = torch.distributed.get_rank()
+        # Here we need to use module.parameter() order
+        # because it is the order of params in the chunk_list
         for n, param in self.client.module.named_parameters():
             if is_torch_param(param) and param.grad is not None:
                 param.data = param.grad

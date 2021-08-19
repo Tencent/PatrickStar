@@ -204,6 +204,5 @@ class Init(InsertPostInitMethodToModuleSubClasses):
                 # TODO(jiaruifang)下面这句将非local的param的内存清零会导致结果错误,
                 # 插入这句会影响模型初始化的值。
                 if not args.use_fake_dist:
-                    param.data = torch.zeros(1,
-                                             dtype=param.dtype,
-                                             device=param.device)
+                    param.data = torch.tensor([], dtype=param.dtype,
+                                              device=param.device)
