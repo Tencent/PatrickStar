@@ -54,7 +54,7 @@ class TensorInfo(object):
     def showme(self):
         logger.info(
             f'tensor_id {self.tensor_id}, name {self.tensor_name}, '
-            f'shape {self.param.ps_shape}, chunk_id {self.chunk_id}, '
+            f'shape {self.param.shape}, chunk_id {self.chunk_id}, '
             f'start_offset {self.start_offset}, nueml {self.numel}, status {self.status()}'
         )
 
@@ -225,7 +225,7 @@ class ChunkTensorIndex(object):
         if not is_param_registed(param):
             param_name = None
         else:
-            param_name = param.ps_attr.ps_name
+            param_name = param.ps_attr.name
 
         self.dict_tensor_id_info[tensor_id] = TensorInfo(
             chunk_id, tensor_id, start_offset, numel, param, access_type,
@@ -233,9 +233,9 @@ class ChunkTensorIndex(object):
 
         if is_param_registed(param):
             if access_type == AccessType.DATA:
-                param.ps_attr.ps_data_chunk_id = chunk_id
+                param.ps_attr.data_chunk_id = chunk_id
             elif access_type == AccessType.GRAD:
-                param.ps_attr.ps_grad_chunk_id = chunk_id
+                param.ps_attr.grad_chunk_id = chunk_id
 
     def delete_chunk_id(self, chunk_id):
         """

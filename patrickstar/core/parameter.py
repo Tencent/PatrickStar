@@ -20,9 +20,9 @@ class PSTensor(object):
     global_id = 0
 
     def __init__(self):
-        self.ps_tensor = None
-        self.ps_id = PSTensor.global_id
-        self.ps_status = PSTensorStatus.FREE
+        self.tensor = None
+        self.id = PSTensor.global_id
+        self.status = PSTensorStatus.FREE
         PSTensor.global_id += 1
 
 
@@ -31,12 +31,12 @@ class PSParameter(object):
         """
         在torch.nn.Parameter的附加成员变量
         """
-        self.ps_name = name
-        self.ps_numel = param.numel()
-        self.ps_shape = param.shape
+        self.name = name
+        self.numel = param.numel()
+        self.shape = param.shape
 
-        self.ps_data_chunk_id = None
-        self.ps_grad_chunk_id = None        
+        self.data_chunk_id = None
+        self.grad_chunk_id = None        
 
         self.data_tensor = PSTensor()
         if param.requires_grad:
@@ -53,8 +53,8 @@ class PSParameter(object):
         return self._is_local
 
     def reset_shape(self, new_shape):
-        self.ps_shape = new_shape
-        self.ps_numel = new_shape.numel()
+        self.shape = new_shape
+        self.numel = new_shape.numel()
 
     def data_id(self):
         return self.get_tensor_id(AccessType.DATA)
@@ -64,35 +64,35 @@ class PSParameter(object):
 
     def get_tensor_id(self, access_type: AccessType):
         if access_type == AccessType.DATA:
-            return self.data_tensor.ps_id
+            return self.data_tensor.id
         elif access_type == AccessType.GRAD:
-            return self.grad_tensor.ps_id
+            return self.grad_tensor.id
         else:
             raise ValueError
 
     def set_tensor(self, tensor: torch.Tensor, access_type: AccessType):
         if access_type == AccessType.DATA:
-            self.data_tensor.ps_tensor = tensor.view(self.ps_shape)
+            self.data_tensor.tensor = tensor.view(self.shape)
         elif access_type == AccessType.GRAD:
-            self.grad_tensor.ps_tensor = tensor.view(self.ps_shape)
+            self.grad_tensor.tensor = tensor.view(self.shape)
         else:
             raise ValueError
 
     def access_tensor(self, access_type: AccessType):
         if access_type == AccessType.DATA:
-            return self.data_tensor.ps_tensor
+            return self.data_tensor.tensor
         elif access_type == AccessType.GRAD:
             if self._is_torch:
                 raise RuntimeError
-            return self.grad_tensor.ps_tensor
+            return self.grad_tensor.tensor
         else:
             raise ValueError
 
     def get_status(self, access_type: AccessType):
         if access_type == AccessType.DATA:
-            return self.data_tensor.ps_status
+            return self.data_tensor.status
         elif access_type == AccessType.GRAD:
-            return self.grad_tensor.ps_status
+            return self.grad_tensor.status
         else:
             raise ValueError
 
@@ -103,13 +103,13 @@ class PSParameter(object):
         TODO(jiaruifang)还需要param reset data和grad
         """
         if access_type == AccessType.DATA:
-            self.data_tensor.ps_status = status
+            self.data_tensor.status = status
             if status != PSTensorStatus.COMPUTE:
-                self.data_tensor.ps_tensor = None
+                self.data_tensor.tensor = None
         elif access_type == AccessType.GRAD:
-            self.grad_tensor.ps_status = status
+            self.grad_tensor.status = status
             if status != PSTensorStatus.COMPUTE:
-                self.grad_tensor.ps_tensor = None
+                self.grad_tensor.tensor = None
         else:
             raise ValueError(
                 f'set status {status} when access type is {access_type}')
@@ -128,7 +128,7 @@ def register_torch_param(param, name=None):
     if not hasattr(param, 'ps_attr'):
         param.ps_attr = PSParameter(param, name)
         param.ps_attr._is_torch = True
-        # param.ps_attr.data_tensor.ps_tensor = param.data
+        # param.ps_attr.data_tensor.tensor = param.data
 
 
 def is_torch_param(param):

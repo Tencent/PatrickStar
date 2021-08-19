@@ -80,7 +80,7 @@ class PatrickStarEngine(Module):
         # print_rank_0(f"reduce_ready_partitions_and_remove_grads param {i}",
         #              force=True)
         # # self.reduce_independent_p_g_buckets_and_remove_grads(param, i)
-        # print_rank_0(f'ps_name {param.ps_attr.ps_name} {param.grad}',
+        # print_rank_0(f'name {param.ps_attr.name} {param.grad}',
         #              force=True)
         # reduce grad and release grad，TODO(jiaruifang)确认这个hook和bwd hook的关系
 

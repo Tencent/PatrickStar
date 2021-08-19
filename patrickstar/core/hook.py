@@ -199,7 +199,7 @@ def post_sub_module_backward_function(sub_module, client, name):
                                          group=self.client.cpu_comm_group,
                                          async_op=False)
             param.data /= world_size
-            logger.debug(f'rank {rank} allreduce grad {param.ps_attr.ps_name}')
+            logger.debug(f'rank {rank} allreduce grad {param.ps_attr.name}')
             continue
         if param.dtype == torch.half:
             tmp_tensor = param.ps_attr.access_tensor(AccessType.DATA)

@@ -193,7 +193,7 @@ class PatrickStarClient(object):
         为param分配一个chunk，如果已经存在的chunk有空隙则插在空隙中
         如果没有空隙则分配一个新的chunk
         """
-        numel = param.ps_attr.ps_numel
+        numel = param.ps_attr.numel
         data_type = param.dtype
 
         chunk_id, offset = self.chunk_tensor_index.find_gap(numel, data_type)
@@ -341,7 +341,7 @@ class PatrickStarClient(object):
         local_chunk_id = chunk_id_list[rank]
 
         logger.debug(
-            f'rank {rank} access_dist access tensor {param.ps_attr.ps_name} '
+            f'rank {rank} access_dist access tensor {param.ps_attr.name} '
             f'local_chunk_id {local_chunk_id} chunk_id_list {chunk_id_list}'
         )
 
@@ -352,7 +352,7 @@ class PatrickStarClient(object):
         self.chunk_list[local_chunk_id].pin()
 
         self._fetch_remote_chunks(chunk_id_list, local_chunk_id,
-                                  compute_device, param.ps_attr.ps_name,
+                                  compute_device, param.ps_attr.name,
                                   training_stage)
         self.chunk_list[local_chunk_id].unpin()
 
@@ -364,7 +364,7 @@ class PatrickStarClient(object):
         info = self.chunk_tensor_index.get_tensor_info(tensor_id)
         start_offset = info.start_offset
         numel = info.numel
-        assert numel == param.ps_attr.ps_numel, f"{numel} vs {param.ps_attr.ps_numel}"
+        assert numel == param.ps_attr.numel, f"{numel} vs {param.ps_attr.numel}"
 
         assert self.chunk_list[
             chunk_id].payload is not None, f"rank {rank} chunk id {chunk_id}' payload is None'"
@@ -446,7 +446,7 @@ class PatrickStarClient(object):
         info = self.chunk_tensor_index.get_tensor_info(tensor_id)
         start_offset = info.start_offset
         numel = info.numel
-        assert numel == param.ps_attr.ps_numel, f"{numel} vs {param.ps_attr.ps_numel}"
+        assert numel == param.ps_attr.numel, f"{numel} vs {param.ps_attr.numel}"
 
         param.ps_attr.set_tensor(
             self.chunk_list[chunk_id].payload.narrow(0, start_offset, numel),
@@ -519,7 +519,7 @@ class PatrickStarClient(object):
         local_chunk_id = chunk_id_list[rank]
 
         logging.debug(
-            f'rank {rank} release tensor {param.ps_attr.ps_name} of chunk_id {chunk_id} to {reset_to_status}'
+            f'rank {rank} release tensor {param.ps_attr.name} of chunk_id {chunk_id} to {reset_to_status}'
         )
 
         # 更新tensor和chunk状态， tensor被设置为free，需要删除内存
