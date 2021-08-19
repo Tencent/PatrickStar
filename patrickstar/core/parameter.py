@@ -15,17 +15,15 @@ import torch
 from .const import PSTensorStatus, AccessType
 import logging
 
-global_id = 0
 
-
-#TODO如何产生全局id？
 class PSTensor(object):
+    global_id = 0
+
     def __init__(self):
-        global global_id
         self.ps_tensor = None
-        self.ps_id = global_id
+        self.ps_id = PSTensor.global_id
         self.ps_status = PSTensorStatus.FREE
-        global_id += 1
+        PSTensor.global_id += 1
 
 
 class PSParameter(object):
@@ -33,26 +31,21 @@ class PSParameter(object):
         """
         在torch.nn.Parameter的附加成员变量
         """
-        self.ps_name = None
-        self.ps_numel = None
-        self.ps_shape = None
-
-        self.ps_data_chunk_id = None
-        self.ps_grad_chunk_id = None
-        # id, status, tensor_data
-        self.data_tensor = None
-        self.grad_tensor = None
-
         self.ps_name = name
         self.ps_numel = param.numel()
         self.ps_shape = param.shape
 
+        self.ps_data_chunk_id = None
+        self.ps_grad_chunk_id = None        
+
         self.data_tensor = PSTensor()
         if param.requires_grad:
             self.grad_tensor = PSTensor()
+        else:
+            self.grad_tensor = None
 
         # 参数是否属于进程的本地Chunk
-        self._is_local = None
+        self._is_local = True
         # 参数是否交给Torch做内存管理，而不是Chunk
         self._is_torch = False
 
@@ -75,7 +68,7 @@ class PSParameter(object):
         elif access_type == AccessType.GRAD:
             return self.grad_tensor.ps_id
         else:
-            raise RuntimeError
+            raise ValueError
 
     def set_tensor(self, tensor: torch.Tensor, access_type: AccessType):
         if access_type == AccessType.DATA:
@@ -83,7 +76,7 @@ class PSParameter(object):
         elif access_type == AccessType.GRAD:
             self.grad_tensor.ps_tensor = tensor.view(self.ps_shape)
         else:
-            raise RuntimeError
+            raise ValueError
 
     def access_tensor(self, access_type: AccessType):
         if access_type == AccessType.DATA:
@@ -93,7 +86,7 @@ class PSParameter(object):
                 raise RuntimeError
             return self.grad_tensor.ps_tensor
         else:
-            raise RuntimeError
+            raise ValueError
 
     def get_status(self, access_type: AccessType):
         if access_type == AccessType.DATA:
@@ -101,7 +94,7 @@ class PSParameter(object):
         elif access_type == AccessType.GRAD:
             return self.grad_tensor.ps_status
         else:
-            raise RuntimeError
+            raise ValueError
 
     def set_status(self, status: PSTensorStatus, access_type: AccessType):
         """
@@ -118,7 +111,7 @@ class PSParameter(object):
             if status != PSTensorStatus.COMPUTE:
                 self.grad_tensor.ps_tensor = None
         else:
-            raise RuntimeError(
+            raise ValueError(
                 f'set status {status} when access type is {access_type}')
 
 

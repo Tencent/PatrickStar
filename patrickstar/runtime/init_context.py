@@ -207,5 +207,3 @@ class Init(InsertPostInitMethodToModuleSubClasses):
                     param.data = torch.zeros(1,
                                              dtype=param.dtype,
                                              device=param.device)
-            else:
-                param.ps_attr._is_local = True
