@@ -57,3 +57,4 @@ class ChunkListType(Enum):
     PARAM_FP32 = 1
     MOMENTUM = 2
     VARIANCE = 3
+    UNDEF = 4
