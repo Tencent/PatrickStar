@@ -192,7 +192,7 @@ class Init(InsertPostInitMethodToModuleSubClasses):
             print_rank(f'** Converting Params {name}', force=False)
 
             register_param(param, name)
-            numel = param.ps_attr.ps_numel
+            numel = param.ps_attr.numel
             data_type = torch.half
 
             chunk_index_in_group, chunk_id = self._client.chunk_schema_scheduler.add_tensor(

@@ -161,7 +161,7 @@ class FP16Adam(torch.optim.Optimizer):
                 # 将FP16 GPU Chunk拷贝到compute_device的FP32 Chunk上。
                 # 如果是第一个tensor则拷贝Chunk，否则索引chunk
                 fp32_grad_tensor = read_chunk_buff.access_from_cache(
-                    fp16_param).view(fp16_param.ps_attr.ps_shape)
+                    fp16_param).view(fp16_param.ps_attr.shape)
 
             compute_device = fp32_grad_tensor.device
             logger.debug(
@@ -297,7 +297,7 @@ class FP16Adam(torch.optim.Optimizer):
                 param.data /= world_size
 
                 logger.info(
-                    f'rank {rank} allreduce grad {param.ps_attr.ps_name}')
+                    f'rank {rank} allreduce grad {param.ps_attr.name}')
                 continue
             if param.ps_attr.get_status(
                     AccessType.DATA) == PSTensorStatus.COMPUTE:
