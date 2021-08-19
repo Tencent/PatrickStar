@@ -53,11 +53,10 @@ def distributed_test(world_size=2, backend='nccl'):
             deepspeed.init_distributed(dist_backend=backend)
 
             if torch.cuda.is_available():
-                # TODO(jiaruifang) debug on only one gpu device
-                # set all device to 0
-                torch.cuda.set_device(0)
-                # torch.cuda.set_device(local_rank)
-
+                torch.cuda.set_device(local_rank)
+            from patrickstar.deepspeed_helper.global_vars import set_global_variables, get_args
+            args = get_args()
+            args.local_rank = local_rank
             run_func(*func_args, **func_kwargs)
 
         def dist_launcher(num_procs, *func_args, **func_kwargs):
