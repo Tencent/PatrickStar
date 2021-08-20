@@ -273,7 +273,8 @@ class ChunkList(object):
         logging.debug(
             f'allocate with new chunk chunk_id {chunk_id} size {chunk_size} data_type {data_type}'
         )
-        return len(self.chunk_type_to_id_dict[chunk_type]) % args.world_size
+        return (len(self.chunk_type_to_id_dict[chunk_type]) -
+                1) % args.world_size
 
     def is_empty(self, chunk_type: ChunkListType):
         return len(self.chunk_type_to_id_dict[chunk_type]) == 0
