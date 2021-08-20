@@ -25,7 +25,8 @@ from .parameter import PSParameter, is_param_registed
 
 class TensorInfo(object):
     """
-    记录chunk内存存储tensor的属性,
+    记录chunk内存存储tensor的属性
+    PyTorch tensor的存根
     """
     def __init__(self,
                  chunk_id: int,
@@ -60,7 +61,7 @@ class TensorInfo(object):
 
 
 class ChunkTensorIndex(object):
-    def __init__(self):
+    def __init__(self, default_chunk_size: int = 0):
         """
         一个存储tensor和chunk的检索信息的数据库，每个进程维护一个ChunkTensorIndex实例
         它在预处理阶段根据DNN定义被创建出来
@@ -81,6 +82,7 @@ class ChunkTensorIndex(object):
         self.param_fp32_list = []
         self.momentum_fp32_list = []
         self.variance_fp32_list = []
+        self.default_chunk_size = default_chunk_size
 
     def add_chunk(self, chunk_id, chunk_size, data_type, comm_group_id,
                   list_type: ChunkListType):
@@ -213,6 +215,7 @@ class ChunkTensorIndex(object):
         添加一个tensor，注册它所属的chunk_id和start_offset信息
         需要将chunk_id内的tensor按照start_offset排序
         二分查找时间复杂度O(logN)
+        考虑chunk内排布的tensor可能不连续的情况
         """
         if chunk_id not in self.dict_chunk_id_tensor_id:
             self.dict_chunk_id_tensor_id[chunk_id] = list()
@@ -325,3 +328,40 @@ class ChunkTensorIndex(object):
                 )
             total_bytes += chunk.get_chunk_space()
         logger.info(f'OVERALL CHUNK SIZE {total_bytes/1e9} GB')
+
+    def _get_tensor_id_list(self, chunk_id):
+        if chunk_id not in self.dict_chunk_id_tensor_id:
+            self.dict_chunk_id_tensor_id[chunk_id] = list()
+        return self.dict_chunk_id_tensor_id[chunk_id]
+
+    def try_insert_tensor(self, chunk_id, param, access_type) -> bool:
+        """
+        尝试向chunk内插入tensor，返回值表示是否成功
+        """
+        tensor_id_list = self._get_tensor_id_list(chunk_id)
+        prev_end_pos = 0
+        assert is_param_registed(param)
+        numel = param.ps_attr.numel
+        target_tensor_id = param.ps_attr.get_tensor_id(access_type)
+        for idx, tensor_id in enumerate(tensor_id_list):
+            tensor_info = self.dict_tensor_id_info[tensor_id]
+            start_pos = tensor_info.start_offset
+            gap = start_pos - prev_end_pos
+            if gap >= numel:
+                self.dict_tensor_id_info[target_tensor_id] = TensorInfo(
+                    chunk_id, target_tensor_id, prev_end_pos, numel, param,
+                    access_type)
+                tensor_id_list.insert(idx + 1, target_tensor_id)
+                return True
+            prev_end_pos = start_pos + tensor_info.numel
+
+        logger.info(
+            f'default_chunk_size {self.default_chunk_size}, prev_end_pos {prev_end_pos}, numel {numel}'
+        )
+        if self.default_chunk_size - prev_end_pos >= numel:
+            self.dict_tensor_id_info[target_tensor_id] = TensorInfo(
+                chunk_id, target_tensor_id, prev_end_pos, numel, param,
+                access_type)
+            tensor_id_list.insert(len(tensor_id_list), target_tensor_id)
+            return True
+        return False
