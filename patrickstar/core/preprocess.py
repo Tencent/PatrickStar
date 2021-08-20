@@ -247,6 +247,17 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
         self.dummy_param_list = []
         self.param_idx = 0
 
+    def _is_local_param(self, param, access_type):
+        """
+        TODO(jiaruifang)暂时和client中的is_local_param重复，未来会合并
+        """
+        args = get_args()
+        chunk_id = self.client.chunk_tensor_index.get_chunk_id(
+            param, access_type)
+        comm_group_id = self.client.chunk_tensor_index.dict_chunk_id_comm_group_id[
+            chunk_id]
+        assert args.local_rank == comm_group_id
+
     def _post_init_method(self, module):
         """
         在model的param被PyTorch初始化完毕后完成
@@ -290,7 +301,7 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
             self.client.append_tensor(param_fp32, AccessType.DATA,
                                       ChunkListType.PARAM_FP32, f'{name}_fp32')
             # Delete the memory of non local tensors
-            if not self.client.is_local_tensor(param, AccessType.DATA):
+            if not self._is_local_param(param, AccessType.DATA):
                 logger.info(f'not local tensor {name}')
                 param.ps_attr._is_local = False
                 # TODO(jiaruifang)下面这句将非local的param的内存清零会导致结果错误,
