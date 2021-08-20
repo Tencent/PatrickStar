@@ -99,40 +99,25 @@ class PatrickStarClient(object):
         register_param(param, tensor_name)
         if self.chunk_list.is_empty(chunk_list_type):
             chunk_id = self.chunk_list.generate_chunk_id()
-            comm_group_idx = self.chunk_list.new_chunk(chunk_id,
-                                                       self.default_chunk_size,
-                                                       param.dtype, False,
-                                                       chunk_list_type)
-            self.chunk_tensor_index.add_chunk(chunk_id,
-                                              self.default_chunk_size,
-                                              param.dtype, comm_group_idx,
-                                              chunk_list_type)
+        else:
+            last_chunk_id = self.chunk_list.last_chunk_id(chunk_list_type)
             is_success = self.chunk_tensor_index.try_insert_tensor(
-                chunk_id, param, access_type)
-            if not is_success:
-                raise RuntimeError(
-                    "can not append a tensor to chunk_tensor_index")
-            return
-
-        last_chunk_id = self.chunk_list.last_chunk_id(chunk_list_type)
-        is_success = self.chunk_tensor_index.try_insert_tensor(
-            last_chunk_id, param, access_type)
-
-        if not is_success:
+                last_chunk_id, param, access_type)
+            if is_success:
+                return
             chunk_id = self.chunk_list.generate_chunk_id()
-            comm_group_idx = self.chunk_list.new_chunk(chunk_id,
-                                                       self.default_chunk_size,
-                                                       param.dtype, False,
-                                                       chunk_list_type)
-            self.chunk_tensor_index.add_chunk(chunk_id,
-                                              self.default_chunk_size,
-                                              param.dtype, comm_group_idx,
-                                              chunk_list_type)
-            is_success = self.chunk_tensor_index.try_insert_tensor(
-                chunk_id, param, access_type)
-            if not is_success:
-                raise RuntimeError(
-                    "can not append a tensor to chunk_tensor_index")
+
+        comm_group_idx = self.chunk_list.new_chunk(chunk_id,
+                                                   self.default_chunk_size,
+                                                   param.dtype, False,
+                                                   chunk_list_type)
+        self.chunk_tensor_index.add_chunk(chunk_id, self.default_chunk_size,
+                                          param.dtype, comm_group_idx,
+                                          chunk_list_type)
+        is_success = self.chunk_tensor_index.try_insert_tensor(
+            chunk_id, param, access_type)
+        if not is_success:
+            raise RuntimeError("can not append a tensor to chunk_tensor_index")
         return
 
     def static_chunk_schedule(self, model, optimizer):
