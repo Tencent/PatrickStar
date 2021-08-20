@@ -14,11 +14,6 @@
 from enum import Enum
 
 
-class AccessType(Enum):
-    DATA = 1
-    GRAD = 2
-
-
 class PSChunkStatus(Enum):
     # Chunk内存被分配出来，在计算中
     COMPUTE = 0

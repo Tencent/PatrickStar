@@ -18,7 +18,7 @@ from pathlib import Path
 from torch import Tensor
 from typing import List, Optional
 import logging
-from patrickstar.core.const import PSTensorStatus, AccessType
+from patrickstar.core.const import PSTensorStatus
 import patrickstar.utils.global_timer as global_timer
 
 
@@ -92,9 +92,9 @@ def F_adam(client, params: List[torch.nn.Parameter],
         param_grad.zero_()
         client.release_grad(param, PSTensorStatus.HOLD)
 
-        client.release_data(param)
-        client.release_data(exp_avg_param)
-        client.release_data(exp_avg_sq_param)
+        client.release(param)
+        client.release(exp_avg_param)
+        client.release(exp_avg_sq_param)
         global_timer.cpu_adam_release_elapse += time.time(
         ) - adam_iter_release_start
 
@@ -174,7 +174,7 @@ class CPUAdam(torch.optim.Optimizer):
         """
         for n, p in self.client.module.named_parameters():
             self.client.release_grad(p, PSTensorStatus.HOLD)
-            self.client.release_data(p, PSTensorStatus.HOLD)
+            self.client.release(p, PSTensorStatus.HOLD)
 
         loss = None
         if closure is not None:

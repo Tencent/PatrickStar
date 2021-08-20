@@ -14,7 +14,7 @@
 from .client import PatrickStarClient
 from .chunk_list import ChunkList
 from .chunk_data import Chunk
-from .const import AccessType, PSChunkStatus, PSTensorStatus, TrainingStage, ChunkListType
+from .const import PSChunkStatus, PSTensorStatus, TrainingStage, ChunkListType
 from .chunk_tensor_index import ChunkTensorIndex
 from .hook import setup_hybrid_ps_hooks
 from .chunk_schema_scheduler import ChunkShemaScheduler

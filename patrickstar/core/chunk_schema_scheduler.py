@@ -14,7 +14,7 @@
 from .chunk_data import Chunk
 from .chunk_list import ChunkList
 from .chunk_tensor_index import ChunkTensorIndex
-from .const import AccessType, PSTensorStatus, ChunkListType
+from .const import PSTensorStatus, ChunkListType
 from .parameter import PSParameter, register_param, is_param_registed, is_torch_param, register_torch_param
 import torch
 import logging
@@ -51,7 +51,7 @@ class ChunkCreator(object):
         self.dummy_param_list = dummy_param_list
         logger.info(f'default chunk size {default_chunk_size}')
 
-    def _add_tensor(self, tensor_id, numel, param, access_type: AccessType,
+    def _add_tensor(self, tensor_id, numel, param,
                     data_type, chunk_list_type: ChunkListType):
         """
         向chunk_tensor_index注册tensor，当新的Tensor大小超过Chunk剩余空间，
@@ -79,8 +79,7 @@ class ChunkCreator(object):
             self.acc_cnt = 0
 
         self.chunk_tensor_index.add_tensor(self.chunk_id, tensor_id,
-                                           self.acc_cnt, numel, param,
-                                           access_type)
+                                           self.acc_cnt, numel, param)
         self.acc_cnt += numel
 
         # 返回tensor对应的chunk在chunk group的位置
@@ -123,8 +122,8 @@ class ChunkCreator(object):
                 register_param(dummy, "dummy")
                 self.dummy_param_list.append(dummy)
                 self.chunk_tensor_index.add_tensor(
-                    self.chunk_id, self.dummy_param_list[-1].ps_attr.data_id(),
-                    0, 1, self.dummy_param_list[-1], AccessType.DATA)
+                    self.chunk_id, self.dummy_param_list[-1].ps_attr.id(),
+                    0, 1, self.dummy_param_list[-1])
 
                 self.chunk_id += 1
                 self.list_id += 1
@@ -145,14 +144,13 @@ class ChunkShemaScheduler(object):
                                           chunk_tensor_index,
                                           self.dummy_param_list)
 
-    def add_tensor(self, tensor_id, numel, param, access_type: AccessType,
+    def add_tensor(self, tensor_id, numel, param,
                    data_type, chunk_list_type):
         """
         返回chunk在process chunk group中的位置
         """
         return self.chunk_creator._add_tensor(tensor_id, numel, param,
-                                              access_type, data_type,
-                                              chunk_list_type)
+                                              data_type, chunk_list_type)
 
     def start_new_chunk_list(self, add_dummy_chunk_flag: bool,
                              chunk_list_type: ChunkListType):
@@ -172,9 +170,8 @@ class ChunkShemaScheduler(object):
             register_param(param, name)
             numel = param.numel()
             data_type = torch.float
-            self.add_tensor(param.ps_attr.data_id(), numel, param,
-                            AccessType.DATA, data_type,
-                            ChunkListType.PARAM_FP32)
+            self.add_tensor(param.ps_attr.id(), numel, param,
+                            data_type, ChunkListType.PARAM_FP32)
 
         self.chunk_creator.start_new_chunk_list(True, ChunkListType.PARAM_FP32)
 
@@ -217,15 +214,13 @@ class ChunkShemaScheduler(object):
                                        f'{ps_name_prefix}.exp_avg_sq')
 
                         numel = p.ps_attr.numel
-                        self.add_tensor(state['exp_avg'].ps_attr.data_id(),
+                        self.add_tensor(state['exp_avg'].ps_attr.id(),
                                         numel, state['exp_avg'],
-                                        AccessType.DATA, data_type,
-                                        ChunkListType.VARIANCE)
+                                        data_type, ChunkListType.VARIANCE)
 
-                        self.add_tensor(state['exp_avg_sq'].ps_attr.data_id(),
+                        self.add_tensor(state['exp_avg_sq'].ps_attr.id(),
                                         numel, state['exp_avg_sq'],
-                                        AccessType.DATA, data_type,
-                                        ChunkListType.MOMENTUM)
+                                        data_type, ChunkListType.MOMENTUM)
 
                         # param.data不被需要，将他们的内存释放
                         state['exp_avg'].data = torch.tensor(
@@ -261,9 +256,8 @@ class ChunkShemaScheduler(object):
                 if not is_torch_param(p):
                     param_fp32 = state['fp32_param_data']
                     numel = param_fp32.ps_attr.numel
-                    chunk_pos = self.add_tensor(param_fp32.ps_attr.data_id(),
-                                                numel, param_fp32, AccessType.DATA,
-                                                torch.float, ChunkListType.PARAM_FP32)
+                    chunk_pos = self.add_tensor(param_fp32.ps_attr.id(),
+                                                numel, param_fp32, torch.float, ChunkListType.PARAM_FP32)
 
         self.start_new_chunk_list(add_dummy_chunk_flag=False,
                                   chunk_list_type=ChunkListType.PARAM_FP32)
@@ -278,9 +272,8 @@ class ChunkShemaScheduler(object):
                         numel = p.ps_attr.numel
 
                         chunk_pos = self.add_tensor(
-                            state['exp_avg'].ps_attr.data_id(), numel,
-                            state['exp_avg'], AccessType.DATA, torch.float,
-                            ChunkListType.VARIANCE)
+                            state['exp_avg'].ps_attr.id(), numel,
+                            state['exp_avg'], torch.float, ChunkListType.VARIANCE)
 
                         if group['amsgrad']:
                             # Maintains max of all exp. moving avg. of sq. grad. values
@@ -299,10 +292,9 @@ class ChunkShemaScheduler(object):
                     # Exponential moving average of gradient values
                     if not is_torch_param(p):
                         numel = p.ps_attr.numel
-                        self.add_tensor(state['exp_avg_sq'].ps_attr.data_id(),
+                        self.add_tensor(state['exp_avg_sq'].ps_attr.id(),
                                         numel, state['exp_avg_sq'],
-                                        AccessType.DATA, torch.float,
-                                        ChunkListType.MOMENTUM)
+                                        torch.float, ChunkListType.MOMENTUM)
 
                         if group['amsgrad']:
                             # Maintains max of all exp. moving avg. of sq. grad. values

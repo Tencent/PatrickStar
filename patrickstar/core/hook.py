@@ -13,7 +13,7 @@
 
 import torch
 import logging
-from .const import PSTensorStatus, AccessType, TrainingStage
+from .const import PSTensorStatus, TrainingStage
 import patrickstar.utils.global_timer as global_timer
 from patrickstar.utils import logger, use_dist_flag
 from patrickstar.core.parameter import is_torch_param
@@ -127,12 +127,11 @@ def pre_sub_module_forward_function(sub_module, client, name):
             continue
         if use_dist_flag:
             client.access_dist(param,
-                               AccessType.DATA,
                                torch.device(f'cuda:{client.rank}'),
                                training_stage=TrainingStage.FWD)
         else:
             client.access_data(param, torch.device(f'cuda:{client.rank}'))
-        param.data = param.ps_attr.access_tensor(AccessType.DATA)
+        param.data = param.ps_attr.access_tensor()
         flag = True
     if flag:
         mgr = PatrickStarManager()
@@ -147,7 +146,6 @@ def post_sub_module_forward_function(sub_module, client, name):
         rank = torch.distributed.get_rank()
         logger.debug(f'rank {rank} FWD post {name}.{sub_name}')
         client.release_dist(param,
-                            AccessType.DATA,
                             PSTensorStatus.HOLD_AFTER_FWD,
                             training_stage=TrainingStage.FWD,
                             is_allreduce=False)
@@ -162,25 +160,19 @@ def pre_sub_module_backward_function(sub_module, client, name):
             continue
         rank = torch.distributed.get_rank()
         logger.debug(f'rank {rank} BWD pre {name}.{sub_name}')
-        if param.dtype == torch.half:
-            rank = torch.distributed.get_rank()
-            if use_dist_flag:
-                client.access_dist(param,
-                                   AccessType.DATA,
-                                   torch.device(f'cuda:{client.rank}'),
-                                   training_stage=TrainingStage.BWD)
-            else:
-                client.access(param, AccessType.DATA,
-                              torch.device(f'cuda:{client.rank}'))
-            tmp_tensor = param.ps_attr.access_tensor(AccessType.DATA)
-            param.data = tmp_tensor
-            param.grad = torch.zeros_like(tmp_tensor)
-            assert param.data.data_ptr() != param.grad.data_ptr()
-        elif param.dtype == torch.float:
-            client.access_data(param, torch.device(f'cuda:{client.rank}'))
-            client.access_grad(param, torch.device(f'cuda:{client.rank}'))
-            param.data = param.ps_attr.access_tensor(AccessType.DATA)
-            param.grad = param.ps_attr.access_tensor(AccessType.GRAD)
+
+        rank = torch.distributed.get_rank()
+        if use_dist_flag:
+            client.access_dist(param,
+                                torch.device(f'cuda:{client.rank}'),
+                                training_stage=TrainingStage.BWD)
+        else:
+            client.access(param, torch.device(f'cuda:{client.rank}'))
+        tmp_tensor = param.ps_attr.access_tensor()
+        param.data = tmp_tensor
+        param.grad = torch.zeros_like(tmp_tensor)
+        assert param.data.data_ptr() != param.grad.data_ptr()
+
         flag = True
     if flag:
         mgr = PatrickStarManager()
@@ -200,9 +192,8 @@ def post_sub_module_backward_function(sub_module, client, name):
                                          async_op=False)
             param.data /= world_size
             logger.debug(f'rank {rank} allreduce grad {param.ps_attr.name}')
-            continue
-        if param.dtype == torch.half:
-            tmp_tensor = param.ps_attr.access_tensor(AccessType.DATA)
+        else:
+            tmp_tensor = param.ps_attr.access_tensor()
             tmp_tensor.copy_(param.grad)
             if torch.distributed.is_initialized():
                 rank = torch.distributed.get_rank()
@@ -212,23 +203,18 @@ def post_sub_module_backward_function(sub_module, client, name):
                 )
                 if use_dist_flag:
                     client.release_dist(param,
-                                        AccessType.DATA,
                                         PSTensorStatus.HOLD_AFTER_BWD,
                                         training_stage=TrainingStage.BWD,
                                         is_allreduce=True)
                 else:
                     client.release(param,
-                                   AccessType.DATA,
                                    PSTensorStatus.HOLD_AFTER_BWD,
                                    True,
                                    allreduce_local_grad=True)
             else:
-                client.release_data(param, PSTensorStatus.HOLD)
+                client.release(param, PSTensorStatus.HOLD)
 
             param.grad = None
-        elif param.dtype == torch.float:
-            client.release_grad(param, PSTensorStatus.HOLD)
-            client.release_data(param, PSTensorStatus.HOLD)
     mgr = PatrickStarManager()
     mgr.tiktac(client)
 

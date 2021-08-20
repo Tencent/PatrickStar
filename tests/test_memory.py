@@ -18,7 +18,7 @@ import time
 import logging
 
 from manager import PatrickStarManager
-from client import PatrickStarClient, AccessType
+from client import PatrickStarClient
 from patrickstar.utils import see_memory_usage
 
 manager = PatrickStarManager()

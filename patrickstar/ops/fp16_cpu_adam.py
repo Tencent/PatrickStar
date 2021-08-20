@@ -19,7 +19,7 @@ from torch import Tensor
 from typing import List, Optional
 import logging
 
-from patrickstar.core.const import PSTensorStatus, AccessType, TrainingStage
+from patrickstar.core.const import PSTensorStatus, TrainingStage
 import patrickstar.utils.global_timer as global_timer
 from patrickstar.utils import print_rank, logger, use_dist_flag, get_sys_memory_used
 from patrickstar.core.parameter import register_param, is_torch_param, register_torch_param
@@ -35,7 +35,7 @@ def get_real_data_tensor(param):
     if is_torch_param(param):
         return param
     else:
-        return param.ps_attr.access_tensor(AccessType.DATA)
+        return param.ps_attr.access_tensor()
 
 
 class FP16Adam(torch.optim.Optimizer):
@@ -304,9 +304,9 @@ class FP16Adam(torch.optim.Optimizer):
                     fp32_data_tensor.numel() * 4)
                 global_timer.my_timer.start_profile('ADAM_release_data')
 
-            client.release_data(fp32_param)
-            client.release_data(exp_avg_param)
-            client.release_data(exp_avg_sq_param)
+            client.release(fp32_param)
+            client.release(exp_avg_param)
+            client.release(exp_avg_sq_param)
 
             if time_profile:
                 global_timer.my_timer.finish_profile('ADAM_release_data')
@@ -345,12 +345,11 @@ class FP16Adam(torch.optim.Optimizer):
                 logger.info(
                     f'rank {rank} allreduce grad {param.ps_attr.name}')
                 continue
-            if param.ps_attr.get_status(
-                    AccessType.DATA) == PSTensorStatus.COMPUTE:
+            if param.ps_attr.status() == PSTensorStatus.COMPUTE:
                 logger.debug(
                     f'rank {rank} release param {n} from COMPUTE to HOLD_AFTER_BWD'
                 )
-                tmp_tensor = param.ps_attr.access_tensor(AccessType.DATA)
+                tmp_tensor = param.ps_attr.access_tensor()
                 tmp_tensor.copy_(param.grad)
                 param.grad = None
 
@@ -358,16 +357,14 @@ class FP16Adam(torch.optim.Optimizer):
                     if use_dist_flag:
                         self.client.release_dist(
                             param,
-                            AccessType.DATA,
                             PSTensorStatus.HOLD_AFTER_BWD,
                             training_stage=TrainingStage.BWD,
                             is_allreduce=True)
                     else:
-                        self.client.release(param, AccessType.DATA,
-                                            PSTensorStatus.HOLD_AFTER_BWD,
+                        self.client.release(param, PSTensorStatus.HOLD_AFTER_BWD,
                                             True)
                 else:
-                    self.client.release_data(param, PSTensorStatus.HOLD)
+                    self.client.release(param, PSTensorStatus.HOLD)
         mgr = PatrickStarManager()
         mgr._training_stage = TrainingStage.ADAM
         logger.info(f'Entering ADAM Stage')
@@ -402,9 +399,9 @@ class FP16Adam(torch.optim.Optimizer):
                     state['step'] += 1
 
                     # p不是torch param，且p属于remote chunk跳过
-                    if use_dist_flag and not is_torch_param(
-                            p) and not self.client.is_local_tensor(
-                                p, AccessType.DATA):
+                    if (use_dist_flag and
+                        not is_torch_param(p) and
+                        not self.client.is_local_tensor(p)):
                         continue
 
                     if is_torch_param(p):

@@ -14,7 +14,7 @@ fp32_data, fp32_data
 1. access_data()，FP16 data ONHOLD->COMPUTE
 2. foward()
 3. fp16_to_fp32(FP16 data) -> FP32 data
-4. release_data(), FP32 data COMPUTE->ONHOLD
+4. release(), FP32 data COMPUTE->ONHOLD
 5. release_fp16_data(), FP16 data COMPUTE->ONHOLD
 
 

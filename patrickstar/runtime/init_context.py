@@ -17,7 +17,7 @@ import functools
 
 from patrickstar.utils import init_distributed, see_memory_usage
 from patrickstar.utils import logger, print_rank
-from patrickstar.core import PatrickStarClient, AccessType, ChunkListType
+from patrickstar.core import PatrickStarClient, ChunkListType
 from patrickstar.core import PSParameter, register_param, is_param_registed, register_torch_param
 from patrickstar.deepspeed_helper.global_vars import get_args
 
@@ -196,7 +196,7 @@ class Init(InsertPostInitMethodToModuleSubClasses):
             data_type = torch.half
 
             chunk_index_in_group, chunk_id = self._client.chunk_schema_scheduler.add_tensor(
-                param.ps_attr.data_id(), numel, param, AccessType.DATA,
+                param.ps_attr.id(), numel, param,
                 data_type, ChunkListType.PARAM_FP16)
             # 将不属于本地Chunk param的data tensor删除掉
             if chunk_index_in_group != rank:

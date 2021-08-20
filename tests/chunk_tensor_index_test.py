@@ -12,7 +12,7 @@
 # See the AUTHORS file for names of contributors.
 
 import unittest
-from patrickstar.core import ChunkTensorIndex, ChunkListType, AccessType
+from patrickstar.core import ChunkTensorIndex, ChunkListType
 import logging
 import torch
 
@@ -48,8 +48,7 @@ class TestAccess(unittest.TestCase):
                                           tensor_id=param_id,
                                           start_offset=offset,
                                           numel=numel,
-                                          param=param,
-                                          access_type=AccessType.DATA)
+                                          param=param)
             offset += numel
             param_list.append(param)
 

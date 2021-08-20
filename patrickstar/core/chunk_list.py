@@ -12,7 +12,7 @@
 # See the AUTHORS file for names of contributors.
 
 from .chunk_data import Chunk
-from .const import PSChunkStatus, AccessType, PSTensorStatus
+from .const import PSChunkStatus, PSTensorStatus
 from .helper import getsizeof
 
 import sys
@@ -104,7 +104,7 @@ class ChunkList(object):
             cur_mem = mgr.get_cur_mom()
             chunk.append_moment(cur_mem, compute_device)
 
-        chunk_status = chunk.get_status()
+        chunk_status = chunk.status()
 
         payload_space = chunk.get_chunk_space()
 
@@ -305,7 +305,7 @@ class ChunkList(object):
 
         for chunk_id, chunk in self.chunk_id_to_chunk_dict.items():
             # TODO(jiaruifang) 耗时
-            status = chunk.get_status()
+            status = chunk.status()
             self._delete_chunk(chunk)
 
     def _chunk_to_move_out_for_room_making(self, size_in_bytes: int,
@@ -329,7 +329,7 @@ class ChunkList(object):
         Q = PriorityQueue()
         for chunk_id, chunk in self.chunk_id_to_chunk_dict.items():
             if chunk.get_device() is not None and chunk.get_device(
-            ).type == target_device.type and chunk.get_status(
+            ).type == target_device.type and chunk.status(
             ) != PSChunkStatus.COMPUTE and chunk.is_pin() is False:
                 # Chunk在本设备下一次被需要的时刻
                 next_mom = chunk.next_accessed_mom(target_device)
@@ -337,7 +337,7 @@ class ChunkList(object):
                 Q.put((-next_mom, chunk_id))
                 movable_chunk_info.append(f"{next_mom}_{chunk_id}")
             # TODO(jiaruifang)不立刻释放FREE chunk，而是让它参与复用
-            # assert chunk.get_status() != PSChunkStatus.FREE
+            # assert chunk.status() != PSChunkStatus.FREE
         while not Q.empty():
             next_mom, chunk_id = Q.get()
             moved_bytes += self.chunk_id_to_chunk_dict[
@@ -372,5 +372,5 @@ class ChunkList(object):
         for chunk_id, chunk in self.chunk_id_to_chunk_dict.items():
             logging.info(
                 f'** {chunk_id}, {chunk.get_device()}, {chunk.get_chunk_space()}, '
-                f'{chunk.data_type}, {chunk.get_device()}, {chunk.get_status()}'
+                f'{chunk.data_type}, {chunk.get_device()}, {chunk.status()}'
             )

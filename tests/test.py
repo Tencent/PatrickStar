@@ -19,7 +19,6 @@ from common import distributed_test
 import time
 import logging
 
-from client.const import AccessType
 from client.const import PSTensorStatus
 
 manager = PatrickStarManager()
@@ -158,8 +157,8 @@ def test_migrate():
 
         client.visit()
 
-        client.release_data(param1)
-        client.release_data(param2)
+        client.release(param1)
+        client.release(param2)
         client.visit()
         print("[PASS] test_migrate - test_access")
 
@@ -199,8 +198,8 @@ def test_migrate():
         param2.grad = param2.ps_grad_tensor
 
         # gpu上空出一个chunk
-        client.release_data(param1)
-        client.release_data(param2)
+        client.release(param1)
+        client.release(param2)
 
         param3 = torch.randn(24, device=torch.device('cuda:0'))
         client.register_param(param3)
@@ -232,8 +231,6 @@ def test_fp16():
 
         assert (param1.dtype == torch.half)
         assert (param1.grad.dtype == torch.half)
-        print(client.get_chunk_id(param1, AccessType.GRAD))
-        assert (client.get_chunk_id(param1, AccessType.GRAD) == 0)
 
         logging.info('client register param2')
         param2 = torch.nn.Parameter(torch.randn(10,
@@ -247,7 +244,6 @@ def test_fp16():
 
         assert (param2.dtype == torch.float)
         assert (param2.grad.dtype == torch.float)
-        assert (client.get_chunk_id(param2, AccessType.GRAD) == 1)
 
         logging.info('client register param3')
         param3 = torch.nn.Parameter(torch.randn(10,
@@ -261,7 +257,6 @@ def test_fp16():
 
         assert (param3.dtype == torch.half)
         assert (param3.grad.dtype == torch.half)
-        assert (client.get_chunk_id(param3, AccessType.GRAD) == 0)
 
     test_register()
 
@@ -328,7 +323,7 @@ def test_tensor_remove():
         print(client.chunk_tensor_index.dict_tensor_id_chunk_id)
         print(client.chunk_tensor_index.dict_chunk_id_tensor_id)
 
-        # client.release_data(param1, PSTensorStatus.FREE)
+        # client.release(param1, PSTensorStatus.FREE)
         # client.release_grad(param1, PSTensorStatus.FREE)
 
         print(client.chunk_tensor_index.dict_tensor_id_chunk_id)

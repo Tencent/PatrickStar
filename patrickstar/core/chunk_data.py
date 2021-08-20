@@ -13,7 +13,7 @@
 
 import os
 import torch
-from .const import PSTensorStatus, PSChunkStatus, AccessType
+from .const import PSTensorStatus, PSChunkStatus
 from .helper import getsizeof
 from .helper import getsizeof
 
@@ -171,7 +171,7 @@ class Chunk(object):
         self._status_dict[old_status] -= 1
         self._status_dict[new_status] += 1
 
-    def get_status(self):
+    def status(self):
         """
         当没有payload时，状态是RELEASED
         有payload是，chunk状态由它所管理的tensor决定。

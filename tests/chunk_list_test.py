@@ -12,7 +12,7 @@
 # See the AUTHORS file for names of contributors.
 
 import unittest
-from patrickstar.core import PatrickStarClient, ChunkList, PSTensorStatus, AccessType, ChunkTensorIndex, Chunk, PSChunkStatus, ChunkListType
+from patrickstar.core import PatrickStarClient, ChunkList, PSTensorStatus, ChunkTensorIndex, Chunk, PSChunkStatus, ChunkListType
 import logging
 import torch
 import patrickstar.utils.global_timer as global_timer
@@ -44,7 +44,7 @@ class TestChunkData(unittest.TestCase):
                              chunk_type=ChunkListType.PARAM_FP32)
 
         assert chunk_list.size() == 1
-        assert (chunk_list[0].get_status() == PSChunkStatus.RELEASED)
+        assert (chunk_list[0].status() == PSChunkStatus.RELEASED)
 
     @distributed_test(world_size=[1])
     def test_new_chunk(self):
@@ -61,7 +61,7 @@ class TestChunkData(unittest.TestCase):
                              chunk_type=ChunkListType.PARAM_FP32)
         chunk_list.access_chunk(new_chunk_id, compute_device)
 
-        assert (chunk_list[new_chunk_id].get_status() == PSChunkStatus.FREE)
+        assert (chunk_list[new_chunk_id].status() == PSChunkStatus.FREE)
 
         self.assertEqual(chunk_list.last_chunk_id(ChunkListType.PARAM_FP32),
                          new_chunk_id, "check last_chunk_id")

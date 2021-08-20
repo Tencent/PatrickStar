@@ -44,9 +44,9 @@ class FP16ChunkWriteBuffer(object):
             return target_param.data.copy_(src_param.data)
         else:
             src_info = self.chunk_tensor_index.get_tensor_info(
-                src_param.ps_attr.data_id())
+                src_param.ps_attr.id())
             target_info = self.chunk_tensor_index.get_tensor_info(
-                target_param.ps_attr.data_id())
+                target_param.ps_attr.id())
 
             if self.cached_src_chunk_id is not None and src_info.chunk_id != self.cached_src_chunk_id:
                 # TODO CPU->GPU拷贝需要优化
@@ -145,7 +145,7 @@ class FP32ChunkReadBuffer(object):
             return param.data
         else:
             info = self.chunk_tensor_index.get_tensor_info(
-                param.ps_attr.data_id())
+                param.ps_attr.id())
 
             # 触发cached chunk更新，判断条件是param.data Tensor是Chunk的第一个Tensor
             if info.start_offset == 0:

@@ -15,7 +15,7 @@ from typing import List
 import torch
 import time
 
-from .const import AccessType, PSChunkStatus, PSTensorStatus, ChunkListType
+from .const import PSChunkStatus, PSTensorStatus, ChunkListType
 from .chunk_list import ChunkList
 import patrickstar.utils.global_timer as global_timer
 from patrickstar.utils import logger
@@ -34,23 +34,20 @@ class TensorInfo(object):
                  start_offset: int,
                  numel: int,
                  param: torch.nn.Parameter,
-                 access_type: AccessType,
                  param_name=""):
         self.tensor_id = tensor_id
         self.chunk_id = chunk_id
         self.start_offset = start_offset
         self.numel = numel
         self.param = param
-        self.tensor_name = f"{param_name}.data" if (
-            access_type == AccessType.DATA) else f"{param_name}.grad"
-        self.access_type = access_type
+        self.tensor_name = f"{param_name}"
         self.param_fp16_chunk_num = 0
 
     def status(self):
         """
         访问param中的成员变量很慢
         """
-        return self.param.ps_attr.get_status(self.access_type)
+        return self.param.ps_attr.status()
 
     def showme(self):
         logger.info(
@@ -147,19 +144,6 @@ class ChunkTensorIndex(object):
         self.dict_tensor_id_info.clear()
         self.dict_chunk_id_tensor_id.clear()
 
-    def generate_grad_tensor_param(self):
-        """
-        按chunk内部排列顺序生成所有当前没有被free的grad tensor所在的param
-        """
-        res_list = []
-        for chunk_id, tensor_id_list in self.dict_chunk_id_tensor_id.items():
-            for tensor_id in tensor_id_list:
-                info = self.dict_tensor_id_info[tensor_id]
-                if info.access_type == AccessType.GRAD and info.status(
-                ) != PSTensorStatus.FREE:
-                    res_list.append(info.param)
-        return res_list
-
     def generate_all_tensor_info(self):
         """
         展示每个chunk中tensor的状态
@@ -209,8 +193,7 @@ class ChunkTensorIndex(object):
         else:
             return mid
 
-    def add_tensor(self, chunk_id, tensor_id, start_offset, numel, param,
-                   access_type):
+    def add_tensor(self, chunk_id, tensor_id, start_offset, numel, param):
         """
         添加一个tensor，注册它所属的chunk_id和start_offset信息
         需要将chunk_id内的tensor按照start_offset排序
@@ -231,14 +214,10 @@ class ChunkTensorIndex(object):
             param_name = param.ps_attr.name
 
         self.dict_tensor_id_info[tensor_id] = TensorInfo(
-            chunk_id, tensor_id, start_offset, numel, param, access_type,
-            param_name)
+            chunk_id, tensor_id, start_offset, numel, param, param_name)
 
         if is_param_registed(param):
-            if access_type == AccessType.DATA:
-                param.ps_attr.data_chunk_id = chunk_id
-            elif access_type == AccessType.GRAD:
-                param.ps_attr.grad_chunk_id = chunk_id
+            param.ps_attr.data_chunk_id = chunk_id
 
     def delete_chunk_id(self, chunk_id):
         """
@@ -266,9 +245,8 @@ class ChunkTensorIndex(object):
         else:
             return info.chunk_id
 
-    def get_chunk_id(self, param: torch.nn.Parameter,
-                     access_type: AccessType) -> int:
-        tensor_id = param.ps_attr.get_tensor_id(access_type)
+    def get_chunk_id(self, param: torch.nn.Parameter) -> int:
+        tensor_id = param.ps_attr.id()
         info = self.dict_tensor_id_info.get(tensor_id)
         if info is None:
             return None
@@ -291,7 +269,7 @@ class ChunkTensorIndex(object):
         chunk_id = chunk.chunk_id
         comm_group_id = self.dict_chunk_id_comm_group_id[chunk_id]
         logger.info(
-            f'rank {rank} Chunk id {chunk.chunk_id}, status {chunk.get_status()}, '
+            f'rank {rank} Chunk id {chunk.chunk_id}, status {chunk.status()}, '
             f'global chunk id {comm_group_id}, capacity {chunk.capacity} elems, '
             f'dtype {chunk.data_type}, size {chunk.get_chunk_space()} B, device {chunk.get_device()}'
         )
@@ -315,7 +293,7 @@ class ChunkTensorIndex(object):
             assert comm_group_id is not None
 
             logger.info(
-                f'rank {rank} Chunk id {chunk.chunk_id}, status {chunk.get_status()}, '
+                f'rank {rank} Chunk id {chunk.chunk_id}, status {chunk.status()}, '
                 f'global chunk id {comm_group_id}, capacity {chunk.capacity} elems, '
                 f'dtype {chunk.data_type}, size {chunk.get_chunk_space()} B, device {chunk.get_device()}'
             )
@@ -334,7 +312,7 @@ class ChunkTensorIndex(object):
             self.dict_chunk_id_tensor_id[chunk_id] = list()
         return self.dict_chunk_id_tensor_id[chunk_id]
 
-    def try_insert_tensor(self, chunk_id, param, access_type) -> bool:
+    def try_insert_tensor(self, chunk_id, param) -> bool:
         """
         尝试向chunk内插入tensor，返回值表示是否成功
         """
@@ -342,15 +320,14 @@ class ChunkTensorIndex(object):
         prev_end_pos = 0
         assert is_param_registed(param)
         numel = param.ps_attr.numel
-        target_tensor_id = param.ps_attr.get_tensor_id(access_type)
+        target_tensor_id = param.ps_attr.id()
         for idx, tensor_id in enumerate(tensor_id_list):
             tensor_info = self.dict_tensor_id_info[tensor_id]
             start_pos = tensor_info.start_offset
             gap = start_pos - prev_end_pos
             if gap >= numel:
                 self.dict_tensor_id_info[target_tensor_id] = TensorInfo(
-                    chunk_id, target_tensor_id, prev_end_pos, numel, param,
-                    access_type)
+                    chunk_id, target_tensor_id, prev_end_pos, numel, param)
                 tensor_id_list.insert(idx + 1, target_tensor_id)
                 return True
             prev_end_pos = start_pos + tensor_info.numel
@@ -360,8 +337,7 @@ class ChunkTensorIndex(object):
         )
         if self.default_chunk_size - prev_end_pos >= numel:
             self.dict_tensor_id_info[target_tensor_id] = TensorInfo(
-                chunk_id, target_tensor_id, prev_end_pos, numel, param,
-                access_type)
+                chunk_id, target_tensor_id, prev_end_pos, numel, param)
             tensor_id_list.insert(len(tensor_id_list), target_tensor_id)
             return True
         return False

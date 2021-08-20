@@ -12,7 +12,7 @@
 # See the AUTHORS file for names of contributors.
 
 import unittest
-from client import PatrickStarClient, ChunkList, PSTensorStatus, AccessType
+from client import PatrickStarClient, ChunkList, PSTensorStatus
 import logging
 import torch
 from manager import PatrickStarManager

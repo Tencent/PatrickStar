@@ -12,7 +12,7 @@
 # See the AUTHORS file for names of contributors.
 
 import torch
-from .const import PSTensorStatus, AccessType
+from .const import PSTensorStatus
 import logging
 
 
@@ -35,14 +35,9 @@ class PSParameter(object):
         self.numel = param.numel()
         self.shape = param.shape
 
-        self.data_chunk_id = None
-        self.grad_chunk_id = None        
+        self.data_chunk_id = None       
 
-        self.data_tensor = PSTensor()
-        if param.requires_grad:
-            self.grad_tensor = PSTensor()
-        else:
-            self.grad_tensor = None
+        self.data = PSTensor()
 
         # 参数是否属于进程的本地Chunk
         self._is_local = True
@@ -56,63 +51,27 @@ class PSParameter(object):
         self.shape = new_shape
         self.numel = new_shape.numel()
 
-    def data_id(self):
-        return self.get_tensor_id(AccessType.DATA)
+    def id(self):
+        return self.data.id
 
-    def grad_id(self):
-        return self.get_tensor_id(AccessType.GRAD)
+    def set_tensor(self, tensor: torch.Tensor):
+        self.data.tensor = tensor.view(self.shape)
 
-    def get_tensor_id(self, access_type: AccessType):
-        if access_type == AccessType.DATA:
-            return self.data_tensor.id
-        elif access_type == AccessType.GRAD:
-            return self.grad_tensor.id
-        else:
-            raise ValueError
+    def access_tensor(self):
+        return self.data.tensor
 
-    def set_tensor(self, tensor: torch.Tensor, access_type: AccessType):
-        if access_type == AccessType.DATA:
-            self.data_tensor.tensor = tensor.view(self.shape)
-        elif access_type == AccessType.GRAD:
-            self.grad_tensor.tensor = tensor.view(self.shape)
-        else:
-            raise ValueError
+    def status(self):
+        return self.data.status
 
-    def access_tensor(self, access_type: AccessType):
-        if access_type == AccessType.DATA:
-            return self.data_tensor.tensor
-        elif access_type == AccessType.GRAD:
-            if self._is_torch:
-                raise RuntimeError
-            return self.grad_tensor.tensor
-        else:
-            raise ValueError
-
-    def get_status(self, access_type: AccessType):
-        if access_type == AccessType.DATA:
-            return self.data_tensor.status
-        elif access_type == AccessType.GRAD:
-            return self.grad_tensor.status
-        else:
-            raise ValueError
-
-    def set_status(self, status: PSTensorStatus, access_type: AccessType):
+    def set_status(self, status: PSTensorStatus):
         """
         只有COMPUTE状态tensor指向chunk payload
         HOLD和FREE状态都悬空
         TODO(jiaruifang)还需要param reset data和grad
         """
-        if access_type == AccessType.DATA:
-            self.data_tensor.status = status
-            if status != PSTensorStatus.COMPUTE:
-                self.data_tensor.tensor = None
-        elif access_type == AccessType.GRAD:
-            self.grad_tensor.status = status
-            if status != PSTensorStatus.COMPUTE:
-                self.grad_tensor.tensor = None
-        else:
-            raise ValueError(
-                f'set status {status} when access type is {access_type}')
+        self.data.status = status
+        if status != PSTensorStatus.COMPUTE:
+            self.data.tensor = None
 
 
 def register_param(param, name=None):
@@ -131,7 +90,7 @@ def register_torch_param(param, name=None):
     if not hasattr(param, 'ps_attr'):
         param.ps_attr = PSParameter(param, name)
         param.ps_attr._is_torch = True
-        # param.ps_attr.data_tensor.tensor = param.data
+        # param.ps_attr.data.tensor = param.data
 
 
 def is_torch_param(param):

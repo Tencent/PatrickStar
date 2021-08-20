@@ -12,7 +12,7 @@
 # See the AUTHORS file for names of contributors.
 
 import unittest
-from client import PatrickStarClient, ChunkList, PSTensorStatus, AccessType, ChunkTensorIndex, Chunk
+from client import PatrickStarClient, ChunkList, PSTensorStatus, ChunkTensorIndex, Chunk
 import logging
 import torch
 from manager import PatrickStarManager
@@ -38,25 +38,25 @@ class TestChunkData(unittest.TestCase):
         param1.ps_data_id = 10
         param1.ps_shape = param1.shape
         chunk_tensor_index.add_tensor(0, param1.ps_data_id, 0, param1.numel(),
-                                      param1, AccessType.DATA)
+                                      param1)
 
         param2 = torch.nn.Parameter(torch.zeros(15))
         param2.ps_data_id = 11
         param2.ps_shape = param2.shape
         chunk_tensor_index.add_tensor(0, param2.ps_data_id, 20, param2.numel(),
-                                      param2, AccessType.DATA)
+                                      param2)
 
         param3 = torch.nn.Parameter(torch.zeros(5))
         param3.ps_data_id = 12
         param3.ps_shape = param3.shape
         chunk_tensor_index.add_tensor(0, param3.ps_data_id, 15, param3.numel(),
-                                      param3, AccessType.DATA)
+                                      param3)
 
         param4 = torch.nn.Parameter(torch.zeros(7))
         param4.ps_data_id = 13
         param4.ps_shape = param4.shape
         chunk_tensor_index.add_tensor(0, param4.ps_data_id, 35, param4.numel(),
-                                      param4, AccessType.DATA)
+                                      param4)
 
         # chunk_tensor_index.delete_tensor(11)
 
@@ -64,13 +64,13 @@ class TestChunkData(unittest.TestCase):
         param5.ps_data_id = 14
         param5.ps_shape = param5.shape
         chunk_tensor_index.add_tensor(1, param5.ps_data_id, 7, param5.numel(),
-                                      param5, AccessType.DATA)
+                                      param5)
 
         param6 = torch.nn.Parameter(torch.zeros(3))
         param6.ps_data_id = 15
         param6.ps_shape = param6.shape
         chunk_tensor_index.add_tensor(1, param6.ps_data_id, 2, param6.numel(),
-                                      param6, AccessType.DATA)
+                                      param6)
 
         # chunk_tensor_index.delete_tensor(14)
         # assert (chunk_tensor_index.tensor_id_to_chunk_id(14) is None)
@@ -88,7 +88,7 @@ class TestChunkData(unittest.TestCase):
         assert chunk1.get_device() == self.compute_device
 
         # 测试param1访问
-        chunk1.access_param(param1, AccessType.DATA, chunk_tensor_index)
+        chunk1.access_param(param1, chunk_tensor_index)
         assert param1.ps_data_tensor.numel() == 10
         assert param1.ps_data_tensor.device == self.compute_device
         # print(param1.ps_data_tensor)
@@ -99,7 +99,7 @@ class TestChunkData(unittest.TestCase):
         print(param1.ps_data_tensor)
 
         # chunk1.visit(chunk_tensor_index)
-        assert chunk1.get_status() == PSChunkStatus.FREE
+        assert chunk1.status() == PSChunkStatus.FREE
 
         chunk2.visit(chunk_tensor_index)
 
