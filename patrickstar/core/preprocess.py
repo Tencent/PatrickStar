@@ -256,7 +256,7 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
             param, access_type)
         comm_group_id = self.client.chunk_tensor_index.dict_chunk_id_comm_group_id[
             chunk_id]
-        assert args.local_rank == comm_group_id
+        return args.local_rank == comm_group_id
 
     def _post_init_method(self, module):
         """
@@ -281,8 +281,7 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
 
         # 在模型初始化的过程构造模型，post_init_method调用粒度是一个SubModule，比如BertAttention模块。
         # 对于每个进程，将所有参数初始化出来。
-        # Excluded Parameter，不存储在Chunk中的parameter
-        # (TODO)模型初始化顺序和optimizer parameter group遍历顺序一致么？
+        # (NOTE)模型初始化顺序和optimizer parameter group遍历顺序虽不一致，但很相似
         for name, param in module.named_parameters(recurse=False):
             assert not is_param_registed(param)
             assert param.dtype == torch.half
@@ -295,26 +294,18 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
 
             # Append a tensor to the param fp32 chunk list.
             # Before that, we have to build a fp32 param.
-            param_fp32 = torch.nn.Parameter(torch.zeros_like(
-                param, dtype=torch.float, device=torch.device('cpu:0')),
+            param_fp32 = torch.nn.Parameter(torch.tensor(
+                [], dtype=torch.float, device=torch.device('cpu:0')),
                                             requires_grad=False)
+            register_param(param_fp32, f'{name}_fp32')
+            param_fp32.ps_attr.reset_shape(param.shape)
             self.client.append_tensor(param_fp32, AccessType.DATA,
                                       ChunkListType.PARAM_FP32, f'{name}_fp32')
+
             # Delete the memory of non local tensors
             if not self._is_local_param(param, AccessType.DATA):
                 logger.info(f'not local tensor {name}')
                 param.ps_attr._is_local = False
-                # TODO(jiaruifang)下面这句将非local的param的内存清零会导致结果错误,
-                # 插入这句会影响模型初始化的值。
-                if not args.use_fake_dist:
-                    param.data = torch.tensor([],
-                                              dtype=param.dtype,
-                                              device=param.device)
-                    param_fp32.data = torch.tensor([],
-                                                   dtype=param_fp32.dtype,
-                                                   device=param_fp32.device)
-            # copy the pytorch data to chunk
-            # 者必须在model全部初始化完毕才能调用，因为on-the-fly chunk是无法被access赋值。
             else:
                 param.ps_attr._is_local = True
                 self.client.access_data(param, torch.device('cpu:0'))
@@ -326,5 +317,14 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
                     AccessType.DATA)
                 data_tensor_fp32.copy_(param.data.float())
 
+                # TODO(jiaruifang) 以下两行代码释放了pytorch的payload
                 self.client.release_data(param_fp32)
                 self.client.release_data(param)
+
+            # release pytorch payload
+            param.data = torch.tensor([],
+                                      dtype=param.dtype,
+                                      device=param.device)
+            param_fp32.data = torch.tensor([],
+                                           dtype=param_fp32.dtype,
+                                           device=param_fp32.device)

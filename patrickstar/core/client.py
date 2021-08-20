@@ -94,8 +94,8 @@ class PatrickStarClient(object):
         将一个tensor交给client管理，这个tensor必须是某个parameter的data或者grad成员变量
         具体过程，如果这个param之前没有被client管理过，则在对应的chunk_list_type后append这个tensor
         """
-        if is_param_registed(param):
-            return
+        # if is_param_registed(param):
+        #     return
         register_param(param, tensor_name)
         if self.chunk_list.is_empty(chunk_list_type):
             chunk_id = self.chunk_list.generate_chunk_id()

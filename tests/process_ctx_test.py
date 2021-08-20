@@ -13,7 +13,7 @@
 
 import unittest
 from patrickstar.core.preprocess import PSPreProcessCtx
-from patrickstar.core import PatrickStarClient, ChunkTensorIndex, ChunkList
+from patrickstar.core import PatrickStarClient, ChunkTensorIndex, ChunkList, AccessType
 import logging
 import torch
 from tests.simple_net import SimpleModel
@@ -31,11 +31,23 @@ class TestModelInitContext(unittest.TestCase):
         def model_provider():
             return SimpleModel(12, False, False)
 
+        compute_device = torch.device('cpu:0')
         chunk_tensor_index = ChunkTensorIndex()
         chunkmgr = ChunkList()
         client = PatrickStarClient(0, 1000, is_fp16=True)
+
+        torch.manual_seed(0)
         with PSPreProcessCtx(client):
-            model_provider()
+            ps_model = model_provider()
+
+        torch.manual_seed(0)
+        torch_model = model_provider()
+        for ps_param, torch_param in zip(ps_model.parameters(),
+                                         torch_model.parameters()):
+            client.access_data(ps_param, compute_device)
+            ps_data = ps_param.ps_attr.access_tensor(AccessType.DATA)
+            # self.assertEqual(torch.max(torch_param.data - ps_data), 0.0, f"{ps_param.ps_attr.name} ps tensor and pytorch tensor are not consist with each other")
+
         client.chunk_tensor_index.visit_chunks(client.chunk_list)
 
 
