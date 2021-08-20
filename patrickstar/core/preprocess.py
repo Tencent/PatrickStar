@@ -274,10 +274,10 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
         for name, param in module.named_parameters(recurse=False):
             assert not is_param_registed(param)
             assert param.dtype == torch.half
-            print_rank(f'** Converting Params {name}', force=False)
+            logger.info(f'** Converting Params {name}')
 
             self.client.append_tensor(param, AccessType.DATA,
-                                      ChunkListType.PARAM_FP16, name)
+                                      ChunkListType.PARAM_FP16, f'{name}_fp16')
 
             # Append a tensor to the param fp32 chunk list.
             # Before that, we have to build a fp32 param.
@@ -285,7 +285,7 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
                 param, dtype=torch.float, device=torch.device('cpu:0')),
                                             requires_grad=False)
             self.client.append_tensor(param_fp32, AccessType.DATA,
-                                      ChunkListType.PARAM_FP32, name)
+                                      ChunkListType.PARAM_FP32, f'{name}_fp32')
             # Delete the memory of non local tensors
             if not self.client.is_local_tensor(param, AccessType.DATA):
                 param.ps_attr._is_local = False
