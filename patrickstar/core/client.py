@@ -22,7 +22,7 @@ import time
 from .hook import setup_hybrid_ps_hooks
 from .const import AccessType, PSChunkStatus, PSTensorStatus, TrainingStage
 from .chunk_data import Chunk
-from .chunk_list import ChunkList
+from .chunk_list import ChunkList, ChunkListType
 from .helper import getsizeof
 from .chunk_tensor_index import ChunkTensorIndex
 from .chunk_schema_scheduler import ChunkShemaScheduler
@@ -35,10 +35,7 @@ from patrickstar.manager import PatrickStarManager
 
 
 class PatrickStarClient(object):
-    def __init__(self,
-                 rank: int,
-                 default_chunk_size: int,
-                 is_fp16=False):
+    def __init__(self, rank: int, default_chunk_size: int, is_fp16=False):
         """
         管理一个Process的Param, AccGrad, OS数据。
         每个进程可以访问一个GPU的显存，和cpu的内存
@@ -56,10 +53,10 @@ class PatrickStarClient(object):
         self.module = None
 
         # 解耦chunk和param的tensors
-        self.chunk_tensor_index = ChunkTensorIndex()
+        self.default_chunk_size = default_chunk_size
+        self.chunk_tensor_index = ChunkTensorIndex(self.default_chunk_size)
         self.chunk_schema_scheduler = ChunkShemaScheduler(
             default_chunk_size, self.chunk_list, self.chunk_tensor_index)
-        self.default_chunk_size = default_chunk_size
         self._time_profile = True
 
         # 通过运行一次迭代来动态进行chunk scheduling
@@ -87,6 +84,56 @@ class PatrickStarClient(object):
         self._copy_model(model)
 
         self.register_model_hook(model)
+
+    def append_tensor(self,
+                      param: torch.nn.Parameter,
+                      access_type: AccessType,
+                      chunk_list_type: ChunkListType,
+                      tensor_name: str = "UNDEF"):
+        """
+        将一个tensor交给client管理，这个tensor必须是某个parameter的data或者grad成员变量
+        具体过程，如果这个param之前没有被client管理过，则在对应的chunk_list_type后append这个tensor
+        """
+        if is_param_registed(param):
+            return
+        register_param(param, tensor_name)
+        if self.chunk_list.is_empty(chunk_list_type):
+            chunk_id = self.chunk_list.generate_chunk_id()
+            comm_group_idx = self.chunk_list.new_chunk(chunk_id,
+                                                       self.default_chunk_size,
+                                                       param.dtype, False,
+                                                       chunk_list_type)
+            self.chunk_tensor_index.add_chunk(chunk_id,
+                                              self.default_chunk_size,
+                                              param.dtype, comm_group_idx,
+                                              chunk_list_type)
+            is_success = self.chunk_tensor_index.try_insert_tensor(
+                chunk_id, param, access_type)
+            if not is_success:
+                raise RuntimeError(
+                    "can not append a tensor to chunk_tensor_index")
+            return
+
+        last_chunk_id = self.chunk_list.last_chunk_id(chunk_list_type)
+        is_success = self.chunk_tensor_index.try_insert_tensor(
+            last_chunk_id, param, access_type)
+
+        if not is_success:
+            chunk_id = self.chunk_list.generate_chunk_id()
+            comm_group_idx = self.chunk_list.new_chunk(chunk_id,
+                                                       self.default_chunk_size,
+                                                       param.dtype, False,
+                                                       chunk_list_type)
+            self.chunk_tensor_index.add_chunk(chunk_id,
+                                              self.default_chunk_size,
+                                              param.dtype, comm_group_idx,
+                                              chunk_list_type)
+            is_success = self.chunk_tensor_index.try_insert_tensor(
+                chunk_id, param, access_type)
+            if not is_success:
+                raise RuntimeError(
+                    "can not append a tensor to chunk_tensor_index")
+        return
 
     def static_chunk_schedule(self, model, optimizer):
         """
@@ -173,7 +220,8 @@ class PatrickStarClient(object):
                         data_tensor.copy_(param.data)
                         self.release_data(param, PSTensorStatus.HOLD)
                 else:
-                    param.data = torch.tensor([], dtype=torch.half,
+                    param.data = torch.tensor([],
+                                              dtype=torch.half,
                                               device=param.device)
 
         for param in self.chunk_schema_scheduler.dummy_param_list:
@@ -341,8 +389,7 @@ class PatrickStarClient(object):
 
         logger.debug(
             f'rank {rank} access_dist access tensor {param.ps_attr.name} '
-            f'local_chunk_id {local_chunk_id} chunk_id_list {chunk_id_list}'
-        )
+            f'local_chunk_id {local_chunk_id} chunk_id_list {chunk_id_list}')
 
         # 每个进程把local_chunk_id都弄到本地
         self.chunk_list.access_chunk(local_chunk_id, compute_device)
@@ -531,7 +578,9 @@ class PatrickStarClient(object):
         # 找到需要删除的chunk，先删除chunk关联的tensors
         if access_type == AccessType.DATA:
             # NOTE(jiaruifang) 必须device和原来param一致，影响hook of param.grad_fn.next_functions[0][0]
-            param.data = torch.tensor([], dtype=param.dtype, device=param.device)
+            param.data = torch.tensor([],
+                                      dtype=param.dtype,
+                                      device=param.device)
         elif access_type == AccessType.GRAD:
             param.grad = None
 
@@ -655,7 +704,9 @@ class PatrickStarClient(object):
         # 找到需要删除的chunk，先删除chunk关联的tensors
         if access_type == AccessType.DATA:
             # NOTE() 必须to device它和param.grad_fn.next_functions[0][0]
-            param.data = torch.tensor([], dtype=param.dtype, device=param.device)
+            param.data = torch.tensor([],
+                                      dtype=param.dtype,
+                                      device=param.device)
         elif access_type == AccessType.GRAD:
             param.grad = None
 

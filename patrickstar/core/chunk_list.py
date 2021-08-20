@@ -37,6 +37,8 @@ class ChunkList(object):
     管理一个chunk链表，
     需要区分四种chunk list，param fp16, param fp32, momentum, variance
     """
+    generated_chunk_id = -1
+
     def __init__(self, rank: int = 0):
         self.chunk_id_to_chunk_dict: dict[int, Chunk] = {}
         self.chunk_type_to_id_dict: dict[ChunkListType, int] = {}
@@ -47,6 +49,10 @@ class ChunkList(object):
         # TODO(jiaruifang) 单GPU不能启动太多stream
         self.copy_stream = torch.cuda.Stream()
         self.moments_cnt_of_iteration = None
+
+    def generate_chunk_id(self) -> int:
+        ChunkList.generated_chunk_id += 1
+        return ChunkList.generated_chunk_id
 
     def __getitem__(self, chunk_id: int):
         """
@@ -251,6 +257,7 @@ class ChunkList(object):
                   chunk_type: ChunkListType = ChunkListType.UNDEF) -> int:
         """
         新建一个chunk，并未初始化内存
+        返回comm_group_idx
         """
         args = get_args()
         if chunk_id in self.chunk_id_to_chunk_dict:
@@ -266,6 +273,7 @@ class ChunkList(object):
         logging.debug(
             f'allocate with new chunk chunk_id {chunk_id} size {chunk_size} data_type {data_type}'
         )
+        return len(self.chunk_type_to_id_dict[chunk_type]) % args.world_size
 
     def is_empty(self, chunk_type: ChunkListType):
         return len(self.chunk_type_to_id_dict[chunk_type]) == 0
