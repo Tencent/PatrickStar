@@ -245,6 +245,7 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
         self.world_size = torch.distributed.get_world_size()
         self.client = client
         self.dummy_param_list = []
+        self.param_idx = 0
 
     def _post_init_method(self, module):
         """
@@ -274,6 +275,8 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
         for name, param in module.named_parameters(recurse=False):
             assert not is_param_registed(param)
             assert param.dtype == torch.half
+            name = f'{name}_{self.param_idx}'
+            self.param_idx += 1
             logger.info(f'** Converting Params {name}')
 
             self.client.append_tensor(param, AccessType.DATA,
@@ -288,6 +291,7 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
                                       ChunkListType.PARAM_FP32, f'{name}_fp32')
             # Delete the memory of non local tensors
             if not self.client.is_local_tensor(param, AccessType.DATA):
+                logger.info(f'not local tensor {name}')
                 param.ps_attr._is_local = False
                 # TODO(jiaruifang)下面这句将非local的param的内存清零会导致结果错误,
                 # 插入这句会影响模型初始化的值。

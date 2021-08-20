@@ -258,17 +258,14 @@ class PatrickStarClient(object):
         调用本接口前判断是否是torch_param
         判断tensor是否在本GPU之上
         """
-        # TODO(jiaruifang)不应该进入这个分支
         if is_torch_param(param):
             return False
         # 准备param所在chunk的内存，如果内存不在计算设备上需要分配或者移动
         chunk_id = self.chunk_tensor_index.get_chunk_id(param, access_type)
-
-        chunk_id_list = self.chunk_tensor_index.get_comm_group_id(chunk_id)
+        comm_group_id = self.chunk_tensor_index.dict_chunk_id_comm_group_id[
+            chunk_id]
         rank = torch.distributed.get_rank()
-        assert rank < len(chunk_id_list)
-        local_chunk_id = chunk_id_list[rank]
-        return chunk_id == local_chunk_id
+        return comm_group_id == rank
 
     def _fetch_remote_chunks(self, chunk_id_list, local_chunk_id,
                              compute_device, param_name,
