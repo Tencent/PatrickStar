@@ -183,31 +183,6 @@ class ChunkCreator(object):
         """
         # data_type甚至可以和param dtype不一致
         self.data_type = data_type
-        if self.acc_cnt + numel > self.default_chunk_size:
-            # 如果再加入一个tensor就超过default_chunk_size了，将已经积累的tensor打包
-            self.chunk_list.new_chunk(self.chunk_id, self.default_chunk_size,
-                                      self.data_type)
-            self.chunk_tensor_index.add_chunk(self.chunk_id,
-                                              self.default_chunk_size,
-                                              self.data_type,
-                                              self.comm_group_idx,
-                                              chunk_list_type)
-            # 标记chunk在global chunk中的位置
-            self.list_id += 1
-            if self.list_id % self.world_size == 0:
-                self.comm_group_idx += 1
-
-            # 为下一个chunk准备
-            self.chunk_id += 1
-            self.acc_cnt = 0
-
-        self.chunk_tensor_index.add_tensor(self.chunk_id, tensor_id,
-                                           self.acc_cnt, numel, param,
-                                           access_type)
-        self.acc_cnt += numel
-
-        # 返回tensor对应的chunk在chunk group的位置
-        return (self.list_id) % self.world_size, self.chunk_id
 
     def start_new_chunk_list(self, add_dummy_chunk_flag: bool,
                              chunk_list_type: ChunkListType):
@@ -260,11 +235,7 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
     """
     A context to initialize model
     """
-    def __init__(self,
-                 chunk_tensor_index: ChunkTensorIndex,
-                 chunkmgr: ChunkList,
-                 client: PatrickStarClient,
-                 dtype=None):
+    def __init__(self, client: PatrickStarClient, dtype=None):
         super().__init__(config=None, dtype=dtype)
         if not torch.distributed.is_initialized():
             assert torch.distributed.is_initialized(
@@ -272,15 +243,8 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
         args = get_args()
         self.rank = args.local_rank
         self.world_size = torch.distributed.get_world_size()
-        self.chunk_tensor_index = chunk_tensor_index
-        self.chunkmgr = chunkmgr
         self.client = client
         self.dummy_param_list = []
-
-        self.chunk_creator = ChunkCreator(args.default_chunk_size,
-                                          self.chunkmgr,
-                                          self.chunk_tensor_index,
-                                          self.dummy_param_list)
 
     def _post_init_method(self, module):
         """
@@ -312,55 +276,40 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
             assert param.dtype == torch.half
             print_rank(f'** Converting Params {name}', force=False)
 
-            register_param(param, name)
-            numel = param.ps_attr.numel
-
-            # Append a tensor to the param fp16 chunk list
-            comm_group_idx_fp16, chunk_id_fp16 = self.chunk_creator.append_tensor(
-                param.ps_attr.data_id(), numel, param, AccessType.DATA,
-                torch.half, ChunkListType.PARAM_FP16)
+            self.client.append_tensor(param, AccessType.DATA,
+                                      ChunkListType.PARAM_FP16, name)
 
             # Append a tensor to the param fp32 chunk list.
             # Before that, we have to build a fp32 param.
             param_fp32 = torch.nn.Parameter(torch.zeros_like(
                 param, dtype=torch.float, device=torch.device('cpu:0')),
                                             requires_grad=False)
-
-            register_param(param_fp32, name)
-            numel = param_fp32.ps_attr.numel
-
-            comm_group_idx_fp32, chunk_id_fp32 = self.chunk_creator.append_tensor(
-                param_fp32.ps_attr.data_id(), numel, param_fp32,
-                AccessType.DATA, torch.float, ChunkListType.PARAM_FP32)
-
-            assert comm_group_idx_fp16 == comm_group_idx_fp32
-            assert chunk_id_fp16 == chunk_id_fp32
-
+            self.client.append_tensor(param_fp32, AccessType.DATA,
+                                      ChunkListType.PARAM_FP32, name)
             # Delete the memory of non local tensors
-            if comm_group_idx_fp16 != rank:
+            if not self.client.is_local_tensor(param, AccessType.DATA):
                 param.ps_attr._is_local = False
                 # TODO(jiaruifang)下面这句将非local的param的内存清零会导致结果错误,
                 # 插入这句会影响模型初始化的值。
                 if not args.use_fake_dist:
-                    param.data = torch.zeros(1,
-                                             dtype=param.dtype,
-                                             device=param.device)
-                    param_fp32.data = torch.zeros(1,
-                                                  dtype=param_fp32.dtype,
-                                                  device=param_fp32.device)
+                    param.data = torch.tensor([],
+                                              dtype=param.dtype,
+                                              device=param.device)
+                    param_fp32.data = torch.tensor([],
+                                                   dtype=param_fp32.dtype,
+                                                   device=param_fp32.device)
             # copy the pytorch data to chunk
             # 者必须在model全部初始化完毕才能调用，因为on-the-fly chunk是无法被access赋值。
             else:
                 param.ps_attr._is_local = True
-                # self.client.access_data(param, torch.device('cpu:0'))
-                # data_tensor = param.ps_attr.access_tensor(
-                #     AccessType.DATA)
-                # data_tensor.copy_(param.data)
+                self.client.access_data(param, torch.device('cpu:0'))
+                data_tensor = param.ps_attr.access_tensor(AccessType.DATA)
+                data_tensor.copy_(param.data)
 
-                # self.client.access_data(param_fp32, torch.device('cpu:0'))
-                # data_tensor_fp32 = param_fp32.ps_attr.access_tensor(
-                #     AccessType.DATA)
-                # data_tensor_fp32.copy_(param.data.float())
+                self.client.access_data(param_fp32, torch.device('cpu:0'))
+                data_tensor_fp32 = param_fp32.ps_attr.access_tensor(
+                    AccessType.DATA)
+                data_tensor_fp32.copy_(param.data.float())
 
-                # self.client.release_data(param_fp32, PSTensorStatus.HOLD)
-                # self.client.release_data(param, PSTensorStatus.HOLD)
+                self.client.release_data(param_fp32)
+                self.client.release_data(param)

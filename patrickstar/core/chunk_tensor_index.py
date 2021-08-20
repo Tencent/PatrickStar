@@ -355,7 +355,7 @@ class ChunkTensorIndex(object):
                 return True
             prev_end_pos = start_pos + tensor_info.numel
 
-        logger.info(
+        logger.debug(
             f'default_chunk_size {self.default_chunk_size}, prev_end_pos {prev_end_pos}, numel {numel}'
         )
         if self.default_chunk_size - prev_end_pos >= numel:

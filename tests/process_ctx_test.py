@@ -34,8 +34,9 @@ class TestModelInitContext(unittest.TestCase):
         chunk_tensor_index = ChunkTensorIndex()
         chunkmgr = ChunkList()
         client = PatrickStarClient(0, 1000, is_fp16=True)
-        with PSPreProcessCtx(chunk_tensor_index, chunkmgr, client):
+        with PSPreProcessCtx(client):
             model_provider()
+        client.chunk_tensor_index.visit_chunks(client.chunk_list)
 
 
 if __name__ == "__main__":
