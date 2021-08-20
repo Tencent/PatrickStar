@@ -117,7 +117,9 @@ class PatrickStarClient(object):
         is_success = self.chunk_tensor_index.try_insert_tensor(
             chunk_id, param, access_type)
         if not is_success:
-            raise RuntimeError("can not append a tensor to chunk_tensor_index")
+            raise RuntimeError(
+                "can not append a tensor to chunk_tensor_index. Tensor size is larger than the default chunk size."
+            )
         return
 
     def static_chunk_schedule(self, model, optimizer):
