@@ -148,7 +148,7 @@ class FP16Adam(torch.optim.Optimizer):
             self.ds_opt_adam.destroy_adam(self.opt_id)
 
     def __setstate__(self, state):
-        super(CPUAdam, self).__setstate__(state)
+        super(FP16Adam, self).__setstate__(state)
         for group in self.param_groups:
             group.setdefault('amsgrad', False)
 
