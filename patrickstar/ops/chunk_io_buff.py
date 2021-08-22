@@ -30,7 +30,7 @@ class FP16ChunkWriteBuffer(object):
         if args.use_gpu_fp32_convert_for_adam:
             self.gpu_fp16_buff = torch.zeros(
                 chunk_size,
-                dtype=torch.half,
+                dtype=torch.float,
                 device=torch.device(f'cuda:{args.local_rank}'))
 
     def write_from_cache(self, target_param, src_param):
