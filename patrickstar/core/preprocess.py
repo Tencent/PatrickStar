@@ -187,6 +187,10 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
 
                     self.client.release_data(param_fp16)
                     self.client.release_data(param_fp32)
+            else:
+                param_fp16.data = torch.tensor([],
+                                               dtype=torch.half,
+                                               device=param_fp16.device)
             chunk_num += 1
 
         world_size = torch.distributed.get_world_size()
