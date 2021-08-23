@@ -236,7 +236,7 @@ class Chunk(object):
         ps_manager.delete(self.get_device().type, self.get_payload_space())
         if is_async:
             if target_device.type == 'cpu':
-                pinned_payload_cpu = torch.ones(self.payload.shape,
+                pinned_payload_cpu = torch.empty(self.payload.shape,
                                                 dtype=self.payload.dtype,
                                                 device='cpu:0',
                                                 pin_memory=True)
@@ -250,7 +250,7 @@ class Chunk(object):
                 # assert self.payload.pin_memory is True
             elif target_device.type == 'cuda':
                 old_payload = self.payload
-                self.payload = torch.ones(self.payload.shape,
+                self.payload = torch.empty(self.payload.shape,
                                           dtype=self.payload.dtype,
                                           device=f'cuda:{self.rank}')
                 copy_stream.synchronize()
@@ -268,7 +268,15 @@ class Chunk(object):
             else:
                 raise RuntimeError
         else:
-            self.payload = self.payload.to(target_device)
+            if target_device.type == 'cpu':
+                pinned_payload_cpu = torch.empty(self.payload.shape,
+                                                dtype=self.payload.dtype,
+                                                device='cpu:0',
+                                                pin_memory=True)
+                pinned_payload_cpu.copy_(self.payload)
+                self.payload = pinned_payload_cpu
+            elif target_device.type == 'cuda':
+                self.payload = self.payload.to(target_device)
 
         ps_manager.add(target_device.type, self.get_payload_space())
 

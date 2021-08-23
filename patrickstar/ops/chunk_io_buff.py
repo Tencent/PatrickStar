@@ -30,7 +30,7 @@ class FP16ChunkWriteBuffer(object):
         if args.use_gpu_fp32_convert_for_adam:
             self.gpu_fp16_buff = torch.zeros(
                 chunk_size,
-                dtype=torch.half,
+                dtype=torch.float,
                 device=torch.device(f'cuda:{args.local_rank}'))
 
     def write_from_cache(self, target_param, src_param):
@@ -103,13 +103,9 @@ class FP32ChunkReadBuffer(object):
         self.chunk_list = chunk_list
         self.chunk_tensor_index = chunk_tensor_index
         self.cpu_payload = torch.empty(chunk_size,
-                                       dtype=torch.float,
+                                       dtype=torch.half,
                                        device=torch.device('cpu:0'),
                                        pin_memory=True)
-        self.fp32_gpu_buffer = torch.empty(
-            chunk_size,
-            dtype=torch.float,
-            device=torch.device(f'cuda:{args.local_rank}'))
         logger.info(
             f"Allocate fp32 Chunk Buffer of size {chunk_size/1e6} MB on CPU.")
         if margin_chunk_num_for_gpu_adam > 0:
@@ -118,7 +114,7 @@ class FP32ChunkReadBuffer(object):
             else:
                 gpu_device = torch.device(f'cuda:{args.local_rank}')
             self.gpu_payload = torch.empty(chunk_size,
-                                           dtype=torch.float,
+                                           dtype=torch.half,
                                            device=gpu_device)
             logger.info(
                 f"Allocate fp32 Chunk Buffer of size {chunk_size/1e6} MB on {gpu_device}."
@@ -152,8 +148,7 @@ class FP32ChunkReadBuffer(object):
                 # TODO GPU FP16->CPU FP32拷贝需要优化,
                 self.cached_chunk_num += 1
 
-                if self.get_cached_chunk_num(
-                ) < self.margin_chunk_num_for_gpu_adam:
+                if self.get_cached_chunk_num() < self.margin_chunk_num_for_gpu_adam:
                     target_device = torch.device(f'cuda:{args.local_rank}')
                 else:
                     target_device = torch.device('cpu:0')
@@ -163,13 +158,8 @@ class FP32ChunkReadBuffer(object):
                         self.chunk_list[info.chunk_id].payload)
                     self.ret_payload = self.gpu_payload
                 elif target_device.type == 'cpu':
-                    if args.use_gpu_fp32_convert_for_adam:
-                        self.fp32_gpu_buffer.copy_(
-                            self.chunk_list[info.chunk_id].payload)
-                        self.cpu_payload.copy_(self.fp32_gpu_buffer)
-                    else:
-                        self.cpu_payload.copy_(
-                            self.chunk_list[info.chunk_id].payload)
+                    self.cpu_payload.copy_(
+                        self.chunk_list[info.chunk_id].payload)
                     self.ret_payload = self.cpu_payload
                 logger.info(
                     f'read chunk to cache {self.cached_chunk_id} {self.chunk_list[info.chunk_id].payload.device} '
