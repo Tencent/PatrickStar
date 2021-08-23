@@ -126,7 +126,8 @@ class PatrickStarClient(object):
             chunk_id, param, data_type, access_type)
         if not is_success:
             raise RuntimeError(
-                f"can not append a tensor to chunk_tensor_index. Tensor size {param.numel()} is larger than the default chunk size {self.default_chunk_size}."
+                f"can not append a tensor to chunk_tensor_index."
+                "Tensor size {param.numel()} is larger than the default chunk size {self.default_chunk_size}."
             )
         return
 
