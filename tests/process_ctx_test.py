@@ -21,6 +21,8 @@ from patrickstar.utils import init_distributed
 from patrickstar.deepspeed_helper.global_vars import set_global_variables
 from common import distributed_test
 
+from transformers import BertModel, BertConfig
+
 
 class TestModelInitContext(unittest.TestCase):
     def setUp(self):
@@ -29,26 +31,33 @@ class TestModelInitContext(unittest.TestCase):
     @distributed_test(world_size=[1])
     def test_model_init(self):
         def model_provider():
-            return SimpleModel(12, False, False)
+            cfg = BertConfig()
+            cfg.vocab_size = 10
+            model = BertModel(cfg)
+            return model
 
         compute_device = torch.device('cpu:0')
-        chunk_tensor_index = ChunkTensorIndex()
-        chunkmgr = ChunkList()
-        client = PatrickStarClient(0, 1000, is_fp16=True)
+        default_chunk_size = 32 * 1024 * 1024
+        client = PatrickStarClient(0, default_chunk_size, is_fp16=True)
 
         torch.manual_seed(0)
-        with PSPreProcessCtx(client):
+        with PSPreProcessCtx(client, dtype=torch.float):
             ps_model = model_provider()
 
         torch.manual_seed(0)
         torch_model = model_provider()
+
         for ps_param, torch_param in zip(ps_model.parameters(),
                                          torch_model.parameters()):
             client.access_data(ps_param, compute_device)
             ps_data = ps_param.ps_attr.access_tensor(AccessType.DATA)
-            # self.assertEqual(torch.max(torch_param.data - ps_data), 0.0, f"{ps_param.ps_attr.name} ps tensor and pytorch tensor are not consist with each other")
+            self.assertLess(
+                torch.max(torch_param.data - ps_data), 1e-4,
+                f"{ps_param.ps_attr.name} ps tensor and pytorch tensor are not consist with each other"
+            )
+            client.release_data(ps_param)
 
-        client.chunk_tensor_index.visit_chunks(client.chunk_list)
+        # client.chunk_tensor_index.visit_chunks(client.chunk_list)
 
 
 if __name__ == "__main__":

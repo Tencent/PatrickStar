@@ -121,12 +121,16 @@ class InsertPostInitMethodToModuleSubClasses(object):
         torch.Tensor.__new__ = torch.Tensor.__old_new__
         torch.empty = _orig_torch_empty
 
+        self._post_context_exec()
         # Now that we cleaned up the metaclass injection, raise the exception.
         if exc_type is not None:
             return False
 
     # To be implemented by inheriting classes
     def _post_init_method(self, module):
+        pass
+
+    def _post_context_exec(self):
         pass
 
     def _set_dtype(self, ds_config, dtype):
@@ -151,6 +155,35 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
         self.client = client
         self.dummy_param_list = []
         self.param_idx = 0
+
+    def _post_context_exec(self):
+        """
+        初始化context退出时执行本函数
+        1. 拷贝param的data，到param fp32和param fp16中去
+        2. append dummy chunk，使chunk num是进程数的整数倍 TODO(jiaruifang)
+        """
+        logger.info('Post Model Init Context')
+        for param_fp16_chunk_id, param_fp32_chunk_id in zip(
+                self.client.chunk_ids_generator(ChunkListType.PARAM_FP16),
+                self.client.chunk_ids_generator(ChunkListType.PARAM_FP32)):
+            for param_fp16, param_fp32 in zip(
+                    self.client.chunk_tensor_index.params_generator(
+                        param_fp16_chunk_id),
+                    self.client.chunk_tensor_index.params_generator(
+                        param_fp32_chunk_id)):
+                self.client.access_data(param_fp16, torch.device('cpu:0'))
+                ps_data_fp16 = param_fp16.ps_attr.access_tensor(
+                    AccessType.DATA)
+
+                self.client.access_data(param_fp32, torch.device('cpu:0'))
+                ps_data_fp32 = param_fp32.ps_attr.access_tensor(
+                    AccessType.DATA)
+
+                ps_data_fp16.copy_(param_fp16.data)
+                ps_data_fp32.copy_(param_fp16.data)
+
+                self.client.release_data(param_fp16)
+                self.client.release_data(param_fp32)
 
     def _is_local_param(self, param, access_type):
         """
@@ -189,12 +222,10 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
         # (NOTE)模型初始化顺序和optimizer parameter group遍历顺序虽不一致，但很相似
         for name, param in module.named_parameters(recurse=False):
             assert not is_param_registed(param)
-            assert param.dtype == torch.half
             name = f'{name}_{self.param_idx}'
             self.param_idx += 1
             logger.info(f'** Converting Params {name}')
-
-            self.client.append_tensor(param, AccessType.DATA,
+            self.client.append_tensor(param, torch.half, AccessType.DATA,
                                       ChunkListType.PARAM_FP16, f'{name}_fp16')
 
             # Append a tensor to the param fp32 chunk list.
@@ -204,29 +235,11 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
                                             requires_grad=False)
             register_param(param_fp32, f'{name}_fp32')
             param_fp32.ps_attr.reset_shape(param.shape)
-            self.client.append_tensor(param_fp32, AccessType.DATA,
+            self.client.append_tensor(param_fp32, torch.float, AccessType.DATA,
                                       ChunkListType.PARAM_FP32, f'{name}_fp32')
 
             # Delete the memory of non local tensors
             if not self._is_local_param(param, AccessType.DATA):
-                logger.info(f'not local tensor {name}')
                 param.ps_attr._is_local = False
             else:
                 param.ps_attr._is_local = True
-                self.client.access_data(param, torch.device('cpu:0'))
-                data_tensor = param.ps_attr.access_tensor(AccessType.DATA)
-                data_tensor.copy_(param.data)
-
-                self.client.access_data(param_fp32, torch.device('cpu:0'))
-                data_tensor_fp32 = param_fp32.ps_attr.access_tensor(
-                    AccessType.DATA)
-                data_tensor_fp32.copy_(param.data.float())
-
-                # TODO(jiaruifang) 以下两行代码释放了pytorch的payload
-                self.client.release_data(param_fp32)
-                self.client.release_data(param)
-
-            # release pytorch payload
-            param.data = torch.tensor([],
-                                      dtype=param.dtype,
-                                      device=param.device)

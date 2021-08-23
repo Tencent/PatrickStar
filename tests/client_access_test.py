@@ -41,7 +41,7 @@ class TestClientAccess(unittest.TestCase):
             param = torch.nn.Parameter(torch.rand(psize))
             param_list.append(param)
             param_payload_ref_list.append(param.data.clone())
-            self.client.append_tensor(param, AccessType.DATA,
+            self.client.append_tensor(param, AccessType.DATA, torch.float,
                                       ChunkListType.PARAM_FP32, f"param{idx}")
 
             # TODO(jiaruifang) access_data叫try_fetch_data更恰当，并没有返回一个tensor

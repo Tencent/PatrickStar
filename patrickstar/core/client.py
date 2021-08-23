@@ -87,38 +87,47 @@ class PatrickStarClient(object):
 
     def append_tensor(self,
                       param: torch.nn.Parameter,
+                      data_type: torch.dtype,
                       access_type: AccessType,
                       chunk_list_type: ChunkListType,
                       tensor_name: str = "UNDEF"):
         """
         将一个tensor交给client管理，这个tensor必须是某个parameter的data或者grad成员变量
         具体过程，如果这个param之前没有被client管理过，则在对应的chunk_list_type后append这个tensor
+        args:
+            @param: tensor所在的Parameter，client管理的tensor必须属于parameter的data或者grad
+            @data_type: tensor的数据类型，可以和param的类型不一致，因为param后面会被改变类型
+            @access_type: 访问data或者grad
+            @chunk_list_type: tensor插入队列的类型
+            @tensor_name: tensor名字的，debug用
         """
-        # if is_param_registed(param):
-        #     return
+        assert type(
+            data_type) == torch.dtype, f"data_type is {type(data_type)}"
+        assert type(access_type) == AccessType
         register_param(param, tensor_name)
         if self.chunk_list.is_empty(chunk_list_type):
             chunk_id = self.chunk_list.generate_chunk_id()
         else:
             last_chunk_id = self.chunk_list.last_chunk_id(chunk_list_type)
             is_success = self.chunk_tensor_index.try_insert_tensor(
-                last_chunk_id, param, access_type)
+                last_chunk_id, param, data_type, access_type)
             if is_success:
                 return
             chunk_id = self.chunk_list.generate_chunk_id()
 
         comm_group_idx = self.chunk_list.new_chunk(chunk_id,
                                                    self.default_chunk_size,
-                                                   param.dtype, False,
+                                                   data_type, False,
                                                    chunk_list_type)
         self.chunk_tensor_index.add_chunk(chunk_id, self.default_chunk_size,
-                                          param.dtype, comm_group_idx,
+                                          data_type, comm_group_idx,
                                           chunk_list_type)
         is_success = self.chunk_tensor_index.try_insert_tensor(
-            chunk_id, param, access_type)
+            chunk_id, param, data_type, access_type)
         if not is_success:
             raise RuntimeError(
-                "can not append a tensor to chunk_tensor_index. Tensor size is larger than the default chunk size."
+                f"can not append a tensor to chunk_tensor_index."
+                "Tensor size {param.numel()} is larger than the default chunk size {self.default_chunk_size}."
             )
         return
 
@@ -215,6 +224,9 @@ class PatrickStarClient(object):
             if self.is_local_tensor(param, AccessType.DATA):
                 self.access_data(param, torch.device('cpu:0'))
                 self.release_data(param, PSTensorStatus.HOLD)
+
+    def chunk_ids_generator(self, chunk_list_type: ChunkListType):
+        return self.chunk_list.chunk_ids_generator(chunk_list_type)
 
     def generate_grad_params(self):
         """

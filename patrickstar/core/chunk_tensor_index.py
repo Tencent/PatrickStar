@@ -334,7 +334,12 @@ class ChunkTensorIndex(object):
             self.dict_chunk_id_tensor_id[chunk_id] = list()
         return self.dict_chunk_id_tensor_id[chunk_id]
 
-    def try_insert_tensor(self, chunk_id, param, access_type) -> bool:
+    def params_generator(self, chunk_id):
+        for tensor_id in self.dict_chunk_id_tensor_id[chunk_id]:
+            yield self.dict_tensor_id_info[tensor_id].param
+
+    def try_insert_tensor(self, chunk_id, param, data_type,
+                          access_type) -> bool:
         """
         尝试向chunk内插入tensor，返回值表示是否成功
         """
