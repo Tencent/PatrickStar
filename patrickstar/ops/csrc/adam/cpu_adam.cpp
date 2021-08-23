@@ -34,6 +34,15 @@ void Adam_Optimizer::Step(float* _params,
     float w_decay = -1 * _alpha * _weight_decay;
     size_t rounded_size = 0;
 
+    __half* grads_cast_h;
+    __half* params_cast_h;
+    if (grad_half_precision) {
+        grads_cast_h = reinterpret_cast<__half*>(grads);
+    }
+    if (param_half_precision) {
+        params_cast_h = reinterpret_cast<__half*>(_params);
+    }
+
 #if defined(__AVX512__) or defined(__AVX256__)
 
     AVX_Data betta1_4;
@@ -59,15 +68,6 @@ void Adam_Optimizer::Step(float* _params,
     if (_weight_decay > 0)
         weight_decay4.data = (_adamw_mode ? SIMD_SET(w_decay) : SIMD_SET(_weight_decay));
     rounded_size = ROUND_DOWN(_param_size, SIMD_WIDTH);
-
-    __half* grads_cast_h;
-    __half* params_cast_h;
-    if (grad_half_precision) {
-        grads_cast_h = reinterpret_cast<__half*>(grads);
-    }
-    if (param_half_precision) {
-        params_cast_h = reinterpret_cast<__half*>(_params);
-    }
 
     for (size_t t = 0; t < rounded_size; t += TILE) {
         size_t copy_size = TILE;
@@ -196,6 +196,15 @@ void Adam_Optimizer::Step_4(float* _params,
 {
     size_t rounded_size = 0;
 
+    __half* grads_cast_h;
+    __half* params_cast_h;
+    if (grad_half_precision) {
+        grads_cast_h = reinterpret_cast<__half*>(grads);
+    }
+    if (param_half_precision) {
+        params_cast_h = reinterpret_cast<__half*>(_params);
+    }
+
 #if defined(__AVX512__) or defined(__AVX256__)
 
     AVX_Data betta1_4;
@@ -225,15 +234,6 @@ void Adam_Optimizer::Step_4(float* _params,
     if (_weight_decay > 0)
         weight_decay4.data = (_adamw_mode ? SIMD_SET(w_decay) : SIMD_SET(_weight_decay));
     rounded_size = ROUND_DOWN(_param_size, (SIMD_WIDTH << 2));
-
-    __half* grads_cast_h;
-    __half* params_cast_h;
-    if (grad_half_precision) {
-        grads_cast_h = reinterpret_cast<__half*>(grads);
-    }
-    if (param_half_precision) {
-        params_cast_h = reinterpret_cast<__half*>(_params);
-    }
 
     for (size_t t = 0; t < rounded_size; t += TILE) {
         size_t copy_size = TILE;
@@ -445,6 +445,15 @@ void Adam_Optimizer::Step_8(float* _params,
 {
     size_t rounded_size = 0;
 
+    __half* grads_cast_h;
+    __half* params_cast_h;
+    if (grad_half_precision) {
+        grads_cast_h = reinterpret_cast<__half*>(grads);
+    }
+    if (param_half_precision) {
+        params_cast_h = reinterpret_cast<__half*>(_params);
+    }
+
 #if defined(__AVX512__) or defined(__AVX256__)
 
     AVX_Data betta1_4;
@@ -474,15 +483,6 @@ void Adam_Optimizer::Step_8(float* _params,
     if (_weight_decay > 0)
         weight_decay4.data = (_adamw_mode ? SIMD_SET(w_decay) : SIMD_SET(_weight_decay));
     rounded_size = ROUND_DOWN(_param_size, (SIMD_WIDTH << 3));
-
-    __half* grads_cast_h;
-    __half* params_cast_h;
-    if (grad_half_precision) {
-        grads_cast_h = reinterpret_cast<__half*>(grads);
-    }
-    if (param_half_precision) {
-        params_cast_h = reinterpret_cast<__half*>(_params);
-    }
 
     for (size_t t = 0; t < rounded_size; t += TILE) {
         size_t copy_size = TILE;
