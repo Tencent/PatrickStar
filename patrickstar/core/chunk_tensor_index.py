@@ -89,7 +89,7 @@ class ChunkTensorIndex(object):
         chunk_id是否是local chunk
         """
         rank = torch.distributed.get_rank()
-        return rank == self.dict_chunk_id_comm_group_id[rank]
+        return rank == self.dict_chunk_id_comm_group_id[chunk_id]
 
     def add_chunk(self, chunk_id, chunk_size, data_type, comm_group_id,
                   list_type: ChunkListType):

@@ -123,10 +123,10 @@ class ChunkCreator(object):
                 # 加入一个dummy param可以让dummy chunk状态被设置为hold
                 register_param(dummy, "dummy")
                 self.dummy_param_list.append(dummy)
-                self.chunk_tensor_index.add_tensor(
-                    self.chunk_id, elf.dummy_param_list[-1].ps_attr.data_id(),
-                    0, dummy.numel(), self.dummy_param_list[-1],
-                    AccessType.DATA)
+                self.chunk_tensor_index.add_tensor(self.chunk_id,
+                                                   dummy.ps_attr.data_id(), 0,
+                                                   dummy.numel(), dummy,
+                                                   AccessType.DATA)
 
                 self.chunk_id += 1
                 self.list_id += 1

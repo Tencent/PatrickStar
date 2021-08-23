@@ -103,7 +103,7 @@ class PatrickStarClient(object):
         self.chunk_tensor_index.add_chunk(tmp_chunk_id,
                                           self.default_chunk_size, torch.half,
                                           comm_group_idx, chunk_list_type)
-        dummy = torch.nn.Parameter(torch.zeros(1, dtype=data_type),
+        dummy = torch.nn.Parameter(torch.tensor([], dtype=data_type),
                                    requires_grad=False)
         # 加入一个dummy param可以让dummy chunk状态被设置为hold
         register_param(dummy, f"dummy_{comm_group_idx}")
