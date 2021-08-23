@@ -117,14 +117,16 @@ class ChunkCreator(object):
                                                   self.data_type,
                                                   self.global_chunk_id,
                                                   chunk_list_type)
-                dummy = torch.nn.Parameter(torch.tensor([], dtype=self.data_type),
+                dummy = torch.nn.Parameter(torch.tensor([],
+                                                        dtype=self.data_type),
                                            requires_grad=False)
                 # 加入一个dummy param可以让dummy chunk状态被设置为hold
                 register_param(dummy, "dummy")
                 self.dummy_param_list.append(dummy)
                 self.chunk_tensor_index.add_tensor(
-                    self.chunk_id, self.dummy_param_list[-1].ps_attr.data_id(),
-                    0, 1, self.dummy_param_list[-1], AccessType.DATA)
+                    self.chunk_id, elf.dummy_param_list[-1].ps_attr.data_id(),
+                    0, dummy.numel(), self.dummy_param_list[-1],
+                    AccessType.DATA)
 
                 self.chunk_id += 1
                 self.list_id += 1
@@ -252,7 +254,8 @@ class ChunkShemaScheduler(object):
                                   chunk_list_type=ChunkListType.PARAM_FP16)
 
         # Note: param_fp16_chunk_num包括dummy chunk
-        self.chunk_tensor_index.param_fp16_chunk_num = self.chunk_tensor_index.get_cur_chunk_num()
+        self.chunk_tensor_index.param_fp16_chunk_num = self.chunk_tensor_index.get_cur_chunk_num(
+        )
 
         # 注册param data fp32，只有属于local chunk的param才初始化内存
         for group in optimizer.param_groups:
@@ -262,8 +265,9 @@ class ChunkShemaScheduler(object):
                     param_fp32 = state['fp32_param_data']
                     numel = param_fp32.ps_attr.numel
                     chunk_pos = self.add_tensor(param_fp32.ps_attr.data_id(),
-                                                numel, param_fp32, AccessType.DATA,
-                                                torch.float, ChunkListType.PARAM_FP32)
+                                                numel, param_fp32,
+                                                AccessType.DATA, torch.float,
+                                                ChunkListType.PARAM_FP32)
 
         self.start_new_chunk_list(add_dummy_chunk_flag=False,
                                   chunk_list_type=ChunkListType.PARAM_FP32)
