@@ -28,7 +28,7 @@ from patrickstar.manager import PatrickStarManager
 from patrickstar.core import ChunkList, ChunkTensorIndex
 from .chunk_io_buff import FP32ChunkReadBuffer, FP16ChunkWriteBuffer
 
-from deepspeed.ops.op_builder import CPUAdamBuilder
+from .op_builder import CPUAdamBuilder
 
 
 def get_real_data_tensor(param):
@@ -200,14 +200,14 @@ class FP16Adam(torch.optim.Optimizer):
             if is_torch_param(fp16_param):
                 # 如果fp16_param被Torch管理，则它肯定在cpu上，cpu_embedding优化引起的
                 assert fp16_param.data.device.type == 'cpu'
-                fp32_grad_tensor = fp16_param.data.float()
+                fp16_grad_tensor = fp16_param.data
             else:
                 # 将FP16 GPU Chunk拷贝到compute_device的FP32 Chunk上。
                 # 如果是第一个tensor则拷贝Chunk，否则索引chunk
-                fp32_grad_tensor = read_chunk_buff.access_from_cache(
+                fp16_grad_tensor = read_chunk_buff.access_from_cache(
                     fp16_param).view(fp16_param.ps_attr.shape)
 
-            compute_device = fp32_grad_tensor.device
+            compute_device = fp16_grad_tensor.device
             logger.debug(
                 f'rank {args.local_rank} adam {i} on {compute_device}')
 
@@ -216,7 +216,7 @@ class FP16Adam(torch.optim.Optimizer):
                     'ADAM_prepare_data_fp16_grad_to_fp32_grad_copy')
                 global_timer.data_move_cnter.update(
                     'ADAM_prepare_data_fp16_grad_to_fp32_grad_copy',
-                    fp32_grad_tensor.numel() * 4)
+                    fp16_grad_tensor.numel() * 2)
 
             client.access_data(fp32_param, compute_device)
             fp32_data_tensor = get_real_data_tensor(fp32_param)
@@ -249,9 +249,9 @@ class FP16Adam(torch.optim.Optimizer):
             lr = lr_list[i]
 
             # TODO(jiaruifang) use_ds_adam时，在生成的数据上正确性没有验证
-            if self.use_ds_adam and compute_device.type == 'cpu' and fp32_grad_tensor.device.type == 'cpu':
+            if self.use_ds_adam and compute_device.type == 'cpu' and fp16_grad_tensor.device.type == 'cpu':
                 assert fp32_data_tensor.device.type == 'cpu'
-                assert fp32_grad_tensor.device.type == 'cpu'
+                assert fp16_grad_tensor.device.type == 'cpu'
                 assert exp_avg.device.type == 'cpu'
                 assert exp_avg_sq.device.type == 'cpu'
 
@@ -259,9 +259,10 @@ class FP16Adam(torch.optim.Optimizer):
                 self.ds_opt_adam.adam_update(self.opt_id, step, lr, beta1,
                                              beta2, eps, weight_decay, True,
                                              fp32_data_tensor.view(-1),
-                                             fp32_grad_tensor.view(-1), exp_avg.view(-1),
+                                             fp16_grad_tensor.view(-1), exp_avg.view(-1),
                                              exp_avg_sq.view(-1))
             else:
+                fp32_grad_tensor = fp16_grad_tensor.float()
                 if weight_decay != 0:
                     fp32_grad_tensor = fp32_grad_tensor.add(fp32_data_tensor,
                                                             alpha=weight_decay)
