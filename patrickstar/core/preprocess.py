@@ -163,27 +163,41 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
         2. append dummy chunk，使chunk num是进程数的整数倍 TODO(jiaruifang)
         """
         logger.info('Post Model Init Context')
+        chunk_num = 0
         for param_fp16_chunk_id, param_fp32_chunk_id in zip(
                 self.client.chunk_ids_generator(ChunkListType.PARAM_FP16),
                 self.client.chunk_ids_generator(ChunkListType.PARAM_FP32)):
-            for param_fp16, param_fp32 in zip(
-                    self.client.chunk_tensor_index.params_generator(
-                        param_fp16_chunk_id),
-                    self.client.chunk_tensor_index.params_generator(
-                        param_fp32_chunk_id)):
-                self.client.access_data(param_fp16, torch.device('cpu:0'))
-                ps_data_fp16 = param_fp16.ps_attr.access_tensor(
-                    AccessType.DATA)
+            if self.client.chunk_tensor_index.is_local_chunk(
+                    param_fp16_chunk_id):
+                for param_fp16, param_fp32 in zip(
+                        self.client.chunk_tensor_index.params_generator(
+                            param_fp16_chunk_id),
+                        self.client.chunk_tensor_index.params_generator(
+                            param_fp32_chunk_id)):
+                    self.client.access_data(param_fp16, torch.device('cpu:0'))
+                    ps_data_fp16 = param_fp16.ps_attr.access_tensor(
+                        AccessType.DATA)
 
-                self.client.access_data(param_fp32, torch.device('cpu:0'))
-                ps_data_fp32 = param_fp32.ps_attr.access_tensor(
-                    AccessType.DATA)
+                    self.client.access_data(param_fp32, torch.device('cpu:0'))
+                    ps_data_fp32 = param_fp32.ps_attr.access_tensor(
+                        AccessType.DATA)
 
-                ps_data_fp16.copy_(param_fp16.data)
-                ps_data_fp32.copy_(param_fp16.data)
+                    ps_data_fp16.copy_(param_fp16.data)
+                    ps_data_fp32.copy_(param_fp16.data)
 
-                self.client.release_data(param_fp16)
-                self.client.release_data(param_fp32)
+                    self.client.release_data(param_fp16)
+                    self.client.release_data(param_fp32)
+            else:
+                param_fp16.data = torch.tensor([],
+                                               dtype=torch.half,
+                                               device=param_fp16.device)
+            chunk_num += 1
+
+        world_size = torch.distributed.get_world_size()
+        while chunk_num % world_size != 0:
+            self.client.append_dummy_chunk(torch.half,
+                                           ChunkListType.PARAM_FP16)
+            chunk_num += 1
 
     def _is_local_param(self, param, access_type):
         """
