@@ -19,7 +19,6 @@ from patrickstar.utils import init_distributed, see_memory_usage
 from patrickstar.utils import logger, print_rank
 from patrickstar.core import PatrickStarClient, AccessType, ChunkListType, ChunkTensorIndex, ChunkList
 from patrickstar.core import PSParameter, register_param, is_param_registed, register_torch_param
-from patrickstar.core.chunk_schema_scheduler import ChunkCreator
 from patrickstar.deepspeed_helper.global_vars import get_args
 from typing import List
 _orig_torch_empty = torch.empty
@@ -137,100 +136,6 @@ class InsertPostInitMethodToModuleSubClasses(object):
             self.dtype = dtype
 
 
-class ChunkCreator(object):
-    def __init__(self, default_chunk_size: int, chunk_list: ChunkList,
-                 chunk_tensor_index: ChunkTensorIndex,
-                 dummy_param_list: List[torch.nn.Parameter]):
-        """
-        chunk的构造器，通过append tensor隐式构建chunk和chunk tensor的映射关系
-        """
-        # default chunk size是subchunk size
-        self.default_chunk_size = default_chunk_size
-        self.chunk_list = chunk_list
-        self.chunk_tensor_index = chunk_tensor_index
-
-        self.chunk_id = 0
-        # accumulated elements count
-        self.acc_cnt = 0
-        # the cached data type
-        self.data_type = None
-
-        self.world_size = 1
-        if torch.distributed.is_initialized():
-            self.world_size = torch.distributed.get_world_size()
-
-        # fp16 tensors, fp32 tensors, m tensors, v tensors各组成一个list
-        # list_id表示tensor在list的顺序。global id跨list需要清零
-        self.list_id = 0
-        self.comm_group_idx = 0
-
-        self.dummy_param_list = dummy_param_list
-        logger.info(f'default chunk size is {default_chunk_size}')
-
-    def append_tensor(self, tensor_id, numel, param, access_type: AccessType,
-                      data_type, chunk_list_type: ChunkListType) -> int:
-        """
-        向chunk_tensor_index注册tensor，当新的Tensor大小超过Chunk剩余空间，
-        则开辟一个新的Chunk添加到ChunkList中，将Tensor分配在新Chunk的起始位置
-        返回chunk在chunk group中的位置
-        @tensor_id: tensor id
-        @numel: tensor number of elements
-        @param: an instance of torch.Paramater
-        @access_type: define accessing which tensor of the param, either data or grad.
-        @data_type: appended tenor type
-        @chunk_list_type: the list type which the tensor appends to
-        @is_copy, whether we copy the payload of param tensor to chunk
-        """
-        # data_type甚至可以和param dtype不一致
-        self.data_type = data_type
-
-    def start_new_chunk_list(self, add_dummy_chunk_flag: bool,
-                             chunk_list_type: ChunkListType):
-        """
-        对构造中的chunk进行收尾
-        """
-        if self.acc_cnt > 0:
-            self.chunk_list.new_chunk(self.chunk_id, self.default_chunk_size,
-                                      self.data_type)
-            self.chunk_tensor_index.add_chunk(self.chunk_id,
-                                              self.default_chunk_size,
-                                              self.data_type,
-                                              self.comm_group_idx,
-                                              chunk_list_type)
-            self.chunk_id += 1
-            self.acc_cnt = 0
-            # 下一个chunk的list_id
-            self.list_id += 1
-
-        # 给不足world_size的global chunk补上dummy chunk，每个dummy chunk管理一个dummy param
-        if add_dummy_chunk_flag:
-            while self.list_id % self.world_size != 0:
-                logger.info('add dummy chunk')
-                self.chunk_list.new_chunk(self.chunk_id,
-                                          self.default_chunk_size,
-                                          self.data_type,
-                                          is_dummy=True)
-                self.chunk_tensor_index.add_chunk(self.chunk_id,
-                                                  self.default_chunk_size,
-                                                  self.data_type,
-                                                  self.comm_group_idx,
-                                                  chunk_list_type)
-                self.dummy_param_list.append(
-                    torch.nn.Parameter(torch.zeros(1, dtype=self.data_type),
-                                       requires_grad=False))
-                # 加入一个dummy param可以让dummy chunk状态被设置为hold
-                register_param(self.dummy_param_list[-1], "dummy")
-                self.chunk_tensor_index.add_tensor(
-                    self.chunk_id, self.dummy_param_list[-1].ps_attr.data_id(),
-                    0, 1, self.dummy_param_list[-1], AccessType.DATA)
-
-                self.chunk_id += 1
-                self.list_id += 1
-
-        self.list_id = 0
-        self.comm_group_idx += 1
-
-
 class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
     """
     A context to initialize model
@@ -325,6 +230,3 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
             param.data = torch.tensor([],
                                       dtype=param.dtype,
                                       device=param.device)
-            param_fp32.data = torch.tensor([],
-                                           dtype=param_fp32.dtype,
-                                           device=param_fp32.device)
