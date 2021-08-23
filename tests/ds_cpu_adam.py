@@ -20,10 +20,7 @@ import copy
 import math
 import unittest
 
-import deepspeed
-# from deepspeed.ops.adam import FusedAdam
-from deepspeed.ops.op_builder import CPUAdamBuilder
-# from deepspeed.utils.logging import should_log_le
+from patrickstar.ops.op_builder import CPUAdamBuilder
 
 
 def torch_adam_update(step, lr, beta1, beta2, eps, weight_decay,
