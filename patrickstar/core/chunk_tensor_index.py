@@ -342,6 +342,7 @@ class ChunkTensorIndex(object):
         prev_end_pos = 0
         assert is_param_registed(param)
         numel = param.ps_attr.numel
+        tensor_name = param.ps_attr.name
         target_tensor_id = param.ps_attr.get_tensor_id(access_type)
         for idx, tensor_id in enumerate(tensor_id_list):
             tensor_info = self.dict_tensor_id_info[tensor_id]
@@ -350,18 +351,18 @@ class ChunkTensorIndex(object):
             if gap >= numel:
                 self.dict_tensor_id_info[target_tensor_id] = TensorInfo(
                     chunk_id, target_tensor_id, prev_end_pos, numel, param,
-                    access_type)
+                    access_type, tensor_name)
                 tensor_id_list.insert(idx + 1, target_tensor_id)
                 return True
             prev_end_pos = start_pos + tensor_info.numel
 
-        logger.info(
+        logger.debug(
             f'default_chunk_size {self.default_chunk_size}, prev_end_pos {prev_end_pos}, numel {numel}'
         )
         if self.default_chunk_size - prev_end_pos >= numel:
             self.dict_tensor_id_info[target_tensor_id] = TensorInfo(
                 chunk_id, target_tensor_id, prev_end_pos, numel, param,
-                access_type)
+                access_type, tensor_name)
             tensor_id_list.insert(len(tensor_id_list), target_tensor_id)
             return True
         return False

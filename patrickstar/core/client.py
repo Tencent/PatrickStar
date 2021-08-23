@@ -94,8 +94,8 @@ class PatrickStarClient(object):
         将一个tensor交给client管理，这个tensor必须是某个parameter的data或者grad成员变量
         具体过程，如果这个param之前没有被client管理过，则在对应的chunk_list_type后append这个tensor
         """
-        if is_param_registed(param):
-            return
+        # if is_param_registed(param):
+        #     return
         register_param(param, tensor_name)
         if self.chunk_list.is_empty(chunk_list_type):
             chunk_id = self.chunk_list.generate_chunk_id()
@@ -117,7 +117,9 @@ class PatrickStarClient(object):
         is_success = self.chunk_tensor_index.try_insert_tensor(
             chunk_id, param, access_type)
         if not is_success:
-            raise RuntimeError("can not append a tensor to chunk_tensor_index")
+            raise RuntimeError(
+                "can not append a tensor to chunk_tensor_index. Tensor size is larger than the default chunk size."
+            )
         return
 
     def static_chunk_schedule(self, model, optimizer):
