@@ -50,7 +50,7 @@ class ChunkList(object):
         self.copy_stream = torch.cuda.Stream()
         self.moments_cnt_of_iteration = None
 
-    def generate_chunk_ids(self, chunk_list_type: ChunkListType):
+    def chunk_ids_generator(self, chunk_list_type: ChunkListType):
         """
         生成chunk_list_type对应chunk的所有chunk_id
         """

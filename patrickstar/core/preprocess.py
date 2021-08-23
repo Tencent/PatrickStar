@@ -162,14 +162,14 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
         1. 拷贝param的data，到param fp32和param fp16中去
         2. append dummy chunk，使chunk num是进程数的整数倍 TODO(jiaruifang)
         """
-        print('_post_context_exec')
+        logger.info('Post Model Init Context')
         for param_fp16_chunk_id, param_fp32_chunk_id in zip(
-                self.client.generate_chunk_ids(ChunkListType.PARAM_FP16),
-                self.client.generate_chunk_ids(ChunkListType.PARAM_FP32)):
+                self.client.chunk_ids_generator(ChunkListType.PARAM_FP16),
+                self.client.chunk_ids_generator(ChunkListType.PARAM_FP32)):
             for param_fp16, param_fp32 in zip(
-                    self.client.chunk_tensor_index.generate_params(
+                    self.client.chunk_tensor_index.params_generator(
                         param_fp16_chunk_id),
-                    self.client.chunk_tensor_index.generate_params(
+                    self.client.chunk_tensor_index.params_generator(
                         param_fp32_chunk_id)):
                 self.client.access_data(param_fp16, torch.device('cpu:0'))
                 ps_data_fp16 = param_fp16.ps_attr.access_tensor(

@@ -224,8 +224,8 @@ class PatrickStarClient(object):
                 self.access_data(param, torch.device('cpu:0'))
                 self.release_data(param, PSTensorStatus.HOLD)
 
-    def generate_chunk_ids(self, chunk_list_type: ChunkListType):
-        return self.chunk_list.generate_chunk_ids(chunk_list_type)
+    def chunk_ids_generator(self, chunk_list_type: ChunkListType):
+        return self.chunk_list.chunk_ids_generator(chunk_list_type)
 
     def generate_grad_params(self):
         """

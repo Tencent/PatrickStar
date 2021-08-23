@@ -334,7 +334,7 @@ class ChunkTensorIndex(object):
             self.dict_chunk_id_tensor_id[chunk_id] = list()
         return self.dict_chunk_id_tensor_id[chunk_id]
 
-    def generate_params(self, chunk_id):
+    def params_generator(self, chunk_id):
         for tensor_id in self.dict_chunk_id_tensor_id[chunk_id]:
             yield self.dict_tensor_id_info[tensor_id].param
 
