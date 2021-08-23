@@ -191,7 +191,8 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
 
         world_size = torch.distributed.get_world_size()
         while chunk_num % world_size != 0:
-            self.client.append_dummy_chunk(ChunkListType.PARAM_FP16)
+            self.client.append_dummy_chunk(torch.half,
+                                           ChunkListType.PARAM_FP16)
             chunk_num += 1
 
     def _is_local_param(self, param, access_type):
