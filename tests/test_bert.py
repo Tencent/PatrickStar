@@ -70,6 +70,11 @@ def test_bert_model(is_ckp: bool = False,
     else:
         rank = args.local_rank
 
+    # Avoid gpu0 use more memory.
+    # https://discuss.pytorch.org/t/extra-10gb-memory-on-gpu-0-in-ddp-tutorial/118113
+    torch.cuda.set_device(rank)
+    torch.cuda.empty_cache()
+
     device = torch.device(f'cuda:{rank}')
 
     if is_ckp:
