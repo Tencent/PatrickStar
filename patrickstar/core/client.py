@@ -65,6 +65,8 @@ class PatrickStarClient(object):
         self._chunk_id = -1
         self.cpu_comm_group = torch.distributed.new_group(backend='gloo')
 
+        self.dummy_param_list = []
+
     def _generate_chunk_id(self):
         self._chunk_id += 1
         return self._chunk_id
@@ -84,6 +86,31 @@ class PatrickStarClient(object):
         self._copy_model(model)
 
         self.register_model_hook(model)
+
+    def append_dummy_chunk(self, chunk_list_type: ChunkListType):
+        """
+        向chunk_list_type list中添加一个dummy chunk
+        """
+        logger.info(
+            f'Append a dummy chunk to the Chunk List {chunk_list_type}')
+        tmp_chunk_id = self.chunk_list.generate_chunk_id()
+        self.chunk_list.new_chunk(tmp_chunk_id,
+                                  self.default_chunk_size,
+                                  torch.half,
+                                  is_dummy=True,
+                                  chunk_type=chunk_list_type)
+        self.chunk_tensor_index.add_chunk(tmp_chunk_id,
+                                          self.default_chunk_size, torch.half,
+                                          self.global_chunk_id,
+                                          chunk_list_type)
+        dummy = torch.nn.Parameter(torch.tensor([0], dtype=self.data_type),
+                                   requires_grad=False)
+        # 加入一个dummy param可以让dummy chunk状态被设置为hold
+        register_param(dummy, f"dummy_{chunk_num % world_size}")
+        self.dummy_param_list.append(dummy)
+        self.chunk_tensor_index.add_tensor(
+            tmp_chunk_id, self.dummy_param_list[-1].ps_attr.data_id(), 0,
+            dummy.numel(), self.dummy_param_list[-1], AccessType.DATA)
 
     def append_tensor(self,
                       param: torch.nn.Parameter,
