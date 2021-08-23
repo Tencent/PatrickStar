@@ -160,7 +160,7 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
         """
         初始化context退出时执行本函数
         1. 拷贝param的data，到param fp32和param fp16中去
-        1. 补充dummy chunk，使chunk num是进程数的整数倍
+        2. append dummy chunk，使chunk num是进程数的整数倍 TODO(jiaruifang)
         """
         print('_post_context_exec')
         for param_fp16_chunk_id, param_fp32_chunk_id in zip(
