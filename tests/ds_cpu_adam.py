@@ -20,10 +20,7 @@ import copy
 import math
 import unittest
 
-import deepspeed
-# from deepspeed.ops.adam import FusedAdam
-from deepspeed.ops.op_builder import CPUAdamBuilder
-# from deepspeed.utils.logging import should_log_le
+from patrickstar.ops.op_builder import CPUAdamBuilder
 
 
 def torch_adam_update(step, lr, beta1, beta2, eps, weight_decay,
@@ -65,7 +62,7 @@ class TestAccess(unittest.TestCase):
                                      weight_decay, False, True)
         self.opt_id = 0
 
-    def check_res(self, step, lr, eps, beta1, beta2, weight_decay, shape):
+    def check_res(self, step, lr, eps, beta1, beta2, weight_decay, shape, grad_dtype):
         state = {}
 
         # step = 1
@@ -79,8 +76,8 @@ class TestAccess(unittest.TestCase):
 
         p_data = torch.rand(shape)
         p_data_copy = p_data.clone()
-        p_grad = torch.rand(shape)
-        p_grad_copy = p_grad.clone()
+        p_grad = torch.rand(shape, dtype=grad_dtype)
+        p_grad_copy = p_grad.clone().float()
         exp_avg = torch.rand(shape)
         exp_avg_copy = exp_avg.clone()
         exp_avg_sq = torch.rand(shape)
@@ -123,7 +120,8 @@ class TestAccess(unittest.TestCase):
         # print(torch.max(exp_avg_sq_copy - exp_avg_sq))
         assert torch.max(torch.abs(exp_avg_sq_copy - exp_avg_sq)) < 1e-6
         print(
-            f'Passed check, step {step}, lr {lr} eps {eps} beta1 {beta1} beta2 {beta2} weight_decay {weight_decay}'
+            f'Passed check, step {step}, lr {lr} eps {eps} beta1 {beta1} beta2 {beta2} '
+            f'weight_decay {weight_decay} grad_dtype {grad_dtype}'
         )
 
     def test(self):
@@ -134,8 +132,9 @@ class TestAccess(unittest.TestCase):
                         for beta1 in [0.9, 0.8]:
                             for beta2 in [0.999, 0.9]:
                                 for weight_decay in [0.001, 0]:
-                                    self.check_res(step, lr, eps, beta1, beta2,
-                                                   weight_decay, shape)
+                                    for grad_dtype in [torch.float, torch.half]:
+                                        self.check_res(step, lr, eps, beta1, beta2,
+                                                       weight_decay, shape, grad_dtype)
 
 
 if __name__ == "__main__":
