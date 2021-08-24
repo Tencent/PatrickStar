@@ -320,25 +320,31 @@ class ChunkTensorIndex(object):
             return
         total_bytes = 0
         logger.info(f'visit chunks')
-        for chunk_id, _ in self.dict_chunk_id_tensor_id.items():
-            chunk = chunk_list[chunk_id]
-            comm_group_id, comm_group_offset, list_type = self.chunk_id_to_comm_group[
-                chunk_id]
-            assert comm_group_id is not None
 
-            logger.info(
-                f'rank {rank} Chunk id {chunk.chunk_id}, status {chunk.get_status()}, '
-                f'comm group {comm_group_id, comm_group_offset, list_type}, capacity {chunk.capacity} elems, '
-                f'dtype {chunk.data_type}, size {chunk.get_chunk_space()} B, device {chunk.get_device()}'
-            )
-            for info in self.generate_tensor_info_in_order(chunk_id):
-                assert info.chunk_id == chunk_id, f'{info.chunk_id} vs {chunk_id}'
+        def print_chunk_list(chunk_list):
+            for chunk_id, _ in chunk_list:
+                chunk = chunk_list[chunk_id]
+                comm_group_id, comm_group_offset, list_type = self.chunk_id_to_comm_group[
+                    chunk_id]
+                assert comm_group_id is not None
+
                 logger.info(
-                    f'** tensor: chunk_id {chunk_id}, start {info.start_offset}, '
-                    f'end {info.start_offset + info.numel}, size {info.numel}, '
-                    f'tensor_id {info.tensor_id}, status {info.status()}, name {info.tensor_name}'
+                    f'rank {rank} Chunk id {chunk.chunk_id}, status {chunk.get_status()}, '
+                    f'comm group {comm_group_id, comm_group_offset, list_type}, capacity {chunk.capacity} elems, '
+                    f'dtype {chunk.data_type}, size {chunk.get_chunk_space()} B, device {chunk.get_device()}'
                 )
-            total_bytes += chunk.get_chunk_space()
+                for info in self.generate_tensor_info_in_order(chunk_id):
+                    assert info.chunk_id == chunk_id, f'{info.chunk_id} vs {chunk_id}'
+                    logger.info(
+                        f'** tensor: chunk_id {chunk_id}, start {info.start_offset}, '
+                        f'end {info.start_offset + info.numel}, size {info.numel}, '
+                        f'tensor_id {info.tensor_id}, status {info.status()}, name {info.tensor_name}'
+                    )
+                total_bytes += chunk.get_chunk_space()
+
+        print_chunk_list(
+            self.chunk_type_chunk_id_map[ChunkListType.PARAM_FP16])
+
         logger.info(f'OVERALL CHUNK SIZE {total_bytes/1e9} GB')
 
     def _get_tensor_id_list(self, chunk_id):
