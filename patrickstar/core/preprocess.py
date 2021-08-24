@@ -203,8 +203,8 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
         # 在CPU上初始化dummy chunk的空间
         for param in self.client.dummy_param_list:
             if self.client.is_local_tensor(param, AccessType.DATA):
-                self.access_data(param, torch.device('cpu:0'))
-                self.release_data(param, PSTensorStatus.HOLD)
+                self.client.access_data(param, torch.device('cpu:0'))
+                self.client.release_data(param)
 
         # 处理Pytorch管理的params
         for param in self.client.torch_param_list:

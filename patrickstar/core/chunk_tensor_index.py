@@ -318,11 +318,11 @@ class ChunkTensorIndex(object):
         rank = torch.distributed.get_rank()
         if rank != 0:
             return
-        total_bytes = 0
         logger.info(f'visit chunks')
 
-        def print_chunk_list(chunk_list):
-            for chunk_id, _ in chunk_list:
+        def print_chunk_list(type_chunk_list):
+            total_bytes = 0
+            for chunk_id in type_chunk_list:
                 chunk = chunk_list[chunk_id]
                 comm_group_id, comm_group_offset, list_type = self.chunk_id_to_comm_group[
                     chunk_id]
@@ -341,11 +341,13 @@ class ChunkTensorIndex(object):
                         f'tensor_id {info.tensor_id}, status {info.status()}, name {info.tensor_name}'
                     )
                 total_bytes += chunk.get_chunk_space()
+            return total_bytes
 
-        print_chunk_list(
+        overall_size = 0
+        overall_size += print_chunk_list(
             self.chunk_type_chunk_id_map[ChunkListType.PARAM_FP16])
 
-        logger.info(f'OVERALL CHUNK SIZE {total_bytes/1e9} GB')
+        logger.info(f'OVERALL CHUNK SIZE {overall_size/1e9} GB')
 
     def _get_tensor_id_list(self, chunk_id):
         if chunk_id not in self.dict_chunk_id_tensor_id:

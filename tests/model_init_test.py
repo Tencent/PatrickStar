@@ -17,7 +17,6 @@ from patrickstar.core import PatrickStarClient, ChunkTensorIndex, ChunkList, Acc
 import logging
 import torch
 from tests.simple_net import SimpleModel
-from patrickstar.utils import init_distributed
 from patrickstar.deepspeed_helper.global_vars import set_global_variables, get_args
 from common import distributed_test
 from patrickstar.core import is_torch_param
@@ -50,7 +49,6 @@ class TestModelInitContext(unittest.TestCase):
         for ps_param, torch_param in zip(ps_model.parameters(),
                                          torch_model.parameters()):
             if is_torch_param(ps_param):
-                print(ps_param, torch_param)
                 self.assertLess(
                     torch.max(torch_param.data - ps_param), 1e-4,
                     f"PyTorch tensors are not consist with each other")

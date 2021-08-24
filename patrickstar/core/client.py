@@ -343,7 +343,7 @@ class PatrickStarClient(object):
 
         # if rank >= len(chunk_id_list):
         #     return
-        assert rank < len(chunk_id_list), f"rank {rank} < {len(chunk_id_list)}"
+        assert rank < len(chunk_id_list), f"rank {rank} < {len(chunk_id_list)} {chunk_id_list}"
 
         local_chunk_id = chunk_id_list[rank]
 
