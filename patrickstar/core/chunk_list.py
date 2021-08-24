@@ -271,11 +271,12 @@ class ChunkList(object):
             raise RuntimeError(
                 f"chunk list new chunk with chunk_id {chunk_id} already existed"
             )
-        self.chunk_id_to_chunk_dict[chunk_id] = Chunk(capacity=chunk_size,
-                                                      data_type=data_type,
-                                                      chunk_id=chunk_id,
-                                                      rank=args.local_rank,
-                                                      is_dummy=is_dummy)
+        self.chunk_id_to_chunk_dict[chunk_id] = Chunk(
+            capacity=chunk_size,
+            data_type=data_type,
+            chunk_id=chunk_id,
+            rank=torch.distributed.get_rank(),
+            is_dummy=is_dummy)
         self.chunk_type_to_id_dict[chunk_type].append(chunk_id)
         logging.debug(
             f'allocate with new chunk chunk_id {chunk_id} size {chunk_size} data_type {data_type}'

@@ -15,7 +15,7 @@ import os
 import torch
 import functools
 
-from patrickstar.utils import init_distributed, see_memory_usage
+from patrickstar.utils import see_memory_usage
 from patrickstar.utils import logger, print_rank
 from patrickstar.core import PatrickStarClient, AccessType, ChunkListType
 from patrickstar.core import PSParameter, register_param, is_param_registed, register_torch_param
@@ -181,7 +181,7 @@ class Init(InsertPostInitMethodToModuleSubClasses):
 
         print_rank(f'Converting Params in {module.__class__.__name__}',
                    force=False)
-        rank = args.local_rank
+        rank = torch.distributed.get_rank()
         # 在模型初始化的过程构造模型，post_init_method调用粒度是一个SubModule，比如BertAttention模块。
         # 对于每个进程，将所有参数初始化出来。
         # Excluded Parameter，不存储在Chunk中的parameter

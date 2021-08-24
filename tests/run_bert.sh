@@ -41,8 +41,7 @@ export use_gpu_fp32_convert_for_adam="--use_gpu_fp32_convert_for_adam"
 else
 export use_gpu_fp32_convert_for_adam=""
 fi
-python ../patrickstar/launcher/runner.py --num_nodes 1 \
-                             --num_gpus ${GPU_NUM} \
+python -m torch.distributed.launch --nproc_per_node=${GPU_NUM} \
                              test_bert.py ${RES_CHECK_FLAG} \
                              --use_ckp \
                              --use_fp16 \
