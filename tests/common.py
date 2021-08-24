@@ -17,7 +17,6 @@ import time
 import torch
 import torch.distributed as dist
 from torch.multiprocessing import Process
-import deepspeed
 
 import pytest
 
@@ -50,11 +49,11 @@ def distributed_test(world_size=2, backend='nccl'):
             os.environ['RANK'] = str(local_rank)
             os.environ['WORLD_SIZE'] = str(num_procs)
 
-            deepspeed.init_distributed(dist_backend=backend)
+            torch.distributed.init_process_group(backend=backend)
 
             if torch.cuda.is_available():
                 torch.cuda.set_device(local_rank)
-            from patrickstar.deepspeed_helper.global_vars import set_global_variables, get_args
+            from patrickstar.deepspeed_helper.global_vars import get_args
             args = get_args()
             args.local_rank = local_rank
             run_func(*func_args, **func_kwargs)
