@@ -179,8 +179,7 @@ class FP16Adam(torch.optim.Optimizer):
         if args.use_fake_dist:
             rank = 0
         else:
-            rank = args.local_rank
-        world_size = torch.distributed.get_world_size()
+            rank = torch.distributed.get_rank()
         logger.info(
             f'rank {rank} margin_chunk_num_for_gpu_adam {margin_chunk_num_for_gpu_adam}, '
             f'param cnt {len(fp32_params)}'

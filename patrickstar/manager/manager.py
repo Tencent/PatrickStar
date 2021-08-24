@@ -89,20 +89,18 @@ class PatrickStarManager(metaclass=SingletonMeta):
         self.warmup_gpu_chunk_mem_ratio = args.warmup_gpu_chunk_mem_ratio
 
         if args.use_fake_dist:
-            rank = 0
             # 伪分布式训练是，大家共享一块GPU
             self._overall_gpu_mem = torch.cuda.get_device_properties(
-                rank
+                0
             ).total_memory * self._overall_gpu_mem_ratio / torch.distributed.get_world_size(
             )
             self._overall_cpu_mem = psutil.virtual_memory(
             ).total * self._overall_cpu_mem_ratio / torch.distributed.get_world_size(
             )
         else:
-            rank = args.local_rank
             # 获得系统的存储信息
             self._overall_gpu_mem = torch.cuda.get_device_properties(
-                rank).total_memory * self._overall_gpu_mem_ratio
+                args.local_rank).total_memory * self._overall_gpu_mem_ratio
             self._overall_cpu_mem = psutil.virtual_memory(
             ).total * self._overall_cpu_mem_ratio / torch.distributed.get_world_size(
             )
