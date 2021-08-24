@@ -11,7 +11,7 @@ export warmup_gpu_chunk_mem_ratio=${warmup_gpu_chunk_mem_ratio:-0.2}
 export overall_gpu_mem_ratio=${overall_gpu_mem_ratio:-0.8}
 
 # Check result correctness
-# RES_CHECK_FLAG="--res_check"
+RES_CHECK_FLAG="--res_check"
 # Use a single GPU card to simulate multiple-GPU training.
 # FAKE_DIST="--use_fake_dist"
 
@@ -28,10 +28,8 @@ export HYBRID_ADAM_FLAG="--use_hybrid_adam"
 
 if [[ ${CPU_EBD} == 1 ]];  then
 export CPU_EMBED="--use_cpu_embedding"
-export CPU_EMBED_FP32="--cpu_embedding_fp32"
 else
 export CPU_EMBED=""
-export CPU_EMBED_FP32=""
 fi
 
 export GPU_BOOST_ADAM=1
@@ -56,7 +54,6 @@ python -m torch.distributed.launch --nproc_per_node=${GPU_NUM} \
                              ${FAKE_DIST} \
                              ${USE_DS_ADAM} \
                              ${CPU_EMBED} \
-                             ${CPU_EMBED_FP32} \
                              ${HYBRID_ADAM_FLAG} \
                              --default_chunk_size=${CHUNK_SIZE} \
                              2>&1 | tee ./logs/log.${MODEL_NAME}_gpu_${GPU_NUM}_cs_${CS}_bs_${BS}_cpueb_${CPU_EBD}_margin_${margin_use_ratio}_warmup_${warmup_gpu_chunk_mem_ratio}_gpu_${overall_gpu_mem_ratio}_adamcvt_${GPU_BOOST_ADAM}

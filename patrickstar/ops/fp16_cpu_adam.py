@@ -91,13 +91,9 @@ class FP16Adam(torch.optim.Optimizer):
                 state['step'] = 0
 
                 if is_torch_param(p):
-                    state['fp32_param_data'] = torch.nn.Parameter(
-                        torch.zeros_like(p,
-                                         dtype=torch.float,
-                                         device=torch.device('cpu:0')),
-                        requires_grad=False)
-                    register_torch_param(state['fp32_param_data'])
-
+                    state[
+                        'fp32_param_data'] = self.client.param_fp16_to_param_fp32(
+                            p)
                     if p.requires_grad:
                         state['exp_avg'] = torch.nn.Parameter(
                             torch.zeros_like(p,

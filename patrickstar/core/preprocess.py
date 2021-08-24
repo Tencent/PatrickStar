@@ -241,6 +241,7 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
                 for name, param in module.named_parameters(recurse=False):
                     param_fp32 = torch.nn.Parameter(param.data.clone())
                     register_torch_param(param, f'embedding_{name}')
+                    register_torch_param(param_fp32, f'embedding_{name}_fp32')
                     self.client.add_param_fp16_to_param_fp32(param, param_fp32)
                     self.client.torch_param_list.append(param)
                 return
