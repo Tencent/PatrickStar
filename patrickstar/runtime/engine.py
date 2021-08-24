@@ -13,7 +13,7 @@
 import torch
 from torch.nn.modules import Module
 
-from patrickstar.utils import logger, init_distributed, global_timer
+from patrickstar.utils import logger, global_timer
 from patrickstar.utils import print_rank as print_rank_0
 from patrickstar.core import PatrickStarClient, AccessType, PSChunkStatus, PSTensorStatus, TrainingStage
 from patrickstar.manager import PatrickStarManager
@@ -27,9 +27,6 @@ class PatrickStarEngine(Module):
     def __init__(self, model, client, config):
         super(PatrickStarEngine, self).__init__()
         args = get_args()
-        if not torch.distributed.is_initialized():
-            self.dist_backend = "gloo" if args.use_fake_dist else "nccl"
-            init_distributed(dist_backend=self.dist_backend)
 
         self.rank = 0 if args.use_fake_dist else args.local_rank
         self.module = model
