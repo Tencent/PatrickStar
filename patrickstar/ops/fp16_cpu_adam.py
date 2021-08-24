@@ -25,7 +25,7 @@ from patrickstar.utils import print_rank, logger, use_dist_flag, get_sys_memory_
 from patrickstar.core.parameter import register_param, is_torch_param, register_torch_param
 from patrickstar.deepspeed_helper.global_vars import get_args
 from patrickstar.manager import PatrickStarManager
-from patrickstar.core import ChunkList, ChunkTensorIndex
+from patrickstar.core import ChunkList, ChunkTensorIndex, ChunkListType
 from .chunk_io_buff import FP32ChunkReadBuffer, FP16ChunkWriteBuffer
 
 from .op_builder import CPUAdamBuilder
@@ -92,43 +92,62 @@ class FP16Adam(torch.optim.Optimizer):
 
                 if is_torch_param(p):
                     state['fp32_param_data'] = torch.nn.Parameter(
-                        torch.zeros_like(p, dtype=torch.float, device=torch.device('cpu:0')),
-                                         requires_grad=False)
+                        torch.zeros_like(p,
+                                         dtype=torch.float,
+                                         device=torch.device('cpu:0')),
+                        requires_grad=False)
                     register_torch_param(state['fp32_param_data'])
 
                     if p.requires_grad:
                         state['exp_avg'] = torch.nn.Parameter(
-                            torch.zeros_like(p, dtype=torch.float, device=torch.device('cpu:0')),
-                                            requires_grad=False)
+                            torch.zeros_like(p,
+                                             dtype=torch.float,
+                                             device=torch.device('cpu:0')),
+                            requires_grad=False)
                         register_torch_param(state['exp_avg'])
                         state['exp_avg_sq'] = torch.nn.Parameter(
-                            torch.zeros_like(p, dtype=torch.float, device=torch.device('cpu:0')),
-                                            requires_grad=False)
+                            torch.zeros_like(p,
+                                             dtype=torch.float,
+                                             device=torch.device('cpu:0')),
+                            requires_grad=False)
                         register_torch_param(state['exp_avg_sq'])
                 else:
-                    state['fp32_param_data'] = torch.nn.Parameter(
-                        torch.tensor([], dtype=torch.float, device=torch.device('cpu:0')),
-                                     requires_grad=False)
-                    register_param(state['fp32_param_data'], f'{p.ps_attr.name}_fp32')
-                    state['fp32_param_data'].ps_attr.reset_shape(p.ps_attr.shape)
+                    name = p.ps_attr.name
+                    state[
+                        'fp32_param_data'] = self.client.param_fp16_to_param_fp32(
+                            p)
+                    state['exp_avg'] = torch.nn.Parameter(
+                        torch.tensor(
+                            [],
+                            dtype=torch.float,
+                            # memory_format=torch.preserve_format,
+                            device=torch.device('cpu:0')),
+                        requires_grad=False)
+                    register_param(state['exp_avg'], f'{name}.exp_avg')
+                    state['exp_avg'].ps_attr.reset_shape(p.ps_attr.shape)
+                    state['exp_avg'].ps_attr._is_local = p.ps_attr.is_local()
 
-                    if p.requires_grad:
-                        state['exp_avg'] = torch.nn.Parameter(
-                            torch.tensor([], dtype=torch.float,
-                                        # memory_format=torch.preserve_format,
-                                        device=torch.device('cpu:0')),
-                                        requires_grad=False)
-                        register_param(state['exp_avg'], f'{p.ps_attr.name}.exp_avg')
-                        state['exp_avg'].ps_attr.reset_shape(p.ps_attr.shape)
+                    state['exp_avg_sq'] = torch.nn.Parameter(
+                        torch.tensor(
+                            [],
+                            dtype=torch.float,
+                            # memory_format=torch.preserve_format,
+                            device=torch.device('cpu:0')),
+                        requires_grad=False)
+                    register_param(state['exp_avg_sq'], f'{name}.exp_avg_sq')
+                    state['exp_avg_sq'].ps_attr.reset_shape(p.ps_attr.shape)
+                    state['exp_avg_sq'].ps_attr._is_local = p.ps_attr.is_local(
+                    )
 
-                        state['exp_avg_sq'] = torch.nn.Parameter(
-                            torch.tensor([], dtype=torch.float,
-                                        # memory_format=torch.preserve_format,
-                                        device=torch.device('cpu:0')),
-                            requires_grad=False)
-                        register_param(state['exp_avg_sq'], f'{p.ps_attr.name}.exp_avg_sq')
-                        state['exp_avg_sq'].ps_attr.reset_shape(p.ps_attr.shape)
+                    self.client.append_tensor(state['exp_avg'], torch.float,
+                                              AccessType.DATA,
+                                              ChunkListType.MOMENTUM,
+                                              f'{name}_fp32')
 
+                    self.client.append_tensor(state['exp_avg_sq'], torch.float,
+                                              AccessType.DATA,
+                                              ChunkListType.VARIANCE,
+                                              f'{name}_fp32')
 
         # 用作fp16 grad 存储的buffer
         self.read_chunk_buff = None
@@ -183,8 +202,7 @@ class FP16Adam(torch.optim.Optimizer):
         world_size = torch.distributed.get_world_size()
         logger.info(
             f'rank {rank} margin_chunk_num_for_gpu_adam {margin_chunk_num_for_gpu_adam}, '
-            f'param cnt {len(fp32_params)}'
-        )
+            f'param cnt {len(fp32_params)}')
         for i, fp32_param in enumerate(fp32_params):
             ##########################
             ####### 准备ADAM数据 ######
@@ -259,7 +277,8 @@ class FP16Adam(torch.optim.Optimizer):
                 self.ds_opt_adam.adam_update(self.opt_id, step, lr, beta1,
                                              beta2, eps, weight_decay, True,
                                              fp32_data_tensor.view(-1),
-                                             fp16_grad_tensor.view(-1), exp_avg.view(-1),
+                                             fp16_grad_tensor.view(-1),
+                                             exp_avg.view(-1),
                                              exp_avg_sq.view(-1))
             else:
                 fp32_grad_tensor = fp16_grad_tensor.float()
@@ -343,8 +362,7 @@ class FP16Adam(torch.optim.Optimizer):
                                              async_op=False)
                 param.data /= world_size
 
-                logger.info(
-                    f'rank {rank} allreduce grad {param.ps_attr.name}')
+                logger.info(f'rank {rank} allreduce grad {param.ps_attr.name}')
                 continue
             if param.ps_attr.get_status(
                     AccessType.DATA) == PSTensorStatus.COMPUTE:

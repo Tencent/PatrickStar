@@ -12,7 +12,6 @@
 # See the AUTHORS file for names of contributors.
 
 import unittest
-from patrickstar.core.preprocess import PSPreProcessCtx
 from patrickstar.core import PatrickStarClient, ChunkTensorIndex, ChunkList, AccessType
 import logging
 import torch
@@ -20,16 +19,17 @@ from tests.simple_net import SimpleModel
 from patrickstar.utils import init_distributed
 from patrickstar.deepspeed_helper.global_vars import set_global_variables
 from common import distributed_test
-
+from patrickstar.ops import FP16Adam
 from transformers import BertModel, BertConfig
+from patrickstar.core import PSPreProcessCtx
 
 
 class TestModelInitContext(unittest.TestCase):
     def setUp(self):
         pass
 
-    @distributed_test(world_size=[2], backend="nccl")
-    def test_model_init(self):
+    @distributed_test(world_size=[1])
+    def test_optimizer_init(self):
         def model_provider():
             cfg = BertConfig()
             cfg.vocab_size = 10
@@ -44,21 +44,8 @@ class TestModelInitContext(unittest.TestCase):
         with PSPreProcessCtx(client, dtype=torch.float):
             ps_model = model_provider()
 
-        torch.manual_seed(0)
-        torch_model = model_provider()
-
-        for ps_param, torch_param in zip(ps_model.parameters(),
-                                         torch_model.parameters()):
-            client.access_data(ps_param, compute_device)
-            ps_data = ps_param.ps_attr.access_tensor(AccessType.DATA)
-            if ps_param.ps_attr.is_local():
-                self.assertLess(
-                    torch.max(torch_param.data - ps_data), 1e-4,
-                    f"{ps_param.ps_attr.name} ps tensor and pytorch tensor are not consist with each other"
-                )
-            client.release_data(ps_param)
-
-        client.chunk_tensor_index.visit_chunks(client.chunk_list)
+        FP16Adam(client, ps_model.parameters())
+        # client.chunk_tensor_index.visit_chunks(client.chunk_list)
 
 
 if __name__ == "__main__":

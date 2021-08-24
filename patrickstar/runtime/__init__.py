@@ -15,6 +15,8 @@ import torch
 from .engine import PatrickStarEngine
 from .init_context import Init
 from ..manager import PatrickStarManager
+from patrickstar.core import PSPreProcessCtx
+
 
 def initialize_engine(model_func, client, config=None):
     """Initialize the PatrickStar Engine.
@@ -31,12 +33,10 @@ def initialize_engine(model_func, client, config=None):
     if not callable(model_func):
         raise ValueError("model_func need to be callable.")
 
-    with Init(client=client, dtype=torch.float):
+    with PSPreProcessCtx(client=client, dtype=torch.float):
         model = model_func()
 
-    engine = PatrickStarEngine(model=model,
-                               client=client,
-                               config=config)
+    engine = PatrickStarEngine(model=model, client=client, config=config)
 
     # 开启预热优化
     mgr = PatrickStarManager()

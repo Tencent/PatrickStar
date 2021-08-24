@@ -73,15 +73,13 @@ class ChunkTensorIndex(object):
         self.dict_chunk_id_tensor_id: dict[int, List[int]] = {}
         self.dict_chunk_id_chunk_info: dict[int, tuple] = {}
 
-        # comm_group_id 对应的chunk_id_list
-        self.comm_group_id_chunk_id_list = {}
-        self.dict_chunk_id_comm_group_id = {}
+        # (comm_group_idx, comm_group_offset, chunk_list_type) -> chunk_id_list
+        self.comm_group_to_chunk_id_list = {}
+        # chunk_id -> (comm_group_idx, comm_group_offset, chunk_list_type)
+        self.chunk_id_to_comm_group = {}
 
         # 记录不同chunk_list信息，存放chunk_id信息
-        self.param_fp16_list = []
-        self.param_fp32_list = []
-        self.momentum_fp32_list = []
-        self.variance_fp32_list = []
+        self.chunk_type_chunk_id_map = {}
         self.default_chunk_size = default_chunk_size
 
     def is_local_chunk(self, chunk_id):
@@ -89,35 +87,39 @@ class ChunkTensorIndex(object):
         chunk_id是否是local chunk
         """
         rank = torch.distributed.get_rank()
-        return rank == self.dict_chunk_id_comm_group_id[chunk_id]
+        grp_id, grp_offset, grp_type = self.chunk_id_to_comm_group[chunk_id]
+        return rank == grp_offset
+
+    def chunk_num(self, list_type: ChunkListType):
+        """
+        返回chunk_list_type类型chunk list的chunk个数
+        """
+        if list not in self.chunk_type_chunk_id_map:
+            return 0
+        else:
+            return len(self.chunk_type_chunk_id_map[list_type])
 
     def add_chunk(self, chunk_id, chunk_size, data_type, comm_group_id,
-                  list_type: ChunkListType):
+                  comm_group_offset, list_type: ChunkListType):
         """
         注册一个chunk信息
         @chunk_id: chunk的id
         @chunk_size: chunk尺寸
         @data_type: chunk中存储数据类型，由于PyTorch限制，再次说明不能在chunk里混合存储两种类型数据，或者将chunk内存以不同类型转换
-        @comm_group_id: communication group id，历史原因名字不一致
+        @comm_group_id: 在当前list_type中当前通信组的id
         @list_type: chunk做在list的类型
         """
         self.dict_chunk_id_chunk_info[chunk_id] = (chunk_size, data_type)
 
-        if comm_group_id not in self.comm_group_id_chunk_id_list:
-            self.comm_group_id_chunk_id_list[comm_group_id] = list()
-        self.comm_group_id_chunk_id_list[comm_group_id].append(chunk_id)
-        self.dict_chunk_id_comm_group_id[chunk_id] = comm_group_id
+        comm_group_info = (comm_group_id, comm_group_offset, list_type)
+        if comm_group_info not in self.comm_group_to_chunk_id_list:
+            self.comm_group_to_chunk_id_list[comm_group_info] = list()
+        self.comm_group_to_chunk_id_list[comm_group_info].append(chunk_id)
+        self.chunk_id_to_comm_group[chunk_id] = comm_group_info
 
-        if list_type == ChunkListType.PARAM_FP16:
-            self.param_fp16_list.append(chunk_id)
-        elif list_type == ChunkListType.PARAM_FP32:
-            self.param_fp32_list.append(chunk_id)
-        elif list_type == ChunkListType.MOMENTUM:
-            self.momentum_fp32_list.append(chunk_id)
-        elif list_type == ChunkListType.VARIANCE:
-            self.variance_fp32_list.append(chunk_id)
-        else:
-            raise RuntimeError
+        if list_type not in self.chunk_type_chunk_id_map:
+            self.chunk_type_chunk_id_map[list_type] = []
+        self.chunk_type_chunk_id_map[list_type].append(chunk_id)
 
     def get_cur_chunk_num(self):
         return len(self.dict_chunk_id_chunk_info)
@@ -281,14 +283,15 @@ class ChunkTensorIndex(object):
             return None
         return info.chunk_id
 
-    def get_comm_group_id(self, chunk_id: int) -> List[int]:
-        return self.comm_group_id_chunk_id_list[
-            self.dict_chunk_id_comm_group_id[chunk_id]]
+    def chunk_ids_of_comm_group(self, chunk_id: int) -> List[int]:
+        return self.comm_group_to_chunk_id_list[
+            self.chunk_id_to_comm_group[chunk_id]]
 
     def generate_all_chunks(self, chunk_list):
         for chunk_id, _ in self.dict_chunk_id_tensor_id.items():
             chunk = chunk_list[chunk_id]
-            comm_group_id = self.dict_chunk_id_comm_group_id[chunk_id]
+            comm_group_id, comm_group_offset, list_type = self.chunk_id_to_comm_group[
+                chunk_id]
             yield chunk_id, comm_group_id, chunk
 
     def visit_chunk(self, chunk):
@@ -296,10 +299,11 @@ class ChunkTensorIndex(object):
         if rank != 1:
             return
         chunk_id = chunk.chunk_id
-        comm_group_id = self.dict_chunk_id_comm_group_id[chunk_id]
+        comm_group_id, comm_group_offset, list_type = self.chunk_id_to_comm_group[
+            chunk_id]
         logger.info(
             f'rank {rank} Chunk id {chunk.chunk_id}, status {chunk.get_status()}, '
-            f'global chunk id {comm_group_id}, capacity {chunk.capacity} elems, '
+            f'comm group ({comm_group_id}, {comm_group_offset}, {list_type}), capacity {chunk.capacity} elems, '
             f'dtype {chunk.data_type}, size {chunk.get_chunk_space()} B, device {chunk.get_device()}'
         )
         for info in self.generate_tensor_info_in_order(chunk_id):
@@ -318,12 +322,13 @@ class ChunkTensorIndex(object):
         logger.info(f'visit chunks')
         for chunk_id, _ in self.dict_chunk_id_tensor_id.items():
             chunk = chunk_list[chunk_id]
-            comm_group_id = self.dict_chunk_id_comm_group_id[chunk_id]
+            comm_group_id, comm_group_offset, list_type = self.chunk_id_to_comm_group[
+                chunk_id]
             assert comm_group_id is not None
 
             logger.info(
                 f'rank {rank} Chunk id {chunk.chunk_id}, status {chunk.get_status()}, '
-                f'global chunk id {comm_group_id}, capacity {chunk.capacity} elems, '
+                f'comm group {comm_group_id, comm_group_offset, list_type}, capacity {chunk.capacity} elems, '
                 f'dtype {chunk.data_type}, size {chunk.get_chunk_space()} B, device {chunk.get_device()}'
             )
             for info in self.generate_tensor_info_in_order(chunk_id):

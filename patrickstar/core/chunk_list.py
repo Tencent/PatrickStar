@@ -261,10 +261,10 @@ class ChunkList(object):
                   chunk_size: int,
                   data_type: torch.dtype,
                   is_dummy: bool = False,
-                  chunk_type: ChunkListType = ChunkListType.UNDEF) -> int:
+                  chunk_type: ChunkListType = ChunkListType.UNDEF):
         """
         新建一个chunk，并未初始化内存
-        返回comm_group_idx
+        返回在通信组中的坐标，(comm_group_idx, comm_group_offset)
         """
         args = get_args()
         if chunk_id in self.chunk_id_to_chunk_dict:
@@ -280,8 +280,11 @@ class ChunkList(object):
         logging.debug(
             f'allocate with new chunk chunk_id {chunk_id} size {chunk_size} data_type {data_type}'
         )
-        return (len(self.chunk_type_to_id_dict[chunk_type]) -
-                1) % args.world_size
+        comm_group_offset = (len(self.chunk_type_to_id_dict[chunk_type]) -
+                             1) % args.world_size
+        comm_group_idx = (len(self.chunk_type_to_id_dict[chunk_type]) -
+                          1) / args.world_size
+        return comm_group_idx, comm_group_offset
 
     def is_empty(self, chunk_type: ChunkListType):
         return len(self.chunk_type_to_id_dict[chunk_type]) == 0

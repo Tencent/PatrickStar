@@ -37,6 +37,7 @@ class TestAccess(unittest.TestCase):
                                      chunk_size=1000,
                                      data_type=torch.float,
                                      comm_group_id=0,
+                                     comm_group_offset=0,
                                      list_type=ChunkListType.PARAM_FP32)
 
         param_numel_list = [10, 20, 30, 20, 7, 2]
