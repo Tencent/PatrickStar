@@ -100,8 +100,6 @@ class PatrickStarClient(object):
         """
         向chunk_list_type list中添加一个dummy chunk
         """
-        logger.info(
-            f'Append a dummy chunk to the Chunk List {chunk_list_type}')
         tmp_chunk_id = self.chunk_list.generate_chunk_id()
         comm_group_idx, comm_group_offset = self.chunk_list.new_chunk(
             tmp_chunk_id,
@@ -121,6 +119,9 @@ class PatrickStarClient(object):
         self.chunk_tensor_index.add_tensor(
             tmp_chunk_id, self.dummy_param_list[-1].ps_attr.data_id(), 0,
             dummy.numel(), self.dummy_param_list[-1], AccessType.DATA)
+
+        logger.info(
+            f'Append a dummy chunk to the Chunk List {chunk_list_type} comm group ({comm_group_idx} {comm_group_offset})')
 
     def append_tensor(self,
                       param: torch.nn.Parameter,

@@ -195,6 +195,7 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
             chunk_num += 1
 
         world_size = torch.distributed.get_world_size()
+        logger.info(f'param fp16 chunk num {chunk_num}')
         while chunk_num % world_size != 0:
             self.client.append_dummy_chunk(torch.half,
                                            ChunkListType.PARAM_FP16)
@@ -210,6 +211,8 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
         for param in self.client.torch_param_list:
             self.client.param_fp16_to_param_fp32(param).data.copy_(param.data)
             param.data = param.data.to(torch.half)
+
+        print(f'init finished rank {args.local_rank} {self.client.chunk_tensor_index.comm_group_to_chunk_id_list}')
 
     def _is_local_param(self, param, access_type):
         """
