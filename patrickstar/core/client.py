@@ -30,7 +30,6 @@ import patrickstar.utils.global_timer as global_timer
 from patrickstar.utils.memory_monitor import get_sys_memory_used, see_memory_usage
 from patrickstar.utils import logger
 from patrickstar.deepspeed_helper.global_vars import get_args
-from patrickstar.manager import PatrickStarManager
 
 
 class PatrickStarClient(object):
@@ -121,7 +120,8 @@ class PatrickStarClient(object):
             dummy.numel(), self.dummy_param_list[-1], AccessType.DATA)
 
         logger.info(
-            f'Append a dummy chunk to the Chunk List {chunk_list_type} comm group ({comm_group_idx} {comm_group_offset})')
+            f'Append a dummy chunk to the Chunk List {chunk_list_type} comm group ({comm_group_idx} {comm_group_offset})'
+        )
 
     def append_tensor(self,
                       param: torch.nn.Parameter,
@@ -344,7 +344,9 @@ class PatrickStarClient(object):
 
         # if rank >= len(chunk_id_list):
         #     return
-        assert rank < len(chunk_id_list), f"rank {rank} < {len(chunk_id_list)} {chunk_id_list}"
+        assert rank < len(
+            chunk_id_list
+        ), f"rank {rank} < {len(chunk_id_list)} {chunk_id_list}"
 
         local_chunk_id = chunk_id_list[rank]
 

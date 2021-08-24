@@ -212,7 +212,9 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
             self.client.param_fp16_to_param_fp32(param).data.copy_(param.data)
             param.data = param.data.to(torch.half)
 
-        print(f'init finished rank {args.local_rank} {self.client.chunk_tensor_index.comm_group_to_chunk_id_list}')
+        print(
+            f'init finished rank {args.local_rank} {self.client.chunk_tensor_index.comm_group_to_chunk_id_list}'
+        )
 
     def _is_local_param(self, param, access_type):
         """
@@ -259,7 +261,7 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
             assert not is_param_registed(param)
             name = f'{name}_{self.param_idx}'
             self.param_idx += 1
-            logger.info(f'** Converting Params {name}')
+            # logger.info(f'** Converting Params {name}')
             self.client.append_tensor(param, torch.half, AccessType.DATA,
                                       ChunkListType.PARAM_FP16, f'{name}_fp16')
 

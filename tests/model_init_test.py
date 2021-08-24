@@ -27,7 +27,7 @@ class TestModelInitContext(unittest.TestCase):
     def setUp(self):
         pass
 
-    @distributed_test(world_size=[2], backend="nccl")
+    @distributed_test(world_size=[2], backend="gloo")
     def test_model_init(self):
         def model_provider():
             cfg = BertConfig()
@@ -68,5 +68,6 @@ class TestModelInitContext(unittest.TestCase):
 if __name__ == "__main__":
     set_global_variables()
     args = get_args()
+    args.use_fake_dist = True
     args.use_cpu_embedding = True
     unittest.main()

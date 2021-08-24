@@ -18,7 +18,6 @@ import torch
 import torch.distributed as dist
 from torch.multiprocessing import Process
 
-
 # Worker timeout *after* the first worker has completed.
 DEEPSPEED_UNIT_WORKER_TIMEOUT = 120
 
@@ -51,7 +50,7 @@ def distributed_test(world_size=2, backend='nccl'):
             torch.distributed.init_process_group(backend=backend)
 
             if torch.cuda.is_available():
-                torch.cuda.set_device(local_rank)
+                torch.cuda.set_device(0)
             from patrickstar.deepspeed_helper.global_vars import get_args
             args = get_args()
             args.local_rank = local_rank
