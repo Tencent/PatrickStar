@@ -18,7 +18,7 @@ import functools
 from patrickstar.utils import see_memory_usage
 from patrickstar.utils import logger, print_rank
 from patrickstar.core import PatrickStarClient, AccessType, ChunkListType
-from patrickstar.core import PSParameter, register_param, is_param_registed, register_torch_param
+from patrickstar.core import PSParameter, register_param, is_param_registered, register_torch_param
 from patrickstar.deepspeed_helper.global_vars import get_args
 
 _orig_torch_empty = torch.empty
@@ -187,7 +187,7 @@ class Init(InsertPostInitMethodToModuleSubClasses):
         # Excluded Parameter，不存储在Chunk中的parameter
         # (TODO)模型初始化顺序和optimizer parameter group遍历顺序一致么？
         for name, param in module.named_parameters(recurse=False):
-            assert not is_param_registed(param)
+            assert not is_param_registered(param)
             assert param.dtype == torch.float
             print_rank(f'** Converting Params {name}', force=False)
 
@@ -204,5 +204,6 @@ class Init(InsertPostInitMethodToModuleSubClasses):
                 # TODO(jiaruifang)下面这句将非local的param的内存清零会导致结果错误,
                 # 插入这句会影响模型初始化的值。
                 if not args.use_fake_dist:
-                    param.data = torch.tensor([], dtype=param.dtype,
+                    param.data = torch.tensor([],
+                                              dtype=param.dtype,
                                               device=param.device)

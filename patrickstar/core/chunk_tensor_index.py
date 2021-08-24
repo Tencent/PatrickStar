@@ -20,7 +20,7 @@ from .chunk_list import ChunkList
 import patrickstar.utils.global_timer as global_timer
 from patrickstar.utils import logger
 
-from .parameter import PSParameter, is_param_registed
+from .parameter import PSParameter, is_param_registered
 
 
 class TensorInfo(object):
@@ -74,12 +74,12 @@ class ChunkTensorIndex(object):
         self.dict_chunk_id_chunk_info: dict[int, tuple] = {}
 
         # (comm_group_idx, chunk_list_type) -> chunk_id_list
-        self.comm_group_to_chunk_id_list = {}
+        self.comm_group_idx_to_chunk_id_list = {}
         # chunk_id -> (comm_group_idx, comm_group_offset, chunk_list_type)
         self.chunk_id_to_comm_group = {}
 
         # 记录不同chunk_list信息，存放chunk_id信息
-        self.chunk_type_chunk_id_map = {}
+        self.chunk_type_chunk_id = {}
         self.default_chunk_size = default_chunk_size
 
     def is_local_chunk(self, chunk_id):
@@ -94,10 +94,10 @@ class ChunkTensorIndex(object):
         """
         返回chunk_list_type类型chunk list的chunk个数
         """
-        if list not in self.chunk_type_chunk_id_map:
+        if list_type not in self.chunk_type_chunk_id:
             return 0
         else:
-            return len(self.chunk_type_chunk_id_map[list_type])
+            return len(self.chunk_type_chunk_id[list_type])
 
     def add_chunk(self, chunk_id, chunk_size, data_type, comm_group_id,
                   comm_group_offset, list_type: ChunkListType):
@@ -112,15 +112,15 @@ class ChunkTensorIndex(object):
         self.dict_chunk_id_chunk_info[chunk_id] = (chunk_size, data_type)
 
         comm_group_info = (comm_group_id, list_type)
-        if comm_group_info not in self.comm_group_to_chunk_id_list:
-            self.comm_group_to_chunk_id_list[comm_group_info] = list()
-        self.comm_group_to_chunk_id_list[comm_group_info].append(chunk_id)
+        if comm_group_info not in self.comm_group_idx_to_chunk_id_list:
+            self.comm_group_idx_to_chunk_id_list[comm_group_info] = list()
+        self.comm_group_idx_to_chunk_id_list[comm_group_info].append(chunk_id)
         self.chunk_id_to_comm_group[chunk_id] = (comm_group_id,
                                                  comm_group_offset, list_type)
 
-        if list_type not in self.chunk_type_chunk_id_map:
-            self.chunk_type_chunk_id_map[list_type] = []
-        self.chunk_type_chunk_id_map[list_type].append(chunk_id)
+        if list_type not in self.chunk_type_chunk_id:
+            self.chunk_type_chunk_id[list_type] = []
+        self.chunk_type_chunk_id[list_type].append(chunk_id)
 
     def get_cur_chunk_num(self):
         return len(self.dict_chunk_id_chunk_info)
@@ -235,7 +235,7 @@ class ChunkTensorIndex(object):
         pos = self._binary_search(tensor_id_list, start_offset, 0,
                                   len(tensor_id_list) - 1)
         tensor_id_list.insert(pos, tensor_id)
-        if not is_param_registed(param):
+        if not is_param_registered(param):
             param_name = None
         else:
             param_name = param.ps_attr.name
@@ -244,7 +244,7 @@ class ChunkTensorIndex(object):
             chunk_id, tensor_id, start_offset, numel, param, access_type,
             param_name)
 
-        if is_param_registed(param):
+        if is_param_registered(param):
             if access_type == AccessType.DATA:
                 param.ps_attr.data_chunk_id = chunk_id
             elif access_type == AccessType.GRAD:
@@ -286,7 +286,7 @@ class ChunkTensorIndex(object):
 
     def chunk_ids_of_comm_group(self, chunk_id: int) -> List[int]:
         comm_group_id, _, list_type = self.chunk_id_to_comm_group[chunk_id]
-        return self.comm_group_to_chunk_id_list[(comm_group_id, list_type)]
+        return self.comm_group_idx_to_chunk_id_list[(comm_group_id, list_type)]
 
     def generate_all_chunks(self, chunk_list):
         for chunk_id, _ in self.dict_chunk_id_tensor_id.items():
@@ -346,7 +346,7 @@ class ChunkTensorIndex(object):
 
         overall_size = 0
         overall_size += print_chunk_list(
-            self.chunk_type_chunk_id_map[ChunkListType.PARAM_FP16])
+            self.chunk_type_chunk_id[ChunkListType.PARAM_FP16])
 
         logger.info(f'OVERALL CHUNK SIZE {overall_size/1e9} GB')
 
@@ -366,7 +366,7 @@ class ChunkTensorIndex(object):
         """
         tensor_id_list = self._get_tensor_id_list(chunk_id)
         prev_end_pos = 0
-        assert is_param_registed(param)
+        assert is_param_registered(param)
         numel = param.ps_attr.numel
         tensor_name = param.ps_attr.name
         target_tensor_id = param.ps_attr.get_tensor_id(access_type)

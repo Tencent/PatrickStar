@@ -18,7 +18,7 @@ import functools
 from patrickstar.utils import see_memory_usage
 from patrickstar.utils import logger, print_rank
 from patrickstar.core import PatrickStarClient, AccessType, ChunkListType, ChunkTensorIndex, ChunkList
-from patrickstar.core import PSParameter, register_param, is_param_registed, register_torch_param
+from patrickstar.core import PSParameter, register_param, is_param_registered, register_torch_param
 from patrickstar.deepspeed_helper.global_vars import get_args
 from typing import List
 _orig_torch_empty = torch.empty
@@ -174,7 +174,7 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
                             param_fp16_chunk_id),
                         self.client.chunk_tensor_index.params_generator(
                             param_fp32_chunk_id)):
-                    if is_param_registed(param_fp32) and is_param_registed(
+                    if is_param_registered(param_fp32) and is_param_registered(
                             param_fp16):
                         self.client.access_data(param_fp16,
                                                 torch.device('cpu:0'))
@@ -186,12 +186,13 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
                         ps_data_fp32 = param_fp32.ps_attr.access_tensor(
                             AccessType.DATA)
 
+                        # param_fp16目前还是fp32
                         ps_data_fp16.copy_(param_fp16.data)
                         ps_data_fp32.copy_(param_fp16.data)
 
                         self.client.release_data(param_fp16)
                         self.client.release_data(param_fp32)
-
+                        param_fp16 = param_fp16.to(torch.half)
             chunk_num += 1
 
         world_size = torch.distributed.get_world_size()
@@ -213,7 +214,7 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
             param.data = param.data.to(torch.half)
 
         print(
-            f'init finished rank {args.local_rank} {self.client.chunk_tensor_index.comm_group_to_chunk_id_list}'
+            f'init finished rank {args.local_rank} {self.client.chunk_tensor_index.comm_group_idx_to_chunk_id_list}'
         )
 
     def _is_local_param(self, param, access_type):
@@ -258,7 +259,7 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
         # 对于每个进程，将所有参数初始化出来。
         # (NOTE)模型初始化顺序和optimizer parameter group遍历顺序虽不一致，但很相似
         for name, param in module.named_parameters(recurse=False):
-            assert not is_param_registed(param)
+            assert not is_param_registered(param)
             name = f'{name}_{self.param_idx}'
             self.param_idx += 1
             # logger.info(f'** Converting Params {name}')

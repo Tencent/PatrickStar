@@ -25,7 +25,7 @@ from .chunk_data import Chunk
 from .chunk_list import ChunkList, ChunkListType
 from .helper import getsizeof
 from .chunk_tensor_index import ChunkTensorIndex
-from .parameter import PSParameter, register_param, is_param_registed, is_torch_param
+from .parameter import PSParameter, register_param, is_param_registered, is_torch_param
 import patrickstar.utils.global_timer as global_timer
 from patrickstar.utils.memory_monitor import get_sys_memory_used, see_memory_usage
 from patrickstar.utils import logger

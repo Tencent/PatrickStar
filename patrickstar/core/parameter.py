@@ -121,7 +121,7 @@ def register_param(param, name=None):
         param.ps_attr = PSParameter(param, name)
 
 
-def is_param_registed(param) -> bool:
+def is_param_registered(param) -> bool:
     assert isinstance(param, torch.nn.Parameter)
     return hasattr(param, 'ps_attr')
 
