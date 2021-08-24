@@ -149,8 +149,7 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
         if not torch.distributed.is_initialized():
             assert torch.distributed.is_initialized(
             ), "Parameters cannot be scattered without initializing torch.distributed"
-        args = get_args()
-        self.rank = args.local_rank
+        self.rank = torch.distributed.get_rank()
         self.world_size = torch.distributed.get_world_size()
         self.client = client
         self.dummy_param_list = []
@@ -205,7 +204,7 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
             param, access_type)
         comm_group_id = self.client.chunk_tensor_index.dict_chunk_id_comm_group_id[
             chunk_id]
-        return args.local_rank == comm_group_id
+        return torch.distributed.get_rank() == comm_group_id
 
     def _post_init_method(self, module):
         """
@@ -226,7 +225,6 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
 
         print_rank(f'Converting Params in {module.__class__.__name__}',
                    force=False)
-        rank = args.local_rank
 
         # 在模型初始化的过程构造模型，post_init_method调用粒度是一个SubModule，比如BertAttention模块。
         # 对于每个进程，将所有参数初始化出来。
