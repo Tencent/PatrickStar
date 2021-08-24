@@ -55,6 +55,7 @@ def distributed_test(world_size=2, backend='nccl'):
             from patrickstar.deepspeed_helper.global_vars import get_args
             args = get_args()
             args.local_rank = local_rank
+            args.world_size = num_procs
             run_func(*func_args, **func_kwargs)
 
         def dist_launcher(num_procs, *func_args, **func_kwargs):

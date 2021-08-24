@@ -27,7 +27,7 @@ class TestModelInitContext(unittest.TestCase):
     def setUp(self):
         pass
 
-    @distributed_test(world_size=[1], backend="nccl")
+    @distributed_test(world_size=[2], backend="nccl")
     def test_model_init(self):
         def model_provider():
             cfg = BertConfig()
