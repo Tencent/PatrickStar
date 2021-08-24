@@ -187,11 +187,7 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
 
                     self.client.release_data(param_fp16)
                     self.client.release_data(param_fp32)
-            else:
-                for param_fp16 in self.client.chunk_tensor_index.params_generator(param_fp16_chunk_id):
-                    param_fp16.data = torch.tensor([],
-                                               dtype=torch.half,
-                                               device=param_fp16.device)
+
             chunk_num += 1
 
         world_size = torch.distributed.get_world_size()
@@ -256,5 +252,10 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
             # Delete the memory of non local tensors
             if not self._is_local_param(param, AccessType.DATA):
                 param.ps_attr._is_local = False
+                param_fp32.ps_attr._is_local = False
+                param.data = torch.tensor([],
+                                          dtype=torch.half,
+                                          device=param.device)
             else:
                 param.ps_attr._is_local = True
+                param_fp32.ps_attr._is_local = True
