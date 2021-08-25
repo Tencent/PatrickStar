@@ -18,8 +18,6 @@ import torch
 import torch.distributed as dist
 from torch.multiprocessing import Process
 
-import pytest
-
 # Worker timeout *after* the first worker has completed.
 DEEPSPEED_UNIT_WORKER_TIMEOUT = 120
 
@@ -56,6 +54,7 @@ def distributed_test(world_size=2, backend='nccl'):
             from patrickstar.deepspeed_helper.global_vars import get_args
             args = get_args()
             args.local_rank = local_rank
+            args.world_size = num_procs
             run_func(*func_args, **func_kwargs)
 
         def dist_launcher(num_procs, *func_args, **func_kwargs):
@@ -89,14 +88,8 @@ def distributed_test(world_size=2, backend='nccl'):
                 # If it still hasn't terminated, kill it because it hung.
                 if p.exitcode is None:
                     p.terminate()
-                    pytest.fail(f'Worker {rank} hung.', pytrace=False)
-                if p.exitcode < 0:
-                    pytest.fail(
-                        f'Worker {rank} killed by signal {-p.exitcode}',
-                        pytrace=False)
-                if p.exitcode > 0:
-                    pytest.fail(f'Worker {rank} exited with code {p.exitcode}',
-                                pytrace=False)
+                if p.exitcode != 0:
+                    p.terminate()
 
         def run_func_decorator(*func_args, **func_kwargs):
             """Entry point for @distributed_test(). """

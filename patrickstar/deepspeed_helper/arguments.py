@@ -155,11 +155,6 @@ def _add_patrick_star_args(parser):
         help=
         'using CPU to perform Embedding and do not assign embedding params to chunks'
     )
-
-    group.add_argument('--cpu_embedding_fp32',
-                       dest='cpu_embedding_fp32',
-                       action='store_true',
-                       help='Embedding on CPU using FP32')
     group.add_argument('--use_deepspeed_cpu_adam',
                        action='store_true',
                        help='Use deepspeed cpu adam')

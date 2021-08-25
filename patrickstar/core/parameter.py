@@ -36,7 +36,7 @@ class PSParameter(object):
         self.shape = param.shape
 
         self.data_chunk_id = None
-        self.grad_chunk_id = None        
+        self.grad_chunk_id = None
 
         self.data_tensor = PSTensor()
         if param.requires_grad:
@@ -121,7 +121,7 @@ def register_param(param, name=None):
         param.ps_attr = PSParameter(param, name)
 
 
-def is_param_registed(param) -> bool:
+def is_param_registered(param) -> bool:
     assert isinstance(param, torch.nn.Parameter)
     return hasattr(param, 'ps_attr')
 
@@ -131,7 +131,9 @@ def register_torch_param(param, name=None):
     if not hasattr(param, 'ps_attr'):
         param.ps_attr = PSParameter(param, name)
         param.ps_attr._is_torch = True
-        # param.ps_attr.data_tensor.tensor = param.data
+    else:
+        raise RuntimeError(
+            "Cannot both register_torch_param and register_param")
 
 
 def is_torch_param(param):

@@ -25,13 +25,11 @@ from .chunk_data import Chunk
 from .chunk_list import ChunkList, ChunkListType
 from .helper import getsizeof
 from .chunk_tensor_index import ChunkTensorIndex
-from .chunk_schema_scheduler import ChunkShemaScheduler
-from .parameter import PSParameter, register_param, is_param_registed, is_torch_param
+from .parameter import PSParameter, register_param, is_param_registered, is_torch_param
 import patrickstar.utils.global_timer as global_timer
 from patrickstar.utils.memory_monitor import get_sys_memory_used, see_memory_usage
 from patrickstar.utils import logger
 from patrickstar.deepspeed_helper.global_vars import get_args
-from patrickstar.manager import PatrickStarManager
 
 
 class PatrickStarClient(object):
@@ -48,15 +46,14 @@ class PatrickStarClient(object):
         # index of gpu
         self.rank = rank
 
-        self.chunk_list = ChunkList()
-
         self.module = None
 
         # 解耦chunk和param的tensors
         self.default_chunk_size = default_chunk_size
+
         self.chunk_tensor_index = ChunkTensorIndex(self.default_chunk_size)
-        self.chunk_schema_scheduler = ChunkShemaScheduler(
-            default_chunk_size, self.chunk_list, self.chunk_tensor_index)
+        self.chunk_list = ChunkList()
+
         self._time_profile = True
 
         # 通过运行一次迭代来动态进行chunk scheduling
@@ -66,6 +63,22 @@ class PatrickStarClient(object):
         self.cpu_comm_group = torch.distributed.new_group(backend='gloo')
 
         self.dummy_param_list = []
+        self.torch_param_list = []
+        self.param_fp16_to_param_fp32_map = {}
+
+    def add_param_fp16_to_param_fp32(self, param_fp16, param_fp32):
+        """
+        add index of param fp32 via param_fp16
+        """
+        self.param_fp16_to_param_fp32_map[param_fp16] = param_fp32
+
+    def param_fp16_to_param_fp32(self, param_fp16):
+        """
+        index param fp32 via param_fp16
+        """
+        if param_fp16 not in self.param_fp16_to_param_fp32_map:
+            raise RuntimeError("add_param_fp16_to_param_fp32 error")
+        return self.param_fp16_to_param_fp32_map[param_fp16]
 
     def _generate_chunk_id(self):
         self._chunk_id += 1
@@ -78,13 +91,7 @@ class PatrickStarClient(object):
         """
         self.module = model
         self.optimizer = optimizer
-        self.static_chunk_schedule(model, optimizer)
-
-        # self.chunk_tensor_index.visit_chunks(self.chunk_list)
-
-        # TODO(jiaruifang) 目前仍是调试状态，每个进程有全部模型
-        self._copy_model(model)
-
+        self.chunk_tensor_index.visit_chunks(self.chunk_list)
         self.register_model_hook(model)
 
     def append_dummy_chunk(self, data_type: torch.dtype,
@@ -92,17 +99,17 @@ class PatrickStarClient(object):
         """
         向chunk_list_type list中添加一个dummy chunk
         """
-        logger.info(
-            f'Append a dummy chunk to the Chunk List {chunk_list_type}')
         tmp_chunk_id = self.chunk_list.generate_chunk_id()
-        comm_group_idx = self.chunk_list.new_chunk(tmp_chunk_id,
-                                                   self.default_chunk_size,
-                                                   torch.half,
-                                                   is_dummy=True,
-                                                   chunk_type=chunk_list_type)
+        comm_group_idx, comm_group_offset = self.chunk_list.new_chunk(
+            tmp_chunk_id,
+            self.default_chunk_size,
+            torch.half,
+            is_dummy=True,
+            chunk_type=chunk_list_type)
         self.chunk_tensor_index.add_chunk(tmp_chunk_id,
                                           self.default_chunk_size, torch.half,
-                                          comm_group_idx, chunk_list_type)
+                                          comm_group_idx, comm_group_offset,
+                                          chunk_list_type)
         dummy = torch.nn.Parameter(torch.tensor([], dtype=data_type),
                                    requires_grad=False)
         # 加入一个dummy param可以让dummy chunk状态被设置为hold
@@ -111,6 +118,10 @@ class PatrickStarClient(object):
         self.chunk_tensor_index.add_tensor(
             tmp_chunk_id, self.dummy_param_list[-1].ps_attr.data_id(), 0,
             dummy.numel(), self.dummy_param_list[-1], AccessType.DATA)
+
+        logger.info(
+            f'Append a dummy chunk to the Chunk List {chunk_list_type} comm group ({comm_group_idx} {comm_group_offset})'
+        )
 
     def append_tensor(self,
                       param: torch.nn.Parameter,
@@ -142,13 +153,12 @@ class PatrickStarClient(object):
                 return
             chunk_id = self.chunk_list.generate_chunk_id()
 
-        comm_group_idx = self.chunk_list.new_chunk(chunk_id,
-                                                   self.default_chunk_size,
-                                                   data_type, False,
-                                                   chunk_list_type)
+        comm_group_idx, comm_group_offset = self.chunk_list.new_chunk(
+            chunk_id, self.default_chunk_size, data_type, False,
+            chunk_list_type)
         self.chunk_tensor_index.add_chunk(chunk_id, self.default_chunk_size,
                                           data_type, comm_group_idx,
-                                          chunk_list_type)
+                                          comm_group_offset, chunk_list_type)
         is_success = self.chunk_tensor_index.try_insert_tensor(
             chunk_id, param, data_type, access_type)
         if not is_success:
@@ -158,25 +168,15 @@ class PatrickStarClient(object):
             )
         return
 
-    def static_chunk_schedule(self, model, optimizer):
-        """
-        TODO(jiaruifang)静态调度chunk schema
-        注册模型和优化器，相当于静态图的预处理过程
-        执行chunk schema调取，为每个tensor找到对应的chunk和位置
-        """
-        if self._is_fp16:
-            self.chunk_schema_scheduler.schedule_fp16(model, optimizer)
-        else:
-            self.chunk_schema_scheduler.schedule(model, optimizer)
-        logging.info(f"static_chunk_schedule finished")
-
     def get_param_fp16_chunks_mem_size(self):
         """
         获得param fp16使用Chunk所占的内存大小 (in Bytes)
         """
         world_size = torch.distributed.get_world_size()
         # 本进程自己管理的Chunk，和Group Chunk Buff会分配的Chunk
-        return self.chunk_tensor_index.param_fp16_chunk_num * self.default_chunk_size * 2 / world_size + (
+        return self.chunk_tensor_index.chunk_num(
+            ChunkListType.PARAM_FP16
+        ) * self.default_chunk_size * 2 / world_size + (
             world_size - 1) * self.default_chunk_size * 2
 
     def set_all_tensors_status_in_chunk(self, chunk_id, new_status):
@@ -195,62 +195,6 @@ class PatrickStarClient(object):
 
     def register_model_hook(self, model):
         setup_hybrid_ps_hooks(model, self)
-
-    def _copy_model(self, model):
-        # TODO(jiaruifang)模型参数的初始化顺序和如下循环访问的顺序相同。
-        args = get_args()
-        for i, group in enumerate(self.optimizer.param_groups):
-            for j, param in enumerate(group['params']):
-                if is_torch_param(param):
-                    if args.cpu_embedding_fp32:
-                        self.optimizer.state[param]['fp32_param_data'].copy_(
-                            param.data)
-                    else:
-                        param.data = param.data.half()
-                        self.optimizer.state[param]['fp32_param_data'].copy_(
-                            param.data.float())
-                    continue
-                if self.is_local_tensor(param, AccessType.DATA):
-                    if True:
-                        param.data = param.data.half()
-                        self.access_data(param, torch.device('cpu:0'))
-                        data_tensor = param.ps_attr.access_tensor(
-                            AccessType.DATA)
-                        data_tensor.copy_(param.data)
-                        if self._is_fp16:
-                            param_fp32 = self.optimizer.state[param][
-                                'fp32_param_data']
-                            self.access_data(param_fp32, torch.device('cpu:0'))
-                            data_tensor_fp32 = param_fp32.ps_attr.access_tensor(
-                                AccessType.DATA)
-                            data_tensor_fp32.copy_(param.data.float())
-                            self.release_data(param_fp32, PSTensorStatus.HOLD)
-                        self.release_data(param, PSTensorStatus.HOLD)
-                    else:
-                        if self._is_fp16:
-                            param_fp32 = self.optimizer.state[param][
-                                'fp32_param_data']
-                            self.access_data(param_fp32, torch.device('cpu:0'))
-                            data_tensor_fp32 = param_fp32.ps_attr.access_tensor(
-                                AccessType.DATA)
-                            data_tensor_fp32.copy_(param.data)
-                            self.release_data(param_fp32, PSTensorStatus.HOLD)
-
-                        param.data = param.data.half()
-                        self.access_data(param, torch.device('cpu:0'))
-                        data_tensor = param.ps_attr.access_tensor(
-                            AccessType.DATA)
-                        data_tensor.copy_(param.data)
-                        self.release_data(param, PSTensorStatus.HOLD)
-                else:
-                    param.data = torch.tensor([],
-                                              dtype=torch.half,
-                                              device=param.device)
-
-        for param in self.chunk_schema_scheduler.dummy_param_list:
-            if self.is_local_tensor(param, AccessType.DATA):
-                self.access_data(param, torch.device('cpu:0'))
-                self.release_data(param, PSTensorStatus.HOLD)
 
     def chunk_ids_generator(self, chunk_list_type: ChunkListType):
         return self.chunk_list.chunk_ids_generator(chunk_list_type)
@@ -274,11 +218,9 @@ class PatrickStarClient(object):
         # 如果没有gap需要新分配一个
         # 还要拷贝数据
         if chunk_id is None:
-            chunk_id = self._generate_chunk_id()
-            offset = 0
-            chunk_size = max(self.default_chunk_size, numel)
-            self.chunk_list.new_chunk(chunk_id, chunk_size, data_type)
-            self.chunk_tensor_index.add_chunk(chunk_id, chunk_size, data_type)
+            raise RuntimeError(
+                "client _assign_chunk_for_tensor meets a tensor not assigned chunk"
+            )
         else:
             pass
 
@@ -297,17 +239,9 @@ class PatrickStarClient(object):
         调用本接口前判断是否是torch_param
         判断tensor是否在本GPU之上
         """
-        # TODO(jiaruifang)不应该进入这个分支
         if is_torch_param(param):
             return False
-        # 准备param所在chunk的内存，如果内存不在计算设备上需要分配或者移动
-        chunk_id = self.chunk_tensor_index.get_chunk_id(param, access_type)
-
-        chunk_id_list = self.chunk_tensor_index.get_comm_group_id(chunk_id)
-        rank = torch.distributed.get_rank()
-        assert rank < len(chunk_id_list)
-        local_chunk_id = chunk_id_list[rank]
-        return chunk_id == local_chunk_id
+        return param.ps_attr.is_local()
 
     def _fetch_remote_chunks(self, chunk_id_list, local_chunk_id,
                              compute_device, param_name,
@@ -368,7 +302,7 @@ class PatrickStarClient(object):
             global_timer.my_timer.start_profile(
                 'CLIENT_fetch_remote_chunks_allgather')
 
-        logger.debug(f'rank {rank} allgather {chunk_id_list}')
+        logger.info(f'rank {rank} allgather {chunk_id_list}')
         handle = torch.distributed.all_gather(allgather_payload_buff,
                                               local_chunk_payload,
                                               async_op=False)
@@ -404,12 +338,15 @@ class PatrickStarClient(object):
         # 准备param所在chunk的内存，如果内存不在计算设备上需要分配或者移动
         chunk_id = self.chunk_tensor_index.get_chunk_id(param, access_type)
 
-        chunk_id_list = self.chunk_tensor_index.get_comm_group_id(chunk_id)
+        chunk_id_list = self.chunk_tensor_index.chunk_ids_of_comm_group(
+            chunk_id)
         rank = torch.distributed.get_rank()
 
         # if rank >= len(chunk_id_list):
         #     return
-        assert rank < len(chunk_id_list), f"rank {rank} < {len(chunk_id_list)}"
+        assert rank < len(
+            chunk_id_list
+        ), f"rank {rank} < {len(chunk_id_list)} {chunk_id_list}"
 
         local_chunk_id = chunk_id_list[rank]
 
@@ -586,7 +523,8 @@ class PatrickStarClient(object):
 
         chunk_id = self.chunk_tensor_index.get_chunk_id(param, access_type)
         # 可以在tensor-chunk schema构造过程中获得local_chunk_id
-        chunk_id_list = self.chunk_tensor_index.get_comm_group_id(chunk_id)
+        chunk_id_list = self.chunk_tensor_index.chunk_ids_of_comm_group(
+            chunk_id)
 
         local_chunk_id = chunk_id_list[rank]
 

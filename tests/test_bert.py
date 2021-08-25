@@ -138,23 +138,22 @@ def test_bert_model(is_ckp: bool = False,
                 cfg, use_cpu_embedding=args.use_cpu_embedding)
 
         config = {
-          # The same format as optimizer config of DeepSpeed
-          # https://www.deepspeed.ai/docs/config-json/#optimizer-parameters
-          "optimizer": {
-            "type": "Adam",
-            "params": {
-              "lr": lr,
-              "betas": betas,
-              "eps": eps,
-              "weight_decay": weight_decay
+            # The same format as optimizer config of DeepSpeed
+            # https://www.deepspeed.ai/docs/config-json/#optimizer-parameters
+            "optimizer": {
+                "type": "Adam",
+                "params": {
+                    "lr": lr,
+                    "betas": betas,
+                    "eps": eps,
+                    "weight_decay": weight_decay
+                }
             }
-          }
         }
 
-        model, optimizer = initialize_engine(
-            model_func=model_func,
-            client=client,
-            config=config)
+        model, optimizer = initialize_engine(model_func=model_func,
+                                             client=client,
+                                             config=config)
     else:
         raise RuntimeError
 
@@ -387,30 +386,30 @@ if __name__ == "__main__":
 
     if res_check:
         torch.manual_seed(0)
-        loss_list = test_bert_model(is_ckp=use_ckp,
-                                    is_fp16=use_fp16,
-                                    is_ps=False,
-                                    hidden_dim=hidden_dim,
-                                    batch_size=batch_size,
-                                    sequence_length=sequence_length,
-                                    num_layer=num_layer,
-                                    num_head=num_head)
+        torch_res_list = test_bert_model(is_ckp=use_ckp,
+                                         is_fp16=use_fp16,
+                                         is_ps=False,
+                                         hidden_dim=hidden_dim,
+                                         batch_size=batch_size,
+                                         sequence_length=sequence_length,
+                                         num_layer=num_layer,
+                                         num_head=num_head)
 
         torch.cuda.empty_cache()
         print("*" * 50)
         torch.manual_seed(0)
-        loss_ref_list = test_bert_model(is_ckp=use_ckp,
-                                        is_fp16=use_fp16,
-                                        is_ps=True,
-                                        hidden_dim=hidden_dim,
-                                        batch_size=batch_size,
-                                        sequence_length=sequence_length,
-                                        num_layer=num_layer,
-                                        num_head=num_head)
+        ps_res_list = test_bert_model(is_ckp=use_ckp,
+                                      is_fp16=use_fp16,
+                                      is_ps=True,
+                                      hidden_dim=hidden_dim,
+                                      batch_size=batch_size,
+                                      sequence_length=sequence_length,
+                                      num_layer=num_layer,
+                                      num_head=num_head)
 
-        print('ps', loss_list)
-        print('ref', loss_ref_list)
+        print('torch', torch_res_list)
+        print('ps', ps_res_list)
         import numpy as np
-        print(np.array(loss_list) - np.array(loss_ref_list))
-        for loss, loss_ref in zip(loss_list, loss_ref_list):
-            assert loss == loss_ref
+        print(np.array(ps_res_list) - np.array(torch_res_list))
+        for loss, loss_ref in zip(torch_res_list, ps_res_list):
+            assert abs(loss - loss_ref) < 1e-4

@@ -18,7 +18,7 @@ import functools
 from patrickstar.utils import see_memory_usage
 from patrickstar.utils import logger, print_rank
 from patrickstar.core import PatrickStarClient, AccessType, ChunkListType, ChunkTensorIndex, ChunkList
-from patrickstar.core import PSParameter, register_param, is_param_registed, register_torch_param
+from patrickstar.core import PSParameter, register_param, is_param_registered, register_torch_param
 from patrickstar.deepspeed_helper.global_vars import get_args
 from typing import List
 _orig_torch_empty = torch.empty
@@ -161,6 +161,7 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
         1. 拷贝param的data，到param fp32和param fp16中去
         2. append dummy chunk，使chunk num是进程数的整数倍 TODO(jiaruifang)
         """
+        args = get_args()
         logger.info('Post Model Init Context')
         chunk_num = 0
         for param_fp16_chunk_id, param_fp32_chunk_id in zip(
@@ -173,27 +174,49 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
                             param_fp16_chunk_id),
                         self.client.chunk_tensor_index.params_generator(
                             param_fp32_chunk_id)):
-                    self.client.access_data(param_fp16, torch.device('cpu:0'))
-                    ps_data_fp16 = param_fp16.ps_attr.access_tensor(
-                        AccessType.DATA)
+                    if is_param_registered(param_fp32) and is_param_registered(
+                            param_fp16):
+                        self.client.access_data(param_fp16,
+                                                torch.device('cpu:0'))
+                        ps_data_fp16 = param_fp16.ps_attr.access_tensor(
+                            AccessType.DATA)
 
-                    self.client.access_data(param_fp32, torch.device('cpu:0'))
-                    ps_data_fp32 = param_fp32.ps_attr.access_tensor(
-                        AccessType.DATA)
+                        self.client.access_data(param_fp32,
+                                                torch.device('cpu:0'))
+                        ps_data_fp32 = param_fp32.ps_attr.access_tensor(
+                            AccessType.DATA)
 
-                    ps_data_fp16.copy_(param_fp16.data)
-                    ps_data_fp32.copy_(param_fp16.data)
+                        # param_fp16目前还是fp32
+                        ps_data_fp16.copy_(param_fp16.data)
+                        ps_data_fp32.copy_(param_fp16.data)
 
-                    self.client.release_data(param_fp16)
-                    self.client.release_data(param_fp32)
-
+                        self.client.release_data(param_fp16)
+                        self.client.release_data(param_fp32)
+                        param_fp16 = param_fp16.to(torch.half)
             chunk_num += 1
 
         world_size = torch.distributed.get_world_size()
+        logger.info(f'param fp16 chunk num {chunk_num}')
         while chunk_num % world_size != 0:
             self.client.append_dummy_chunk(torch.half,
                                            ChunkListType.PARAM_FP16)
             chunk_num += 1
+
+        # 在CPU上初始化dummy chunk的空间
+        # for param in self.client.dummy_param_list:
+        #     if self.client.is_local_tensor(param, AccessType.DATA):
+        #         self.client.access_data(param, torch.device('cpu:0'))
+        #         self.client.release_data(param)
+
+        # 处理Pytorch管理的params
+        for param in self.client.torch_param_list:
+            self.client.param_fp16_to_param_fp32(param).data.copy_(param.data)
+            # TODO(jiaruifang) CPU上计算不支持half
+            # param.data = param.data.to(torch.half)
+
+        print(
+            f'init finished rank {args.local_rank} {self.client.chunk_tensor_index.comm_group_idx_to_chunk_id_list}'
+        )
 
     def _is_local_param(self, param, access_type):
         """
@@ -202,9 +225,9 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
         args = get_args()
         chunk_id = self.client.chunk_tensor_index.get_chunk_id(
             param, access_type)
-        comm_group_id = self.client.chunk_tensor_index.dict_chunk_id_comm_group_id[
+        comm_group_id, comm_group_offset, list_type = self.client.chunk_tensor_index.chunk_id_to_comm_group[
             chunk_id]
-        return torch.distributed.get_rank() == comm_group_id
+        return torch.distributed.get_rank() == comm_group_offset
 
     def _post_init_method(self, module):
         """
@@ -219,8 +242,15 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
         if args.use_cpu_embedding:
             # cpu_embedding优化把embedding交给Torch管理而非Chunk
             if module.__class__.__name__ == 'Embedding':
+                logger.info(
+                    f'** Converting Maintain PyTorch Params in {module.__class__.__name__}'
+                )
                 for name, param in module.named_parameters(recurse=False):
+                    param_fp32 = torch.nn.Parameter(param.data.clone())
                     register_torch_param(param, f'embedding_{name}')
+                    register_torch_param(param_fp32, f'embedding_{name}_fp32')
+                    self.client.add_param_fp16_to_param_fp32(param, param_fp32)
+                    self.client.torch_param_list.append(param)
                 return
 
         print_rank(f'Converting Params in {module.__class__.__name__}',
@@ -230,10 +260,10 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
         # 对于每个进程，将所有参数初始化出来。
         # (NOTE)模型初始化顺序和optimizer parameter group遍历顺序虽不一致，但很相似
         for name, param in module.named_parameters(recurse=False):
-            assert not is_param_registed(param)
+            assert not is_param_registered(param)
             name = f'{name}_{self.param_idx}'
             self.param_idx += 1
-            logger.info(f'** Converting Params {name}')
+            # logger.info(f'** Converting Params {name}')
             self.client.append_tensor(param, torch.half, AccessType.DATA,
                                       ChunkListType.PARAM_FP16, f'{name}_fp16')
 
@@ -247,13 +277,15 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
             self.client.append_tensor(param_fp32, torch.float, AccessType.DATA,
                                       ChunkListType.PARAM_FP32, f'{name}_fp32')
 
+            self.client.add_param_fp16_to_param_fp32(param, param_fp32)
             # Delete the memory of non local tensors
             if not self._is_local_param(param, AccessType.DATA):
                 param.ps_attr._is_local = False
                 param_fp32.ps_attr._is_local = False
-                param.data = torch.tensor([],
-                                          dtype=torch.half,
-                                          device=param.device)
+                # TODO(jiaruifang) fix bert init bug
+                # param.data = torch.tensor([],
+                #                           dtype=torch.half,
+                #                           device=param.device)
             else:
                 param.ps_attr._is_local = True
                 param_fp32.ps_attr._is_local = True

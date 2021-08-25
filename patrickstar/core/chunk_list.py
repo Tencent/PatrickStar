@@ -261,27 +261,30 @@ class ChunkList(object):
                   chunk_size: int,
                   data_type: torch.dtype,
                   is_dummy: bool = False,
-                  chunk_type: ChunkListType = ChunkListType.UNDEF) -> int:
+                  chunk_type: ChunkListType = ChunkListType.UNDEF):
         """
         新建一个chunk，并未初始化内存
-        返回comm_group_idx
+        返回在通信组中的坐标，(comm_group_idx, comm_group_offset)
         """
         args = get_args()
         if chunk_id in self.chunk_id_to_chunk_dict:
             raise RuntimeError(
                 f"chunk list new chunk with chunk_id {chunk_id} already existed"
             )
-        self.chunk_id_to_chunk_dict[chunk_id] = Chunk(capacity=chunk_size,
-                                                      data_type=data_type,
-                                                      chunk_id=chunk_id,
-                                                      rank=torch.distributed.get_rank(),
-                                                      is_dummy=is_dummy)
+        self.chunk_id_to_chunk_dict[chunk_id] = Chunk(
+            capacity=chunk_size,
+            data_type=data_type,
+            chunk_id=chunk_id,
+            rank=torch.distributed.get_rank(),
+            is_dummy=is_dummy)
         self.chunk_type_to_id_dict[chunk_type].append(chunk_id)
-        logging.debug(
-            f'allocate with new chunk chunk_id {chunk_id} size {chunk_size} data_type {data_type}'
+        tmp_chunk_list_len = len(self.chunk_type_to_id_dict[chunk_type])
+        comm_group_offset = (tmp_chunk_list_len - 1) % args.world_size
+        comm_group_idx = (tmp_chunk_list_len - 1) // args.world_size
+        logger.info(
+            f'rank {args.local_rank}, allocate with new chunk chunk_id {chunk_id} size {chunk_size} data_type {data_type} comm group ({comm_group_idx}, {comm_group_offset}, {chunk_type})'
         )
-        return (len(self.chunk_type_to_id_dict[chunk_type]) -
-                1) % args.world_size
+        return comm_group_idx, comm_group_offset
 
     def is_empty(self, chunk_type: ChunkListType):
         return len(self.chunk_type_to_id_dict[chunk_type]) == 0
