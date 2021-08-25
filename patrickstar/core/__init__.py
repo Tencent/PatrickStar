@@ -17,5 +17,5 @@ from .chunk_data import Chunk
 from .const import AccessType, PSChunkStatus, PSTensorStatus, TrainingStage, ChunkListType
 from .chunk_tensor_index import ChunkTensorIndex
 from .hook import setup_hybrid_ps_hooks
-from .parameter import PSParameter, register_param, is_param_registed, register_torch_param, is_torch_param
+from .parameter import PSParameter, register_param, is_param_registered, register_torch_param, is_torch_param
 from .preprocess import PSPreProcessCtx

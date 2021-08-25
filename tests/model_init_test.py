@@ -52,15 +52,15 @@ class TestModelInitContext(unittest.TestCase):
                 self.assertLess(
                     torch.max(torch_param.data - ps_param), 1e-4,
                     f"PyTorch tensors are not consist with each other")
-                continue
-            client.access_data(ps_param, compute_device)
-            ps_data = ps_param.ps_attr.access_tensor(AccessType.DATA)
-            if ps_param.ps_attr.is_local():
-                self.assertLess(
-                    torch.max(torch_param.data - ps_data), 1e-4,
-                    f"{ps_param.ps_attr.name} ps tensor and pytorch tensor are not consist with each other"
-                )
-            client.release_data(ps_param)
+            else:
+                client.access_data(ps_param, compute_device)
+                ps_data = ps_param.ps_attr.access_tensor(AccessType.DATA)
+                if ps_param.ps_attr.is_local():
+                    self.assertLess(
+                        torch.max(torch_param.data - ps_data), 1e-4,
+                        f"{ps_param.ps_attr.name} ps tensor and pytorch tensor are not consist with each other"
+                    )
+                client.release_data(ps_param)
 
         # client.chunk_tensor_index.visit_chunks(client.chunk_list)
 
@@ -69,5 +69,6 @@ if __name__ == "__main__":
     set_global_variables()
     args = get_args()
     args.use_fake_dist = True
+    #TODO(jiaruifang)
     args.use_cpu_embedding = True
     unittest.main()

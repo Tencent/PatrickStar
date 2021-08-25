@@ -412,4 +412,4 @@ if __name__ == "__main__":
         import numpy as np
         print(np.array(ps_res_list) - np.array(torch_res_list))
         for loss, loss_ref in zip(torch_res_list, ps_res_list):
-            assert abs(max(loss - loss_ref)) < 1e-4
+            assert abs(loss - loss_ref) < 1e-4
