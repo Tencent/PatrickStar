@@ -196,7 +196,7 @@ class _BcastActFromRank0(torch.autograd.Function):
         else:
             target_device = torch.device(f'cuda:{args.local_rank}')
 
-        return input_.to(target_device).half()
+        return input_.to(target_device)
 
     @staticmethod
     def forward(ctx, input_):
@@ -207,9 +207,9 @@ class _BcastActFromRank0(torch.autograd.Function):
             target_device = torch.device(f'cuda:{args.local_rank}')
 
         logger.info(
-            f'Entrying CPU Emedding BWD, copy grad_output to cuda, {input_.dtype}->fp16'
+            f'Entrying CPU Emedding BWD, copy grad_output to cuda, input dtype {input_.dtype}'
         )
-        return input_.to(target_device).half()
+        return input_.to(target_device)
 
     @staticmethod
     def backward(ctx, grad_output):
@@ -255,6 +255,7 @@ class CpuBertEmbeddings(nn.Module):
                                               token_type_ids, position_ids)
 
         embeddings = fetch_from_rank0(output_parallel)
-        embeddings = self.LayerNorm(embeddings)
+        assert embeddings.dtype == torch.float, f"embedding outputs should be in float on CPU, now {embeddings.dtype}"
+        embeddings = self.LayerNorm(embeddings.to(torch.half))
         embeddings = self.dropout(embeddings)
         return embeddings
