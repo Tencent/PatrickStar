@@ -17,7 +17,6 @@ import logging as logger
 from torch.multiprocessing import Process, Manager
 
 from patrickstar.utils.memory_monitor import get_sys_memory_used
-from patrickstar.deepspeed_helper.global_vars import get_args
 from patrickstar.core.const import TrainingStage
 
 
@@ -67,28 +66,45 @@ class Metronome():
         return (self._moment + 1) % self._total_moment
 
 
+class ManagerConfig(object):
+    def __init__(self, config):
+        self._overall_gpu_mem_ratio = config.overall_gpu_mem_ratio
+        self._overall_cpu_mem_ratio = config.overall_cpu_mem_ratio
+        self._margin_use_ratio = json.margin_use_ratio
+        self.warmup_gpu_chunk_mem_ratio = json.warmup_gpu_chunk_mem_ratio
+
+
 class PatrickStarManager(metaclass=SingletonMeta):
     """
     知道所有设备的使用情况，来指导payload的迁移
     singleton类，被所有进程访问
     拥有所有chunk信息的overview picture
     """
-    def __init__(self):
+    def __init__(self, local_rank: int, config=None):
+        self.local_rank = local_rank
         self.gpu_chunk_available_mem = 0
         self.cpu_chunk_available_mem = 0
 
         self.gpu_chunk_used_mem = 0
         self.cpu_chunk_used_mem = 0
 
-        args = get_args()
+        if config is not None:
+            # 需要设置的超参数
+            self._overall_gpu_mem_ratio = config.overall_gpu_mem_ratio
+            self._overall_cpu_mem_ratio = config.overall_cpu_mem_ratio
+            self._margin_use_ratio = config.margin_use_ratio
+            self.warmup_gpu_chunk_mem_ratio = config.warmup_gpu_chunk_mem_ratio
+            self.use_fake_dist = config.use_fake_dist
+            self.always_warmup = config.always_warmup
+        else:
+            self._overall_gpu_mem_ratio = 0.8
+            self._overall_cpu_mem_ratio = 0.8
+            self._margin_use_ratio = 0.8
+            self.warmup_gpu_chunk_mem_ratio = 0.2
+            self.use_fake_dist = False
+            self.always_warmup = False
 
-        # 需要设置的超参数
-        self._overall_gpu_mem_ratio = args.overall_gpu_mem_ratio
-        self._overall_cpu_mem_ratio = args.overall_cpu_mem_ratio
-        self._margin_use_ratio = args.margin_use_ratio
-        self.warmup_gpu_chunk_mem_ratio = args.warmup_gpu_chunk_mem_ratio
-
-        if args.use_fake_dist:
+        if self.use_fake_dist:
             # 伪分布式训练是，大家共享一块GPU
             self._overall_gpu_mem = torch.cuda.get_device_properties(
                 0
@@ -100,15 +116,14 @@ class PatrickStarManager(metaclass=SingletonMeta):
         else:
             # 获得系统的存储信息
             self._overall_gpu_mem = torch.cuda.get_device_properties(
-                args.local_rank).total_memory * self._overall_gpu_mem_ratio
+                self.local_rank).total_memory * self._overall_gpu_mem_ratio
             self._overall_cpu_mem = psutil.virtual_memory(
             ).total * self._overall_cpu_mem_ratio / torch.distributed.get_world_size(
             )
 
         logger.info(
             f'Init Manager over all gpu mem {self._overall_gpu_mem/1e6} MB, '
-            f'cpu mem {self._overall_cpu_mem/1e6} MB'
-        )
+            f'cpu mem {self._overall_cpu_mem/1e6} MB')
         # 统计信息
         self.cpu_used_list = []
         self.cpu_chunk_used_list = []
@@ -185,9 +200,8 @@ class PatrickStarManager(metaclass=SingletonMeta):
         """
         打节拍，同时记录此刻的内存使用情况
         """
-        args = get_args()
         if torch.distributed.is_initialized():
-            rank = args.local_rank
+            rank = client.local_rank
         else:
             rank = 0
         gpu_device = torch.device(f'cuda:{rank}')
@@ -285,7 +299,6 @@ class PatrickStarManager(metaclass=SingletonMeta):
         预热阶段是部分GPU内存和全部CPU内存。
         非预热阶段，是当前moment和下一moment可用内存的最小值。
         """
-        args = get_args()
         if device_type == "cpu":
             if self.warmup or not self._start_training:
                 # TODO(jiaruifang)瞎拍一个数，预热阶段三分之一GPU显存用来存储chunk
@@ -293,7 +306,7 @@ class PatrickStarManager(metaclass=SingletonMeta):
             else:
                 return self._overall_cpu_mem
         elif device_type == "cuda":
-            if args.always_warmup or self.warmup or not self._start_training:
+            if self.always_warmup or self.warmup or not self._start_training:
                 if self._training_stage == TrainingStage.ADAM:
                     # ADAM时没有activation所以显存可以全部给Chunk，需要两个default chunk size做buffer，这里先预留6个
                     ava_mem = self._overall_gpu_mem - 4 * self._default_chunk_size * 4
@@ -304,6 +317,7 @@ class PatrickStarManager(metaclass=SingletonMeta):
                     # TODO(jiaruifang)瞎拍一个数，预热阶段三分之一GPU显存用来存储chunk
                     return self._overall_gpu_mem * self.warmup_gpu_chunk_mem_ratio
             else:
+                world_size = torch.distributed.get_world_size()
                 if self._training_stage == TrainingStage.ADAM:
                     return self._overall_gpu_mem - 4 * self._default_chunk_size * 4
                 elif self._training_stage == TrainingStage.FWD:
@@ -313,9 +327,8 @@ class PatrickStarManager(metaclass=SingletonMeta):
                         next_mom]
                     cur_mom_ava_mem = self._overall_gpu_mem - 1.5 * self.gpu_sys_used_list[
                         cur_mom]
-                    return min(
-                        next_mom_ava_mem, cur_mom_ava_mem
-                    ) - args.world_size * 2 * self._default_chunk_size
+                    return min(next_mom_ava_mem, cur_mom_ava_mem
+                               ) - world_size * 2 * self._default_chunk_size
                 elif self._training_stage == TrainingStage.BWD:
                     next_mom = self.metronome.next_moment()
                     cur_mom = self.metronome.moment()
@@ -323,9 +336,8 @@ class PatrickStarManager(metaclass=SingletonMeta):
                         next_mom]
                     cur_mom_ava_mem = self._overall_gpu_mem - 2 * self.gpu_sys_used_list[
                         cur_mom]
-                    return min(
-                        next_mom_ava_mem, cur_mom_ava_mem
-                    ) - args.world_size * 2 * self._default_chunk_size
+                    return min(next_mom_ava_mem, cur_mom_ava_mem
+                               ) - world_size * 2 * self._default_chunk_size
 
     def show_mem_curve(self):
         with open('gpu_used_curve.txt', 'w') as fh:

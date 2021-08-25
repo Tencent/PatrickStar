@@ -15,7 +15,6 @@ import os
 import torch
 from .const import PSTensorStatus, PSChunkStatus, AccessType
 from .helper import getsizeof
-from .helper import getsizeof
 
 from typing import Dict
 
@@ -34,7 +33,7 @@ class Chunk(object):
                  capacity: int,
                  data_type: torch.dtype,
                  chunk_id: int,
-                 rank: int = 0,
+                 local_rank: int = 0,
                  is_dummy: bool = False):
         """
         Chunk是数据迁移的最小单位，
@@ -47,7 +46,7 @@ class Chunk(object):
         # payload numel 不等于 capacity, payload可能是None
         self.capacity = capacity
         self.data_type = data_type
-        self.rank = rank
+        self.local_rank = local_rank
         self._is_dummy = is_dummy
 
         # 存储chunk管理tensor的状态数目
@@ -237,9 +236,9 @@ class Chunk(object):
         if is_async:
             if target_device.type == 'cpu':
                 pinned_payload_cpu = torch.empty(self.payload.shape,
-                                                dtype=self.payload.dtype,
-                                                device='cpu:0',
-                                                pin_memory=True)
+                                                 dtype=self.payload.dtype,
+                                                 device='cpu:0',
+                                                 pin_memory=True)
                 torch.cuda.synchronize()
                 copy_stream.synchronize()
                 with torch.cuda.stream(copy_stream):
@@ -251,8 +250,8 @@ class Chunk(object):
             elif target_device.type == 'cuda':
                 old_payload = self.payload
                 self.payload = torch.empty(self.payload.shape,
-                                          dtype=self.payload.dtype,
-                                          device=f'cuda:{self.rank}')
+                                           dtype=self.payload.dtype,
+                                           device=target_device)
                 copy_stream.synchronize()
                 # NOTE(jiaruifang) it is necessary
                 torch.cuda.synchronize()
@@ -270,9 +269,9 @@ class Chunk(object):
         else:
             if target_device.type == 'cpu':
                 pinned_payload_cpu = torch.empty(self.payload.shape,
-                                                dtype=self.payload.dtype,
-                                                device='cpu:0',
-                                                pin_memory=True)
+                                                 dtype=self.payload.dtype,
+                                                 device='cpu:0',
+                                                 pin_memory=True)
                 pinned_payload_cpu.copy_(self.payload)
                 self.payload = pinned_payload_cpu
             elif target_device.type == 'cuda':

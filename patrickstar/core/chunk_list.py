@@ -28,7 +28,6 @@ import patrickstar.utils.global_timer as global_timer
 from patrickstar.utils.memory_monitor import see_memory_usage, get_sys_memory_used
 from patrickstar.utils import logger, log_dist
 from patrickstar.manager import PatrickStarManager
-from patrickstar.deepspeed_helper.global_vars import get_args
 from patrickstar.core.const import ChunkListType
 
 
@@ -39,7 +38,7 @@ class ChunkList(object):
     """
     generated_chunk_id = -1
 
-    def __init__(self, rank: int = 0):
+    def __init__(self, local_rank: int):
         self.chunk_id_to_chunk_dict_map: dict[int, Chunk] = {}
         self.chunk_type_to_id_list_map: dict[ChunkListType, int] = {}
         for ct in ChunkListType:
@@ -49,6 +48,7 @@ class ChunkList(object):
         # TODO(jiaruifang) 单GPU不能启动太多stream
         self.copy_stream = torch.cuda.Stream()
         self.moments_cnt_of_iteration = None
+        self.local_rank = local_rank
 
     def chunk_ids_generator(self, chunk_list_type: ChunkListType):
         """
@@ -155,8 +155,6 @@ class ChunkList(object):
             f'ava_chunk_mem_size {ava_chunk_mem_size/1e6} MB, '
             f'free_chunk_mem_size {free_chunk_mem_size/1e6} MB.')
 
-        args = get_args()
-
         # TODO(jiaruifang) 无法分配的情况
         # 这个条件尚不充分，应该是如果cpu和gpu的的free_chunk都不足存放need bytes则放弃
         if ava_chunk_mem_size < need_bytes:
@@ -192,7 +190,7 @@ class ChunkList(object):
         # TODO(jiaruifang) 这里默认新设备上有足够空间，强制把Chunk塞给新设备，可能会突破新设备上的ava_chunk_mem的上线，引起bug
         new_device = torch.device(
             'cpu') if target_device.type == 'cuda' else torch.device(
-                f'cuda:{args.local_rank}')
+                f'cuda:{self.local_rank}')
 
         # 把他们移动到新设备上，如果新设备上free_chunk空间不足，则放弃
         for idx in moved_list:
@@ -209,7 +207,6 @@ class ChunkList(object):
         if self._time_profile:
             global_timer.my_timer.start_profile('CHUNK_LIST_make_room')
 
-        args = get_args()
         # 需要在target_device上腾出空间
         moved_list = self._chunk_to_move_out_for_room_making(
             offload_size_in_bytes, target_device)
@@ -217,7 +214,7 @@ class ChunkList(object):
         # TODO(jiaruifang)只考虑单卡情况，新设备只有gpu和cpu
         new_device = torch.device(
             'cpu') if target_device.type == 'cuda' else torch.device(
-                f'cuda:{args.local_rank}')
+                f'cuda:{self.local_rank}')
 
         # 把他们移动到新设备上
         for idx in moved_list:
@@ -266,7 +263,6 @@ class ChunkList(object):
         新建一个chunk，并未初始化内存
         返回在通信组中的坐标，(comm_group_idx, comm_group_offset)
         """
-        args = get_args()
         if chunk_id in self.chunk_id_to_chunk_dict_map:
             raise RuntimeError(
                 f"chunk list new chunk with chunk_id {chunk_id} already existed"
@@ -275,14 +271,16 @@ class ChunkList(object):
             capacity=chunk_size,
             data_type=data_type,
             chunk_id=chunk_id,
-            rank=torch.distributed.get_rank(),
+            local_rank=self.local_rank,
             is_dummy=is_dummy)
+        world_size = torch.distributed.get_world_size()
+        global_rank = torch.distributed.get_rank()
         self.chunk_type_to_id_list_map[chunk_type].append(chunk_id)
         tmp_chunk_list_len = len(self.chunk_type_to_id_list_map[chunk_type])
-        comm_group_offset = (tmp_chunk_list_len - 1) % args.world_size
-        comm_group_idx = (tmp_chunk_list_len - 1) // args.world_size
+        comm_group_offset = (tmp_chunk_list_len - 1) % world_size
+        comm_group_idx = (tmp_chunk_list_len - 1) // world_size
         logger.info(
-            f'rank {args.local_rank}, allocate with new chunk chunk_id {chunk_id} size {chunk_size} data_type {data_type} comm group ({comm_group_idx}, {comm_group_offset}, {chunk_type})'
+            f'global_rank {global_rank}, allocate with new chunk chunk_id {chunk_id} size {chunk_size} data_type {data_type} comm group ({comm_group_idx}, {comm_group_offset}, {chunk_type})'
         )
         return comm_group_idx, comm_group_offset
 

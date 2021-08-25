@@ -18,7 +18,6 @@ from patrickstar.utils import print_rank as print_rank_0
 from patrickstar.core import PatrickStarClient, AccessType, PSChunkStatus, PSTensorStatus, TrainingStage
 from patrickstar.manager import PatrickStarManager
 from patrickstar.ops import FP16Adam
-from patrickstar.deepspeed_helper.global_vars import get_args
 
 
 class PatrickStarEngine(Module):
@@ -26,46 +25,40 @@ class PatrickStarEngine(Module):
     """
     def __init__(self, model, client, config):
         super(PatrickStarEngine, self).__init__()
-        args = get_args()
-
-        self.rank = 0 if args.use_fake_dist else args.local_rank
         self.module = model
         self.module.train()
 
         self.client = client
 
         # TODO(jiaruifang) prefer_device应该是自适应的
-        if args.use_fake_dist:
-            prefer_device = torch.device(f'cpu:0')
-        else:
-            prefer_device = torch.device(f'cpu:0')
-            # prefer_device = torch.device(f'cuda:{args.local_rank}')
+        prefer_device = torch.device(f'cpu:0')
 
-        if args.local_rank == 0:
+        if client.local_rank == 0:
             logger.info(f'ADAM on device {prefer_device}')
         if config is not None:
-            optim_type = config["optimizer"]["type"]
+            optim_type = config["type"]
             if optim_type != "Adam":
-                raise ValueError(
-                    f"Only support adam at the moment. "
-                    f"Get optimizer type {optim_type}")
-            optim_params = config["optimizer"]["params"]
+                raise ValueError(f"Only support adam at the moment. "
+                                 f"Get optimizer type {optim_type}")
+            optim_params = config["params"]
         else:
             # default parameter for adam.
             optim_params = {
                 "lr": 0.01,
                 "betas": (0.9, 0.999),
                 "eps": 1e-8,
-                "weight_decay": 0
+                "weight_decay": 0,
+                "use_hybrid_adam": True
             }
-        self.optimizer = FP16Adam(self.client,
-                                  self.module.parameters(),
-                                  lr=optim_params["lr"],
-                                  betas=optim_params["betas"],
-                                  eps=optim_params["eps"],
-                                  weight_decay=optim_params["weight_decay"],
-                                  prefer_device=prefer_device)
-        # prefer_device = torch.device(f'cuda:{self.rank}')
+        self.optimizer = FP16Adam(
+            self.client,
+            self.module.parameters(),
+            lr=optim_params["lr"],
+            betas=optim_params["betas"],
+            eps=optim_params["eps"],
+            weight_decay=optim_params["weight_decay"],
+            prefer_device=prefer_device,
+            use_hybrid_adam=optim_params["use_hybrid_adam"])
         # 这个hook并没啥意义，为何不能和postbwd hook一起？
         # self.create_reduce_and_remove_grad_hooks()
 

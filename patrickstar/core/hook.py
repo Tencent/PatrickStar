@@ -128,10 +128,11 @@ def pre_sub_module_forward_function(sub_module, client, name):
         if use_dist_flag:
             client.access_dist(param,
                                AccessType.DATA,
-                               torch.device(f'cuda:{client.rank}'),
+                               torch.device(f'cuda:{client.local_rank}'),
                                training_stage=TrainingStage.FWD)
         else:
-            client.access_data(param, torch.device(f'cuda:{client.rank}'))
+            client.access_data(param,
+                               torch.device(f'cuda:{client.local_rank}'))
         param.data = param.ps_attr.access_tensor(AccessType.DATA)
         flag = True
     if flag:
@@ -167,18 +168,20 @@ def pre_sub_module_backward_function(sub_module, client, name):
             if use_dist_flag:
                 client.access_dist(param,
                                    AccessType.DATA,
-                                   torch.device(f'cuda:{client.rank}'),
+                                   torch.device(f'cuda:{client.local_rank}'),
                                    training_stage=TrainingStage.BWD)
             else:
                 client.access(param, AccessType.DATA,
-                              torch.device(f'cuda:{client.rank}'))
+                              torch.device(f'cuda:{client.local_rank}'))
             tmp_tensor = param.ps_attr.access_tensor(AccessType.DATA)
             param.data = tmp_tensor
             param.grad = torch.zeros_like(tmp_tensor)
             assert param.data.data_ptr() != param.grad.data_ptr()
         elif param.dtype == torch.float:
-            client.access_data(param, torch.device(f'cuda:{client.rank}'))
-            client.access_grad(param, torch.device(f'cuda:{client.rank}'))
+            client.access_data(param,
+                               torch.device(f'cuda:{client.local_rank}'))
+            client.access_grad(param,
+                               torch.device(f'cuda:{client.local_rank}'))
             param.data = param.ps_attr.access_tensor(AccessType.DATA)
             param.grad = param.ps_attr.access_tensor(AccessType.GRAD)
         flag = True

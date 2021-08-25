@@ -13,11 +13,12 @@
 
 import unittest
 from patrickstar.core.preprocess import PSPreProcessCtx
+from patrickstar import PatrickStarManager
 from patrickstar.core import PatrickStarClient, ChunkTensorIndex, ChunkList, AccessType
 import logging
 import torch
 from tests.simple_net import SimpleModel
-from patrickstar.deepspeed_helper.global_vars import set_global_variables, get_args
+from patrickstar.deepspeed_helper.global_vars import set_global_variables
 from common import distributed_test
 from patrickstar.core import is_torch_param
 from transformers import BertModel, BertConfig
@@ -27,8 +28,10 @@ class TestModelInitContext(unittest.TestCase):
     def setUp(self):
         pass
 
-    @distributed_test(world_size=[2], backend="gloo")
+    @distributed_test(world_size=[2], backend="gloo", use_fake_dist=True)
     def test_model_init(self):
+        mgr = PatrickStarManager(0)
+
         def model_provider():
             cfg = BertConfig()
             cfg.vocab_size = 10
@@ -40,7 +43,7 @@ class TestModelInitContext(unittest.TestCase):
         client = PatrickStarClient(0, default_chunk_size, is_fp16=True)
 
         torch.manual_seed(0)
-        with PSPreProcessCtx(client, dtype=torch.float):
+        with PSPreProcessCtx(client, dtype=torch.float, use_fake_dist=True):
             ps_model = model_provider()
 
         torch.manual_seed(0)
@@ -67,8 +70,4 @@ class TestModelInitContext(unittest.TestCase):
 
 if __name__ == "__main__":
     set_global_variables()
-    args = get_args()
-    args.use_fake_dist = True
-    #TODO(jiaruifang)
-    args.use_cpu_embedding = True
     unittest.main()

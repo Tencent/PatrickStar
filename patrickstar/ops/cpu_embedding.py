@@ -13,7 +13,6 @@
 
 import torch
 import torch.nn as nn
-from patrickstar.deepspeed_helper.global_vars import get_args
 from patrickstar.utils import logger
 from patrickstar.core.parameter import is_torch_param, is_param_registered
 from patrickstar.core import AccessType
@@ -60,11 +59,7 @@ class BertEmbeddings(nn.Module):
         seq_length = input_shape[1]
 
         # 让临时生成的ids的设备和模型设备一致
-        args = get_args()
-        if args.use_fake_dist:
-            device = torch.device('cuda:0')
-        else:
-            device = torch.device(f'cuda:{args.local_rank}')
+        device = self.word_embeddings.weight.device
 
         if position_ids is None:
             position_ids = self.position_ids[:, past_key_values_length:
@@ -162,24 +157,17 @@ class BertEmbeddingsWithoutLN(nn.Module):
 class _CopyInputToCPU(torch.autograd.Function):
     @staticmethod
     def symbolic(graph, input_):
-        args = get_args()
         return input_.to(torch.device('cpu:0'))
 
     @staticmethod
     def forward(ctx, input_):
-        args = get_args()
         logger.info(
             f'Entrying CPU Emedding FWD, copy input to cpu and {input_.dtype}')
         return input_.to(torch.device('cpu:0'))
 
     @staticmethod
     def backward(ctx, grad_output):
-        args = get_args()
-        if args.use_fake_dist:
-            target_device = torch.device('cuda:0')
-        else:
-            target_device = torch.device(f'cuda:{args.local_rank}')
-
+        target_device = torch.device(f'cuda:{torch.cuda.current_device()}')
         logger.info(
             'Entrying CPU Emedding BWD, copy grad_output to cuda, fp32->fp16')
         return grad_output.to(target_device)
@@ -188,21 +176,13 @@ class _CopyInputToCPU(torch.autograd.Function):
 class _CopyActToGPU(torch.autograd.Function):
     @staticmethod
     def symbolic(graph, input_):
-        args = get_args()
-        if args.use_fake_dist:
-            target_device = torch.device('cuda:0')
-        else:
-            target_device = torch.device(f'cuda:{args.local_rank}')
+        target_device = torch.device(f'cuda:{torch.cuda.current_device()}')
 
         return input_.to(target_device)
 
     @staticmethod
     def forward(ctx, input_):
-        args = get_args()
-        if args.use_fake_dist:
-            target_device = torch.device('cuda:0')
-        else:
-            target_device = torch.device(f'cuda:{args.local_rank}')
+        target_device = torch.device(f'cuda:{torch.cuda.current_device()}')
 
         logger.info(
             f'Entrying CPU Emedding BWD, copy grad_output to cuda, input dtype {input_.dtype}'
@@ -211,7 +191,6 @@ class _CopyActToGPU(torch.autograd.Function):
 
     @staticmethod
     def backward(ctx, grad_output):
-        args = get_args()
         return grad_output.to(torch.device('cpu:0')).float()
 
 

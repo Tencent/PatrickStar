@@ -350,8 +350,9 @@ class ChunkTensorIndex(object):
             return total_bytes
 
         overall_size = 0
-        overall_size += print_chunk_list(
-            self.chunk_type_to_chunk_id_list_map[ChunkListType.PARAM_FP16])
+        for chunk_type, chunk_list_of_the_type in self.chunk_type_to_chunk_id_list_map.items(
+        ):
+            overall_size += print_chunk_list(chunk_list_of_the_type)
 
         logger.info(f'OVERALL CHUNK SIZE {overall_size/1e9} GB')
 

@@ -12,7 +12,7 @@
 # See the AUTHORS file for names of contributors.
 
 import unittest
-from client import PatrickStarClient, ChunkList, PSTensorStatus, AccessType, ChunkTensorIndex, Chunk
+from patrickstar.core import PatrickStarClient, ChunkList, PSTensorStatus, AccessType, ChunkTensorIndex, Chunk
 import logging
 import torch
 from manager import PatrickStarManager
@@ -24,8 +24,6 @@ class TestChunkData(unittest.TestCase):
         self.default_chunk_size = 40
         self.client = PatrickStarClient(
             rank=0, default_chunk_size=self.default_chunk_size)
-        self.manager = PatrickStarManager()
-        self.manager.init(32, 1024)
         self.compute_device = torch.device(
             'cuda:0') if torch.cuda.is_available() else torch.device('cpu')
 
@@ -79,8 +77,8 @@ class TestChunkData(unittest.TestCase):
         # assert (chunk_tensor_index.tensor_id_to_chunk_id(14) is None)
 
         # 初始化chunk
-        chunk1 = Chunk(100, torch.float, 0, self.compute_device)
-        chunk2 = Chunk(100, torch.float, 1, self.compute_device)
+        chunk1 = Chunk(100, torch.float, 0, 0, False)
+        chunk2 = Chunk(100, torch.float, 0, 0, False)
         assert chunk1.get_device() is None
 
         chunk1.allocate_payload(self.compute_device)

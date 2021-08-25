@@ -129,9 +129,6 @@ def test_bert_model(is_ckp: bool = False,
                                                           device_ids=[rank])
     elif is_ps:
         assert is_fp16, f"use_ps must use fp16"
-        client = PatrickStarClient(rank=rank,
-                                   default_chunk_size=args.default_chunk_size,
-                                   is_fp16=True)
 
         def model_func():
             return BertForSequenceClassification(
@@ -146,13 +143,17 @@ def test_bert_model(is_ckp: bool = False,
                     "lr": lr,
                     "betas": betas,
                     "eps": eps,
-                    "weight_decay": weight_decay
+                    "weight_decay": weight_decay,
+                    "use_hybrid_adam": args.use_hybrid_adam
                 }
-            }
+            },
+            "default_chunk_size": args.default_chunk_size,
+            "use_fake_dist": args.use_fake_dist,
+            "use_cpu_embedding": args.use_cpu_embedding
         }
 
         model, optimizer = initialize_engine(model_func=model_func,
-                                             client=client,
+                                             local_rank=rank,
                                              config=config)
     else:
         raise RuntimeError

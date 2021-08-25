@@ -16,7 +16,6 @@ from patrickstar.core import PatrickStarClient, ChunkList, PSTensorStatus, Acces
 import logging
 import torch
 from common import distributed_test
-from patrickstar.deepspeed_helper.global_vars import set_global_variables, get_args
 
 
 class TestChunkData(unittest.TestCase):
@@ -25,15 +24,13 @@ class TestChunkData(unittest.TestCase):
 
     @distributed_test(world_size=[1])
     def test_add_chunk(self):
-        args = get_args()
-        print('local rank', args.local_rank)
         default_chunk_size = 40
 
         compute_device = torch.device(
             f'cuda:{torch.cuda.current_device()}') if torch.cuda.is_available(
             ) else torch.device('cpu:0')
 
-        chunk_list = ChunkList()
+        chunk_list = ChunkList(0)
         assert chunk_list.size() == 0
 
         chunk_list.new_chunk(chunk_id=0,
@@ -45,12 +42,12 @@ class TestChunkData(unittest.TestCase):
         assert chunk_list.size() == 1
         assert (chunk_list[0].get_status() == PSChunkStatus.RELEASED)
 
-    @distributed_test(world_size=[1])
+    @distributed_test(world_size=[1], use_fake_dist=True)
     def test_new_chunk(self):
         compute_device = torch.device(
             f'cuda:{torch.cuda.current_device()}') if torch.cuda.is_available(
             ) else torch.device('cpu:0')
-        chunk_list = ChunkList()
+        chunk_list = ChunkList(0)
 
         new_chunk_id = 123
         chunk_list.new_chunk(chunk_id=new_chunk_id,
@@ -78,10 +75,4 @@ class TestChunkData(unittest.TestCase):
 
 
 if __name__ == "__main__":
-    set_global_variables()
-    logging.basicConfig(
-        format=
-        '%(asctime)s,%(msecs)d %(levelname)-8s [%(filename)s:%(lineno)d] %(message)s',
-        datefmt='%Y-%m-%d:%H:%M:%S',
-        level=logging.DEBUG)
     unittest.main()

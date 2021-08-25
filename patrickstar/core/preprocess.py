@@ -19,7 +19,6 @@ from patrickstar.utils import see_memory_usage
 from patrickstar.utils import logger, print_rank
 from patrickstar.core import PatrickStarClient, AccessType, ChunkListType, ChunkTensorIndex, ChunkList
 from patrickstar.core import PSParameter, register_param, is_param_registered, register_torch_param
-from patrickstar.deepspeed_helper.global_vars import get_args
 from typing import List
 _orig_torch_empty = torch.empty
 
@@ -144,7 +143,11 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
     """
     A context to initialize model
     """
-    def __init__(self, client: PatrickStarClient, dtype=None):
+    def __init__(self,
+                 client: PatrickStarClient,
+                 use_fake_dist=False,
+                 use_cpu_embedding=False,
+                 dtype=None):
         super().__init__(config=None, dtype=dtype)
         if not torch.distributed.is_initialized():
             assert torch.distributed.is_initialized(
@@ -155,13 +158,15 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
         self.dummy_param_list = []
         self.param_idx = 0
 
+        self.use_fake_dist = use_fake_dist
+        self.use_cpu_embedding = use_cpu_embedding
+
     def _post_context_exec(self):
         """
         初始化context退出时执行本函数
         1. 拷贝param的data，到param fp32和param fp16中去
         2. append dummy chunk，使chunk num是进程数的整数倍 TODO(jiaruifang)
         """
-        args = get_args()
         logger.info('Post Model Init Context')
         chunk_num = 0
         for param_fp16_chunk_id, param_fp32_chunk_id in zip(
@@ -214,15 +219,10 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
             # TODO(jiaruifang) CPU上计算不支持half
             # param.data = param.data.to(torch.half)
 
-        print(
-            f'init finished rank {args.local_rank} {self.client.chunk_tensor_index.comm_group_idx_to_chunk_id_list_map}'
-        )
-
     def _is_local_param(self, param, access_type):
         """
         TODO(jiaruifang)暂时和client中的is_local_param重复，未来会合并
         """
-        args = get_args()
         chunk_id = self.client.chunk_tensor_index.get_chunk_id(
             param, access_type)
         comm_group_id, comm_group_offset, list_type = self.client.chunk_tensor_index.chunk_id_to_comm_group_map[
@@ -238,8 +238,7 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
         see_memory_usage(
             f"Before converting parmas in {module.__class__.__name__}",
             force=False)
-        args = get_args()
-        if args.use_cpu_embedding:
+        if self.use_cpu_embedding:
             # cpu_embedding优化把embedding交给Torch管理而非Chunk
             if module.__class__.__name__ == 'Embedding':
                 logger.info(
@@ -283,7 +282,7 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
                 param.ps_attr._is_local = False
                 param_fp32.ps_attr._is_local = False
                 # TODO(jiaruifang) fix bert init bug
-                if not args.use_fake_dist:
+                if not self.use_fake_dist:
                     param.data = torch.tensor([],
                                               dtype=torch.half,
                                               device=param.device)

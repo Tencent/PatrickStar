@@ -22,7 +22,7 @@ from torch.multiprocessing import Process
 DEEPSPEED_UNIT_WORKER_TIMEOUT = 120
 
 
-def distributed_test(world_size=2, backend='nccl'):
+def distributed_test(world_size=2, backend='nccl', use_fake_dist=False):
     """A decorator for executing a function (e.g., a unit test) in a distributed manner.
     This decorator manages the spawning and joining of processes, initialization of
     torch.distributed, and catching of errors.
@@ -48,16 +48,11 @@ def distributed_test(world_size=2, backend='nccl'):
             os.environ['WORLD_SIZE'] = str(num_procs)
 
             torch.distributed.init_process_group(backend=backend)
-            from patrickstar.deepspeed_helper.global_vars import get_args
-            args = get_args()
-
             if torch.cuda.is_available():
-                if args.use_fake_dist:
+                if use_fake_dist:
                     torch.cuda.set_device(0)
                 else:
                     torch.cuda.set_device(local_rank)
-            args.local_rank = local_rank
-            args.world_size = num_procs
             run_func(*func_args, **func_kwargs)
 
         def dist_launcher(num_procs, *func_args, **func_kwargs):
