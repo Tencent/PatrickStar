@@ -40,10 +40,10 @@ class ChunkList(object):
     generated_chunk_id = -1
 
     def __init__(self, rank: int = 0):
-        self.chunk_id_to_chunk_dict: dict[int, Chunk] = {}
-        self.chunk_type_to_id_dict: dict[ChunkListType, int] = {}
+        self.chunk_id_to_chunk_dict_map: dict[int, Chunk] = {}
+        self.chunk_type_to_id_list_map: dict[ChunkListType, int] = {}
         for ct in ChunkListType:
-            self.chunk_type_to_id_dict[ct] = []
+            self.chunk_type_to_id_list_map[ct] = []
 
         self._time_profile = True
         # TODO(jiaruifang) 单GPU不能启动太多stream
@@ -54,7 +54,7 @@ class ChunkList(object):
         """
         生成chunk_list_type对应chunk的所有chunk_id
         """
-        for chunk_id in self.chunk_type_to_id_dict[chunk_list_type]:
+        for chunk_id in self.chunk_type_to_id_list_map[chunk_list_type]:
             yield chunk_id
 
     def generate_chunk_id(self) -> int:
@@ -65,20 +65,20 @@ class ChunkList(object):
         """
         索引一个chunk
         """
-        return self.chunk_id_to_chunk_dict.get(chunk_id)
+        return self.chunk_id_to_chunk_dict_map.get(chunk_id)
 
     def size(self) -> int:
         """
         返回chunk的个数
         """
-        return len(self.chunk_id_to_chunk_dict)
+        return len(self.chunk_id_to_chunk_dict_map)
 
     def get_chunk_memory_used(self, device):
         """
         获得ChunkList中所有Chunk的payload占用的内存
         """
         mem_used = 0
-        for chunk_id, chunk in self.chunk_id_to_chunk_dict.items():
+        for chunk_id, chunk in self.chunk_id_to_chunk_dict_map.items():
             if chunk.get_device() is not None and chunk.get_device(
             ).type == device.type:
                 mem_used += chunk.get_payload_space()
@@ -86,7 +86,7 @@ class ChunkList(object):
 
     def max_chunk_size(self):
         max_size = 0
-        for chunk_id, chunk in self.chunk_id_to_chunk_dict.items():
+        for chunk_id, chunk in self.chunk_id_to_chunk_dict_map.items():
             max_size = max(chunk.capacity, max_size)
         return max_size
 
@@ -103,7 +103,7 @@ class ChunkList(object):
         需要获取其他进程chunk，进行一次allgather获取一个完成的global chunk
         """
 
-        chunk = self.chunk_id_to_chunk_dict[chunk_id]
+        chunk = self.chunk_id_to_chunk_dict_map[chunk_id]
 
         # 预热时注册chunk的访问时间
         mgr = PatrickStarManager()
@@ -234,7 +234,7 @@ class ChunkList(object):
         if self._time_profile:
             global_timer.my_timer.start_profile('CHUNK_LIST_chunk_move')
 
-        chunk = self.chunk_id_to_chunk_dict[chunk_id]
+        chunk = self.chunk_id_to_chunk_dict_map[chunk_id]
 
         ps_manager = PatrickStarManager()
         ava_chunk_mem_size = ps_manager.available_chunk_mem(device.type)
@@ -267,18 +267,18 @@ class ChunkList(object):
         返回在通信组中的坐标，(comm_group_idx, comm_group_offset)
         """
         args = get_args()
-        if chunk_id in self.chunk_id_to_chunk_dict:
+        if chunk_id in self.chunk_id_to_chunk_dict_map:
             raise RuntimeError(
                 f"chunk list new chunk with chunk_id {chunk_id} already existed"
             )
-        self.chunk_id_to_chunk_dict[chunk_id] = Chunk(
+        self.chunk_id_to_chunk_dict_map[chunk_id] = Chunk(
             capacity=chunk_size,
             data_type=data_type,
             chunk_id=chunk_id,
             rank=torch.distributed.get_rank(),
             is_dummy=is_dummy)
-        self.chunk_type_to_id_dict[chunk_type].append(chunk_id)
-        tmp_chunk_list_len = len(self.chunk_type_to_id_dict[chunk_type])
+        self.chunk_type_to_id_list_map[chunk_type].append(chunk_id)
+        tmp_chunk_list_len = len(self.chunk_type_to_id_list_map[chunk_type])
         comm_group_offset = (tmp_chunk_list_len - 1) % args.world_size
         comm_group_idx = (tmp_chunk_list_len - 1) // args.world_size
         logger.info(
@@ -287,16 +287,16 @@ class ChunkList(object):
         return comm_group_idx, comm_group_offset
 
     def is_empty(self, chunk_type: ChunkListType):
-        return len(self.chunk_type_to_id_dict[chunk_type]) == 0
+        return len(self.chunk_type_to_id_list_map[chunk_type]) == 0
 
     def last_chunk_id(self, chunk_type: ChunkListType):
         if self.is_empty(chunk_type):
             raise RuntimeError(
                 f"Call last_chunk_id on an empty {chunk_type} chunk list")
-        return self.chunk_type_to_id_dict[chunk_type][-1]
+        return self.chunk_type_to_id_list_map[chunk_type][-1]
 
     def generate_chunk(self) -> (int, Chunk):
-        for chunk_id, chunk in self.chunk_id_to_chunk_dict.items():
+        for chunk_id, chunk in self.chunk_id_to_chunk_dict_map.items():
             yield chunk_id, chunk
 
     def _delete_chunk(self, chunk: Chunk):
@@ -313,7 +313,7 @@ class ChunkList(object):
         """
         # 释放cpu和gpu上所有free chunk，统计目标设备上腾出的空间
 
-        for chunk_id, chunk in self.chunk_id_to_chunk_dict.items():
+        for chunk_id, chunk in self.chunk_id_to_chunk_dict_map.items():
             # TODO(jiaruifang) 耗时
             status = chunk.get_status()
             self._delete_chunk(chunk)
@@ -337,7 +337,7 @@ class ChunkList(object):
         movable_chunk_info = []
 
         Q = PriorityQueue()
-        for chunk_id, chunk in self.chunk_id_to_chunk_dict.items():
+        for chunk_id, chunk in self.chunk_id_to_chunk_dict_map.items():
             if chunk.get_device() is not None and chunk.get_device(
             ).type == target_device.type and chunk.get_status(
             ) != PSChunkStatus.COMPUTE and chunk.is_pin() is False:
@@ -350,7 +350,7 @@ class ChunkList(object):
             # assert chunk.get_status() != PSChunkStatus.FREE
         while not Q.empty():
             next_mom, chunk_id = Q.get()
-            moved_bytes += self.chunk_id_to_chunk_dict[
+            moved_bytes += self.chunk_id_to_chunk_dict_map[
                 chunk_id].get_payload_space()
             moved_list.append(chunk_id)
             if moved_bytes >= still_need_bytes:
@@ -373,13 +373,13 @@ class ChunkList(object):
         return moved_list
 
     def update_status(self, chunk_id, old_status, new_status):
-        self.chunk_id_to_chunk_dict[chunk_id].update_status(
+        self.chunk_id_to_chunk_dict_map[chunk_id].update_status(
             old_status, new_status)
 
     def visit(self):
         logging.info('* chunk list visit results:')
         logging.info('** chunk_id, device, size(B), ' 'type, device, status')
-        for chunk_id, chunk in self.chunk_id_to_chunk_dict.items():
+        for chunk_id, chunk in self.chunk_id_to_chunk_dict_map.items():
             logging.info(
                 f'** {chunk_id}, {chunk.get_device()}, {chunk.get_chunk_space()}, '
                 f'{chunk.data_type}, {chunk.get_device()}, {chunk.get_status()}'

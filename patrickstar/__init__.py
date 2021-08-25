@@ -17,7 +17,7 @@ from .fp16 import FP16_Module, FP16_Optimizer
 from .manager import PatrickStarManager
 from .ops import CPUAdam, TorchAdam, FP16Adam
 from .utils import global_timer
-from .runtime import Init, initialize_engine
+from .runtime import initialize_engine
 from .deepspeed_helper.global_vars import set_global_variables
 from .deepspeed_helper.global_vars import get_args
 from .utils.model_size_calculator import get_ps_model_size, estimate_bert_MAC
