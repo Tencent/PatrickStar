@@ -283,9 +283,10 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
                 param.ps_attr._is_local = False
                 param_fp32.ps_attr._is_local = False
                 # TODO(jiaruifang) fix bert init bug
-                # param.data = torch.tensor([],
-                #                           dtype=torch.half,
-                #                           device=param.device)
+                if not args.use_fake_dist:
+                    param.data = torch.tensor([],
+                                              dtype=torch.half,
+                                              device=param.device)
             else:
                 param.ps_attr._is_local = True
                 param_fp32.ps_attr._is_local = True

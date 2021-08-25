@@ -61,7 +61,7 @@ from transformers.modeling_outputs import (
     TokenClassifierOutput,
 )
 
-from patrickstar.ops.embedding import CpuBertEmbeddings, BertEmbeddings
+from patrickstar.ops.cpu_embedding import CpuBertEmbeddings, BertEmbeddings
 
 import logging
 from transformers import BertConfig
