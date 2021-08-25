@@ -50,7 +50,7 @@ def distributed_test(world_size=2, backend='nccl'):
             torch.distributed.init_process_group(backend=backend)
 
             if torch.cuda.is_available():
-                torch.cuda.set_device(0)
+                torch.cuda.set_device(local_rank)
             from patrickstar.deepspeed_helper.global_vars import get_args
             args = get_args()
             args.local_rank = local_rank
@@ -88,9 +88,7 @@ def distributed_test(world_size=2, backend='nccl'):
                 # If it still hasn't terminated, kill it because it hung.
                 if p.exitcode is None:
                     p.terminate()
-                if p.exitcode < 0:
-                    p.terminate()
-                if p.exitcode > 0:
+                if p.exitcode != 0:
                     p.terminate()
 
         def run_func_decorator(*func_args, **func_kwargs):
