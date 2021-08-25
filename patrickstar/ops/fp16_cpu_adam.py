@@ -23,7 +23,6 @@ from patrickstar.core.const import PSTensorStatus, AccessType, TrainingStage
 import patrickstar.utils.global_timer as global_timer
 from patrickstar.utils import print_rank, logger, use_dist_flag, get_sys_memory_used
 from patrickstar.core.parameter import register_param, is_torch_param, register_torch_param
-from patrickstar.deepspeed_helper.global_vars import get_args
 from patrickstar.manager import PatrickStarManager
 from patrickstar.core import ChunkList, ChunkTensorIndex, ChunkListType
 from .chunk_io_buff import FP32ChunkReadBuffer, FP16ChunkWriteBuffer
@@ -49,7 +48,8 @@ class FP16Adam(torch.optim.Optimizer):
                  eps=1e-8,
                  weight_decay=0,
                  amsgrad=False,
-                 prefer_device=torch.device('cpu:0')):
+                 prefer_device=torch.device('cpu:0'),
+                 use_hybrid_adam: bool = True):
         """
         父类Optimzer实现细节
         https://github.com/pytorch/pytorch/blob/c371542efc/torch/optim/optimizer.py
@@ -77,7 +77,7 @@ class FP16Adam(torch.optim.Optimizer):
         super(FP16Adam, self).__init__(params, defaults)
         self.client = client
         self.prefer_device = prefer_device
-
+        self.use_hybrid_adam = use_hybrid_adam
         # Eager state initialization, different from Pytorch
         for group in self.param_groups:
             for p in group['params']:
@@ -147,8 +147,7 @@ class FP16Adam(torch.optim.Optimizer):
 
         # 用作fp16 grad 存储的buffer
         self.read_chunk_buff = None
-        args = get_args()
-        self.use_ds_adam = args.use_deepspeed_cpu_adam
+        self.use_ds_adam = True
         if self.use_ds_adam:
             self.opt_id = FP16Adam.optimizer_id
             FP16Adam.optimizer_id = FP16Adam.optimizer_id + 1
@@ -190,13 +189,9 @@ class FP16Adam(torch.optim.Optimizer):
         按照在chunk内的存储顺序连续访问fp16_param_with_grad_list的参数，获取fp16 grad，
         以chunk为单位拷贝到一个tmp buff之中
         """
-        args = get_args()
-        if args.use_fake_dist:
-            rank = 0
-        else:
-            rank = torch.distributed.get_rank()
+        local_rank = client.local_rank
         logger.info(
-            f'rank {rank} margin_chunk_num_for_gpu_adam {margin_chunk_num_for_gpu_adam}, '
+            f'local_rank {local_rank} margin_chunk_num_for_gpu_adam {margin_chunk_num_for_gpu_adam}, '
             f'param cnt {len(fp32_params)}')
         for i, fp32_param in enumerate(fp32_params):
             ##########################
@@ -221,8 +216,6 @@ class FP16Adam(torch.optim.Optimizer):
                     fp16_param).view(fp16_param.ps_attr.shape)
 
             compute_device = fp16_grad_tensor.device
-            logger.debug(
-                f'rank {args.local_rank} adam {i} on {compute_device}')
 
             if time_profile:
                 global_timer.my_timer.finish_profile(
@@ -341,7 +334,6 @@ class FP16Adam(torch.optim.Optimizer):
             closure (callable, optional): A closure that reevaluates the model
                 and returns the loss.
         """
-        args = get_args()
         rank = torch.distributed.get_rank()
         # Here we need to use module.parameter() order
         # because it is the order of params in the chunk_list
@@ -442,7 +434,7 @@ class FP16Adam(torch.optim.Optimizer):
                 else:
                     raise RuntimeError(f"tensor id {p.ps_attr.grad_id()}")
 
-        if args.use_hybrid_adam:
+        if self.use_hybrid_adam:
             margin_chunk_num_for_gpu_adam = mgr.get_margin_chunk_num_for_gpu_adam(
             )
         else:

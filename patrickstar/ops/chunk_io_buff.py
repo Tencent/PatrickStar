@@ -16,22 +16,24 @@ from patrickstar.core import ChunkList, ChunkTensorIndex
 from patrickstar.core.parameter import is_torch_param
 from patrickstar.manager import PatrickStarManager
 from patrickstar.utils import logger
-from patrickstar.deepspeed_helper.global_vars import get_args
 
 
 class FP16ChunkWriteBuffer(object):
-    def __init__(self, chunk_list: ChunkList,
-                 chunk_tensor_index: ChunkTensorIndex, chunk_size: int):
+    def __init__(self,
+                 chunk_list: ChunkList,
+                 chunk_tensor_index: ChunkTensorIndex,
+                 chunk_size: int,
+                 use_gpu_fp32_convert_for_adam: bool = True):
         self.chunk_list = chunk_list
         self.chunk_tensor_index = chunk_tensor_index
         self.cached_src_chunk_id = None
         self.cached_target_chunk_id = None
-        args = get_args()
-        if args.use_gpu_fp32_convert_for_adam:
+        self.use_gpu_fp32_convert_for_adam = use_gpu_fp32_convert_for_adam
+        if self.use_gpu_fp32_convert_for_adam:
             self.gpu_fp16_buff = torch.zeros(
                 chunk_size,
                 dtype=torch.float,
-                device=torch.device(f'cuda:{args.local_rank}'))
+                device=torch.device(f'cuda:{torch.cuda.current_device()}'))
 
     def write_from_cache(self, target_param, src_param):
         """
@@ -39,7 +41,6 @@ class FP16ChunkWriteBuffer(object):
         则把src_param的chunk写到target_param所在的chunk中
         可能是cpu向gpu移动
         """
-        args = get_args()
         if is_torch_param(src_param):
             return target_param.data.copy_(src_param.data)
         else:
@@ -56,9 +57,8 @@ class FP16ChunkWriteBuffer(object):
                     self.cached_src_chunk_id].payload.device
                 logger.info(
                     f'Write chunk {self.cached_src_chunk_id} -> {self.cached_target_chunk_id}, '
-                    f'{src_device} -> {target_device}'
-                )
-                if args.use_gpu_fp32_convert_for_adam and target_device.type == 'cuda' and src_device.type == 'cpu':
+                    f'{src_device} -> {target_device}')
+                if self.use_gpu_fp32_convert_for_adam and target_device.type == 'cuda' and src_device.type == 'cpu':
                     self.gpu_fp16_buff.copy_(
                         self.chunk_list[self.cached_src_chunk_id].payload)
                     self.chunk_list[self.cached_target_chunk_id].payload.copy_(
@@ -73,9 +73,9 @@ class FP16ChunkWriteBuffer(object):
         """
         reset时，将cache住的payload写到chunk里
         """
-        args = get_args()
+        global_rank = torch.distributed.get_rank()
         logger.info(
-            f'rank {args.local_rank} finally, write chunk {self.cached_target_chunk_id}'
+            f'global_rank {global_rank} finally, write chunk {self.cached_target_chunk_id}'
         )
         # Note 有可能这一个进程只有一个Chunk，且该Chunk只有一个Embedding Layer，而它是Torch管理的
         # 导致这个Chunk没有分配payload
@@ -99,20 +99,17 @@ class FP32ChunkReadBuffer(object):
         @params
         margin_chunk_num_for_gpu_adam: 训练过程GPU可以额外分配给adam的chunk个数
         """
-        args = get_args()
         self.chunk_list = chunk_list
         self.chunk_tensor_index = chunk_tensor_index
         self.cpu_payload = torch.empty(chunk_size,
                                        dtype=torch.half,
                                        device=torch.device('cpu:0'),
                                        pin_memory=True)
+        self.local_rank = chunk_list.local_rank
         logger.info(
             f"Allocate fp32 Chunk Buffer of size {chunk_size/1e6} MB on CPU.")
         if margin_chunk_num_for_gpu_adam > 0:
-            if args.use_fake_dist:
-                gpu_device = torch.device(f'cuda:0')
-            else:
-                gpu_device = torch.device(f'cuda:{args.local_rank}')
+            gpu_device = torch.device(f'cuda:{self.local_rank}')
             self.gpu_payload = torch.empty(chunk_size,
                                            dtype=torch.half,
                                            device=gpu_device)
@@ -136,7 +133,6 @@ class FP32ChunkReadBuffer(object):
         target_device可能是cpu或者gpu，因此需要两种不同的payload来缓存
         返回一个tensor内存
         """
-        args = get_args()
         if is_torch_param(param):
             return param.data
         else:
@@ -148,8 +144,9 @@ class FP32ChunkReadBuffer(object):
                 # TODO GPU FP16->CPU FP32拷贝需要优化,
                 self.cached_chunk_num += 1
 
-                if self.get_cached_chunk_num() < self.margin_chunk_num_for_gpu_adam:
-                    target_device = torch.device(f'cuda:{args.local_rank}')
+                if self.get_cached_chunk_num(
+                ) < self.margin_chunk_num_for_gpu_adam:
+                    target_device = torch.device(f'cuda:{self.local_rank}')
                 else:
                     target_device = torch.device('cpu:0')
 

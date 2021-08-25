@@ -14,10 +14,10 @@
 import torch
 from .engine import PatrickStarEngine
 from ..manager import PatrickStarManager
-from patrickstar.core import PSPreProcessCtx
+from patrickstar.core import PSPreProcessCtx, PatrickStarClient
 
 
-def initialize_engine(model_func, client, config=None):
+def initialize_engine(model_func, local_rank, config=None):
     """Initialize the PatrickStar Engine.
     Arguments:
         model_func: Required: nn.module class before apply any wrappers
@@ -31,11 +31,29 @@ def initialize_engine(model_func, client, config=None):
     """
     if not callable(model_func):
         raise ValueError("model_func need to be callable.")
+    if config is None:
+        default_chunk_size = 32 * 1024 * 1024
+        use_fake_dist = False
+        use_cpu_embedding = True
+    else:
+        default_chunk_size = config["default_chunk_size"]
+        use_fake_dist = config["use_fake_dist"]
+        use_cpu_embedding = config["use_cpu_embedding"]
 
-    with PSPreProcessCtx(client=client, dtype=torch.float):
+    mgr = PatrickStarManager(local_rank=local_rank)
+    client = PatrickStarClient(rank=local_rank,
+                               default_chunk_size=default_chunk_size,
+                               is_fp16=True)
+
+    with PSPreProcessCtx(client=client,
+                         dtype=torch.float,
+                         use_fake_dist=use_fake_dist,
+                         use_cpu_embedding=use_cpu_embedding):
         model = model_func()
 
-    engine = PatrickStarEngine(model=model, client=client, config=config)
+    engine = PatrickStarEngine(model=model,
+                               client=client,
+                               config=config["optimizer"])
 
     # 开启预热优化
     mgr = PatrickStarManager()

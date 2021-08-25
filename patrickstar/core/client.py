@@ -29,7 +29,6 @@ from .parameter import PSParameter, register_param, is_param_registered, is_torc
 import patrickstar.utils.global_timer as global_timer
 from patrickstar.utils.memory_monitor import get_sys_memory_used, see_memory_usage
 from patrickstar.utils import logger
-from patrickstar.deepspeed_helper.global_vars import get_args
 
 
 class PatrickStarClient(object):
@@ -44,7 +43,7 @@ class PatrickStarClient(object):
         self.pid = os.getpid()
 
         # index of gpu
-        self.rank = rank
+        self.local_rank = rank
 
         self.module = None
 
@@ -52,7 +51,7 @@ class PatrickStarClient(object):
         self.default_chunk_size = default_chunk_size
 
         self.chunk_tensor_index = ChunkTensorIndex(self.default_chunk_size)
-        self.chunk_list = ChunkList()
+        self.chunk_list = ChunkList(self.local_rank)
 
         self._time_profile = True
 
@@ -519,7 +518,6 @@ class PatrickStarClient(object):
 
         if is_torch_param(param):
             return
-        args = get_args()
 
         chunk_id = self.chunk_tensor_index.get_chunk_id(param, access_type)
         # 可以在tensor-chunk schema构造过程中获得local_chunk_id
@@ -551,7 +549,8 @@ class PatrickStarClient(object):
         # 判断chunk group中所有的chunk都被使用完毕，可以释放remote chunk
         # FWD: 当所有非dummy的chunk都是HOLD_AFTER_FWD
         # BWD: 当所有非dummy的chunk都是HOLD_AFTER_BWD
-        if args.world_size > 1:
+        world_size = torch.distributed.get_world_size()
+        if world_size > 1:
             all_chunks_ready = True
             for i in chunk_id_list:
                 if training_stage == TrainingStage.FWD:
@@ -577,35 +576,19 @@ class PatrickStarClient(object):
                             'CLIENT_release_dist_reduce_scatter')
                     world_size = torch.distributed.get_world_size()
                     assert self.chunk_list[local_chunk_id].payload is not None
-                    if not args.use_fake_dist:
-                        input_list = []
-                        for i in chunk_id_list:
-                            self.chunk_list.access_chunk(
-                                i, torch.device(f'cuda:{args.local_rank}'))
-                            self.chunk_list[i].pin()
-                            input_list.append(self.chunk_list[i].payload)
-                        torch.distributed.reduce_scatter(
-                            self.chunk_list[local_chunk_id].payload,
-                            input_list,
-                            op=torch.distributed.ReduceOp.SUM,
-                            async_op=False)
-                        input_list = []
-                    else:
-                        # Note()为了在开发机调试方便
-                        # 它非常慢 4.92 sec/5.89 sec (client_release_elapse)
-                        group_list = []
-                        for i, _ in enumerate(chunk_id_list):
-                            group_list.append(i)
-                        group = torch.distributed.new_group(group_list)
-                        for rank_, chunk_id_ in enumerate(chunk_id_list):
-                            if self.chunk_list[chunk_id_].is_dummy():
-                                continue
-                            torch.distributed.reduce(
-                                self.chunk_list[chunk_id_].payload,
-                                rank_,
-                                op=torch.distributed.ReduceOp.SUM,
-                                group=group,
-                                async_op=False)
+                    input_list = []
+                    for i in chunk_id_list:
+                        self.chunk_list.access_chunk(
+                            i, torch.device(f'cuda:{self.local_rank}'))
+                        self.chunk_list[i].pin()
+                        input_list.append(self.chunk_list[i].payload)
+                    torch.distributed.reduce_scatter(
+                        self.chunk_list[local_chunk_id].payload,
+                        input_list,
+                        op=torch.distributed.ReduceOp.SUM,
+                        async_op=False)
+                    input_list = []
+
                     # NOTE把下面行注释了不影响最终结果？loss可能是有softmax算出，所以相对值不影响LOSS比较，但是影响了
                     # 不应该除以world_size,减去dummy chunk个数
                     self.chunk_list[local_chunk_id].payload /= world_size
@@ -650,8 +633,7 @@ class PatrickStarClient(object):
             return
         if self._time_profile:
             global_timer.my_timer.start_profile('CLIENT_release')
-        args = get_args()
-        rank = args.local_rank
+        rank = self.local_rank
         assert isinstance(reset_to_status, PSTensorStatus)
 
         chunk_id = self.chunk_tensor_index.get_chunk_id(param, access_type)

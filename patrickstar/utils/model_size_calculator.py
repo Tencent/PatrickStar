@@ -12,7 +12,6 @@
 # See the AUTHORS file for names of contributors.
 
 import torch
-from patrickstar.deepspeed_helper.global_vars import get_args
 from patrickstar.core.parameter import is_param_registered
 
 

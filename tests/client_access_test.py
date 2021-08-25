@@ -15,8 +15,8 @@ import unittest
 from patrickstar.core import PatrickStarClient, ChunkList, PSTensorStatus, AccessType, ChunkTensorIndex, PSChunkStatus, register_param, ChunkListType
 import logging
 import torch
+from patrickstar import PatrickStarManager
 from common import distributed_test
-from patrickstar.deepspeed_helper.global_vars import set_global_variables, get_args
 
 
 class TestClientAccess(unittest.TestCase):
@@ -26,12 +26,11 @@ class TestClientAccess(unittest.TestCase):
 
     @distributed_test(world_size=[1])
     def test_append_tensor(self):
+        mgr = PatrickStarManager(0)
         self.client = PatrickStarClient(
             rank=0, default_chunk_size=self.default_chunk_size)
 
         self.compute_device = torch.device('cpu:0')
-        # self.compute_device = torch.device(
-        #     f'cuda:{torch.cuda.current_device()}') if torch.cuda.is_available() else torch.device('cpu:0')
 
         param_size_list = [10, 11, 12, 13]
 
@@ -41,7 +40,7 @@ class TestClientAccess(unittest.TestCase):
             param = torch.nn.Parameter(torch.rand(psize))
             param_list.append(param)
             param_payload_ref_list.append(param.data.clone())
-            self.client.append_tensor(param, AccessType.DATA, torch.float,
+            self.client.append_tensor(param, torch.float, AccessType.DATA,
                                       ChunkListType.PARAM_FP32, f"param{idx}")
 
             # TODO(jiaruifang) access_data叫try_fetch_data更恰当，并没有返回一个tensor
@@ -60,10 +59,4 @@ class TestClientAccess(unittest.TestCase):
 
 
 if __name__ == "__main__":
-    set_global_variables()
-    logging.basicConfig(
-        format=
-        '%(asctime)s,%(msecs)d %(levelname)-8s [%(filename)s:%(lineno)d] %(message)s',
-        datefmt='%Y-%m-%d:%H:%M:%S',
-        level=logging.DEBUG)
     unittest.main()
