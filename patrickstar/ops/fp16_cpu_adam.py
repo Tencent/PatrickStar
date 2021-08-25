@@ -341,6 +341,8 @@ class FP16Adam(torch.optim.Optimizer):
         # Here we need to use module.parameter() order
         # because it is the order of params in the chunk_list
         for n, param in self.client.module.named_parameters():
+            if is_torch_param(param):
+                continue
             if param.ps_attr.get_status(
                     AccessType.DATA) == PSTensorStatus.COMPUTE:
                 logger.debug(
