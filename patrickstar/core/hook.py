@@ -15,7 +15,7 @@ import torch
 import logging
 from .const import PSTensorStatus, AccessType, TrainingStage
 import patrickstar.utils.global_timer as global_timer
-from patrickstar.utils import logger, use_dist_flag
+from patrickstar.utils import logger, USE_DIST_FLAG
 from patrickstar.core.parameter import is_torch_param
 from patrickstar.manager import PatrickStarManager
 
@@ -125,7 +125,7 @@ def pre_sub_module_forward_function(sub_module, client, name):
         logger.debug(f'rank {rank} FWD pre {name}.{sub_name} access data')
         if is_torch_param(param):
             continue
-        if use_dist_flag:
+        if USE_DIST_FLAG:
             client.access_dist(param,
                                AccessType.DATA,
                                torch.device(f'cuda:{client.local_rank}'),
@@ -165,7 +165,7 @@ def pre_sub_module_backward_function(sub_module, client, name):
         logger.debug(f'rank {rank} BWD pre {name}.{sub_name}')
         if param.dtype == torch.half:
             rank = torch.distributed.get_rank()
-            if use_dist_flag:
+            if USE_DIST_FLAG:
                 client.access_dist(param,
                                    AccessType.DATA,
                                    torch.device(f'cuda:{client.local_rank}'),
@@ -213,7 +213,7 @@ def post_sub_module_backward_function(sub_module, client, name):
                 logger.debug(
                     f'rank {rank} BWD post before release_dist {name}.{sub_name}'
                 )
-                if use_dist_flag:
+                if USE_DIST_FLAG:
                     client.release_dist(param,
                                         AccessType.DATA,
                                         PSTensorStatus.HOLD_AFTER_BWD,

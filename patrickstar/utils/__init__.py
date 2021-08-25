@@ -14,4 +14,4 @@
 from .global_timer import *
 from .memory_monitor import see_memory_usage, get_sys_memory_used
 from .logging import log_dist, logger, print_rank
-use_dist_flag = True
+USE_DIST_FLAG = True
