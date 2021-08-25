@@ -215,7 +215,7 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
             # param.data = param.data.to(torch.half)
 
         print(
-            f'init finished rank {args.local_rank} {self.client.chunk_tensor_index.comm_group_idx_to_chunk_id_list}'
+            f'init finished rank {args.local_rank} {self.client.chunk_tensor_index.comm_group_idx_to_chunk_id_list_map}'
         )
 
     def _is_local_param(self, param, access_type):
@@ -225,7 +225,7 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
         args = get_args()
         chunk_id = self.client.chunk_tensor_index.get_chunk_id(
             param, access_type)
-        comm_group_id, comm_group_offset, list_type = self.client.chunk_tensor_index.chunk_id_to_comm_group[
+        comm_group_id, comm_group_offset, list_type = self.client.chunk_tensor_index.chunk_id_to_comm_group_map[
             chunk_id]
         return torch.distributed.get_rank() == comm_group_offset
 

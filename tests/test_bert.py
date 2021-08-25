@@ -27,7 +27,7 @@ from patrickstar.fp16 import FP16_Module, FP16_Optimizer
 from patrickstar.core import PatrickStarClient
 from patrickstar.ops import CPUAdam, TorchAdam, FP16Adam
 import patrickstar.utils.global_timer as global_timer
-from patrickstar.runtime import Init, initialize_engine
+from patrickstar.runtime import initialize_engine
 from patrickstar.deepspeed_helper.global_vars import set_global_variables
 from patrickstar.deepspeed_helper.global_vars import get_args
 from patrickstar.manager import PatrickStarManager

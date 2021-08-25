@@ -68,18 +68,18 @@ class ChunkTensorIndex(object):
         只有增查功能，无删改
         """
         # 1-1 dict, tensor_id -> TensorInfo
-        self.dict_tensor_id_info: dict[int, TensorInfo] = {}
+        self.tensor_id_to_info_map: dict[int, TensorInfo] = {}
         # 1-N dict, chunk_id -> List(tensor_id) in order of start_offset
-        self.dict_chunk_id_tensor_id: dict[int, List[int]] = {}
-        self.dict_chunk_id_chunk_info: dict[int, tuple] = {}
+        self.chunk_id_to_tensor_id_list_map: dict[int, List[int]] = {}
+        self.chunk_id_to_info_map: dict[int, tuple] = {}
 
         # (comm_group_idx, chunk_list_type) -> chunk_id_list
-        self.comm_group_idx_to_chunk_id_list = {}
+        self.comm_group_idx_to_chunk_id_list_map = {}
         # chunk_id -> (comm_group_idx, comm_group_offset, chunk_list_type)
-        self.chunk_id_to_comm_group = {}
+        self.chunk_id_to_comm_group_map = {}
 
         # 记录不同chunk_list信息，存放chunk_id信息
-        self.chunk_type_chunk_id = {}
+        self.chunk_type_to_chunk_id_list_map = {}
         self.default_chunk_size = default_chunk_size
 
     def is_local_chunk(self, chunk_id):
@@ -87,17 +87,18 @@ class ChunkTensorIndex(object):
         chunk_id是否是local chunk
         """
         rank = torch.distributed.get_rank()
-        grp_id, grp_offset, grp_type = self.chunk_id_to_comm_group[chunk_id]
+        grp_id, grp_offset, grp_type = self.chunk_id_to_comm_group_map[
+            chunk_id]
         return rank == grp_offset
 
     def chunk_num(self, list_type: ChunkListType):
         """
         返回chunk_list_type类型chunk list的chunk个数
         """
-        if list_type not in self.chunk_type_chunk_id:
+        if list_type not in self.chunk_type_to_chunk_id_list_map:
             return 0
         else:
-            return len(self.chunk_type_chunk_id[list_type])
+            return len(self.chunk_type_to_chunk_id_list_map[list_type])
 
     def add_chunk(self, chunk_id, chunk_size, data_type, comm_group_id,
                   comm_group_offset, list_type: ChunkListType):
@@ -109,21 +110,23 @@ class ChunkTensorIndex(object):
         @comm_group_id: 在当前list_type中当前通信组的id
         @list_type: chunk做在list的类型
         """
-        self.dict_chunk_id_chunk_info[chunk_id] = (chunk_size, data_type)
+        self.chunk_id_to_info_map[chunk_id] = (chunk_size, data_type)
 
         comm_group_info = (comm_group_id, list_type)
-        if comm_group_info not in self.comm_group_idx_to_chunk_id_list:
-            self.comm_group_idx_to_chunk_id_list[comm_group_info] = list()
-        self.comm_group_idx_to_chunk_id_list[comm_group_info].append(chunk_id)
-        self.chunk_id_to_comm_group[chunk_id] = (comm_group_id,
-                                                 comm_group_offset, list_type)
+        if comm_group_info not in self.comm_group_idx_to_chunk_id_list_map:
+            self.comm_group_idx_to_chunk_id_list_map[comm_group_info] = list()
+        self.comm_group_idx_to_chunk_id_list_map[comm_group_info].append(
+            chunk_id)
+        self.chunk_id_to_comm_group_map[chunk_id] = (comm_group_id,
+                                                     comm_group_offset,
+                                                     list_type)
 
-        if list_type not in self.chunk_type_chunk_id:
-            self.chunk_type_chunk_id[list_type] = []
-        self.chunk_type_chunk_id[list_type].append(chunk_id)
+        if list_type not in self.chunk_type_to_chunk_id_list_map:
+            self.chunk_type_to_chunk_id_list_map[list_type] = []
+        self.chunk_type_to_chunk_id_list_map[list_type].append(chunk_id)
 
     def get_cur_chunk_num(self):
-        return len(self.dict_chunk_id_chunk_info)
+        return len(self.chunk_id_to_info_map)
 
     def find_gap(self, numel, data_type):
         """
@@ -131,14 +134,14 @@ class ChunkTensorIndex(object):
         TODO(jiaruifang) 应该优先分配同设备的gap
         实际使用场景非常具体：在fp16 BWD时，分配grad会在data的chunk内。
         """
-        for chunk_id, tensor_info_list in self.dict_chunk_id_tensor_id.items():
-            chunk_size, chunk_data_type = self.dict_chunk_id_chunk_info[
-                chunk_id]
+        for chunk_id, tensor_info_list in self.chunk_id_to_tensor_id_list_map.items(
+        ):
+            chunk_size, chunk_data_type = self.chunk_id_to_info_map[chunk_id]
             if chunk_data_type != data_type or chunk_size < numel:
                 continue
             prev_end = 0
             for tensor_id in tensor_info_list:
-                info = self.dict_tensor_id_info[tensor_id]
+                info = self.tensor_id_to_info_map[tensor_id]
                 status = info.status()
                 if status == PSTensorStatus.FREE:
                     continue
@@ -154,17 +157,18 @@ class ChunkTensorIndex(object):
         return None, None
 
     def reset(self):
-        self.dict_tensor_id_info.clear()
-        self.dict_chunk_id_tensor_id.clear()
+        self.tensor_id_to_info_map.clear()
+        self.chunk_id_to_tensor_id_list_map.clear()
 
     def generate_grad_tensor_param(self):
         """
         按chunk内部排列顺序生成所有当前没有被free的grad tensor所在的param
         """
         res_list = []
-        for chunk_id, tensor_id_list in self.dict_chunk_id_tensor_id.items():
+        for chunk_id, tensor_id_list in self.chunk_id_to_tensor_id_list_map.items(
+        ):
             for tensor_id in tensor_id_list:
-                info = self.dict_tensor_id_info[tensor_id]
+                info = self.tensor_id_to_info_map[tensor_id]
                 if info.access_type == AccessType.GRAD and info.status(
                 ) != PSTensorStatus.FREE:
                     res_list.append(info.param)
@@ -174,20 +178,20 @@ class ChunkTensorIndex(object):
         """
         展示每个chunk中tensor的状态
         """
-        for chunk_id, tensor_info_list in self.dict_tensor_id_info.items():
+        for chunk_id, tensor_info_list in self.tensor_id_to_info_map.items():
             for tensor_id in tensor_info_list:
-                yield self.dict_tensor_id_info[tensor_id]
+                yield self.tensor_id_to_info_map[tensor_id]
 
     def generate_tensor_info_in_order(self, chunk_id):
         """
         产生在chunk id的所有tensor，以start_offset位置从小到大排序
         O(N)
         """
-        for tensor_id in self.dict_chunk_id_tensor_id.get(chunk_id, []):
-            yield self.dict_tensor_id_info[tensor_id]
+        for tensor_id in self.chunk_id_to_tensor_id_list_map.get(chunk_id, []):
+            yield self.tensor_id_to_info_map[tensor_id]
 
     def get_tensor_info(self, tensor_id):
-        return self.dict_tensor_id_info[tensor_id]
+        return self.tensor_id_to_info_map[tensor_id]
 
     def _binary_search(self, tensor_id_list, start_offset, start, end):
         # we need to distinugish whether we should insert
@@ -195,7 +199,7 @@ class ChunkTensorIndex(object):
         # imagine [0] is the last step of the binary search
         # and we need to decide where to insert -1
         if start == end:
-            if self.dict_tensor_id_info[
+            if self.tensor_id_to_info_map[
                     tensor_id_list[start]].start_offset > start_offset:
                 return start
             else:
@@ -208,7 +212,7 @@ class ChunkTensorIndex(object):
             return start
 
         mid = (start + end) // 2
-        mid_start_offset = self.dict_tensor_id_info[
+        mid_start_offset = self.tensor_id_to_info_map[
             tensor_id_list[mid]].start_offset
         if mid_start_offset < start_offset:
             return self._binary_search(tensor_id_list, start_offset, mid + 1,
@@ -227,10 +231,10 @@ class ChunkTensorIndex(object):
         二分查找时间复杂度O(logN)
         考虑chunk内排布的tensor可能不连续的情况
         """
-        if chunk_id not in self.dict_chunk_id_tensor_id:
-            self.dict_chunk_id_tensor_id[chunk_id] = list()
+        if chunk_id not in self.chunk_id_to_tensor_id_list_map:
+            self.chunk_id_to_tensor_id_list_map[chunk_id] = list()
 
-        tensor_id_list = self.dict_chunk_id_tensor_id[chunk_id]
+        tensor_id_list = self.chunk_id_to_tensor_id_list_map[chunk_id]
         # 二分查找按照start_offset顺序从小到大插入
         pos = self._binary_search(tensor_id_list, start_offset, 0,
                                   len(tensor_id_list) - 1)
@@ -240,7 +244,7 @@ class ChunkTensorIndex(object):
         else:
             param_name = param.ps_attr.name
 
-        self.dict_tensor_id_info[tensor_id] = TensorInfo(
+        self.tensor_id_to_info_map[tensor_id] = TensorInfo(
             chunk_id, tensor_id, start_offset, numel, param, access_type,
             param_name)
 
@@ -257,20 +261,20 @@ class ChunkTensorIndex(object):
         """
         raise NotImplementedError
         # 删除chunk中的tensor
-        if self.dict_chunk_id_tensor_id.get(chunk_id) is None:
+        if self.chunk_id_to_tensor_id_list_map.get(chunk_id) is None:
             # logger.info(f'delete_chunk_id {chunk_id} does not exist')
             return
-        for tid in self.dict_chunk_id_tensor_id.get(chunk_id, []):
-            del self.dict_tensor_id_info[tid]
+        for tid in self.chunk_id_to_tensor_id_list_map.get(chunk_id, []):
+            del self.tensor_id_to_info_map[tid]
 
-        del self.dict_chunk_id_tensor_id[chunk_id]
+        del self.chunk_id_to_tensor_id_list_map[chunk_id]
 
     def tensor_id_to_chunk_id(self, tensor_id) -> int:
         """
         tensor_id -> chunk_id
         """
         # info =
-        info = self.dict_tensor_id_info.get(tensor_id)
+        info = self.tensor_id_to_info_map.get(tensor_id)
         if info is None:
             return None
         else:
@@ -279,19 +283,20 @@ class ChunkTensorIndex(object):
     def get_chunk_id(self, param: torch.nn.Parameter,
                      access_type: AccessType) -> int:
         tensor_id = param.ps_attr.get_tensor_id(access_type)
-        info = self.dict_tensor_id_info.get(tensor_id)
+        info = self.tensor_id_to_info_map.get(tensor_id)
         if info is None:
             return None
         return info.chunk_id
 
     def chunk_ids_of_comm_group(self, chunk_id: int) -> List[int]:
-        comm_group_id, _, list_type = self.chunk_id_to_comm_group[chunk_id]
-        return self.comm_group_idx_to_chunk_id_list[(comm_group_id, list_type)]
+        comm_group_id, _, list_type = self.chunk_id_to_comm_group_map[chunk_id]
+        return self.comm_group_idx_to_chunk_id_list_map[(comm_group_id,
+                                                         list_type)]
 
     def generate_all_chunks(self, chunk_list):
-        for chunk_id, _ in self.dict_chunk_id_tensor_id.items():
+        for chunk_id, _ in self.chunk_id_to_tensor_id_list_map.items():
             chunk = chunk_list[chunk_id]
-            comm_group_id, comm_group_offset, list_type = self.chunk_id_to_comm_group[
+            comm_group_id, comm_group_offset, list_type = self.chunk_id_to_comm_group_map[
                 chunk_id]
             yield chunk_id, comm_group_id, chunk
 
@@ -300,7 +305,7 @@ class ChunkTensorIndex(object):
         if rank != 1:
             return
         chunk_id = chunk.chunk_id
-        comm_group_id, comm_group_offset, list_type = self.chunk_id_to_comm_group[
+        comm_group_id, comm_group_offset, list_type = self.chunk_id_to_comm_group_map[
             chunk_id]
         logger.info(
             f'rank {rank} Chunk id {chunk.chunk_id}, status {chunk.get_status()}, '
@@ -325,7 +330,7 @@ class ChunkTensorIndex(object):
             total_bytes = 0
             for chunk_id in type_chunk_list:
                 chunk = chunk_list[chunk_id]
-                comm_group_id, comm_group_offset, list_type = self.chunk_id_to_comm_group[
+                comm_group_id, comm_group_offset, list_type = self.chunk_id_to_comm_group_map[
                     chunk_id]
                 assert comm_group_id is not None
 
@@ -346,18 +351,18 @@ class ChunkTensorIndex(object):
 
         overall_size = 0
         overall_size += print_chunk_list(
-            self.chunk_type_chunk_id[ChunkListType.PARAM_FP16])
+            self.chunk_type_to_chunk_id_list_map[ChunkListType.PARAM_FP16])
 
         logger.info(f'OVERALL CHUNK SIZE {overall_size/1e9} GB')
 
     def _get_tensor_id_list(self, chunk_id):
-        if chunk_id not in self.dict_chunk_id_tensor_id:
-            self.dict_chunk_id_tensor_id[chunk_id] = list()
-        return self.dict_chunk_id_tensor_id[chunk_id]
+        if chunk_id not in self.chunk_id_to_tensor_id_list_map:
+            self.chunk_id_to_tensor_id_list_map[chunk_id] = list()
+        return self.chunk_id_to_tensor_id_list_map[chunk_id]
 
     def params_generator(self, chunk_id):
-        for tensor_id in self.dict_chunk_id_tensor_id[chunk_id]:
-            yield self.dict_tensor_id_info[tensor_id].param
+        for tensor_id in self.chunk_id_to_tensor_id_list_map[chunk_id]:
+            yield self.tensor_id_to_info_map[tensor_id].param
 
     def try_insert_tensor(self, chunk_id, param, data_type,
                           access_type) -> bool:
@@ -371,11 +376,11 @@ class ChunkTensorIndex(object):
         tensor_name = param.ps_attr.name
         target_tensor_id = param.ps_attr.get_tensor_id(access_type)
         for idx, tensor_id in enumerate(tensor_id_list):
-            tensor_info = self.dict_tensor_id_info[tensor_id]
+            tensor_info = self.tensor_id_to_info_map[tensor_id]
             start_pos = tensor_info.start_offset
             gap = start_pos - prev_end_pos
             if gap >= numel:
-                self.dict_tensor_id_info[target_tensor_id] = TensorInfo(
+                self.tensor_id_to_info_map[target_tensor_id] = TensorInfo(
                     chunk_id, target_tensor_id, prev_end_pos, numel, param,
                     access_type, tensor_name)
                 tensor_id_list.insert(idx + 1, target_tensor_id)
@@ -386,7 +391,7 @@ class ChunkTensorIndex(object):
             f'default_chunk_size {self.default_chunk_size}, prev_end_pos {prev_end_pos}, numel {numel}'
         )
         if self.default_chunk_size - prev_end_pos >= numel:
-            self.dict_tensor_id_info[target_tensor_id] = TensorInfo(
+            self.tensor_id_to_info_map[target_tensor_id] = TensorInfo(
                 chunk_id, target_tensor_id, prev_end_pos, numel, param,
                 access_type, tensor_name)
             tensor_id_list.insert(len(tensor_id_list), target_tensor_id)
