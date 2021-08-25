@@ -202,15 +202,16 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
             chunk_num += 1
 
         # 在CPU上初始化dummy chunk的空间
-        for param in self.client.dummy_param_list:
-            if self.client.is_local_tensor(param, AccessType.DATA):
-                self.client.access_data(param, torch.device('cpu:0'))
-                self.client.release_data(param)
+        # for param in self.client.dummy_param_list:
+        #     if self.client.is_local_tensor(param, AccessType.DATA):
+        #         self.client.access_data(param, torch.device('cpu:0'))
+        #         self.client.release_data(param)
 
         # 处理Pytorch管理的params
         for param in self.client.torch_param_list:
             self.client.param_fp16_to_param_fp32(param).data.copy_(param.data)
-            param.data = param.data.to(torch.half)
+            # TODO(jiaruifang) CPU上计算不支持half
+            # param.data = param.data.to(torch.half)
 
         print(
             f'init finished rank {args.local_rank} {self.client.chunk_tensor_index.comm_group_to_chunk_id_list}'
