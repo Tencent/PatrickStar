@@ -59,7 +59,7 @@ class BertEmbeddings(nn.Module):
         seq_length = input_shape[1]
 
         # 让临时生成的ids的设备和模型设备一致
-        device = self.word_embeddings.weight.device
+        device = torch.device(f'cuda:{torch.cuda.current_device()}')
 
         if position_ids is None:
             position_ids = self.position_ids[:, past_key_values_length:
