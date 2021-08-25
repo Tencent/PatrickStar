@@ -16,7 +16,7 @@ from torch.utils.data import SequentialSampler
 # from checkpoint.torch_checkpoint import checkpoint
 from torch.utils.checkpoint import checkpoint
 from patrickstar.utils import logger
-from patrickstar.ops.embedding import CpuBertEmbeddings, BertEmbeddings
+from patrickstar.ops.cpu_embedding import CpuBertEmbeddings, BertEmbeddings
 from transformers import BertConfig
 
 

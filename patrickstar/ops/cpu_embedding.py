@@ -160,7 +160,6 @@ class BertEmbeddingsWithoutLN(nn.Module):
 
 
 class _CopyInputToCPU(torch.autograd.Function):
-    """gather activations from other proc to proc 0"""
     @staticmethod
     def symbolic(graph, input_):
         args = get_args()
@@ -187,7 +186,6 @@ class _CopyInputToCPU(torch.autograd.Function):
 
 
 class _CopyActToGPU(torch.autograd.Function):
-    """Pass the input to the model parallel region."""
     @staticmethod
     def symbolic(graph, input_):
         args = get_args()
@@ -249,10 +247,10 @@ class CpuBertEmbeddings(nn.Module):
         assert token_type_ids is None
         assert position_ids is None
 
-        input_ids_parallel = copy_to_cpu(input_ids)
+        new_input_ids = copy_to_cpu(input_ids)
 
-        output_activation = self.bert_embedding(input_ids_parallel,
-                                                token_type_ids, position_ids)
+        output_activation = self.bert_embedding(new_input_ids, token_type_ids,
+                                                position_ids)
 
         embeddings = copy_to_gpu(output_activation)
         assert embeddings.dtype == torch.float, f"embedding outputs should be in float on CPU, now {embeddings.dtype}"
