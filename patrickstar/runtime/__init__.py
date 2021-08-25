@@ -13,7 +13,6 @@
 
 import torch
 from .engine import PatrickStarEngine
-from .init_context import Init
 from ..manager import PatrickStarManager
 from patrickstar.core import PSPreProcessCtx
 

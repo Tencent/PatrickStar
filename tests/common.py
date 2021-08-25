@@ -48,11 +48,14 @@ def distributed_test(world_size=2, backend='nccl'):
             os.environ['WORLD_SIZE'] = str(num_procs)
 
             torch.distributed.init_process_group(backend=backend)
-
-            if torch.cuda.is_available():
-                torch.cuda.set_device(local_rank)
             from patrickstar.deepspeed_helper.global_vars import get_args
             args = get_args()
+
+            if torch.cuda.is_available():
+                if args.use_fake_dist:
+                    torch.cuda.set_device(0)
+                else:
+                    torch.cuda.set_device(local_rank)
             args.local_rank = local_rank
             args.world_size = num_procs
             run_func(*func_args, **func_kwargs)
