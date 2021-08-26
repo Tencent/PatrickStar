@@ -59,7 +59,7 @@ def test_bert_model(method,
 
     # 如果要测试溢出情况的对比，可以将 initial_scale_power 设为 20
     # 但是注意，apex 的 LossScaler 的默认初始值最大为 2**16，所以需要手动在 apex 中修改
-    initial_scale_power = 20
+    initial_scale_power = 16
 
     if method == "patrickstar":
         def model_func():
@@ -229,6 +229,6 @@ if __name__ == "__main__":
     print('patrickstar:\t', ps_res_list)
     print('')
     print('loss scale:')
-    print('apex scale:\t', apex_scale_list)
     print('torch scale:\t', torch_scale_list)
+    print('apex scale:\t', apex_scale_list)
     print('patrickstar:\t', ps_scale_list)

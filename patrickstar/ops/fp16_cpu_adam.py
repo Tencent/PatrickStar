@@ -171,7 +171,7 @@ class FP16Adam(torch.optim.Optimizer):
         for group in self.param_groups:
             group.setdefault('amsgrad', False)
 
-    def cpu_adam_update(self,
+    def ds_cpu_adam_update(self,
                         data, grad,
                         momentum, variance,
                         step, lr, beta1, beta2, eps, weight_decay,
@@ -222,7 +222,15 @@ class FP16Adam(torch.optim.Optimizer):
 
         data.addcdiv_(exp_avg, denom, value=-step_size)
 
+    def check_overflow(self, param):
+        if (self.loss_scaler is not None and not self.has_overflow and
+            self.loss_scaler.has_overflow(param)):
+            self.has_overflow = True
+
     def has_overflow_and_reset_param(self, write_chunk_buff):
+        """
+        这个函数应该在已经判断过本进程是否存在 overflow 之后调用
+        """
         if torch.distributed.is_initialized():
             overflow_gpu = torch.cuda.ByteTensor([self.has_overflow])
             torch.distributed.all_reduce(overflow_gpu,
@@ -334,7 +342,7 @@ class FP16Adam(torch.optim.Optimizer):
 
             # TODO(jiaruifang) use_ds_adam时，在生成的数据上正确性没有验证
             if self.use_ds_adam and compute_device.type == 'cpu' and fp16_grad_tensor.device.type == 'cpu':
-                self.cpu_adam_update(fp32_data_tensor, fp16_grad_tensor,
+                self.ds_cpu_adam_update(fp32_data_tensor, fp16_grad_tensor,
                                      exp_avg, exp_avg_sq,
                                      step, lr, beta1,
                                      beta2, eps, weight_decay, True)
