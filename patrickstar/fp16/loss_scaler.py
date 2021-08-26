@@ -26,15 +26,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import torch
-
-from apex.multi_tensor_apply import multi_tensor_applier
-import amp_C
-
-# from megatron import mpu
-
-# item() is a recent addition, so this helps with backward compatibility.
-
 
 def to_python_float(t):
     if hasattr(t, 'item'):
@@ -56,7 +47,7 @@ class LossScaler:
         self.cur_scale = scale
 
     # `params` is a list / generator of torch.Variable
-    def has_overflow(self, params):
+    def has_overflow(self, param):
         return False
 
     # `x` is a torch.Tensor
@@ -69,12 +60,6 @@ class LossScaler:
     @property
     def loss_scale(self):
         return self.cur_scale
-
-    def scale_gradient(self, module, grad_in, grad_out):
-        _overflow_buf = torch.cuda.IntTensor([0])
-        multi_tensor_applier(amp_C.multi_tensor_scale, _overflow_buf,
-                             [grad_in, grad_in], self.loss_scale)
-        return grad_in
 
     def backward(self, loss, retain_graph=False):
         scaled_loss = loss * self.loss_scale
@@ -122,26 +107,11 @@ class DynamicLossScaler:
         self.consecutive_hysteresis = consecutive_hysteresis
 
     # `params` is a list / generator of torch.Variable
-    def has_overflow_serial(self, params):
-        for p in params:
-            if p.grad is not None and DynamicLossScaler._has_inf_or_nan(
-                    p.grad.data):
-                return True
+    def has_overflow(self, param):
+        if DynamicLossScaler._has_inf_or_nan(param.grad):
+            return True
 
         return False
-
-    def has_overflow(self, params):
-        overflow = self.has_overflow_serial(params)
-        # Since each model parallel GPU carries only part of the model,
-        # make sure overflow flag is synced across all the model parallel GPUs
-        overflow_gpu = torch.cuda.ByteTensor([overflow])
-        torch.distributed.all_reduce(overflow_gpu,
-                                     op=torch.distributed.ReduceOp.MAX,
-                                     group=mpu.get_model_parallel_group())
-        overflow = overflow_gpu[0].item()
-        return bool(overflow)
-
-    # `x` is a torch.Tensor
 
     def _has_inf_or_nan(x):
         try:
@@ -197,57 +167,6 @@ class DynamicLossScaler:
     def loss_scale(self):
         return self.cur_scale
 
-    def scale_gradient(self, module, grad_in, grad_out):
-        _overflow_buf = torch.cuda.IntTensor([0])
-        multi_tensor_applier(amp_C.multi_tensor_scale, _overflow_buf,
-                             [grad_in, grad_in], self.loss_scale)
-        return grad_in
-
     def backward(self, loss, retain_graph=False):
         scaled_loss = loss * self.loss_scale
         scaled_loss.backward(retain_graph=retain_graph)
-
-
-##############################################################
-# Example usage below here -- assuming it's in a separate file
-##############################################################
-"""
-TO-DO separate out into an example.
-if __name__ == "__main__":
-    import torch
-    from torch.autograd import Variable
-    from dynamic_loss_scaler import DynamicLossScaler
-    # N is batch size; D_in is input dimension;
-    # H is hidden dimension; D_out is output dimension.
-    N, D_in, H, D_out = 64, 1000, 100, 10
-    # Create random Tensors to hold inputs and outputs, and wrap them in Variables.
-    x = Variable(torch.randn(N, D_in), requires_grad=False)
-    y = Variable(torch.randn(N, D_out), requires_grad=False)
-    w1 = Variable(torch.randn(D_in, H), requires_grad=True)
-    w2 = Variable(torch.randn(H, D_out), requires_grad=True)
-    parameters = [w1, w2]
-    learning_rate = 1e-6
-    optimizer = torch.optim.SGD(parameters, lr=learning_rate)
-    loss_scaler = DynamicLossScaler()
-    for t in range(500):
-        y_pred = x.mm(w1).clamp(min=0).mm(w2)
-        loss = (y_pred - y).pow(2).sum() * loss_scaler.loss_scale
-        print('Iter {} loss scale: {}'.format(t, loss_scaler.loss_scale))
-        print('Iter {} scaled loss: {}'.format(t, loss.data[0]))
-        print('Iter {} unscaled loss: {}'.format(t, loss.data[0] / loss_scaler.loss_scale))
-        # Run backprop
-        optimizer.zero_grad()
-        loss.backward()
-        # Check for overflow
-        has_overflow = DynamicLossScaler.has_overflow(parameters)
-        # If no overflow, unscale grad and update as usual
-        if not has_overflow:
-            for param in parameters:
-                param.grad.data.mul_(1. / loss_scaler.loss_scale)
-            optimizer.step()
-        # Otherwise, don't do anything -- ie, skip iteration
-        else:
-            print('OVERFLOW!')
-        # Update loss scale for next iteration
-        loss_scaler.update_scale(has_overflow)
-"""

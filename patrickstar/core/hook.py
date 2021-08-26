@@ -185,6 +185,10 @@ def post_sub_module_backward_function(sub_module, client, name):
         if is_torch_param(param):
             continue
         if param.dtype == torch.half:
+            if (client.optimizer.loss_scaler is not None and
+                not client.optimizer.has_overflow and
+                client.optimizer.loss_scaler.has_overflow(param)):
+                client.optimizer.has_overflow = True
             tmp_tensor = param.ps_attr.access_tensor(AccessType.DATA)
             tmp_tensor.copy_(param.grad)
             if torch.distributed.is_initialized():
@@ -278,6 +282,10 @@ def _register_hooks_recursively(module, client, count=[0], name=""):
 
             def torch_param_all_reduce(*ignore):
                 world_size = torch.distributed.get_world_size()
+                if (client.optimizer.loss_scaler is not None and
+                    not client.optimizer.has_overflow and
+                    client.optimizer.loss_scaler.has_overflow(param)):
+                    client.optimizer.has_overflow = True
                 torch.distributed.all_reduce(param.grad,
                                              op=torch.distributed.ReduceOp.SUM,
                                              group=client.cpu_comm_group,

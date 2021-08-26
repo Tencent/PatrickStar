@@ -72,6 +72,8 @@ class FP16ChunkWriteBuffer(object):
         """
         reset时，将cache住的payload写到chunk里
         """
+        if self.cached_src_chunk_id is None:
+            return
         global_rank = torch.distributed.get_rank()
         logger.info(
             f'global_rank {global_rank} finally, write chunk {self.cached_target_chunk_id}'

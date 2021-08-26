@@ -31,6 +31,7 @@
     _mm256_store_ps(a, _mm256_castsi256_ps(_mm512_cvtps_ph(d, _MM_FROUND_TO_NEAREST_INT)))
 #define SIMD_LOAD(x) _mm512_loadu_ps(x)
 #define SIMD_LOAD_HALF(x) _mm512_cvtph_ps(_mm256_loadu_si256((const __m256i*)(x)))
+#define SIMD_LOAD_SCALAR(x) _mm512_set1_ps(x)
 #define SIMD_SET(x) _mm512_set1_ps(x)
 #define SIMD_MUL(x, y) _mm512_mul_ps(x, y)
 #define SIMD_FMA(x, y, c) _mm512_fmadd_ps(x, y, c)
@@ -49,6 +50,7 @@
     _mm_store_ps(a, _mm_castsi128_ps(_mm256_cvtps_ph(d, _MM_FROUND_TO_NEAREST_INT)))
 #define SIMD_LOAD(x) _mm256_loadu_ps(x)
 #define SIMD_LOAD_HALF(x) _mm256_cvtph_ps(_mm_loadu_si128((const __m128i*)(x)))
+#define SIMD_LOAD_SCALAR(x) _mm256_set1_ps(x)
 #define SIMD_SET(x) _mm256_set1_ps(x)
 #define SIMD_MUL(x, y) _mm256_mul_ps(x, y)
 #define SIMD_FMA(x, y, c) _mm256_fmadd_ps(x, y, c)
@@ -101,7 +103,8 @@ public:
               size_t param_size,
               __half* dev_param = nullptr,
               bool param_half_precision = false,
-              bool grad_half_precision = false);
+              bool grad_half_precision = false,
+              float loss_scale = -1);
 
     void Step_4(float* _params,
                 float* grads,
@@ -110,7 +113,8 @@ public:
                 size_t param_size,
                 __half* dev_param = nullptr,
                 bool param_half_precision = false,
-                bool grad_half_precision = false);
+                bool grad_half_precision = false,
+                float loss_scale = -1);
 
     void Step_8(float* _params,
                 float* grads,
@@ -119,7 +123,8 @@ public:
                 size_t _param_size,
                 __half* dev_params = nullptr,
                 bool param_half_precision = false,
-                bool grad_half_precision = false);
+                bool grad_half_precision = false,
+                float loss_scale = -1);
 
     inline void SynchronizeStreams()
     {
