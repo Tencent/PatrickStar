@@ -434,6 +434,23 @@ class FP16Adam(torch.optim.Optimizer):
         eps_list = []
         lr_list = []
 
+        if self.use_hybrid_adam:
+            margin_chunk_num_for_gpu_adam = mgr.get_margin_chunk_num_for_gpu_adam()
+        else:
+            margin_chunk_num_for_gpu_adam = 0
+
+        max_chunk_size = self.client.chunk_list.max_chunk_size()
+        self.read_chunk_buff = FP32ChunkReadBuffer(
+            self.client.chunk_list, self.client.chunk_tensor_index,
+            max_chunk_size, margin_chunk_num_for_gpu_adam)
+        self.write_chunk_buff = FP16ChunkWriteBuffer(
+            self.client.chunk_list, self.client.chunk_tensor_index,
+            max_chunk_size)
+
+        if self.has_overflow_and_reset_param(write_chunk_buff=self.write_chunk_buff):
+            global_timer.my_timer.finish_profile('ADAM')
+            return loss
+
         max_param_size = 0
         for i, group in enumerate(self.param_groups):
             for j, p in enumerate(group['params']):
@@ -469,23 +486,6 @@ class FP16Adam(torch.optim.Optimizer):
                 else:
                     raise RuntimeError(f"tensor id {p.ps_attr.grad_id()}")
 
-        if self.use_hybrid_adam:
-            margin_chunk_num_for_gpu_adam = mgr.get_margin_chunk_num_for_gpu_adam()
-        else:
-            margin_chunk_num_for_gpu_adam = 0
-
-        max_chunk_size = self.client.chunk_list.max_chunk_size()
-        self.read_chunk_buff = FP32ChunkReadBuffer(
-            self.client.chunk_list, self.client.chunk_tensor_index,
-            max_chunk_size, margin_chunk_num_for_gpu_adam)
-        self.write_chunk_buff = FP16ChunkWriteBuffer(
-            self.client.chunk_list, self.client.chunk_tensor_index,
-            max_chunk_size)
-
-        if self.has_overflow_and_reset_param(write_chunk_buff=self.write_chunk_buff):
-            global_timer.my_timer.finish_profile('ADAM')
-            return loss
-
         # 混合ADMA，根据预热获得的信息，放一部分Chunk在GPU上。
         self.FP16_f_adamv2(self.client, fp32_param_list,
                            fp16_param_with_grad_list, exp_avgs, exp_avg_sqs,
@@ -504,6 +504,7 @@ class FP16Adam(torch.optim.Optimizer):
                 chunk.display_access_mom_info()
         mgr.reset_metronome()
 
-        self.loss_scaler.update_scale(self.has_overflow)
+        if self.loss_scaler:
+            self.loss_scaler.update_scale(self.has_overflow)
 
         return loss

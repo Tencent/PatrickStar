@@ -46,10 +46,10 @@ class PatrickStarEngine(Module):
             optim_params = optim_config["params"]
 
             # Loss scaler configuration
-            loss_scale_config = config["fp16"]
-            if loss_scale_config is None:
+            if "fp16" not in config:
                 self.loss_scaler = None
             else:
+                loss_scale_config = config["fp16"]
                 assert loss_scale_config["enabled"], "Must enable fp16 training."
                 loss_scale = loss_scale_config["loss_scale"]
                 if loss_scale == 0:
@@ -157,6 +157,9 @@ class PatrickStarEngine(Module):
         mgr = PatrickStarManager()
         mgr._training_stage = TrainingStage.BWD
         self.optimizer.zero_grad()
-        self.loss_scaler.backward(loss)
+        if self.loss_scaler:
+            self.loss_scaler.backward(loss)
+        else:
+            loss.backward()
         mgr.update_margin_mem()
         global_timer.my_timer.finish_profile("BWD")
