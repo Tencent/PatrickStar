@@ -44,16 +44,16 @@ class TestClientAccess(unittest.TestCase):
                                       ChunkListType.PARAM_FP32, f"param{idx}")
 
             # TODO(jiaruifang) access_data叫try_fetch_data更恰当，并没有返回一个tensor
-            self.client.access_data(param, torch.device('cpu:0'))
-            real_payload = param.ps_attr.access_tensor(AccessType.DATA)
+            real_payload = self.client.access_data(param,
+                                                   torch.device('cpu:0'))
             real_payload.copy_(param.data)
             param.data = torch.tensor([])
             self.client.release_data(param)
 
         self.client.chunk_tensor_index.visit_chunks(self.client.chunk_list)
         for param, payload_ref in zip(param_list, param_payload_ref_list):
-            self.client.access_data(param, torch.device('cpu:0'))
-            real_payload = param.ps_attr.access_tensor(AccessType.DATA)
+            real_payload = self.client.access_data(param,
+                                                   torch.device('cpu:0'))
             self.assertEqual(torch.max(real_payload - payload_ref), 0)
             self.client.release_data(param)
 

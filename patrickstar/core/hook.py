@@ -125,11 +125,11 @@ def pre_sub_module_forward_function(sub_module, client, name):
         logger.debug(f'rank {rank} FWD pre {name}.{sub_name} access data')
         if is_torch_param(param):
             continue
-        client.access_dist(param,
-                           AccessType.DATA,
-                           torch.device(f'cuda:{client.local_rank}'),
-                           training_stage=TrainingStage.FWD)
-        param.data = param.ps_attr.access_tensor(AccessType.DATA)
+        param.data = client.access_dist(
+            param,
+            AccessType.DATA,
+            torch.device(f'cuda:{client.local_rank}'),
+            training_stage=TrainingStage.FWD)
         flag = True
     if flag:
         mgr = PatrickStarManager()
@@ -161,21 +161,19 @@ def pre_sub_module_backward_function(sub_module, client, name):
         logger.debug(f'rank {rank} BWD pre {name}.{sub_name}')
         if param.dtype == torch.half:
             rank = torch.distributed.get_rank()
-            client.access_dist(param,
-                               AccessType.DATA,
-                               torch.device(f'cuda:{client.local_rank}'),
-                               training_stage=TrainingStage.BWD)
-            tmp_tensor = param.ps_attr.access_tensor(AccessType.DATA)
+            tmp_tensor = client.access_dist(
+                param,
+                AccessType.DATA,
+                torch.device(f'cuda:{client.local_rank}'),
+                training_stage=TrainingStage.BWD)
             param.data = tmp_tensor
             param.grad = torch.zeros_like(tmp_tensor)
             assert param.data.data_ptr() != param.grad.data_ptr()
         elif param.dtype == torch.float:
-            client.access_data(param,
-                               torch.device(f'cuda:{client.local_rank}'))
-            client.access_grad(param,
-                               torch.device(f'cuda:{client.local_rank}'))
-            param.data = param.ps_attr.access_tensor(AccessType.DATA)
-            param.grad = param.ps_attr.access_tensor(AccessType.GRAD)
+            param.data = client.access_data(
+                param, torch.device(f'cuda:{client.local_rank}'))
+            param.grad = client.access_grad(
+                param, torch.device(f'cuda:{client.local_rank}'))
         flag = True
     if flag:
         mgr = PatrickStarManager()

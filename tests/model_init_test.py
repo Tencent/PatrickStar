@@ -56,8 +56,7 @@ class TestModelInitContext(unittest.TestCase):
                     torch.max(torch_param.data - ps_param), 1e-4,
                     f"PyTorch tensors are not consist with each other")
             else:
-                client.access_data(ps_param, compute_device)
-                ps_data = ps_param.ps_attr.access_tensor(AccessType.DATA)
+                ps_data = client.access_data(ps_param, compute_device)
                 if ps_param.ps_attr.is_local():
                     self.assertLess(
                         torch.max(torch_param.data - ps_data), 1e-4,

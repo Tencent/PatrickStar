@@ -316,7 +316,15 @@ class PatrickStarClient(object):
 
     def access_dist(self, param: torch.nn.Parameter, access_type: AccessType,
                     compute_device: torch.device,
-                    training_stage: TrainingStage):
+                    training_stage: TrainingStage) -> torch.Tensor:
+        """
+        在分布式训练场景下，访问param的tensor，串行也可以使用
+        @args
+            param: 待访问的参数
+            access_type: 访问方式
+            compute_device: 目标设备
+            training_stage: 训练解阶段
+        """
         assert compute_device.type == "cuda"
         if not hasattr(param, 'ps_attr'):
             raise RuntimeError(
@@ -324,12 +332,12 @@ class PatrickStarClient(object):
 
         # 如果是Torch管理的Tensor，则直接返回，不管compute_device的意义
         if is_torch_param(param):
-            # if access_type == AccessType.DATA:
-            #     param.data.to(compute_device)
-            # elif access_type == AccessType.GRAD:
-            #     param.data.to(compute_device)
-            #     param.grad.to(compute_device)
-            return
+            if access_type == AccessType.DATA:
+                return param.data
+            elif access_type == AccessType.GRAD:
+                return param.grad
+            else:
+                raise RuntimeError(f"{access_type} is not supported")
 
         if self._time_profile:
             global_timer.my_timer.start_profile('CLIENT_access_dist')
@@ -341,8 +349,6 @@ class PatrickStarClient(object):
             chunk_id)
         rank = torch.distributed.get_rank()
 
-        # if rank >= len(chunk_id_list):
-        #     return
         assert rank < len(
             chunk_id_list
         ), f"rank {rank} < {len(chunk_id_list)} {chunk_id_list}"
@@ -400,6 +406,8 @@ class PatrickStarClient(object):
         if self._time_profile:
             global_timer.my_timer.finish_profile('CLIENT_access_dist')
 
+        return param.ps_attr.access_tensor(access_type)
+
     def access(self, param: torch.nn.Parameter, access_type: AccessType,
                compute_device: torch.device):
         """
@@ -420,7 +428,12 @@ class PatrickStarClient(object):
         只能访问本地chunk不需要通信
         """
         if is_torch_param(param):
-            return
+            if access_type == AccessType.DATA:
+                return param.data
+            elif access_type == AccessType.GRAD:
+                return param.grad
+            else:
+                raise RuntimeError(f"{access_type} is not supported")
 
         if not hasattr(param, 'ps_attr'):
             # 第一次access，动态调度方案的预热过程会遇到
@@ -481,13 +494,14 @@ class PatrickStarClient(object):
         # Note并不设置parameter对应的tensor，因为adam可能直接访问pstensor
         if self._time_profile:
             global_timer.my_timer.finish_profile('CLIENT_access')
+        return param.ps_attr.access_tensor(access_type)
 
     def access_data(self, param: torch.nn.Parameter,
                     compute_device: torch.device):
         """
         将param的ps_data_tensor的数据放置到compute_device上
         """
-        self.access(param, AccessType.DATA, compute_device)
+        return self.access(param, AccessType.DATA, compute_device)
 
     def access_grad(self, param: torch.nn.Parameter,
                     compute_device: torch.device):
@@ -496,7 +510,7 @@ class PatrickStarClient(object):
         NOTE，并没有正确设置param的grad，此时grad的数据无效。因为grad的设备属性并不自由，需要看data的脸色行事。我们使用grad时候，需要显式设置
         `param.grad = param.ps_grad_tensore`
         """
-        self.access(param, AccessType.GRAD, compute_device)
+        return self.access(param, AccessType.GRAD, compute_device)
 
     def release_dist(self, param: torch.nn.Parameter, access_type: AccessType,
                      reset_to_status: PSTensorStatus,
