@@ -91,10 +91,9 @@ class FP16Adam(torch.optim.Optimizer):
                 state['step'] = 0
 
                 if is_torch_param(p):
-                    state[
-                        'fp32_param_data'] = self.client.param_fp16_to_param_fp32(
-                            p)
                     if p.requires_grad:
+                        # torch param 没有备份的 fp32 参数
+                        state['fp32_param_data'] = None
                         state['exp_avg'] = torch.nn.Parameter(
                             torch.zeros_like(p,
                                              dtype=torch.float,
@@ -208,7 +207,10 @@ class FP16Adam(torch.optim.Optimizer):
             if is_torch_param(fp16_param):
                 # 如果fp16_param被Torch管理，则它肯定在cpu上，cpu_embedding优化引起的
                 assert fp16_param.data.device.type == 'cpu'
-                fp16_grad_tensor = fp16_param.data
+                fp32_param = fp16_param
+                # 这里已经是 fp32 的了
+                fp16_grad_tensor = fp16_param.grad
+                assert fp16_grad_tensor.dtype == torch.float
             else:
                 # 将FP16 GPU Chunk拷贝到compute_device的FP32 Chunk上。
                 # 如果是第一个tensor则拷贝Chunk，否则索引chunk
@@ -303,7 +305,8 @@ class FP16Adam(torch.optim.Optimizer):
             ##########################
 
             # Note fp16_param对应的Chunk内存 ->fp32_param对应的chunk内存
-            write_chunk_buff.write_from_cache(fp16_param, fp32_param)
+            if not is_torch_param(fp32_param):
+                write_chunk_buff.write_from_cache(fp16_param, fp32_param)
 
             if time_profile:
                 global_timer.my_timer.finish_profile('ADAM_param_fp32_to_fp16')
@@ -338,18 +341,7 @@ class FP16Adam(torch.optim.Optimizer):
         # Here we need to use module.parameter() order
         # because it is the order of params in the chunk_list
         for n, param in self.client.module.named_parameters():
-            if is_torch_param(param) and param.grad is not None:
-                param.data = param.grad
-                param.grad = None
-                world_size = torch.distributed.get_world_size()
-
-                torch.distributed.all_reduce(param.data,
-                                             op=torch.distributed.ReduceOp.SUM,
-                                             group=self.client.cpu_comm_group,
-                                             async_op=False)
-                param.data /= world_size
-
-                logger.info(f'rank {rank} allreduce grad {param.ps_attr.name}')
+            if is_torch_param(param):
                 continue
             if param.ps_attr.get_status(
                     AccessType.DATA) == PSTensorStatus.COMPUTE:

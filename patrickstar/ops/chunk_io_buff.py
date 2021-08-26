@@ -41,33 +41,32 @@ class FP16ChunkWriteBuffer(object):
         则把src_param的chunk写到target_param所在的chunk中
         可能是cpu向gpu移动
         """
-        if is_torch_param(src_param):
-            return target_param.data.copy_(src_param.data)
-        else:
-            src_info = self.chunk_tensor_index.get_tensor_info(
-                src_param.ps_attr.data_id())
-            target_info = self.chunk_tensor_index.get_tensor_info(
-                target_param.ps_attr.data_id())
+        # torch param 只有 fp32 的一份数据，不需要拷贝
+        assert not is_torch_param(src_param)
+        src_info = self.chunk_tensor_index.get_tensor_info(
+            src_param.ps_attr.data_id())
+        target_info = self.chunk_tensor_index.get_tensor_info(
+            target_param.ps_attr.data_id())
 
-            if self.cached_src_chunk_id is not None and src_info.chunk_id != self.cached_src_chunk_id:
-                # TODO CPU->GPU拷贝需要优化
-                target_device = self.chunk_list[
-                    self.cached_target_chunk_id].payload.device
-                src_device = self.chunk_list[
-                    self.cached_src_chunk_id].payload.device
-                logger.info(
-                    f'Write chunk {self.cached_src_chunk_id} -> {self.cached_target_chunk_id}, '
-                    f'{src_device} -> {target_device}')
-                if self.use_gpu_fp32_convert_for_adam and target_device.type == 'cuda' and src_device.type == 'cpu':
-                    self.gpu_fp16_buff.copy_(
-                        self.chunk_list[self.cached_src_chunk_id].payload)
-                    self.chunk_list[self.cached_target_chunk_id].payload.copy_(
-                        self.gpu_fp16_buff)
-                else:
-                    self.chunk_list[self.cached_target_chunk_id].payload.copy_(
-                        self.chunk_list[self.cached_src_chunk_id].payload)
-            self.cached_src_chunk_id = src_info.chunk_id
-            self.cached_target_chunk_id = target_info.chunk_id
+        if self.cached_src_chunk_id is not None and src_info.chunk_id != self.cached_src_chunk_id:
+            # TODO CPU->GPU拷贝需要优化
+            target_device = self.chunk_list[
+                self.cached_target_chunk_id].payload.device
+            src_device = self.chunk_list[
+                self.cached_src_chunk_id].payload.device
+            logger.info(
+                f'Write chunk {self.cached_src_chunk_id} -> {self.cached_target_chunk_id}, '
+                f'{src_device} -> {target_device}')
+            if self.use_gpu_fp32_convert_for_adam and target_device.type == 'cuda' and src_device.type == 'cpu':
+                self.gpu_fp16_buff.copy_(
+                    self.chunk_list[self.cached_src_chunk_id].payload)
+                self.chunk_list[self.cached_target_chunk_id].payload.copy_(
+                    self.gpu_fp16_buff)
+            else:
+                self.chunk_list[self.cached_target_chunk_id].payload.copy_(
+                    self.chunk_list[self.cached_src_chunk_id].payload)
+        self.cached_src_chunk_id = src_info.chunk_id
+        self.cached_target_chunk_id = target_info.chunk_id
 
     def reset(self):
         """
@@ -134,7 +133,8 @@ class FP32ChunkReadBuffer(object):
         返回一个tensor内存
         """
         if is_torch_param(param):
-            return param.data
+            # torch param 的梯度保存在 param.grad 中
+            return param.grad
         else:
             info = self.chunk_tensor_index.get_tensor_info(
                 param.ps_attr.data_id())

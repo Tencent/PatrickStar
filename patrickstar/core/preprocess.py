@@ -213,12 +213,6 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
         #         self.client.access_data(param, torch.device('cpu:0'))
         #         self.client.release_data(param)
 
-        # 处理Pytorch管理的params
-        for param in self.client.torch_param_list:
-            self.client.param_fp16_to_param_fp32(param).data.copy_(param.data)
-            # TODO(jiaruifang) CPU上计算不支持half
-            # param.data = param.data.to(torch.half)
-
     def _is_local_param(self, param, access_type):
         """
         TODO(jiaruifang)暂时和client中的is_local_param重复，未来会合并
@@ -247,8 +241,6 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
                 for name, param in module.named_parameters(recurse=False):
                     param_fp32 = torch.nn.Parameter(param.data.clone())
                     register_torch_param(param, f'embedding_{name}')
-                    register_torch_param(param_fp32, f'embedding_{name}_fp32')
-                    self.client.add_param_fp16_to_param_fp32(param, param_fp32)
                     self.client.torch_param_list.append(param)
                 return
 

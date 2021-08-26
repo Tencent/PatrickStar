@@ -193,16 +193,6 @@ def pre_sub_module_backward_function(sub_module, client, name):
 def post_sub_module_backward_function(sub_module, client, name):
     for sub_name, param in sub_module.named_parameters(recurse=False):
         if is_torch_param(param):
-            # TODO allreduce
-            param.data = param.grad
-            param.grad = None
-            world_size = torch.distributed.get_world_size()
-            torch.distributed.all_reduce(param.data,
-                                         op=torch.distributed.ReduceOp.SUM,
-                                         group=self.client.cpu_comm_group,
-                                         async_op=False)
-            param.data /= world_size
-            logger.debug(f'rank {rank} allreduce grad {param.ps_attr.name}')
             continue
         if param.dtype == torch.half:
             tmp_tensor = param.ps_attr.access_tensor(AccessType.DATA)
@@ -297,6 +287,22 @@ def _register_hooks_recursively(module, client, count=[0], name=""):
     module.register_forward_hook(_pre_backward_module_hook)
     module.register_forward_pre_hook(_post_backward_module_hook)
 
+    # torch param will not override data with grad,
+    # we could use the standard register_hook on them.
+    for param in client.torch_param_list:
+        if param.requires_grad:
+            def torch_param_all_reduce(*ignore):
+                world_size = torch.distributed.get_world_size()
+                torch.distributed.all_reduce(param.grad,
+                                             op=torch.distributed.ReduceOp.SUM,
+                                             group=client.cpu_comm_group,
+                                             async_op=False)
+                param.data /= world_size
+                logger.debug(f'rank {torch.distributed.get_rank} allreduce grad {param.ps_attr.name}')
+
+            param_tmp = param.expand_as(param)
+            grad_acc = param_tmp.grad_fn.next_functions[0][0]
+            grad_acc.register_hook(torch_param_all_reduce)
 
 def setup_hybrid_ps_hooks(module, client):
     _register_hooks_recursively(module, client)
