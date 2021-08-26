@@ -15,7 +15,7 @@ import torch
 import logging
 from .const import PSTensorStatus, AccessType, TrainingStage
 import patrickstar.utils.global_timer as global_timer
-from patrickstar.utils import logger, USE_DIST_FLAG
+from patrickstar.utils import logger
 from patrickstar.core.parameter import is_torch_param
 from patrickstar.manager import PatrickStarManager
 
@@ -125,14 +125,10 @@ def pre_sub_module_forward_function(sub_module, client, name):
         logger.debug(f'rank {rank} FWD pre {name}.{sub_name} access data')
         if is_torch_param(param):
             continue
-        if USE_DIST_FLAG:
-            client.access_dist(param,
-                               AccessType.DATA,
-                               torch.device(f'cuda:{client.local_rank}'),
-                               training_stage=TrainingStage.FWD)
-        else:
-            client.access_data(param,
-                               torch.device(f'cuda:{client.local_rank}'))
+        client.access_dist(param,
+                           AccessType.DATA,
+                           torch.device(f'cuda:{client.local_rank}'),
+                           training_stage=TrainingStage.FWD)
         param.data = param.ps_attr.access_tensor(AccessType.DATA)
         flag = True
     if flag:
@@ -165,14 +161,10 @@ def pre_sub_module_backward_function(sub_module, client, name):
         logger.debug(f'rank {rank} BWD pre {name}.{sub_name}')
         if param.dtype == torch.half:
             rank = torch.distributed.get_rank()
-            if USE_DIST_FLAG:
-                client.access_dist(param,
-                                   AccessType.DATA,
-                                   torch.device(f'cuda:{client.local_rank}'),
-                                   training_stage=TrainingStage.BWD)
-            else:
-                client.access(param, AccessType.DATA,
-                              torch.device(f'cuda:{client.local_rank}'))
+            client.access_dist(param,
+                               AccessType.DATA,
+                               torch.device(f'cuda:{client.local_rank}'),
+                               training_stage=TrainingStage.BWD)
             tmp_tensor = param.ps_attr.access_tensor(AccessType.DATA)
             param.data = tmp_tensor
             param.grad = torch.zeros_like(tmp_tensor)
@@ -203,18 +195,12 @@ def post_sub_module_backward_function(sub_module, client, name):
                 logger.debug(
                     f'rank {rank} BWD post before release_dist {name}.{sub_name}'
                 )
-                if USE_DIST_FLAG:
-                    client.release_dist(param,
-                                        AccessType.DATA,
-                                        PSTensorStatus.HOLD_AFTER_BWD,
-                                        training_stage=TrainingStage.BWD,
-                                        is_allreduce=True)
-                else:
-                    client.release(param,
-                                   AccessType.DATA,
-                                   PSTensorStatus.HOLD_AFTER_BWD,
-                                   True,
-                                   allreduce_local_grad=True)
+                client.release_dist(param,
+                                    AccessType.DATA,
+                                    PSTensorStatus.HOLD_AFTER_BWD,
+                                    training_stage=TrainingStage.BWD,
+                                    is_allreduce=True)
+
             else:
                 client.release_data(param, PSTensorStatus.HOLD)
 
@@ -291,6 +277,7 @@ def _register_hooks_recursively(module, client, count=[0], name=""):
     # we could use the standard register_hook on them.
     for param in client.torch_param_list:
         if param.requires_grad:
+
             def torch_param_all_reduce(*ignore):
                 world_size = torch.distributed.get_world_size()
                 torch.distributed.all_reduce(param.grad,
@@ -298,11 +285,14 @@ def _register_hooks_recursively(module, client, count=[0], name=""):
                                              group=client.cpu_comm_group,
                                              async_op=False)
                 param.data /= world_size
-                logger.debug(f'rank {torch.distributed.get_rank} allreduce grad {param.ps_attr.name}')
+                logger.debug(
+                    f'rank {torch.distributed.get_rank} allreduce grad {param.ps_attr.name}'
+                )
 
             param_tmp = param.expand_as(param)
             grad_acc = param_tmp.grad_fn.next_functions[0][0]
             grad_acc.register_hook(torch_param_all_reduce)
+
 
 def setup_hybrid_ps_hooks(module, client):
     _register_hooks_recursively(module, client)

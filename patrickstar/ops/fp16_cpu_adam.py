@@ -21,7 +21,7 @@ import logging
 
 from patrickstar.core.const import PSTensorStatus, AccessType, TrainingStage
 import patrickstar.utils.global_timer as global_timer
-from patrickstar.utils import print_rank, logger, USE_DIST_FLAG, get_sys_memory_used
+from patrickstar.utils import print_rank, logger, get_sys_memory_used
 from patrickstar.core.parameter import register_param, is_torch_param, register_torch_param
 from patrickstar.manager import PatrickStarManager
 from patrickstar.core import ChunkList, ChunkTensorIndex, ChunkListType
@@ -353,17 +353,11 @@ class FP16Adam(torch.optim.Optimizer):
                 param.grad = None
 
                 if torch.distributed.is_initialized():
-                    if USE_DIST_FLAG:
-                        self.client.release_dist(
-                            param,
-                            AccessType.DATA,
-                            PSTensorStatus.HOLD_AFTER_BWD,
-                            training_stage=TrainingStage.BWD,
-                            is_allreduce=True)
-                    else:
-                        self.client.release(param, AccessType.DATA,
-                                            PSTensorStatus.HOLD_AFTER_BWD,
-                                            True)
+                    self.client.release_dist(param,
+                                             AccessType.DATA,
+                                             PSTensorStatus.HOLD_AFTER_BWD,
+                                             training_stage=TrainingStage.BWD,
+                                             is_allreduce=True)
                 else:
                     self.client.release_data(param, PSTensorStatus.HOLD)
         mgr = PatrickStarManager()
@@ -400,7 +394,7 @@ class FP16Adam(torch.optim.Optimizer):
                     state['step'] += 1
 
                     # p不是torch param，且p属于remote chunk跳过
-                    if USE_DIST_FLAG and not is_torch_param(
+                    if not is_torch_param(
                             p) and not self.client.is_local_tensor(
                                 p, AccessType.DATA):
                         continue
