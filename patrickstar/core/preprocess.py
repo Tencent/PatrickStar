@@ -181,15 +181,11 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
                             param_fp32_chunk_id)):
                     if is_param_registered(param_fp32) and is_param_registered(
                             param_fp16):
-                        self.client.access_data(param_fp16,
-                                                torch.device('cpu:0'))
-                        ps_data_fp16 = param_fp16.ps_attr.access_tensor(
-                            AccessType.DATA)
+                        ps_data_fp16 = self.client.access_data(
+                            param_fp16, torch.device('cpu:0'))
 
-                        self.client.access_data(param_fp32,
-                                                torch.device('cpu:0'))
-                        ps_data_fp32 = param_fp32.ps_attr.access_tensor(
-                            AccessType.DATA)
+                        ps_data_fp32 = self.client.access_data(
+                            param_fp32, torch.device('cpu:0'))
 
                         # param_fp16目前还是fp32
                         ps_data_fp16.copy_(param_fp16.data)

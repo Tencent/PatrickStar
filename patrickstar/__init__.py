@@ -15,7 +15,7 @@ from .core import PatrickStarClient
 from .utils import see_memory_usage
 from .fp16 import FP16_Module, FP16_Optimizer
 from .manager import PatrickStarManager
-from .ops import CPUAdam, TorchAdam, FP16Adam
+from .ops import TorchAdam, FP16Adam
 from .utils import global_timer
 from .runtime import initialize_engine
 from .deepspeed_helper.global_vars import set_global_variables
