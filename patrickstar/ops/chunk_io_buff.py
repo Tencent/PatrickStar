@@ -48,7 +48,9 @@ class FP16ChunkWriteBuffer(object):
         target_info = self.chunk_tensor_index.get_tensor_info(
             target_param.ps_attr.data_id())
 
-        if self.cached_src_chunk_id is not None and src_info.chunk_id != self.cached_src_chunk_id:
+        if self.cached_src_chunk_id is None or src_info.chunk_id != self.cached_src_chunk_id:
+            self.cached_src_chunk_id = src_info.chunk_id
+            self.cached_target_chunk_id = target_info.chunk_id
             # TODO CPU->GPU拷贝需要优化
             target_device = self.chunk_list[
                 self.cached_target_chunk_id].payload.device
@@ -65,8 +67,6 @@ class FP16ChunkWriteBuffer(object):
             else:
                 self.chunk_list[self.cached_target_chunk_id].payload.copy_(
                     self.chunk_list[self.cached_src_chunk_id].payload)
-        self.cached_src_chunk_id = src_info.chunk_id
-        self.cached_target_chunk_id = target_info.chunk_id
 
     def reset(self):
         """
