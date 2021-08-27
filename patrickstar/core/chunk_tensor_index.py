@@ -21,46 +21,7 @@ import patrickstar.utils.global_timer as global_timer
 from patrickstar.utils import logger
 
 from .parameter import PSParameter, is_param_registered, ParamType
-
-
-class TensorInfo(object):
-    """
-    记录chunk内存存储tensor的属性
-    PyTorch tensor的存根
-    """
-    def __init__(self,
-                 chunk_id: int,
-                 tensor_id: int,
-                 start_offset: int,
-                 numel: int,
-                 param: torch.nn.Parameter,
-                 access_type: AccessType,
-                 param_name=""):
-        self.tensor_id = tensor_id
-        self.chunk_id = chunk_id
-        self.start_offset = start_offset
-        self.numel = numel
-        self.param = param
-        self.tensor_name = f"{param_name}.data" if (
-            access_type == AccessType.DATA) else f"{param_name}.grad"
-        self.access_type = access_type
-        self.param_fp16_chunk_num = 0
-
-    def status(self):
-        """
-        访问param中的成员变量很慢
-        """
-        if self.param.ps_attr.param_type == ParamType.TORCH_BASED:
-            return None
-        else:
-            return self.param.ps_attr.get_status(self.access_type)
-
-    def showme(self):
-        logger.info(
-            f'tensor_id {self.tensor_id}, name {self.tensor_name}, '
-            f'shape {self.param.shape}, chunk_id {self.chunk_id}, '
-            f'start_offset {self.start_offset}, nueml {self.numel}, status {self.status()}'
-        )
+from .tensor_stub import TensorInfo
 
 
 class ChunkTensorIndex(object):
@@ -372,6 +333,7 @@ class ChunkTensorIndex(object):
                           access_type) -> bool:
         """
         尝试向chunk内插入tensor，返回值表示是否成功
+        如果param已经插入过了则不予处理
         """
         tensor_id_list = self._get_tensor_id_list(chunk_id)
         prev_end_pos = 0
@@ -379,6 +341,9 @@ class ChunkTensorIndex(object):
         numel = param.ps_attr.numel
         tensor_name = param.ps_attr.name
         target_tensor_id = param.ps_attr.get_tensor_id(access_type)
+        for idx, tensor_id in enumerate(tensor_id_list):
+            if target_tensor_id == tensor_id:
+                return True
         for idx, tensor_id in enumerate(tensor_id_list):
             tensor_info = self.tensor_id_to_info_map[tensor_id]
             start_pos = tensor_info.start_offset

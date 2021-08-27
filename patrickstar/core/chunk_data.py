@@ -41,7 +41,6 @@ class Chunk(object):
         删除tensor，只需要将tensor的status设置为free
         这里把chunk设置为对是否分布式无感的，每个进程看到自己的chunk instance。
         """
-        self.pid = os.getpid()
         self.chunk_id = chunk_id
         # payload numel 不等于 capacity, payload可能是None
         self.capacity = capacity
@@ -147,7 +146,6 @@ class Chunk(object):
         ps_manager = PatrickStarManager()
         ps_manager.add(device.type, self.get_payload_space())
 
-        self.touch()
         if self._time_profile:
             global_timer.my_timer.finish_profile('CHUNK_allocate_payload')
 
@@ -201,12 +199,6 @@ class Chunk(object):
             if k != PSTensorStatus.FREE:
                 tensor_num += v
         return self._status_dict[status] == tensor_num
-
-    def touch(self):
-        self.timestamp = datetime.datetime.now().timestamp()
-
-    def get_timestamp(self):
-        return self.timestamp
 
     def move(self, target_device: torch.device, copy_stream, is_async=False):
         """
