@@ -111,18 +111,19 @@ class TestAccess(unittest.TestCase):
         if loss_scale > 0:
             p_grad.div_(loss_scale)
 
-        self.assertTrue(
-            torch.max(torch.abs(p_data_copy - p_data)) < 1e-1,
-            f"p_data diff {torch.max(p_data_copy - p_data)}. Failed check, step {step}, lr {lr} eps {eps} beta1 {beta1} beta2 {beta2} weight_decay {weight_decay}"
+        data_diff = torch.max(torch.abs(p_data_copy - p_data))
+        self.assertLess(
+            data_diff, 1e-4,
+            f"p_data diff {data_diff}. Failed check, step {step}, lr {lr} eps {eps} beta1 {beta1} beta2 {beta2} weight_decay {weight_decay}"
         )
         max_grad_diff = torch.max(torch.abs(p_grad_copy - p_grad))
-        self.assertTrue(max_grad_diff < 1e-3, f"diff {max_grad_diff}")
+        self.assertTrue(max_grad_diff < 1e-4, f"diff {max_grad_diff}")
         max_exp_avg_diff = torch.max(torch.abs(exp_avg_copy - exp_avg))
-        self.assertTrue(max_exp_avg_diff < 1e-3,
+        self.assertTrue(max_exp_avg_diff < 1e-4,
                         f"max_exp_avg_diff {max_exp_avg_diff}")
         max_exp_avg_sq_diff = torch.max(torch.abs(exp_avg_sq_copy -
                                                   exp_avg_sq))
-        self.assertTrue(max_exp_avg_sq_diff < 1e-3,
+        self.assertTrue(max_exp_avg_sq_diff < 1e-4,
                         f"max_exp_avg_sq_diff {max_exp_avg_sq_diff}")
         logger.debug(
             f'Passed check, step {step}, lr {lr} eps {eps} beta1 {beta1} beta2 {beta2} '
