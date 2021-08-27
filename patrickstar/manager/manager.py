@@ -80,7 +80,7 @@ class PatrickStarManager(metaclass=SingletonMeta):
     singleton类，被所有进程访问
     拥有所有chunk信息的overview picture
     """
-    def __init__(self, local_rank: int, config=None):
+    def __init__(self, local_rank: int = 0, config=None):
         self.local_rank = local_rank
         self.gpu_chunk_available_mem = 0
         self.cpu_chunk_available_mem = 0

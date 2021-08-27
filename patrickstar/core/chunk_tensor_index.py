@@ -21,46 +21,7 @@ import patrickstar.utils.global_timer as global_timer
 from patrickstar.utils import logger
 
 from .parameter import PSParameter, is_param_registered, ParamType
-
-
-class TensorInfo(object):
-    """
-    记录chunk内存存储tensor的属性
-    PyTorch tensor的存根
-    """
-    def __init__(self,
-                 chunk_id: int,
-                 tensor_id: int,
-                 start_offset: int,
-                 numel: int,
-                 param: torch.nn.Parameter,
-                 access_type: AccessType,
-                 param_name=""):
-        self.tensor_id = tensor_id
-        self.chunk_id = chunk_id
-        self.start_offset = start_offset
-        self.numel = numel
-        self.param = param
-        self.tensor_name = f"{param_name}.data" if (
-            access_type == AccessType.DATA) else f"{param_name}.grad"
-        self.access_type = access_type
-        self.param_fp16_chunk_num = 0
-
-    def status(self):
-        """
-        访问param中的成员变量很慢
-        """
-        if self.param.ps_attr.param_type == ParamType.TORCH_BASED:
-            return None
-        else:
-            return self.param.ps_attr.get_status(self.access_type)
-
-    def showme(self):
-        logger.info(
-            f'tensor_id {self.tensor_id}, name {self.tensor_name}, '
-            f'shape {self.param.shape}, chunk_id {self.chunk_id}, '
-            f'start_offset {self.start_offset}, nueml {self.numel}, status {self.status()}'
-        )
+from .tensor_stub import TensorInfo
 
 
 class ChunkTensorIndex(object):
