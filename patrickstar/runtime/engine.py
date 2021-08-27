@@ -35,6 +35,7 @@ class PatrickStarEngine(Module):
 
         if client.local_rank == 0:
             logger.info(f'ADAM on device {prefer_device}')
+
         if config is not None:
             # Optimizer configuration
             optim_config = config["optimizer"]
@@ -60,6 +61,12 @@ class PatrickStarEngine(Module):
                         min_scale=loss_scale_config["min_loss_scale"])
                 else:
                     self.loss_scaler = LossScaler(loss_scale)
+
+            # Gradient clipping configuration
+            if "gradient_clipping" not in config:
+                self.gradient_clipping = -1
+            else:
+                self.gradient_clipping = config["gradient_clipping"]
         else:
             # default parameter for adam.
             optim_params = {
@@ -70,10 +77,13 @@ class PatrickStarEngine(Module):
                 "use_hybrid_adam": True
             }
             self.loss_scaler = None
+            self.gradient_clipping = -1
+
         self.optimizer = FP16Adam(
             self.client,
             self.module.parameters(),
             loss_scaler=self.loss_scaler,
+            gradient_clipping=self.gradient_clipping,
             lr=optim_params["lr"],
             betas=optim_params["betas"],
             eps=optim_params["eps"],

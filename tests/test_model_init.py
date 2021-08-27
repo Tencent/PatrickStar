@@ -14,12 +14,12 @@
 import unittest
 from patrickstar.core.preprocess import PSPreProcessCtx
 from patrickstar import PatrickStarManager
-from patrickstar.core import PatrickStarClient, ChunkTensorIndex, ChunkList, AccessType
+from patrickstar.core import PatrickStarClient, ChunkTensorIndex, ChunkList, AccessType, ParamType
 import logging
 import torch
 from tests.simple_net import SimpleModel
 from patrickstar.deepspeed_helper.global_vars import set_global_variables
-from common import distributed_tests
+from common import distributed_test
 from transformers import BertModel, BertConfig
 
 

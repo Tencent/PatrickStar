@@ -233,10 +233,8 @@ class CpuBertEmbeddings(nn.Module):
 
         embeddings = copy_to_gpu(output_activation)
         assert embeddings.dtype == torch.float, f"embedding outputs should be in float on CPU, now {embeddings.dtype}"
-        # embeddings = embeddings.to(torch.half) #)
 
         if is_param_registered(self.LayerNorm.weight):
-            print("here", self.LayerNorm.weight)
             tgt_type = self.LayerNorm.weight.ps_attr.data_type
             assert tgt_type == torch.half, f"{self.LayerNorm.weight.ps_attr.name}"
         else:
