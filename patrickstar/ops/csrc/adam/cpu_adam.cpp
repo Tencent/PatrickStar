@@ -25,7 +25,8 @@ void Adam_Optimizer::Step(float* _params,
                           size_t _param_size,
                           __half* dev_params,
                           bool param_half_precision,
-                          bool grad_half_precision)
+                          bool grad_half_precision,
+                          float loss_scale)
 {
     float betta1_minus1 = 1 - _betta1;
     float betta2_minus1 = 1 - _betta2;
@@ -83,7 +84,11 @@ void Adam_Optimizer::Step(float* _params,
             } else {
                 grad_4.data = SIMD_LOAD(grads + i);
             }
-
+            if (loss_scale > 0) {
+                AVX_Data loss_scale_vec;
+                loss_scale_vec.data = SIMD_LOAD_SCALAR(loss_scale);
+                grad_4.data = SIMD_DIV(grad_4.data, loss_scale_vec.data);
+            }
             AVX_Data momentum_4;
             momentum_4.data = SIMD_LOAD(_exp_avg + i);
             AVX_Data variance_4;
@@ -150,6 +155,9 @@ void Adam_Optimizer::Step(float* _params,
 #pragma omp parallel for
             for (size_t k = t; k < offset; k++) {
                 float grad = grad_half_precision ? (float)grads_cast_h[k] : grads[k];
+                if (loss_scale > 0) {
+                  grad /= loss_scale;
+                }
                 float param = param_half_precision ? (float)params_cast_h[k] : _params[k];
                 float momentum = _exp_avg[k];
                 float variance = _exp_avg_sq[k];
@@ -192,7 +200,8 @@ void Adam_Optimizer::Step_4(float* _params,
                             size_t _param_size,
                             __half* dev_params,
                             bool param_half_precision,
-                            bool grad_half_precision)
+                            bool grad_half_precision,
+                            float loss_scale)
 {
     size_t rounded_size = 0;
 
@@ -254,7 +263,14 @@ void Adam_Optimizer::Step_4(float* _params,
                 grad_4[2].data = SIMD_LOAD(grads + i + (SIMD_WIDTH << 1));
                 grad_4[3].data = SIMD_LOAD(grads + i + SIMD_WIDTH * 3);
             }
-
+            if (loss_scale > 0) {
+                AVX_Data loss_scale_vec;
+                loss_scale_vec.data = SIMD_LOAD_SCALAR(loss_scale);
+                grad_4[0].data = SIMD_DIV(grad_4[0].data, loss_scale_vec.data);
+                grad_4[1].data = SIMD_DIV(grad_4[1].data, loss_scale_vec.data);
+                grad_4[2].data = SIMD_DIV(grad_4[2].data, loss_scale_vec.data);
+                grad_4[3].data = SIMD_DIV(grad_4[3].data, loss_scale_vec.data);
+            }
             AVX_Data momentum_4[4];
             momentum_4[0].data = SIMD_LOAD(_exp_avg + i);
             momentum_4[1].data = SIMD_LOAD(_exp_avg + i + SIMD_WIDTH);
@@ -441,7 +457,8 @@ void Adam_Optimizer::Step_8(float* _params,
                             size_t _param_size,
                             __half* dev_params,
                             bool param_half_precision,
-                            bool grad_half_precision)
+                            bool grad_half_precision,
+                            float loss_scale)
 {
     size_t rounded_size = 0;
 
@@ -510,6 +527,18 @@ void Adam_Optimizer::Step_8(float* _params,
                 grad_4[5].data = SIMD_LOAD(grads + i + SIMD_WIDTH * 5);
                 grad_4[6].data = SIMD_LOAD(grads + i + SIMD_WIDTH * 6);
                 grad_4[7].data = SIMD_LOAD(grads + i + SIMD_WIDTH * 7);
+            }
+            if (loss_scale > 0) {
+                AVX_Data loss_scale_vec;
+                loss_scale_vec.data = SIMD_LOAD_SCALAR(loss_scale);
+                grad_4[0].data = SIMD_DIV(grad_4[0].data, loss_scale_vec.data);
+                grad_4[1].data = SIMD_DIV(grad_4[1].data, loss_scale_vec.data);
+                grad_4[2].data = SIMD_DIV(grad_4[2].data, loss_scale_vec.data);
+                grad_4[3].data = SIMD_DIV(grad_4[3].data, loss_scale_vec.data);
+                grad_4[4].data = SIMD_DIV(grad_4[4].data, loss_scale_vec.data);
+                grad_4[5].data = SIMD_DIV(grad_4[5].data, loss_scale_vec.data);
+                grad_4[6].data = SIMD_DIV(grad_4[6].data, loss_scale_vec.data);
+                grad_4[7].data = SIMD_DIV(grad_4[7].data, loss_scale_vec.data);
             }
 
             AVX_Data momentum_4[8];
@@ -748,7 +777,8 @@ int ds_adam_step(int optimizer_id,
                  torch::Tensor& params,
                  torch::Tensor& grads,
                  torch::Tensor& exp_avg,
-                 torch::Tensor& exp_avg_sq)
+                 torch::Tensor& exp_avg_sq,
+                 float loss_scale)
 {
     auto params_c = params.contiguous();
     auto grads_c = grads.contiguous();
@@ -774,7 +804,8 @@ int ds_adam_step(int optimizer_id,
                 params_c.size(0),
                 nullptr,
                 (params.options().dtype() == at::kHalf),
-                (grads.options().dtype() == at::kHalf));
+                (grads.options().dtype() == at::kHalf),
+                loss_scale);
 
     opt->SynchronizeStreams();
     return 0;
@@ -792,7 +823,8 @@ int ds_adam_step_plus_copy(int optimizer_id,
                            torch::Tensor& grads,
                            torch::Tensor& exp_avg,
                            torch::Tensor& exp_avg_sq,
-                           torch::Tensor& gpu_params)
+                           torch::Tensor& gpu_params,
+                           float loss_scale)
 {
     auto params_c = params.contiguous();
     auto gpu_params_c = gpu_params.contiguous();
@@ -817,7 +849,8 @@ int ds_adam_step_plus_copy(int optimizer_id,
                 params_c.size(0),
                 gpu_params_ptr,
                 (params.options().dtype() == at::kHalf),
-                (grads.options().dtype() == at::kHalf));
+                (grads.options().dtype() == at::kHalf),
+                loss_scale);
 
     opt->SynchronizeStreams();
     return 0;

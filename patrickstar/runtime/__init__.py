@@ -53,7 +53,7 @@ def initialize_engine(model_func, local_rank, config=None):
 
     engine = PatrickStarEngine(model=model,
                                client=client,
-                               config=config["optimizer"])
+                               config=config)
 
     # 开启预热优化
     mgr = PatrickStarManager()

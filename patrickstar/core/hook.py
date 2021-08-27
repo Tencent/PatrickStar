@@ -184,7 +184,10 @@ def post_sub_module_backward_function(sub_module, client, name):
     for sub_name, param in sub_module.named_parameters(recurse=False):
         if is_torch_param(param):
             continue
+        # TODO(jiaruifang)以后给所有param的ps_attr加一个FP16或者FP32的标识。
+        # 不要用param的本身类型判断。因为这个我们可以随意更改param，并没有加检测或者权限限制。
         if param.dtype == torch.half:
+            client.optimizer.check_overflow(param)
             tmp_tensor = param.ps_attr.access_tensor(AccessType.DATA)
             tmp_tensor.copy_(param.grad)
             if torch.distributed.is_initialized():
@@ -278,6 +281,7 @@ def _register_hooks_recursively(module, client, count=[0], name=""):
 
             def torch_param_all_reduce(*ignore):
                 world_size = torch.distributed.get_world_size()
+                client.optimizer.check_overflow(param)
                 torch.distributed.all_reduce(param.grad,
                                              op=torch.distributed.ReduceOp.SUM,
                                              group=client.cpu_comm_group,

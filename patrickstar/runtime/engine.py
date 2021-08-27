@@ -18,6 +18,7 @@ from patrickstar.utils import print_rank as print_rank_0
 from patrickstar.core import PatrickStarClient, AccessType, PSChunkStatus, PSTensorStatus, TrainingStage
 from patrickstar.manager import PatrickStarManager
 from patrickstar.ops import FP16Adam
+from patrickstar.fp16 import LossScaler, DynamicLossScaler
 
 
 class PatrickStarEngine(Module):
@@ -36,11 +37,29 @@ class PatrickStarEngine(Module):
         if client.local_rank == 0:
             logger.info(f'ADAM on device {prefer_device}')
         if config is not None:
-            optim_type = config["type"]
+            # Optimizer configuration
+            optim_config = config["optimizer"]
+            optim_type = optim_config["type"]
             if optim_type != "Adam":
                 raise ValueError(f"Only support adam at the moment. "
                                  f"Get optimizer type {optim_type}")
-            optim_params = config["params"]
+            optim_params = optim_config["params"]
+
+            # Loss scaler configuration
+            if "fp16" not in config:
+                self.loss_scaler = None
+            else:
+                loss_scale_config = config["fp16"]
+                assert loss_scale_config["enabled"], "Must enable fp16 training."
+                loss_scale = loss_scale_config["loss_scale"]
+                if loss_scale == 0:
+                    self.loss_scaler = DynamicLossScaler(
+                        init_scale=2**loss_scale_config["initial_scale_power"],
+                        scale_factor=loss_scale_config["hysteresis"],
+                        scale_window=loss_scale_config["loss_scale_window"],
+                        min_scale=loss_scale_config["min_loss_scale"])
+                else:
+                    self.loss_scaler = LossScaler(loss_scale)
         else:
             # default parameter for adam.
             optim_params = {
@@ -50,9 +69,11 @@ class PatrickStarEngine(Module):
                 "weight_decay": 0,
                 "use_hybrid_adam": True
             }
+            self.loss_scaler = None
         self.optimizer = FP16Adam(
             self.client,
             self.module.parameters(),
+            loss_scaler=self.loss_scaler,
             lr=optim_params["lr"],
             betas=optim_params["betas"],
             eps=optim_params["eps"],
@@ -136,6 +157,9 @@ class PatrickStarEngine(Module):
         mgr = PatrickStarManager()
         mgr._training_stage = TrainingStage.BWD
         self.optimizer.zero_grad()
-        loss.backward()
+        if self.loss_scaler:
+            self.loss_scaler.backward(loss)
+        else:
+            loss.backward()
         mgr.update_margin_mem()
         global_timer.my_timer.finish_profile("BWD")

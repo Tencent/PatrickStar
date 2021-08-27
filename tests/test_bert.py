@@ -147,6 +147,14 @@ def test_bert_model(is_ckp: bool = False,
                     "use_hybrid_adam": args.use_hybrid_adam
                 }
             },
+            "fp16": {
+                "enabled": True,
+                "loss_scale": 2**10,
+                "initial_scale_power": 32,
+                "loss_scale_window": 1000,
+                "hysteresis": 2,
+                "min_loss_scale": 1
+            },
             "default_chunk_size": args.default_chunk_size,
             "use_fake_dist": args.use_fake_dist,
             "use_cpu_embedding": args.use_cpu_embedding

@@ -25,7 +25,9 @@ from patrickstar.ops.op_builder import CPUAdamBuilder
 
 def torch_adam_update(step, lr, beta1, beta2, eps, weight_decay,
                       bias_correction, fp32_data_tensor, fp32_grad_tensor,
-                      exp_avg, exp_avg_sq):
+                      exp_avg, exp_avg_sq, loss_scale):
+    if loss_scale > 0:
+        fp32_grad_tensor.div_(loss_scale)
     bias_correction1 = 1 - beta1**step
     bias_correction2 = 1 - beta2**step
 
@@ -62,7 +64,8 @@ class TestAccess(unittest.TestCase):
                                      weight_decay, False, True)
         self.opt_id = 0
 
-    def check_res(self, step, lr, eps, beta1, beta2, weight_decay, shape, grad_dtype):
+    def check_res(self, step, lr, eps, beta1, beta2, weight_decay,
+                  shape, grad_dtype, loss_scale):
         state = {}
 
         # step = 1
@@ -77,6 +80,8 @@ class TestAccess(unittest.TestCase):
         p_data = torch.rand(shape)
         p_data_copy = p_data.clone()
         p_grad = torch.rand(shape, dtype=grad_dtype)
+        if loss_scale > 0:
+            p_grad.mul_(loss_scale)
         p_grad_copy = p_grad.clone().float()
         exp_avg = torch.rand(shape)
         exp_avg_copy = exp_avg.clone()
@@ -95,7 +100,8 @@ class TestAccess(unittest.TestCase):
             p_data.view(-1),  #fp32 data
             p_grad.view(-1),  #fp32 grad
             exp_avg.view(-1),
-            exp_avg_sq.view(-1))
+            exp_avg_sq.view(-1),
+            loss_scale)
         # print(p_data)
 
         torch_adam_update(
@@ -109,9 +115,14 @@ class TestAccess(unittest.TestCase):
             p_data_copy,  #fp32 data
             p_grad_copy,  #fp32 grad
             exp_avg_copy,
-            exp_avg_sq_copy)
-
+            exp_avg_sq_copy,
+            loss_scale)
         # print(p_data_copy)
+
+        # torch_adam_update update the grad inplace.
+        if loss_scale > 0:
+            p_grad.div_(loss_scale)
+
         assert torch.max(
             torch.abs(p_data_copy - p_data)
         ) < 1e-4, f"p_data diff {torch.max(p_data_copy - p_data)}. Failed check, step {step}, lr {lr} eps {eps} beta1 {beta1} beta2 {beta2} weight_decay {weight_decay}"
@@ -133,8 +144,10 @@ class TestAccess(unittest.TestCase):
                             for beta2 in [0.999, 0.9]:
                                 for weight_decay in [0.001, 0]:
                                     for grad_dtype in [torch.float, torch.half]:
-                                        self.check_res(step, lr, eps, beta1, beta2,
-                                                       weight_decay, shape, grad_dtype)
+                                        for loss_scale in [-1, 2**5]:
+                                            self.check_res(step, lr, eps, beta1, beta2,
+                                                           weight_decay, shape, grad_dtype,
+                                                           loss_scale)
 
 
 if __name__ == "__main__":
