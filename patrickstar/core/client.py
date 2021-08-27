@@ -241,7 +241,7 @@ class PatrickStarClient(object):
         """
         assert is_param_registered(
             param
-        ), "client shall not access_dist tensor not registered for PatrickStar"
+        ), "Client can only access_dist tensor registered for PatrickStar."
         return param.ps_attr.is_local()
 
     def _fetch_remote_chunks(self, chunk_id_list, local_chunk_id,
@@ -330,7 +330,7 @@ class PatrickStarClient(object):
 
         assert is_param_registered(
             param
-        ), "client shall not access_dist tensor not registered for PatrickStar"
+        ), "Client can only access_dist tensor registered for PatrickStar."
         if param.ps_attr.param_type == ParamType.TORCH_BASED:
             if access_type == AccessType.DATA:
                 return param.data

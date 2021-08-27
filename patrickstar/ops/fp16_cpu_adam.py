@@ -47,6 +47,7 @@ class FP16Adam(torch.optim.Optimizer):
                  client,
                  params,
                  loss_scaler=None,
+                 gradient_clipping=-1,
                  lr=1e-3,
                  betas=(0.9, 0.999),
                  eps=1e-8,
@@ -83,6 +84,8 @@ class FP16Adam(torch.optim.Optimizer):
 
         self.loss_scaler = loss_scaler
         self.has_overflow = False
+
+        self.gradient_clipping = gradient_clipping
 
         self.prefer_device = prefer_device
         self.use_hybrid_adam = use_hybrid_adam
@@ -298,6 +301,13 @@ class FP16Adam(torch.optim.Optimizer):
                 # 如果是第一个tensor则拷贝Chunk，否则索引chunk
                 fp16_grad_tensor = read_chunk_buff.access_from_cache(
                     fp16_param).view(fp16_param.ps_attr.shape)
+
+            # gradient clipping
+            if self.gradient_clipping > 0:
+                gradient_clipping = self.gradient_clipping
+                if self.loss_scaler is not None:
+                    gradient_clipping *= self.loss_scaler.loss_scale
+                fp16_grad_tensor.clamp_(-gradient_clipping, gradient_clipping)
 
             compute_device = fp16_grad_tensor.device
 

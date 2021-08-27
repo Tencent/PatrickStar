@@ -37,6 +37,7 @@ class PSParameter(object):
         args
             @param: torch param，PSParameter管理的是它的data和grad
             @param_type: 类型，torch_based由pytorch管理，chunk_based由chunk管理
+            @data_type: PSParameter的类型，可以和当前param不一致
             @name: 名字
         """
         self.name = name
