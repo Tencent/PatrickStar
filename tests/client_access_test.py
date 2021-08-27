@@ -47,7 +47,6 @@ class TestClientAccess(unittest.TestCase):
             self.client.append_tensor(param, torch.float, AccessType.DATA,
                                       ChunkListType.PARAM_FP32, f"param{idx}")
 
-            # TODO(jiaruifang) access_data叫try_fetch_data更恰当，并没有返回一个tensor
             real_payload = self.client.access_data(param,
                                                    torch.device('cpu:0'))
             real_payload.copy_(param.data)
@@ -82,7 +81,6 @@ class TestClientAccess(unittest.TestCase):
             self.client.append_tensor(param, torch.float, AccessType.DATA,
                                       ChunkListType.PARAM_FP32, f"param{idx}")
 
-            # TODO(jiaruifang) access_data叫try_fetch_data更恰当，并没有返回一个tensor
             real_payload = self.client.access_data(param,
                                                    torch.device('cpu:0'))
             real_payload.copy_(param.data)

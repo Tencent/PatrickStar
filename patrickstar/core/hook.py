@@ -159,7 +159,7 @@ def pre_sub_module_backward_function(sub_module, client, name):
             continue
         rank = torch.distributed.get_rank()
         logger.debug(f'rank {rank} BWD pre {name}.{sub_name}')
-        if param.dtype == torch.half:
+        if param.ps_attr.data_type == torch.half:
             rank = torch.distributed.get_rank()
             tmp_tensor = client.access_dist(
                 param,
@@ -170,10 +170,7 @@ def pre_sub_module_backward_function(sub_module, client, name):
             param.grad = torch.zeros_like(tmp_tensor)
             assert param.data.data_ptr() != param.grad.data_ptr()
         elif param.dtype == torch.float:
-            param.data = client.access_data(
-                param, torch.device(f'cuda:{client.local_rank}'))
-            param.grad = client.access_grad(
-                param, torch.device(f'cuda:{client.local_rank}'))
+            raise RuntimeError("fp32 training is not supported!")
         flag = True
     if flag:
         mgr = PatrickStarManager()
@@ -186,7 +183,7 @@ def post_sub_module_backward_function(sub_module, client, name):
             continue
         # TODO(jiaruifang)以后给所有param的ps_attr加一个FP16或者FP32的标识。
         # 不要用param的本身类型判断。因为这个我们可以随意更改param，并没有加检测或者权限限制。
-        if param.dtype == torch.half:
+        if param.ps_attr.data_type == torch.half:
             client.optimizer.check_overflow(param)
             tmp_tensor = param.ps_attr.access_tensor(AccessType.DATA)
             tmp_tensor.copy_(param.grad)
