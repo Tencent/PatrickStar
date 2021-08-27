@@ -21,6 +21,7 @@ import math
 import unittest
 
 from patrickstar.ops.op_builder import CPUAdamBuilder
+from patrickstar.utils import logger
 
 
 def torch_adam_update(step, lr, beta1, beta2, eps, weight_decay,
@@ -123,7 +124,7 @@ class TestAccess(unittest.TestCase):
                                                   exp_avg_sq))
         self.assertTrue(max_exp_avg_sq_diff < 1e-3,
                         f"max_exp_avg_sq_diff {max_exp_avg_sq_diff}")
-        print(
+        logger.debug(
             f'Passed check, step {step}, lr {lr} eps {eps} beta1 {beta1} beta2 {beta2} '
             f'weight_decay {weight_decay} grad_dtype {grad_dtype}')
 
