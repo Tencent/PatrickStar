@@ -141,4 +141,4 @@ def is_torch_param(param):
     if hasattr(param, 'ps_attr'):
         return param.ps_attr._is_torch
     else:
-        return False
+        return True
