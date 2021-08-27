@@ -29,7 +29,7 @@ class TestChunkData(unittest.TestCase):
         self.compute_device = torch.device(
             'cuda:0') if torch.cuda.is_available() else torch.device('cpu')
         # 构建静态chunk layout -> chunk_tensor_index
-        chunk_tensor_index = ChunkTensorIndex()
+        chunk_tensor_index = ChunkTensorIndex(self.default_chunk_size)
 
         param1 = torch.nn.Parameter(torch.zeros(10))
         register_param(param1, ParamType.CHUNK_BASED, torch.float, "param1")
@@ -50,37 +50,47 @@ class TestChunkData(unittest.TestCase):
         register_param(param2, ParamType.CHUNK_BASED, torch.float, "param2")
         self.assertTrue(
             chunk_tensor_index.get_chunk_id(param2, AccessType.DATA) is None)
-        chunk_tensor_index.try_insert_tensor(0, param2, torch.float,
-                                             AccessType.DATA)
+        ret = chunk_tensor_index.try_insert_tensor(0, param2, torch.float,
+                                                   AccessType.DATA)
+        self.assertTrue(ret)
         tensor_info = chunk_tensor_index.get_tensor_info(
             param2.ps_attr.data_id())
-        self.assertTrue(tensor_info.offset)
-        # chunk_tensor_index.add_tensor(0, param2.ps_attr.data_id(), 20, param2.numel(),
-        #                               param2, AccessType.DATA)
+        self.assertTrue(tensor_info.start_offset == 10)
 
         param3 = torch.nn.Parameter(torch.zeros(5))
         register_param(param3, ParamType.CHUNK_BASED, torch.float, "param3")
-        chunk_tensor_index.add_tensor(0, param3.ps_attr.data_id(), 15,
-                                      param3.numel(), param3, AccessType.DATA)
+        ret = chunk_tensor_index.try_insert_tensor(0, param3, torch.float,
+                                                   AccessType.DATA)
+        tensor_info = chunk_tensor_index.get_tensor_info(
+            param3.ps_attr.data_id())
+        self.assertTrue(tensor_info.start_offset == 25)
 
-        param4 = torch.nn.Parameter(torch.zeros(7))
+        param4 = torch.nn.Parameter(torch.zeros(100))
         register_param(param4, ParamType.CHUNK_BASED, torch.float, "param4")
-        chunk_tensor_index.add_tensor(0, param4.ps_attr.data_id(), 35,
-                                      param4.numel(), param4, AccessType.DATA)
-
+        ret = chunk_tensor_index.try_insert_tensor(0, param4, torch.float,
+                                                   AccessType.DATA)
+        self.assertFalse(ret)
         # chunk_tensor_index.delete_tensor(11)
 
         param5 = torch.nn.Parameter(torch.zeros(13))
         register_param(param5, ParamType.CHUNK_BASED, torch.float, "param5")
-        chunk_tensor_index.add_tensor(1, param5.ps_attr.data_id(), 7,
-                                      param5.numel(), param5, AccessType.DATA)
+        ret = chunk_tensor_index.try_insert_tensor(1, param5, torch.float,
+                                                   AccessType.DATA)
+        tensor_info = chunk_tensor_index.get_tensor_info(
+            param5.ps_attr.data_id())
+        self.assertTrue(tensor_info.start_offset == 0)
 
-        param6 = torch.nn.Parameter(torch.zeros(3))
+        ret = chunk_tensor_index.try_insert_tensor(1, param5, torch.float,
+                                                   AccessType.DATA)
+        tensor_info = chunk_tensor_index.get_tensor_info(
+            param5.ps_attr.data_id())
+        self.assertTrue(tensor_info.start_offset == 0)
+
+        param6 = torch.nn.Parameter(torch.zeros(1000))
         register_param(param6, ParamType.CHUNK_BASED, torch.float, "param6")
-        chunk_tensor_index.add_tensor(1, param6.ps_attr.data_id(), 2,
-                                      param6.numel(), param6, AccessType.DATA)
-
-        # chunk_tensor_index.visit_chunk()
+        ret = chunk_tensor_index.try_insert_tensor(1, param6, torch.float,
+                                                   AccessType.DATA)
+        self.assertFalse(ret)
 
 
 if __name__ == "__main__":

@@ -333,6 +333,7 @@ class ChunkTensorIndex(object):
                           access_type) -> bool:
         """
         尝试向chunk内插入tensor，返回值表示是否成功
+        如果param已经插入过了则不予处理
         """
         tensor_id_list = self._get_tensor_id_list(chunk_id)
         prev_end_pos = 0
@@ -340,6 +341,9 @@ class ChunkTensorIndex(object):
         numel = param.ps_attr.numel
         tensor_name = param.ps_attr.name
         target_tensor_id = param.ps_attr.get_tensor_id(access_type)
+        for idx, tensor_id in enumerate(tensor_id_list):
+            if target_tensor_id == tensor_id:
+                return True
         for idx, tensor_id in enumerate(tensor_id_list):
             tensor_info = self.tensor_id_to_info_map[tensor_id]
             start_pos = tensor_info.start_offset
