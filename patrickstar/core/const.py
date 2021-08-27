@@ -58,3 +58,8 @@ class ChunkListType(Enum):
     MOMENTUM = 2
     VARIANCE = 3
     UNDEF = 4
+
+
+class ParamType(Enum):
+    CHUNK_BASED = 0
+    TORCH_BASED = 1

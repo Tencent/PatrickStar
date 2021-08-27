@@ -20,7 +20,7 @@ from .chunk_list import ChunkList
 import patrickstar.utils.global_timer as global_timer
 from patrickstar.utils import logger
 
-from .parameter import PSParameter, is_param_registered
+from .parameter import PSParameter, is_param_registered, ParamType
 
 
 class TensorInfo(object):
@@ -50,7 +50,10 @@ class TensorInfo(object):
         """
         访问param中的成员变量很慢
         """
-        return self.param.ps_attr.get_status(self.access_type)
+        if self.param.ps_attr.param_type == ParamType.TORCH_BASED:
+            return None
+        else:
+            return self.param.ps_attr.get_status(self.access_type)
 
     def showme(self):
         logger.info(

@@ -19,8 +19,7 @@ import logging
 import torch
 from tests.simple_net import SimpleModel
 from patrickstar.deepspeed_helper.global_vars import set_global_variables
-from common import distributed_test
-from patrickstar.core import is_torch_param
+from common import distributed_tests
 from transformers import BertModel, BertConfig
 
 
@@ -51,7 +50,7 @@ class TestModelInitContext(unittest.TestCase):
 
         for ps_param, torch_param in zip(ps_model.parameters(),
                                          torch_model.parameters()):
-            if is_torch_param(ps_param):
+            if ps_param.ps_attr.param_type == ParamType.TORCH_BASED:
                 self.assertLess(
                     torch.max(torch_param.data - ps_param), 1e-4,
                     f"PyTorch tensors are not consist with each other")

@@ -12,7 +12,7 @@
 # See the AUTHORS file for names of contributors.
 
 import torch
-from .const import PSTensorStatus, AccessType
+from .const import PSTensorStatus, AccessType, ParamType
 import logging
 
 
@@ -27,27 +27,38 @@ class PSTensor(object):
 
 
 class PSParameter(object):
-    def __init__(self, param: torch.nn.Parameter, name: str = None):
+    def __init__(self,
+                 param: torch.nn.Parameter,
+                 param_type: ParamType,
+                 data_type: torch.dtype,
+                 name: str = None):
         """
-        在torch.nn.Parameter的附加成员变量
+        初始化PSParameter，PSParameter的类型可以和param不一致
+        args
+            @param: torch param，PSParameter管理的是它的data和grad
+            @param_type: 类型，torch_based由pytorch管理，chunk_based由chunk管理
+            @name: 名字
         """
         self.name = name
+
         self.numel = param.numel()
         self.shape = param.shape
+
+        self.data_type = data_type
+        self.param_type = param_type
 
         self.data_chunk_id = None
         self.grad_chunk_id = None
 
-        self.data_tensor = PSTensor()
-        if param.requires_grad:
-            self.grad_tensor = PSTensor()
-        else:
-            self.grad_tensor = None
+        if self.param_type == ParamType.CHUNK_BASED:
+            self.data_tensor = PSTensor()
+            if param.requires_grad:
+                self.grad_tensor = PSTensor()
+            else:
+                self.grad_tensor = None
 
         # 参数是否属于进程的本地Chunk
         self._is_local = True
-        # 参数是否交给Torch做内存管理，而不是Chunk
-        self._is_torch = False
 
     def is_local(self):
         return self._is_local
@@ -63,38 +74,53 @@ class PSParameter(object):
         return self.get_tensor_id(AccessType.GRAD)
 
     def get_tensor_id(self, access_type: AccessType):
-        if access_type == AccessType.DATA:
-            return self.data_tensor.id
-        elif access_type == AccessType.GRAD:
-            return self.grad_tensor.id
+        """
+        只有chunk based tensor有id，torch返回-1
+        """
+        if self.param_type == ParamType.TORCH_BASED:
+            return -1
         else:
-            raise ValueError
+            if access_type == AccessType.DATA:
+                return self.data_tensor.id
+            elif access_type == AccessType.GRAD:
+                return self.grad_tensor.id
+            else:
+                raise ValueError
 
     def set_tensor(self, tensor: torch.Tensor, access_type: AccessType):
-        if access_type == AccessType.DATA:
-            self.data_tensor.tensor = tensor.view(self.shape)
-        elif access_type == AccessType.GRAD:
-            self.grad_tensor.tensor = tensor.view(self.shape)
-        else:
+        if self.param_type == ParamType.TORCH_BASED:
             raise ValueError
+        else:
+            if access_type == AccessType.DATA:
+                self.data_tensor.tensor = tensor.view(self.shape)
+            elif access_type == AccessType.GRAD:
+                self.grad_tensor.tensor = tensor.view(self.shape)
+            else:
+                raise ValueError
 
     def access_tensor(self, access_type: AccessType):
-        if access_type == AccessType.DATA:
-            return self.data_tensor.tensor
-        elif access_type == AccessType.GRAD:
-            if self._is_torch:
-                raise RuntimeError
-            return self.grad_tensor.tensor
-        else:
+        if self.param_type == ParamType.TORCH_BASED:
             raise ValueError
+        else:
+            if access_type == AccessType.DATA:
+                return self.data_tensor.tensor
+            elif access_type == AccessType.GRAD:
+                if self._is_torch:
+                    raise RuntimeError
+                return self.grad_tensor.tensor
+            else:
+                raise ValueError
 
     def get_status(self, access_type: AccessType):
-        if access_type == AccessType.DATA:
-            return self.data_tensor.status
-        elif access_type == AccessType.GRAD:
-            return self.grad_tensor.status
-        else:
+        if self.param_type == ParamType.TORCH_BASED:
             raise ValueError
+        else:
+            if access_type == AccessType.DATA:
+                return self.data_tensor.status
+            elif access_type == AccessType.GRAD:
+                return self.grad_tensor.status
+            else:
+                raise ValueError
 
     def set_status(self, status: PSTensorStatus, access_type: AccessType):
         """
@@ -102,43 +128,28 @@ class PSParameter(object):
         HOLD和FREE状态都悬空
         TODO(jiaruifang)还需要param reset data和grad
         """
-        if access_type == AccessType.DATA:
-            self.data_tensor.status = status
-            if status != PSTensorStatus.COMPUTE:
-                self.data_tensor.tensor = None
-        elif access_type == AccessType.GRAD:
-            self.grad_tensor.status = status
-            if status != PSTensorStatus.COMPUTE:
-                self.grad_tensor.tensor = None
+        if self.param_type == ParamType.TORCH_BASED:
+            raise ValueError
         else:
-            raise ValueError(
-                f'set status {status} when access type is {access_type}')
+            if access_type == AccessType.DATA:
+                self.data_tensor.status = status
+                if status != PSTensorStatus.COMPUTE:
+                    self.data_tensor.tensor = None
+            elif access_type == AccessType.GRAD:
+                self.grad_tensor.status = status
+                if status != PSTensorStatus.COMPUTE:
+                    self.grad_tensor.tensor = None
+            else:
+                raise ValueError(
+                    f'set status {status} when access type is {access_type}')
 
 
-def register_param(param, name=None):
+def register_param(param, param_type, data_type, name=None):
     assert isinstance(param, torch.nn.Parameter)
     if not hasattr(param, 'ps_attr'):
-        param.ps_attr = PSParameter(param, name)
+        param.ps_attr = PSParameter(param, param_type, data_type, name)
 
 
 def is_param_registered(param) -> bool:
     assert isinstance(param, torch.nn.Parameter)
     return hasattr(param, 'ps_attr')
-
-
-def register_torch_param(param, name=None):
-    assert isinstance(param, torch.nn.Parameter)
-    if not hasattr(param, 'ps_attr'):
-        param.ps_attr = PSParameter(param, name)
-        param.ps_attr._is_torch = True
-    else:
-        raise RuntimeError(
-            "Cannot both register_torch_param and register_param")
-
-
-def is_torch_param(param):
-    assert isinstance(param, torch.nn.Parameter)
-    if hasattr(param, 'ps_attr'):
-        return param.ps_attr._is_torch
-    else:
-        return True

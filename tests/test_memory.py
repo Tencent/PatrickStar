@@ -18,18 +18,12 @@ import time
 import logging
 
 from manager import PatrickStarManager
-from client import PatrickStarClient, AccessType
+from patrickstar.core import PatrickStarClient, AccessType, ParamType
 from patrickstar.utils import see_memory_usage
-
-manager = PatrickStarManager()
 
 
 def test_monitor():
     # gpu 4GB, CPU 4 GB
-    manager.init(gpu_info=[1024 * 1024 * 1024 * 4],
-                 cpu_info=[4 * 1024 * 1024 * 1024])
-    print("is init manager", PatrickStarManager().is_init())
-
     # nothing in memory
     # MA 0.0 KB         Max_MA 0.0 KB         CA 0.0 KB         Max_CA 0 KB
     # CPU Virtual Memory:  used = 1.64 GB, percent = 10.5%
@@ -67,11 +61,8 @@ def test_monitor():
 
     client = PatrickStarClient(rank=0, default_chunk_size=1024)
 
-    client.register_param(param1)
-
     # 应该也是 4KB
     see_memory_usage('after register param1', force=True)
-    client.register_param(param2)
 
     # now 4MB CPU memory, 0KB GPU memory
     # MA 0.0 KB         Max_MA 4.0 KB         CA 2048.0 KB         Max_CA 2048 KB
@@ -81,9 +72,6 @@ def test_monitor():
     assert param1.device == torch.device('cpu')
 
     # 测试chunk内存复用
-
-    # 测试chunk的删除
-    client.register_param(param1, )
 
 
 if __name__ == "__main__":

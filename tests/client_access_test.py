@@ -17,6 +17,7 @@ import logging
 import torch
 from patrickstar import PatrickStarManager
 from common import distributed_test
+from patrickstar.core.parameter import ParamType
 
 
 class TestClientAccess(unittest.TestCase):
@@ -25,7 +26,7 @@ class TestClientAccess(unittest.TestCase):
         logging.info('SetUp finished')
 
     @distributed_test(world_size=[1])
-    def test_append_tensor(self):
+    def test_append_ps_tensor(self):
         mgr = PatrickStarManager(0)
         self.client = PatrickStarClient(
             rank=0, default_chunk_size=self.default_chunk_size)
@@ -40,6 +41,9 @@ class TestClientAccess(unittest.TestCase):
             param = torch.nn.Parameter(torch.rand(psize))
             param_list.append(param)
             param_payload_ref_list.append(param.data.clone())
+
+            register_param(param, ParamType.CHUNK_BASED, torch.float,
+                           f"param_{idx}")
             self.client.append_tensor(param, torch.float, AccessType.DATA,
                                       ChunkListType.PARAM_FP32, f"param{idx}")
 
@@ -47,7 +51,41 @@ class TestClientAccess(unittest.TestCase):
             real_payload = self.client.access_data(param,
                                                    torch.device('cpu:0'))
             real_payload.copy_(param.data)
-            param.data = torch.tensor([])
+            self.client.release_data(param)
+            self.assertTrue(param.data.numel() == 0)
+
+        self.client.chunk_tensor_index.visit_chunks(self.client.chunk_list)
+        for param, payload_ref in zip(param_list, param_payload_ref_list):
+            real_payload = self.client.access_data(param,
+                                                   torch.device('cpu:0'))
+            self.assertEqual(torch.max(real_payload - payload_ref), 0)
+            self.client.release_data(param)
+
+    @distributed_test(world_size=[1])
+    def test_append_torch_tensor(self):
+        mgr = PatrickStarManager(0)
+        self.client = PatrickStarClient(
+            rank=0, default_chunk_size=self.default_chunk_size)
+
+        self.compute_device = torch.device('cpu:0')
+
+        param_size_list = [10, 11, 12, 13]
+
+        param_list = []
+        param_payload_ref_list = []
+        for idx, psize in enumerate(param_size_list):
+            param = torch.nn.Parameter(torch.rand(psize))
+            param_list.append(param)
+            register_param(param, ParamType.TORCH_BASED, torch.float,
+                           f"param_{idx}")
+            param_payload_ref_list.append(param.data.clone())
+            self.client.append_tensor(param, torch.float, AccessType.DATA,
+                                      ChunkListType.PARAM_FP32, f"param{idx}")
+
+            # TODO(jiaruifang) access_data叫try_fetch_data更恰当，并没有返回一个tensor
+            real_payload = self.client.access_data(param,
+                                                   torch.device('cpu:0'))
+            real_payload.copy_(param.data)
             self.client.release_data(param)
 
         self.client.chunk_tensor_index.visit_chunks(self.client.chunk_list)

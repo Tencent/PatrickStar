@@ -14,7 +14,7 @@
 import torch
 import torch.nn as nn
 from patrickstar.utils import logger
-from patrickstar.core.parameter import is_torch_param, is_param_registered
+from patrickstar.core.parameter import is_param_registered
 from patrickstar.core import AccessType
 
 
@@ -235,11 +235,12 @@ class CpuBertEmbeddings(nn.Module):
         assert embeddings.dtype == torch.float, f"embedding outputs should be in float on CPU, now {embeddings.dtype}"
         # embeddings = embeddings.to(torch.half) #)
 
-        param_W = self.LayerNorm.weight
-        if is_torch_param(param_W):
-            tgt_type = param_W.dtype
+        if is_param_registered(self.LayerNorm.weight):
+            print("here", self.LayerNorm.weight)
+            tgt_type = self.LayerNorm.weight.ps_attr.data_type
+            assert tgt_type == torch.half, f"{self.LayerNorm.weight.ps_attr.name}"
         else:
-            tgt_type = torch.half
-        embeddings = self.LayerNorm(embeddings.to(tgt_type))  #
+            tgt_type = self.LayerNorm.weight.dtype
+        embeddings = self.LayerNorm(embeddings.to(tgt_type))
         embeddings = self.dropout(embeddings)
         return embeddings
