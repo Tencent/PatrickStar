@@ -407,7 +407,8 @@ void Adam_Optimizer::Step_4(float* _params,
              (_param_size - rounded_size),
              (dev_params != nullptr ? (dev_params + rounded_size) : dev_params),
              param_half_precision,
-             grad_half_precision);
+             grad_half_precision,
+             loss_scale);
 }
 
 int create_adam_optimizer(int optimizer_id,
@@ -763,7 +764,8 @@ void Adam_Optimizer::Step_8(float* _params,
                (_param_size - rounded_size),
                (dev_params != nullptr ? (dev_params + rounded_size) : dev_params),
                param_half_precision,
-               grad_half_precision);
+               grad_half_precision,
+               loss_scale);
 }
 
 int ds_adam_step(int optimizer_id,
