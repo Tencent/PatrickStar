@@ -25,7 +25,7 @@ from .chunk_data import Chunk
 from .chunk_list import ChunkList, ChunkListType
 from .helper import getsizeof
 from .chunk_tensor_index import ChunkTensorIndex
-from .parameter import PSParameter, register_param, is_param_registered, is_torch_param
+from .parameter import PSParameter, register_param, is_param_registered, ParamType
 import patrickstar.utils.global_timer as global_timer
 from patrickstar.utils.memory_monitor import get_sys_memory_used, see_memory_usage
 from patrickstar.utils import logger
@@ -112,7 +112,8 @@ class PatrickStarClient(object):
         dummy = torch.nn.Parameter(torch.tensor([], dtype=data_type),
                                    requires_grad=False)
         # 加入一个dummy param可以让dummy chunk状态被设置为hold
-        register_param(dummy, f"dummy_{comm_group_idx}")
+        register_param(dummy, ParamType.CHUNK_BASED, torch.half,
+                       f"dummy_{comm_group_idx}")
         self.dummy_param_list.append(dummy)
         self.chunk_tensor_index.add_tensor(
             tmp_chunk_id, self.dummy_param_list[-1].ps_attr.data_id(), 0,
@@ -141,7 +142,7 @@ class PatrickStarClient(object):
         assert type(
             data_type) == torch.dtype, f"data_type is {type(data_type)}"
         assert type(access_type) == AccessType
-        register_param(param, tensor_name)
+        assert is_param_registered(param)
         if self.chunk_list.is_empty(chunk_list_type):
             chunk_id = self.chunk_list.generate_chunk_id()
         else:
@@ -238,8 +239,9 @@ class PatrickStarClient(object):
         调用本接口前判断是否是torch_param
         判断tensor是否在本GPU之上
         """
-        if is_torch_param(param):
-            return False
+        assert is_param_registered(
+            param
+        ), "Client can only access_dist tensor registered for PatrickStar."
         return param.ps_attr.is_local()
 
     def _fetch_remote_chunks(self, chunk_id_list, local_chunk_id,
@@ -325,13 +327,11 @@ class PatrickStarClient(object):
             compute_device: 目标设备
             training_stage: 训练解阶段
         """
-        assert compute_device.type == "cuda"
-        if not hasattr(param, 'ps_attr'):
-            raise RuntimeError(
-                "FP16 training shall not meet tensors not registered for PS")
 
-        # 如果是Torch管理的Tensor，则直接返回，不管compute_device的意义
-        if is_torch_param(param):
+        assert is_param_registered(
+            param
+        ), "Client can only access_dist tensor registered for PatrickStar."
+        if param.ps_attr.param_type == ParamType.TORCH_BASED:
             if access_type == AccessType.DATA:
                 return param.data
             elif access_type == AccessType.GRAD:
@@ -427,20 +427,16 @@ class PatrickStarClient(object):
         2. adam过程access_data
         只能访问本地chunk不需要通信
         """
-        if is_torch_param(param):
+        assert is_param_registered(
+            param
+        ), "client shall not access tensor not registered for PatrickStar"
+        if param.ps_attr.param_type == ParamType.TORCH_BASED:
             if access_type == AccessType.DATA:
                 return param.data
             elif access_type == AccessType.GRAD:
                 return param.grad
             else:
                 raise RuntimeError(f"{access_type} is not supported")
-
-        if not hasattr(param, 'ps_attr'):
-            # 第一次access，动态调度方案的预热过程会遇到
-            # data 和 grad都有id
-            # TODO(jiaruifang)可以在optimizer init过程把编号分配好
-            raise RuntimeError(
-                "FP16 training shall not meet tensors not registered for PS")
 
         if self._time_profile:
             global_timer.my_timer.start_profile('CLIENT_access')
@@ -523,15 +519,15 @@ class PatrickStarClient(object):
         在释放Parameter中tensor的内存，释放PSTensor中的内存
         看看是否有chunk的状态为free，释放chunk内存
         """
+        if param.ps_attr.param_type == ParamType.TORCH_BASED:
+            return
+
         if self._time_profile:
             global_timer.my_timer.start_profile('CLIENT_release_dist')
         rank = torch.distributed.get_rank()
 
         assert isinstance(reset_to_status, PSTensorStatus)
         assert torch.distributed.is_initialized()
-
-        if is_torch_param(param):
-            return
 
         chunk_id = self.chunk_tensor_index.get_chunk_id(param, access_type)
         # 可以在tensor-chunk schema构造过程中获得local_chunk_id
@@ -555,7 +551,7 @@ class PatrickStarClient(object):
         if access_type == AccessType.DATA:
             # NOTE(jiaruifang) 必须device和原来param一致，影响hook of param.grad_fn.next_functions[0][0]
             param.data = torch.tensor([],
-                                      dtype=param.dtype,
+                                      dtype=param.ps_attr.data_type,
                                       device=param.device)
         elif access_type == AccessType.GRAD:
             param.grad = None
@@ -643,7 +639,7 @@ class PatrickStarClient(object):
         在释放Parameter中tensor的内存，释放PSTensor中的内存
         看看是否有chunk的状态为free，释放chunk内存
         """
-        if is_torch_param(param):
+        if param.ps_attr.param_type == ParamType.TORCH_BASED:
             return
         if self._time_profile:
             global_timer.my_timer.start_profile('CLIENT_release')
@@ -665,7 +661,7 @@ class PatrickStarClient(object):
         if access_type == AccessType.DATA:
             # NOTE() 必须to device它和param.grad_fn.next_functions[0][0]
             param.data = torch.tensor([],
-                                      dtype=param.dtype,
+                                      dtype=param.ps_attr.data_type,
                                       device=param.device)
         elif access_type == AccessType.GRAD:
             param.grad = None

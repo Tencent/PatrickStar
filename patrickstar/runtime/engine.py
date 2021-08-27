@@ -31,7 +31,6 @@ class PatrickStarEngine(Module):
 
         self.client = client
 
-        # TODO(jiaruifang) prefer_device应该是自适应的
         prefer_device = torch.device(f'cpu:0')
 
         if client.local_rank == 0:
@@ -51,7 +50,8 @@ class PatrickStarEngine(Module):
                 self.loss_scaler = None
             else:
                 loss_scale_config = config["fp16"]
-                assert loss_scale_config["enabled"], "Must enable fp16 training."
+                assert loss_scale_config[
+                    "enabled"], "Must enable fp16 training."
                 loss_scale = loss_scale_config["loss_scale"]
                 if loss_scale == 0:
                     self.loss_scaler = DynamicLossScaler(

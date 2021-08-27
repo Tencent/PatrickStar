@@ -12,8 +12,7 @@
 # See the AUTHORS file for names of contributors.
 
 import torch
-from patrickstar.core import ChunkList, ChunkTensorIndex
-from patrickstar.core.parameter import is_torch_param
+from patrickstar.core import ChunkList, ChunkTensorIndex, ParamType
 from patrickstar.manager import PatrickStarManager
 from patrickstar.utils import logger
 
@@ -42,7 +41,7 @@ class FP16ChunkWriteBuffer(object):
         可能是cpu向gpu移动
         """
         # torch param 只有 fp32 的一份数据，不需要拷贝
-        assert not is_torch_param(src_param)
+        assert src_param.ps_attr.param_type == ParamType.CHUNK_BASED
         src_info = self.chunk_tensor_index.get_tensor_info(
             src_param.ps_attr.data_id())
         target_info = self.chunk_tensor_index.get_tensor_info(
@@ -134,7 +133,7 @@ class FP32ChunkReadBuffer(object):
         target_device可能是cpu或者gpu，因此需要两种不同的payload来缓存
         返回一个tensor内存
         """
-        if is_torch_param(param):
+        if param.ps_attr.param_type == ParamType.TORCH_BASED:
             # torch param 的梯度保存在 param.grad 中
             return param.grad
         else:

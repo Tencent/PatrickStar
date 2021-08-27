@@ -23,7 +23,7 @@ import logging
 from patrickstar.core.const import PSTensorStatus, AccessType, TrainingStage
 import patrickstar.utils.global_timer as global_timer
 from patrickstar.utils import print_rank, logger, get_sys_memory_used
-from patrickstar.core.parameter import register_param, is_torch_param, register_torch_param
+from patrickstar.core.parameter import register_param, ParamType
 from patrickstar.manager import PatrickStarManager
 from patrickstar.core import ChunkList, ChunkTensorIndex, ChunkListType
 from .chunk_io_buff import FP32ChunkReadBuffer, FP16ChunkWriteBuffer
@@ -32,10 +32,12 @@ from .op_builder import CPUAdamBuilder
 
 
 def get_real_data_tensor(param):
-    if is_torch_param(param):
-        return param
-    else:
+    if param.ps_attr.param_type == ParamType.TORCH_BASED:
+        return param.data
+    elif param.ps_attr.param_type == ParamType.CHUNK_BASED:
         return param.ps_attr.access_tensor(AccessType.DATA)
+    else:
+        raise RuntimeError
 
 
 class FP16Adam(torch.optim.Optimizer):
@@ -99,7 +101,7 @@ class FP16Adam(torch.optim.Optimizer):
 
                 state['step'] = 0
 
-                if is_torch_param(p):
+                if p.ps_attr.param_type == ParamType.TORCH_BASED:
                     if p.requires_grad:
                         # torch param 没有备份的 fp32 参数
                         state['fp32_param_data'] = None
@@ -108,13 +110,15 @@ class FP16Adam(torch.optim.Optimizer):
                                              dtype=torch.float,
                                              device=torch.device('cpu:0')),
                             requires_grad=False)
-                        register_torch_param(state['exp_avg'])
+                        register_param(state['exp_avg'], ParamType.TORCH_BASED,
+                                       torch.float)
                         state['exp_avg_sq'] = torch.nn.Parameter(
                             torch.zeros_like(p,
                                              dtype=torch.float,
                                              device=torch.device('cpu:0')),
                             requires_grad=False)
-                        register_torch_param(state['exp_avg_sq'])
+                        register_param(state['exp_avg_sq'],
+                                       ParamType.TORCH_BASED, torch.float)
                 else:
                     name = p.ps_attr.name
                     state[
@@ -127,7 +131,8 @@ class FP16Adam(torch.optim.Optimizer):
                             # memory_format=torch.preserve_format,
                             device=torch.device('cpu:0')),
                         requires_grad=False)
-                    register_param(state['exp_avg'], f'{name}.exp_avg')
+                    register_param(state['exp_avg'], ParamType.CHUNK_BASED,
+                                   torch.float, f'{name}.exp_avg')
                     state['exp_avg'].ps_attr.reset_shape(p.ps_attr.shape)
                     state['exp_avg'].ps_attr._is_local = p.ps_attr.is_local()
 
@@ -138,7 +143,8 @@ class FP16Adam(torch.optim.Optimizer):
                             # memory_format=torch.preserve_format,
                             device=torch.device('cpu:0')),
                         requires_grad=False)
-                    register_param(state['exp_avg_sq'], f'{name}.exp_avg_sq')
+                    register_param(state['exp_avg_sq'], ParamType.CHUNK_BASED,
+                                   torch.float, f'{name}.exp_avg_sq')
                     state['exp_avg_sq'].ps_attr.reset_shape(p.ps_attr.shape)
                     state['exp_avg_sq'].ps_attr._is_local = p.ps_attr.is_local(
                     )
@@ -174,11 +180,8 @@ class FP16Adam(torch.optim.Optimizer):
         for group in self.param_groups:
             group.setdefault('amsgrad', False)
 
-    def ds_cpu_adam_update(self,
-                        data, grad,
-                        momentum, variance,
-                        step, lr, beta1, beta2, eps, weight_decay,
-                        bias_correction):
+    def ds_cpu_adam_update(self, data, grad, momentum, variance, step, lr,
+                           beta1, beta2, eps, weight_decay, bias_correction):
         """
         This function will update the data, momentum and variance inplace.
         """
@@ -189,19 +192,15 @@ class FP16Adam(torch.optim.Optimizer):
 
         loss_scale = self.loss_scaler.loss_scale if self.loss_scaler is not None else -1
         # Inputs of DS CPU Adam need to be flattened.
-        self.ds_opt_adam.adam_update(self.opt_id, step, lr, beta1,
-                                    beta2, eps, weight_decay, bias_correction,
-                                    data.view(-1),
-                                    grad.view(-1),
-                                    momentum.view(-1),
-                                    variance.view(-1),
-                                    loss_scale)
+        self.ds_opt_adam.adam_update(self.opt_id, step, lr, beta1, beta2, eps,
+                                     weight_decay, bias_correction,
+                                     data.view(-1), grad.view(-1),
+                                     momentum.view(-1), variance.view(-1),
+                                     loss_scale)
 
-    def torch_adam_update(self,
-                          data, grad,
-                          exp_avg, exp_avg_sq,
-                          lr, beta1, beta2, eps, weight_decay,
-                          bias_correction1, bias_correction2):
+    def torch_adam_update(self, data, grad, exp_avg, exp_avg_sq, lr, beta1,
+                          beta2, eps, weight_decay, bias_correction1,
+                          bias_correction2):
         if self.loss_scaler is not None:
             grad.div_(self.loss_scaler.loss_scale)
         if weight_decay != 0:
@@ -211,23 +210,20 @@ class FP16Adam(torch.optim.Optimizer):
         exp_avg_sq.mul_(beta2).addcmul_(grad, grad, value=1 - beta2)
         if False:  # amsgrad
             # Maintains the maximum of all 2nd moment running avg. till now
-            torch.maximum(max_exp_avg_sqs,
-                          exp_avg_sq,
-                          out=max_exp_avg_sqs)
+            torch.maximum(max_exp_avg_sqs, exp_avg_sq, out=max_exp_avg_sqs)
             # Use the max. for normalizing running avg. of gradient
             denom = (max_exp_avg_sqs.sqrt() /
-                      math.sqrt(bias_correction2)).add_(eps)
+                     math.sqrt(bias_correction2)).add_(eps)
         else:
-            denom = (exp_avg_sq.sqrt() /
-                      math.sqrt(bias_correction2)).add_(eps)
+            denom = (exp_avg_sq.sqrt() / math.sqrt(bias_correction2)).add_(eps)
 
         step_size = lr / bias_correction1
 
         data.addcdiv_(exp_avg, denom, value=-step_size)
 
     def check_overflow(self, param):
-        if (self.loss_scaler is not None and not self.has_overflow and
-            self.loss_scaler.has_overflow(param)):
+        if (self.loss_scaler is not None and not self.has_overflow
+                and self.loss_scaler.has_overflow(param)):
             self.has_overflow = True
 
     def has_overflow_and_reset_param(self, write_chunk_buff):
@@ -242,7 +238,9 @@ class FP16Adam(torch.optim.Optimizer):
         if self.has_overflow:
             # TODO(zilinzhu): Find a better way to overwrite the grads
             for _, p in self.client.module.named_parameters():
-                if is_torch_param(p) or not self.client.is_local_tensor(p, AccessType.DATA):
+                if p.ps_attr.param_type == ParamType.TORCH_BASED:
+                    continue
+                if not self.client.is_local_tensor(p, AccessType.DATA):
                     continue
                 fp32_param = self.state[p]['fp32_param_data']
                 write_chunk_buff.write_from_cache(p, fp32_param)
@@ -291,7 +289,7 @@ class FP16Adam(torch.optim.Optimizer):
                     'ADAM_prepare_data_fp16_grad_to_fp32_grad_copy')
 
             # 以chunk为粒度拷贝grad fp16 (FWD+BWD计算设备GPU, CPU如果被换出了) -> grad fp32 (Adam计算设备CPU or GPU如果margin空间足够)
-            if is_torch_param(fp16_param):
+            if fp16_param.ps_attr.param_type == ParamType.TORCH_BASED:
                 # 如果fp16_param被Torch管理，则它肯定在cpu上，cpu_embedding优化引起的
                 assert fp16_param.data.device.type == 'cpu'
                 fp32_param = fp16_param
@@ -353,15 +351,14 @@ class FP16Adam(torch.optim.Optimizer):
             # TODO(jiaruifang) use_ds_adam时，在生成的数据上正确性没有验证
             if self.use_ds_adam and compute_device.type == 'cpu' and fp16_grad_tensor.device.type == 'cpu':
                 self.ds_cpu_adam_update(fp32_data_tensor, fp16_grad_tensor,
-                                     exp_avg, exp_avg_sq,
-                                     step, lr, beta1,
-                                     beta2, eps, weight_decay, True)
+                                        exp_avg, exp_avg_sq, step, lr, beta1,
+                                        beta2, eps, weight_decay, True)
             else:
                 fp32_grad_tensor = fp16_grad_tensor.float()
                 self.torch_adam_update(fp32_data_tensor, fp32_grad_tensor,
-                                       exp_avg, exp_avg_sq,
-                                       lr, beta1, beta2, eps, weight_decay,
-                                       bias_correction1, bias_correction2)
+                                       exp_avg, exp_avg_sq, lr, beta1, beta2,
+                                       eps, weight_decay, bias_correction1,
+                                       bias_correction2)
 
             if time_profile:
                 global_timer.my_timer.finish_profile('ADAM_compute')
@@ -372,7 +369,7 @@ class FP16Adam(torch.optim.Optimizer):
             ##########################
 
             # Note fp16_param对应的Chunk内存 ->fp32_param对应的chunk内存
-            if not is_torch_param(fp32_param):
+            if fp32_param.ps_attr.param_type == ParamType.CHUNK_BASED:
                 write_chunk_buff.write_from_cache(fp16_param, fp32_param)
 
             if time_profile:
@@ -407,7 +404,7 @@ class FP16Adam(torch.optim.Optimizer):
         rank = torch.distributed.get_rank()
 
         for name, param in self.client.module.named_parameters():
-            if is_torch_param(param):
+            if param.ps_attr.param_type == ParamType.TORCH_BASED:
                 continue
             if param.ps_attr.get_status(
                     AccessType.DATA) == PSTensorStatus.COMPUTE:
@@ -453,7 +450,8 @@ class FP16Adam(torch.optim.Optimizer):
         lr_list = []
 
         if self.use_hybrid_adam:
-            margin_chunk_num_for_gpu_adam = mgr.get_margin_chunk_num_for_gpu_adam()
+            margin_chunk_num_for_gpu_adam = mgr.get_margin_chunk_num_for_gpu_adam(
+            )
         else:
             margin_chunk_num_for_gpu_adam = 0
 
@@ -465,7 +463,8 @@ class FP16Adam(torch.optim.Optimizer):
             self.client.chunk_list, self.client.chunk_tensor_index,
             max_chunk_size)
 
-        if self.has_overflow_and_reset_param(write_chunk_buff=self.write_chunk_buff):
+        if self.has_overflow_and_reset_param(
+                write_chunk_buff=self.write_chunk_buff):
             global_timer.my_timer.finish_profile('ADAM')
             return loss
 
@@ -478,12 +477,11 @@ class FP16Adam(torch.optim.Optimizer):
                     state['step'] += 1
 
                     # p不是torch param，且p属于remote chunk跳过
-                    if not is_torch_param(
-                            p) and not self.client.is_local_tensor(
-                                p, AccessType.DATA):
+                    if p.ps_attr.param_type == ParamType.CHUNK_BASED and not self.client.is_local_tensor(
+                            p, AccessType.DATA):
                         continue
 
-                    if is_torch_param(p):
+                    if p.ps_attr.param_type == ParamType.TORCH_BASED:
                         max_param_size = max(p.numel(), max_param_size)
 
                     fp16_param_with_grad_list.append(p)

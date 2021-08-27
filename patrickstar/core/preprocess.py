@@ -18,7 +18,7 @@ import functools
 from patrickstar.utils import see_memory_usage
 from patrickstar.utils import logger, print_rank
 from patrickstar.core import PatrickStarClient, AccessType, ChunkListType, ChunkTensorIndex, ChunkList
-from patrickstar.core import PSParameter, register_param, is_param_registered, register_torch_param
+from patrickstar.core import PSParameter, register_param, is_param_registered, ParamType
 from typing import List
 _orig_torch_empty = torch.empty
 
@@ -236,7 +236,8 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
                 )
                 for name, param in module.named_parameters(recurse=False):
                     param_fp32 = torch.nn.Parameter(param.data.clone())
-                    register_torch_param(param, f'embedding_{name}')
+                    register_param(param, ParamType.TORCH_BASED, torch.float,
+                                   f'embedding_{name}')
                     self.client.torch_param_list.append(param)
                 return
 
@@ -247,8 +248,8 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
         # 对于每个进程，将所有参数初始化出来。
         # (NOTE)模型初始化顺序和optimizer parameter group遍历顺序虽不一致，但很相似
         for name, param in module.named_parameters(recurse=False):
-            assert not is_param_registered(param)
             name = f'{name}_{self.param_idx}'
+            register_param(param, ParamType.CHUNK_BASED, torch.half, name)
             self.param_idx += 1
             # logger.info(f'** Converting Params {name}')
             self.client.append_tensor(param, torch.half, AccessType.DATA,
@@ -259,7 +260,8 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
             param_fp32 = torch.nn.Parameter(torch.tensor(
                 [], dtype=torch.float, device=torch.device('cpu:0')),
                                             requires_grad=False)
-            register_param(param_fp32, f'{name}_fp32')
+            register_param(param_fp32, ParamType.CHUNK_BASED, torch.float,
+                           f'{name}_fp32')
             param_fp32.ps_attr.reset_shape(param.shape)
             self.client.append_tensor(param_fp32, torch.float, AccessType.DATA,
                                       ChunkListType.PARAM_FP32, f'{name}_fp32')
