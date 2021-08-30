@@ -154,52 +154,125 @@ class BertEmbeddingsWithoutLN(nn.Module):
         return embeddings
 
 
-class _CopyInputToCPU(torch.autograd.Function):
+# Model parallel group that the current rank belongs to.
+_EMBEDING_COMM_GROUP = None
+
+
+def get_embedding_comm_group():
+    global _EMBEDING_COMM_GROUP
+    if _EMBEDING_COMM_GROUP is None:
+        _EMBEDING_COMM_GROUP = torch.distributed.new_group(backend='gloo')
+    assert _EMBEDING_COMM_GROUP is not None, \
+        'embedding communication group is not initialized'
+    return _EMBEDING_COMM_GROUP
+
+
+def _send_to_rank(input_, tgt_rank):
+    # Bypass the function if we are using only 1 GPU.
+    if torch.distributed.get_world_size() == 1:
+        return
+    comm_group = get_embedding_comm_group()
+    # All-reduce.
+    torch.distributed.send(input_, dst=tgt_rank, group=comm_group)
+    return
+
+
+def _recv_from_rank(buff, src_rank):
+    # Bypass the function if we are using only 1 GPU.
+    if torch.distributed.get_world_size() == 1:
+        return buff
+    comm_group = get_embedding_comm_group()
+    # All-reduce.
+    print('buff', buff, buff.dtype)
+    torch.distributed.recv(buff, src=src_rank, group=comm_group)
+    return buff
+
+
+class _CopyInputToCPURank0(torch.autograd.Function):
     @staticmethod
     def symbolic(graph, input_):
-        return input_.to(torch.device('cpu:0'))
+        rank = torch.distributed.get_rank()
+        world_size = torch.distributed.get_world_size()
+        if world_size == 1:
+            return input_.to(torch.device('cpu:0'))
+
+        input_ = input_.to(torch.device('cpu:0'))
+        if rank == 0:
+            for i in range(1, world_size):
+                outputs_ = _recv_from_rank(
+                    torch.zeros_like(input_, device=torch.device('cpu:0')), i)
+                input_ = torch.cat((input_, outputs_), 0)
+            return input_
+        else:
+            _send_to_rank(input_, 0)
+            return input_
 
     @staticmethod
     def forward(ctx, input_):
-        logger.info(
-            f'Entrying CPU Emedding FWD, copy input to cpu and {input_.dtype}')
-        return input_.to(torch.device('cpu:0'))
+        return _CopyInputToCPURank0.symbolic(ctx, input_)
 
     @staticmethod
     def backward(ctx, grad_output):
+        raise RuntimeError({"Not Implemented"})
         target_device = torch.device(f'cuda:{torch.cuda.current_device()}')
         logger.info(
             'Entrying CPU Emedding BWD, copy grad_output to cuda, fp32->fp16')
         return grad_output.to(target_device)
 
 
-class _CopyActToGPU(torch.autograd.Function):
+class _CopyActToGPURank0(torch.autograd.Function):
     @staticmethod
     def symbolic(graph, input_):
+        """
+        输入分布在cpu rank=0上，按照batch维度拆分成N份，分发给各个进程
+        返回本进程的activations
+        """
         target_device = torch.device(f'cuda:{torch.cuda.current_device()}')
+        local_rank = torch.distributed.get_rank()
+        world_size = torch.distributed.get_world_size()
+        if world_size == 1:
+            return input_.to(target_device)
 
-        return input_.to(target_device)
+        input_ = input_.to(target_device)
+        mini_batch_inputs_ = torch.split(input_, input_.shape[0] // world_size)
+        if local_rank == 0:
+            for i in range(1, world_size):
+                _send_to_rank(mini_batch_inputs_[i], i)
+            return mini_batch_inputs_[0]
+        else:
+            input_ = _recv_from_rank(
+                torch.zeros_like(mini_batch_inputs_[local_rank]), 0)
+            return input_
 
     @staticmethod
     def forward(ctx, input_):
-        target_device = torch.device(f'cuda:{torch.cuda.current_device()}')
-
-        logger.info(
-            f'Entrying CPU Emedding BWD, copy grad_output to cuda, input dtype {input_.dtype}'
-        )
-        return input_.to(target_device)
+        return _CopyActToGPURank0.symbolic(ctx, input_)
 
     @staticmethod
     def backward(ctx, grad_output):
-        return grad_output.to(torch.device('cpu:0')).float()
+        target_device = torch.device(f'cpu:0')
+        local_rank = torch.distributed.get_rank()
+        world_size = torch.distributed.get_world_size()
+        if world_size == 1:
+            return grad_output.to(torch.device('cpu:0')).float()
+
+        grad_output = grad_output.to(target_device)
+        if local_rank != 0:
+            _send_to_rank(grad_output, 0)
+            return grad_output
+        else:
+            for i in range(1, world_size):
+                output_ = _recv_from_rank(torch.zeros_like(grad_output), i)
+                torch.cat((grad_output, output_), 0)
+            return grad_output
 
 
-def copy_to_cpu(input_):
-    return _CopyInputToCPU.apply(input_)
+def copy_to_cpu_rank0(input_):
+    return _CopyInputToCPURank0.apply(input_)
 
 
-def copy_to_gpu(input_):
-    return _CopyActToGPU.apply(input_)
+def copy_to_gpu_rank0(input_):
+    return _CopyActToGPURank0.apply(input_)
 
 
 class CpuBertEmbeddings(nn.Module):
@@ -208,6 +281,8 @@ class CpuBertEmbeddings(nn.Module):
         self.bert_embedding = BertEmbeddingsWithoutLN(config)
         self.LayerNorm = nn.LayerNorm(config.hidden_size)
         self.dropout = nn.Dropout(0)
+        global _EMBEDING_COMM_GROUP
+        _EMBEDING_COMM_GROUP = torch.distributed.new_group(backend='gloo')
 
     def forward(self,
                 input_ids=None,
@@ -226,12 +301,16 @@ class CpuBertEmbeddings(nn.Module):
         assert token_type_ids is None
         assert position_ids is None
 
-        new_input_ids = copy_to_cpu(input_ids)
+        global_rank = torch.distributed.get_rank()
 
-        output_activation = self.bert_embedding(new_input_ids, token_type_ids,
-                                                position_ids)
+        new_input_ids = copy_to_cpu_rank0(input_ids)
 
-        embeddings = copy_to_gpu(output_activation)
+        if global_rank == 0:
+            output_activation = self.bert_embedding(new_input_ids,
+                                                    token_type_ids,
+                                                    position_ids)
+
+        embeddings = copy_to_gpu_rank0(output_activation)
         assert embeddings.dtype == torch.float, f"embedding outputs should be in float on CPU, now {embeddings.dtype}"
 
         if is_param_registered(self.LayerNorm.weight):
