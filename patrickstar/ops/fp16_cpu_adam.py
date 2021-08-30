@@ -122,7 +122,7 @@ class FP16Adam(torch.optim.Optimizer):
                 else:
                     name = p.ps_attr.name
                     state[
-                        'fp32_param_data'] = self.client.param_fp16_to_param_fp32(
+                        'fp32_param_data'] = self.client.get_param_fp16_to_param_fp32(
                             p)
                     state['exp_avg'] = torch.nn.Parameter(
                         torch.tensor(

@@ -266,7 +266,8 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
             self.client.append_tensor(param_fp32, torch.float, AccessType.DATA,
                                       ChunkListType.PARAM_FP32, f'{name}_fp32')
 
-            self.client.add_param_fp16_to_param_fp32(param, param_fp32)
+            self.client.param_fp16_to_param_fp32_map[param] = param_fp32
+            self.client.chunk_based_param_fp16.append(param)
             # Delete the memory of non local tensors
             if not self._is_local_param(param, AccessType.DATA):
                 param.ps_attr._is_local = False

@@ -64,19 +64,14 @@ class PatrickStarClient(object):
         self.dummy_param_list = []
         self.torch_param_list = []
         self.param_fp16_to_param_fp32_map = {}
+        self.chunk_based_param_fp16 = []
 
-    def add_param_fp16_to_param_fp32(self, param_fp16, param_fp32):
-        """
-        add index of param fp32 via param_fp16
-        """
-        self.param_fp16_to_param_fp32_map[param_fp16] = param_fp32
-
-    def param_fp16_to_param_fp32(self, param_fp16):
+    def get_param_fp16_to_param_fp32(self, param_fp16):
         """
         index param fp32 via param_fp16
         """
         if param_fp16 not in self.param_fp16_to_param_fp32_map:
-            raise RuntimeError("add_param_fp16_to_param_fp32 error")
+            raise RuntimeError("param_fp16_to_param_fp32_map access error")
         return self.param_fp16_to_param_fp32_map[param_fp16]
 
     def _generate_chunk_id(self):

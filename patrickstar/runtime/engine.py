@@ -164,6 +164,8 @@ class PatrickStarEngine(Module):
             allreduce_gradients: is deprecated, ignored, and will soon be removed'
         """
         global_timer.my_timer.start_profile("BWD")
+        for param_fp16 in self.client.chunk_based_param_fp16:
+            param_fp16.ps_attr.bwd_cnt = 0
         mgr = PatrickStarManager()
         mgr._training_stage = TrainingStage.BWD
         self.optimizer.zero_grad()

@@ -169,7 +169,10 @@ def pre_sub_module_backward_function(sub_module, client, name):
             param.data = tmp_tensor
             param.grad = torch.zeros_like(tmp_tensor)
             assert param.data.data_ptr() != param.grad.data_ptr()
-        elif param.dtype == torch.float:
+
+            assert param.ps_attr.bwd_cnt == 0, f"Backward Propagation updates the gradient of a parameter twice. This is not allowed when using chunk reusing."
+
+        elif param.ps_attr.data_type == torch.float:
             raise RuntimeError("fp32 training is not supported!")
         flag = True
     if flag:
@@ -203,7 +206,8 @@ def post_sub_module_backward_function(sub_module, client, name):
                 client.release_data(param, PSTensorStatus.HOLD)
 
             param.grad = None
-        elif param.dtype == torch.float:
+            param.ps_attr.bwd_cnt += 1
+        elif param.ps_attr.data_type == torch.float:
             client.release_grad(param, PSTensorStatus.HOLD)
             client.release_data(param, PSTensorStatus.HOLD)
     mgr = PatrickStarManager()
