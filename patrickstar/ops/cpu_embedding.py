@@ -225,6 +225,8 @@ class _CollectFrom(torch.autograd.Function):
     def symbolic(graph, input_):
         """
         输入分布在cpu rank=0上，按照batch维度拆分成N份，分发给各个进程
+        @args
+            input_: cpu上的activation tensor，是聚合后的
         返回本进程的activations
         """
         target_device = torch.device(f'cuda:{torch.cuda.current_device()}')
@@ -259,12 +261,12 @@ class _CollectFrom(torch.autograd.Function):
         grad_output = grad_output.to(target_device)
         if local_rank != 0:
             _send_to_rank(grad_output, 0)
-            return grad_output
+            return grad_output.float()
         else:
             for i in range(1, world_size):
                 output_ = _recv_from_rank(torch.zeros_like(grad_output), i)
                 torch.cat((grad_output, output_), 0)
-            return grad_output
+            return grad_output.float()
 
 
 def send_ids_to_parallel_region(input_):
@@ -306,10 +308,13 @@ class CpuBertEmbeddings(nn.Module):
         new_input_ids = send_ids_to_parallel_region(input_ids)
 
         if global_rank == 0:
+            # run embedding on CPU, output_activation (fp32 on CPU)
             output_activation = self.bert_embedding(new_input_ids,
                                                     token_type_ids,
                                                     position_ids)
-
+        else:
+            output_activation = torch.zeros(new_input_ids.shape[0],
+                                            self.bert_embedding.hidden_size)
         embeddings = collect_act_from_parallel_region(output_activation)
         assert embeddings.dtype == torch.float, f"embedding outputs should be in float on CPU, now {embeddings.dtype}"
 
