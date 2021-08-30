@@ -188,7 +188,7 @@ def _recv_from_rank(buff, src_rank):
     return buff
 
 
-class _CopyInputToCPURank0(torch.autograd.Function):
+class _SendTo(torch.autograd.Function):
     @staticmethod
     def symbolic(graph, input_):
         rank = torch.distributed.get_rank()
@@ -209,7 +209,7 @@ class _CopyInputToCPURank0(torch.autograd.Function):
 
     @staticmethod
     def forward(ctx, input_):
-        return _CopyInputToCPURank0.symbolic(ctx, input_)
+        return _SendTo.symbolic(ctx, input_)
 
     @staticmethod
     def backward(ctx, grad_output):
@@ -220,7 +220,7 @@ class _CopyInputToCPURank0(torch.autograd.Function):
         return grad_output.to(target_device)
 
 
-class _CopyActToGPURank0(torch.autograd.Function):
+class _CollectFrom(torch.autograd.Function):
     @staticmethod
     def symbolic(graph, input_):
         """
@@ -233,20 +233,20 @@ class _CopyActToGPURank0(torch.autograd.Function):
         if world_size == 1:
             return input_.to(target_device)
 
-        input_ = input_.to(target_device)
+        input_ = input_.cpu()
         mini_batch_inputs_ = torch.split(input_, input_.shape[0] // world_size)
         if local_rank == 0:
             for i in range(1, world_size):
                 _send_to_rank(mini_batch_inputs_[i], i)
-            return mini_batch_inputs_[0]
+            return mini_batch_inputs_[0].to(target_device)
         else:
             input_ = _recv_from_rank(
                 torch.zeros_like(mini_batch_inputs_[local_rank]), 0)
-            return input_
+            return input_.to(target_device)
 
     @staticmethod
     def forward(ctx, input_):
-        return _CopyActToGPURank0.symbolic(ctx, input_)
+        return _CollectFrom.symbolic(ctx, input_)
 
     @staticmethod
     def backward(ctx, grad_output):
@@ -267,12 +267,12 @@ class _CopyActToGPURank0(torch.autograd.Function):
             return grad_output
 
 
-def copy_to_cpu_rank0(input_):
-    return _CopyInputToCPURank0.apply(input_)
+def send_ids_to_parallel_region(input_):
+    return _SendTo.apply(input_)
 
 
-def copy_to_gpu_rank0(input_):
-    return _CopyActToGPURank0.apply(input_)
+def collect_act_from_parallel_region(input_):
+    return _CollectFrom.apply(input_)
 
 
 class CpuBertEmbeddings(nn.Module):
@@ -303,14 +303,14 @@ class CpuBertEmbeddings(nn.Module):
 
         global_rank = torch.distributed.get_rank()
 
-        new_input_ids = copy_to_cpu_rank0(input_ids)
+        new_input_ids = send_ids_to_parallel_region(input_ids)
 
         if global_rank == 0:
             output_activation = self.bert_embedding(new_input_ids,
                                                     token_type_ids,
                                                     position_ids)
 
-        embeddings = copy_to_gpu_rank0(output_activation)
+        embeddings = collect_act_from_parallel_region(output_activation)
         assert embeddings.dtype == torch.float, f"embedding outputs should be in float on CPU, now {embeddings.dtype}"
 
         if is_param_registered(self.LayerNorm.weight):

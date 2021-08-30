@@ -66,8 +66,8 @@ class TestClientAccess(unittest.TestCase):
             torch.distributed.recv(input_ids, src=0)
 
     @distributed_test(world_size=[2], backend='gloo', use_fake_dist=True)
-    def test_copy_to_cpu_rank0(self):
-        from patrickstar.ops.cpu_embedding import copy_to_cpu_rank0
+    def test_send_ids_to_parallel_region(self):
+        from patrickstar.ops.cpu_embedding import send_ids_to_parallel_region
         seq_len = 20
         test_device = torch.device('cpu:0')
         input_ids = torch.randint(low=0,
@@ -76,20 +76,20 @@ class TestClientAccess(unittest.TestCase):
                                   dtype=torch.long,
                                   device=test_device)
         rank = torch.distributed.get_rank()
-        gathered_input_ids = copy_to_cpu_rank0(input_ids)
+        gathered_input_ids = send_ids_to_parallel_region(input_ids)
 
         if rank == 0:
             self.assertTrue(gathered_input_ids.shape[0] == 2,
                             "the batch dim of gathered id should be 2")
 
     @distributed_test(world_size=[2], backend='gloo', use_fake_dist=True)
-    def test_copy_to_gpu_rank0(self):
-        from patrickstar.ops.cpu_embedding import copy_to_gpu_rank0
+    def test_collect_act_from_parallel_region(self):
+        from patrickstar.ops.cpu_embedding import collect_act_from_parallel_region
         seq_len = 20
-        test_device = torch.device('cpu:0')
-        input_ids = torch.randn(4, 10)
+        test_device = torch.device(f'cuda:{torch.cuda.current_device()}')
+        input_ids = torch.randn(4, 10, device=test_device)
         rank = torch.distributed.get_rank()
-        gathered_input_ids = copy_to_gpu_rank0(input_ids)
+        gathered_input_ids = collect_act_from_parallel_region(input_ids)
 
         if rank == 0:
             self.assertTrue(gathered_input_ids.shape[0] == 2,
