@@ -293,7 +293,7 @@ class PatrickStarClient(object):
             global_timer.my_timer.start_profile(
                 'CLIENT_fetch_remote_chunks_allgather')
 
-        logger.info(f'rank {rank} allgather {chunk_id_list}')
+        logger.debug(f'rank {rank} allgather {chunk_id_list}')
         handle = torch.distributed.all_gather(allgather_payload_buff,
                                               local_chunk_payload,
                                               async_op=False)

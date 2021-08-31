@@ -72,12 +72,12 @@ class InsertPostInitMethodToModuleSubClasses(object):
             @functools.wraps(f)
             def wrapper(module, *args, **kwargs):
                 print_rank(f'Before initializing {module.__class__.__name__}',
-                           force=True)
+                           force=False)
                 f(module, *args, **kwargs)
                 self._post_init_method(module)
                 print_rank(
                     f'After initializing followed by post init for {module.__class__.__name__}',
-                    force=True)
+                    force=False)
 
             return wrapper
 
@@ -227,7 +227,7 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
         2. 将model param拷贝到chunk对应的内存中
         """
         print_rank(f"Before converting parmas in {module.__class__.__name__}",
-                   force=True)
+                   force=False)
         if self.use_cpu_embedding:
             # cpu_embedding优化把embedding交给Torch管理而非Chunk
             if module.__class__.__name__ == 'Embedding':
