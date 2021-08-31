@@ -66,6 +66,9 @@ class PatrickStarClient(object):
         self.param_fp16_to_param_fp32_map = {}
         self.chunk_based_param_fp16 = []
 
+        # for post backward hook
+        self.grad_accs = []
+
     def _generate_chunk_id(self):
         self._chunk_id += 1
         return self._chunk_id

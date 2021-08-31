@@ -275,27 +275,29 @@ def _register_hooks_recursively(module, client, count=[0], name=""):
     module.register_forward_hook(_pre_backward_module_hook)
     module.register_forward_pre_hook(_post_backward_module_hook)
 
+
+def setup_hybrid_ps_hooks(module, client):
+    _register_hooks_recursively(module, client)
+
+    def make_post_backward_hook(param):
+        def hook(*ignore):
+            world_size = torch.distributed.get_world_size()
+            client.optimizer.check_overflow(param)
+            torch.distributed.all_reduce(param.grad,
+                                          op=torch.distributed.ReduceOp.SUM,
+                                          group=client.cpu_comm_group,
+                                          async_op=False)
+            param.data /= world_size
+            logger.debug(
+                f'rank {torch.distributed.get_rank} allreduce grad {param.ps_attr.name}'
+            )
+        return hook
+
     # torch param will not override data with grad,
     # we could use the standard register_hook on them.
     for param in client.torch_param_list:
         if param.requires_grad:
-
-            def torch_param_all_reduce(*ignore):
-                world_size = torch.distributed.get_world_size()
-                client.optimizer.check_overflow(param)
-                torch.distributed.all_reduce(param.grad,
-                                             op=torch.distributed.ReduceOp.SUM,
-                                             group=client.cpu_comm_group,
-                                             async_op=False)
-                param.data /= world_size
-                logger.debug(
-                    f'rank {torch.distributed.get_rank} allreduce grad {param.ps_attr.name}'
-                )
-
             param_tmp = param.expand_as(param)
             grad_acc = param_tmp.grad_fn.next_functions[0][0]
-            grad_acc.register_hook(torch_param_all_reduce)
-
-
-def setup_hybrid_ps_hooks(module, client):
-    _register_hooks_recursively(module, client)
+            grad_acc.register_hook(make_post_backward_hook(param))
+            client.grad_accs.append(grad_acc)
