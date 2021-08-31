@@ -72,12 +72,12 @@ class InsertPostInitMethodToModuleSubClasses(object):
             @functools.wraps(f)
             def wrapper(module, *args, **kwargs):
                 print_rank(f'Before initializing {module.__class__.__name__}',
-                           force=False)
+                           force=True)
                 f(module, *args, **kwargs)
                 self._post_init_method(module)
                 print_rank(
                     f'After initializing followed by post init for {module.__class__.__name__}',
-                    force=False)
+                    force=True)
 
             return wrapper
 
@@ -160,6 +160,7 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
 
         self.use_fake_dist = use_fake_dist
         self.use_cpu_embedding = use_cpu_embedding
+        self.chunked_submodule_id = -1
 
     def _post_context_exec(self):
         """
@@ -225,9 +226,8 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
         1. 保留local的tensor，通过删除remote tensor的方式
         2. 将model param拷贝到chunk对应的内存中
         """
-        see_memory_usage(
-            f"Before converting parmas in {module.__class__.__name__}",
-            force=False)
+        print_rank(f"Before converting parmas in {module.__class__.__name__}",
+                   force=True)
         if self.use_cpu_embedding:
             # cpu_embedding优化把embedding交给Torch管理而非Chunk
             if module.__class__.__name__ == 'Embedding':
@@ -241,8 +241,7 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
                     self.client.torch_param_list.append(param)
                 return
 
-        print_rank(f'Converting Params in {module.__class__.__name__}',
-                   force=False)
+        self.chunked_submodule_id += 1
 
         # 在模型初始化的过程构造模型，post_init_method调用粒度是一个SubModule，比如BertAttention模块。
         # 对于每个进程，将所有参数初始化出来。

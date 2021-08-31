@@ -119,6 +119,8 @@ class PostBackwardFunction(torch.autograd.Function):
 
 # 必须具备重复调用，第二次无效的能力 fetch submodule
 def pre_sub_module_forward_function(sub_module, client, name):
+    logger.debug(
+        f'pre_sub_module_forward_function {sub_module.__class__.__name__}')
     flag = False
     for sub_name, param in sub_module.named_parameters(recurse=False):
         rank = torch.distributed.get_rank()
@@ -223,12 +225,13 @@ def _register_hooks_recursively(module, client, count=[0], name=""):
     my_count = count[0]
     module.id = my_count
 
-    # logging.log(logging.DEBUG, f"{module.__class__.__name__} : {module.id}")
-
+    has_children = False
     for child_name, child in module.named_children():
-        logging.log(logging.DEBUG, f"{child.__class__.__name__}")
         count[0] = count[0] + 1
         _register_hooks_recursively(child, client, count, name + child_name)
+        has_children = True
+    if has_children:
+        return
 
     # 如下两个hook和backward的hook是否重复
     def _pre_forward_module_hook(module, *args):
@@ -268,6 +271,8 @@ def _register_hooks_recursively(module, client, count=[0], name=""):
         # self.post_bwd_hook_times += len(inputs)
         return _apply_to_tensors_only(module, PostBackwardFunction,
                                       _run_after_backward_function, inputs)
+
+    logger.debug(f"_register_hooks_recursively {module.__class__.__name__}")
 
     module.register_forward_pre_hook(_pre_forward_module_hook)
     module.register_forward_hook(_post_forward_module_hook)

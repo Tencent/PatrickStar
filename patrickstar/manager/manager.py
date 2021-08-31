@@ -17,7 +17,7 @@ import logging as logger
 from torch.multiprocessing import Process, Manager
 
 from patrickstar.utils.memory_monitor import get_sys_memory_used
-from patrickstar.core.const import TrainingStage
+from patrickstar.core.const import TrainingStage, ChunkListType
 
 
 ######### Global Scheduler ###########
@@ -145,6 +145,8 @@ class PatrickStarManager(metaclass=SingletonMeta):
         self._margin_chunk_num_for_gpu_adam = 0
         self._default_chunk_size = 0
 
+        self.gpu_param_fp16_chunk_num_list = []
+
     def is_warmup_training(self):
         return self._start_training and self.warmup
 
@@ -180,6 +182,9 @@ class PatrickStarManager(metaclass=SingletonMeta):
             f'available chunk num for Optimizer States {self._margin_chunk_num_for_gpu_adam}'
         )
         logger.info(f'OVERALL GPU MEM {self._overall_gpu_mem}')
+        logger.info(
+            f'MAX USED GPU PARAM FP16 CHUNK NUMBER {max(self.gpu_param_fp16_chunk_num_list)}'
+        )
 
     def reset_metronome(self):
         """
@@ -223,6 +228,11 @@ class PatrickStarManager(metaclass=SingletonMeta):
             # 确保list最后一个元素和cur_mom和此时更新的下标一致
             cur_mom = self.metronome.moment()
             assert len(self.gpu_sys_used_list) - 1 == cur_mom
+
+            self.gpu_param_fp16_chunk_num_list.append(
+                client.chunk_list.get_chunk_cnt_on_gpu(
+                    ChunkListType.PARAM_FP16))
+
         else:
             # 非warmup需要对Chunk Memory调仓
             # 如果下一刻的Chunk Memory可用空间小于当前Chunk Memory
@@ -241,7 +251,9 @@ class PatrickStarManager(metaclass=SingletonMeta):
             # 每个节拍都校准gpu sys used
             self.gpu_sys_used_list[
                 cur_mom] = gpu_used - self.gpu_chunk_used_mem
-
+            self.gpu_param_fp16_chunk_num_list[
+                cur_mom] = client.chunk_list.get_chunk_cnt_on_gpu(
+                    ChunkListType.PARAM_FP16)
         self.metronome.tiktac()
 
     def get_cur_mom(self):

@@ -374,6 +374,17 @@ class ChunkList(object):
         self.chunk_id_to_chunk_dict_map[chunk_id].update_status(
             old_status, new_status)
 
+    def get_chunk_cnt_on_gpu(self, list_type: ChunkListType):
+        """
+        Returne currently count of chunks on GPU.
+        """
+        cnt = 0
+        for chunk_id in self.chunk_type_to_id_list_map[list_type]:
+            dev = self.chunk_id_to_chunk_dict_map[chunk_id].get_device()
+            if dev is not None and dev.type == "cuda":
+                cnt += 1
+        return cnt
+
     def visit(self):
         logging.info('* chunk list visit results:')
         logging.info('** chunk_id, device, size(B), ' 'type, device, status')
