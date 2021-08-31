@@ -276,21 +276,24 @@ def _register_hooks_recursively(module, client, count=[0], name=""):
     module.register_forward_pre_hook(_post_backward_module_hook)
 
 
-def setup_hybrid_ps_hooks(module, client):
+def setup_patrickstar_hooks(module, client):
     _register_hooks_recursively(module, client)
 
     def make_post_backward_hook(param):
         def hook(*ignore):
+            global_timer.my_timer.start_profile('HOOK_torch_allreduce')
             world_size = torch.distributed.get_world_size()
             client.optimizer.check_overflow(param)
             torch.distributed.all_reduce(param.grad,
-                                          op=torch.distributed.ReduceOp.SUM,
-                                          group=client.cpu_comm_group,
-                                          async_op=False)
+                                         op=torch.distributed.ReduceOp.SUM,
+                                         group=client.cpu_comm_group,
+                                         async_op=False)
             param.data /= world_size
             logger.debug(
                 f'rank {torch.distributed.get_rank} allreduce grad {param.ps_attr.name}'
             )
+            global_timer.my_timer.finish_profile('HOOK_torch_allreduce')
+
         return hook
 
     # torch param will not override data with grad,
