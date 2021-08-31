@@ -25,7 +25,7 @@ class TestClientAccess(unittest.TestCase):
         pass
 
     @distributed_test(world_size=[1])
-    def use_test_function(self):
+    def test_cpu_embedding_layer(self):
         cfg = BertConfig()
         cfg.hidden_dropout_prob = 0
         test_device = torch.device('cuda:0')
@@ -50,6 +50,7 @@ class TestClientAccess(unittest.TestCase):
         # torch
         torch_res = bert_embedding(input_ids)
         self.assertLess(torch.max(torch_res.cpu() - res.cpu()), 1e-4)
+        print("cpu embedding check OK")
 
     @distributed_test(world_size=[2], backend='gloo', use_fake_dist=True)
     def test_p2p_api(self):
@@ -66,8 +67,8 @@ class TestClientAccess(unittest.TestCase):
             torch.distributed.recv(input_ids, src=0)
 
     @distributed_test(world_size=[2], backend='gloo', use_fake_dist=True)
-    def test_send_ids_to_parallel_region(self):
-        from patrickstar.ops.cpu_embedding import send_ids_to_parallel_region
+    def test_send_ids_to_rank0(self):
+        from patrickstar.ops.cpu_embedding import send_ids_to_rank0
         seq_len = 20
         test_device = torch.device('cpu:0')
         input_ids = torch.randint(low=0,
@@ -76,23 +77,30 @@ class TestClientAccess(unittest.TestCase):
                                   dtype=torch.long,
                                   device=test_device)
         rank = torch.distributed.get_rank()
-        gathered_input_ids = send_ids_to_parallel_region(input_ids)
-
+        gathered_input_ids = send_ids_to_rank0(input_ids)
         if rank == 0:
-            self.assertTrue(gathered_input_ids.shape[0] == 2,
-                            "the batch dim of gathered id should be 2")
+            self.assertTrue(
+                gathered_input_ids.shape[0] == 2,
+                f"the batch dim of gathered id should be 2, now {gathered_input_ids.shape[0]}"
+            )
 
     @distributed_test(world_size=[2], backend='gloo', use_fake_dist=True)
-    def test_collect_act_from_parallel_region(self):
-        from patrickstar.ops.cpu_embedding import collect_act_from_parallel_region
+    def test_collect_act_from_rank0(self):
+        from patrickstar.ops.cpu_embedding import collect_act_from_rank0
         seq_len = 20
         test_device = torch.device(f'cuda:{torch.cuda.current_device()}')
-        input_ids = torch.randn(4, 10, device=test_device)
-        rank = torch.distributed.get_rank()
-        gathered_input_ids = collect_act_from_parallel_region(input_ids)
 
-        if rank == 0:
-            self.assertTrue(gathered_input_ids.shape[0] == 2,
+        global_rank = torch.distributed.get_rank()
+        world_size = torch.distributed.get_world_size()
+
+        if global_rank == 0:
+            input_ids = torch.randn(4 * world_size, 10, device=test_device)
+        else:
+            input_ids = torch.randn(4, 10, device=test_device)
+        gathered_input_ids = collect_act_from_rank0(input_ids)
+
+        if global_rank == 0:
+            self.assertTrue(gathered_input_ids.shape[0] == 4,
                             "the batch dim of gathered id should be 2")
 
 

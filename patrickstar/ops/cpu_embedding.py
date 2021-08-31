@@ -168,48 +168,100 @@ def get_embedding_comm_group():
 
 
 def _send_to_rank(input_, tgt_rank):
-    # Bypass the function if we are using only 1 GPU.
     if torch.distributed.get_world_size() == 1:
         return
     comm_group = get_embedding_comm_group()
-    # All-reduce.
     torch.distributed.send(input_, dst=tgt_rank, group=comm_group)
     return
 
 
 def _recv_from_rank(buff, src_rank):
-    # Bypass the function if we are using only 1 GPU.
     if torch.distributed.get_world_size() == 1:
         return buff
     comm_group = get_embedding_comm_group()
-    # All-reduce.
-    print('buff', buff, buff.dtype)
+
     torch.distributed.recv(buff, src=src_rank, group=comm_group)
     return buff
 
 
-class _SendTo(torch.autograd.Function):
+def _bcast_from_rank(input_tensor, src_rank):
+    """
+    将src_rank进程上的input tensor切成N份，发送到其他rank的进程上
+    input tensor在cpu，输出结果再gpu上
+    src_rank: input_tensor是一个batch的activation
+    其他rank: input_tensor是一个进程的activation
+    """
+    work_device = torch.device('cpu:0')
+    input_tensor = input_tensor.cpu()
+    local_rank = torch.distributed.get_rank()
+    world_size = torch.distributed.get_world_size()
+    comm_group = get_embedding_comm_group()
+
+    if local_rank == src_rank:
+        splitted_tensor = torch.split(input_tensor,
+                                      input_tensor.shape[0] // world_size)
+        scatter_list = []
+        for i in range(world_size):
+            scatter_list.append(splitted_tensor[i])
+        torch.distributed.scatter(scatter_list[src_rank],
+                                  scatter_list,
+                                  src=src_rank,
+                                  group=comm_group)
+        return scatter_list[src_rank]
+    else:
+        torch.distributed.scatter(input_tensor, src=src_rank, group=comm_group)
+        return input_tensor
+
+
+def _gather_to_rank(input_tensor, tgt_rank):
+    """
+    所有rank不是tgt_rank的input_tensor gather到tgt_rank上
+    这个操作调用Gloo的API，所以输入数据需要在cpu上
+    """
+    work_device = torch.device('cpu:0')
+    input_tensor = input_tensor.cpu()
+    local_rank = torch.distributed.get_rank()
+    world_size = torch.distributed.get_world_size()
+    comm_group = get_embedding_comm_group()
+    if local_rank == tgt_rank:
+        gather_list = []
+        for i in range(world_size):
+            if i == tgt_rank:
+                gather_list.append(input_tensor)
+            else:
+                gather_list.append(torch.zeros_like(input_tensor))
+        torch.distributed.gather(input_tensor,
+                                 gather_list,
+                                 dst=tgt_rank,
+                                 group=comm_group)
+        res = torch.tensor([], dtype=input_tensor.dtype, device=work_device)
+        for t in gather_list:
+            res = torch.cat((res, t), 0)
+        return res
+    else:
+        torch.distributed.gather(input_tensor, dst=tgt_rank, group=comm_group)
+        return torch.tensor([], dtype=input_tensor.dtype, device=work_device)
+
+
+class _GatherToRank0(torch.autograd.Function):
     @staticmethod
     def symbolic(graph, input_):
+        """
+        把input_都聚合到rank 0
+        rank 0返回一个拼接后的tensor
+        其它rank返回空的tensor
+        """
         rank = torch.distributed.get_rank()
         world_size = torch.distributed.get_world_size()
         if world_size == 1:
             return input_.to(torch.device('cpu:0'))
 
         input_ = input_.to(torch.device('cpu:0'))
-        if rank == 0:
-            for i in range(1, world_size):
-                outputs_ = _recv_from_rank(
-                    torch.zeros_like(input_, device=torch.device('cpu:0')), i)
-                input_ = torch.cat((input_, outputs_), 0)
-            return input_
-        else:
-            _send_to_rank(input_, 0)
-            return input_
+        return _gather_to_rank(input_, 0)
 
     @staticmethod
     def forward(ctx, input_):
-        return _SendTo.symbolic(ctx, input_)
+        return _GatherToRank0.symbolic(ctx, input_)
 
     @staticmethod
     def backward(ctx, grad_output):
@@ -220,7 +272,7 @@ class _SendTo(torch.autograd.Function):
         return grad_output.to(target_device)
 
 
-class _CollectFrom(torch.autograd.Function):
+class _BcastFromRank0(torch.autograd.Function):
     @staticmethod
     def symbolic(graph, input_):
         """
@@ -236,45 +288,33 @@ class _CollectFrom(torch.autograd.Function):
             return input_.to(target_device)
 
         input_ = input_.cpu()
-        mini_batch_inputs_ = torch.split(input_, input_.shape[0] // world_size)
-        if local_rank == 0:
-            for i in range(1, world_size):
-                _send_to_rank(mini_batch_inputs_[i], i)
-            return mini_batch_inputs_[0].to(target_device)
-        else:
-            input_ = _recv_from_rank(
-                torch.zeros_like(mini_batch_inputs_[local_rank]), 0)
-            return input_.to(target_device)
+        return _bcast_from_rank(input_, 0)
 
     @staticmethod
     def forward(ctx, input_):
-        return _CollectFrom.symbolic(ctx, input_)
+        return _BcastFromRank0.symbolic(ctx, input_)
 
     @staticmethod
     def backward(ctx, grad_output):
-        target_device = torch.device(f'cpu:0')
+        """
+        grad_output每个进程都有一份，需要聚合成一份放在rank0上
+        """
+        work_device = torch.device(f'cpu:0')
         local_rank = torch.distributed.get_rank()
         world_size = torch.distributed.get_world_size()
         if world_size == 1:
-            return grad_output.to(torch.device('cpu:0')).float()
+            return grad_output.to(work_device).float()
 
-        grad_output = grad_output.to(target_device)
-        if local_rank != 0:
-            _send_to_rank(grad_output, 0)
-            return grad_output.float()
-        else:
-            for i in range(1, world_size):
-                output_ = _recv_from_rank(torch.zeros_like(grad_output), i)
-                torch.cat((grad_output, output_), 0)
-            return grad_output.float()
+        grad_output = grad_output.to(work_device)
+        return _gather_to_rank(grad_output, 0)
 
 
-def send_ids_to_parallel_region(input_):
-    return _SendTo.apply(input_)
+def send_ids_to_rank0(input_):
+    return _GatherToRank0.apply(input_)
 
 
-def collect_act_from_parallel_region(input_):
-    return _CollectFrom.apply(input_)
+def collect_act_from_rank0(input_):
+    return _BcastFromRank0.apply(input_)
 
 
 class CpuBertEmbeddings(nn.Module):
@@ -304,8 +344,8 @@ class CpuBertEmbeddings(nn.Module):
         assert position_ids is None
 
         global_rank = torch.distributed.get_rank()
-
-        new_input_ids = send_ids_to_parallel_region(input_ids)
+        world_size = torch.distributed.get_world_size()
+        new_input_ids = send_ids_to_rank0(input_ids)
 
         if global_rank == 0:
             # run embedding on CPU, output_activation (fp32 on CPU)
@@ -313,9 +353,10 @@ class CpuBertEmbeddings(nn.Module):
                                                     token_type_ids,
                                                     position_ids)
         else:
-            output_activation = torch.zeros(new_input_ids.shape[0],
-                                            self.bert_embedding.hidden_size)
-        embeddings = collect_act_from_parallel_region(output_activation)
+            output_activation = torch.zeros(
+                new_input_ids.shape[0] // world_size,
+                self.bert_embedding.hidden_size)
+        embeddings = collect_act_from_rank0(output_activation)
         assert embeddings.dtype == torch.float, f"embedding outputs should be in float on CPU, now {embeddings.dtype}"
 
         if is_param_registered(self.LayerNorm.weight):
