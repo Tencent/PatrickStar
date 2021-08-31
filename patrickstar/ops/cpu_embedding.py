@@ -242,3 +242,19 @@ class CpuBertEmbeddings(nn.Module):
         embeddings = self.LayerNorm(embeddings.to(tgt_type))
         embeddings = self.dropout(embeddings)
         return embeddings
+
+class Embedding(nn.Module):
+    def __init__(self, *args, **kwargs):
+        super().__init__()
+        # for huggingface
+        self.dummy = nn.Parameter(torch.tensor([], dtype=torch.half),
+                                  requires_grad=False)
+
+        embedding = args[0]
+        self.embedding = embedding
+
+    def forward(self, input):
+        new_input = copy_to_cpu(input)
+        output = self.embedding(new_input)
+        output = copy_to_gpu(output)
+        return output.to(torch.half)
