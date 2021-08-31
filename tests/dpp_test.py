@@ -22,7 +22,7 @@ import time
 import torch.distributed as dist
 
 from ops import TorchAdam, FP16Adam
-from client import PatrickStarClient, setup_hybrid_ps_hooks, PSTensorStatus
+from client import PatrickStarClient, setup_patrickstar_hooks, PSTensorStatus
 from patrickstar.utils import see_memory_usage
 import patrickstar.utils.global_timer as global_timer
 

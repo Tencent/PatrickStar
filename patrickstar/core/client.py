@@ -19,7 +19,7 @@ import logging
 from torch.multiprocessing import Process, Manager
 import time
 
-from .hook import setup_hybrid_ps_hooks
+from .hook import setup_patrickstar_hooks
 from .const import AccessType, PSChunkStatus, PSTensorStatus, TrainingStage
 from .chunk_data import Chunk
 from .chunk_list import ChunkList, ChunkListType
@@ -184,7 +184,7 @@ class PatrickStarClient(object):
             param.ps_attr.set_status(new_status, access_type)
 
     def register_model_hook(self, model):
-        setup_hybrid_ps_hooks(model, self)
+        setup_patrickstar_hooks(model, self)
 
     def chunk_ids_generator(self, chunk_list_type: ChunkListType):
         return self.chunk_list.chunk_ids_generator(chunk_list_type)
