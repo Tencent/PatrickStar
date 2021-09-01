@@ -12,7 +12,7 @@
 # See the AUTHORS file for names of contributors.
 
 import torch
-from tests.bert_classification import get_bert_data_loader
+from tests.data_loader import get_bert_data_loader
 from transformers import BertConfig, BertForSequenceClassification
 import enum
 import time

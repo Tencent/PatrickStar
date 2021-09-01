@@ -170,12 +170,10 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
 
         self.submodule_id = -1
     def _pre_context_exec(self):
-        _old_new = torch.nn.Embedding.__new__
         def _new(cls, *args, **kwargs):
-            embedding = _old_new(cls)
+            embedding = object.__new__(cls)
             embedding.__init__(*args, **kwargs)
             return Embedding(embedding, use_cpu_embedding=self.use_cpu_embedding)
-        torch.nn.Embedding._old_new = _old_new
         torch.nn.Embedding.__new__ = _new
 
     def _post_context_exec(self):
@@ -186,8 +184,9 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
         """
         logger.info('Post Model Init Context')
 
-        torch.nn.Embedding.__new__ = torch.nn.Embedding._old_new
-        del torch.nn.Embedding._old_new
+        def _origin_new(cls, *arg, **kwargs):
+            return object.__new__(cls)
+        torch.nn.Embedding.__new__ = _origin_new
 
         chunk_num = 0
         for param_fp16_chunk_id, param_fp32_chunk_id in zip(
