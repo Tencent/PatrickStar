@@ -81,12 +81,13 @@ class Embedding(nn.Module):
         self.embedding = embedding
         self.use_cpu_embedding = use_cpu_embedding
 
-    def forward(self, input):
+    def forward(self, input_):
         if self.use_cpu_embedding:
-            input = copy_to_cpu(input)
+            input_ = copy_to_cpu(input_)
         else:
-            input = copy_to_gpu(input)
-        output = self.embedding(input)
+            input_ = copy_to_gpu(input_)
+        print(input_)
+        output = self.embedding(input_)
         if self.use_cpu_embedding:
             output = copy_to_gpu(output)
         return output.to(torch.half)
