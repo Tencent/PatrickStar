@@ -261,9 +261,11 @@ class ChunkTensorIndex(object):
             yield chunk_id, comm_group_id, chunk
 
     def visit_chunk(self, chunk):
-        rank = torch.distributed.get_rank()
-        if rank != 1:
-            return
+        if torch.distributed.is_initialized():
+            rank = torch.distributed.get_rank()
+            if rank != 0:
+                return
+        chunk_id = chunk.chunk_id
         comm_group_id, comm_group_offset, list_type = self.chunk_id_to_comm_group_map[
             chunk_id]
         logger.info(
