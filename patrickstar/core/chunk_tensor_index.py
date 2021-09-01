@@ -46,6 +46,8 @@ class ChunkTensorIndex(object):
         self.chunk_type_to_chunk_id_list_map = {}
         self.default_chunk_size = default_chunk_size
 
+        self.param_fp16_chunk_id_to_os_chunk_id = {}
+
     def is_local_chunk(self, chunk_id):
         """
         chunk_id是否是local chunk
