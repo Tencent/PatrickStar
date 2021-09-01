@@ -70,7 +70,7 @@ class ChunkTensorIndex(object):
             返回chunk id，如果不存在则返回None
         """
         ref_chunk_id = self.get_chunk_id(ref_param, access_type)
-        return self.param_fp16_chunk_id_to_os_chunk_id.get(
+        return self.param_fp16_chunk_id_to_os_chunk_id_map.get(
             (ref_chunk_id, chunk_list_type))
 
     def is_local_chunk(self, chunk_id):
