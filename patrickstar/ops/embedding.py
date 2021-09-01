@@ -86,7 +86,6 @@ class Embedding(nn.Module):
             input_ = copy_to_cpu(input_)
         else:
             input_ = copy_to_gpu(input_)
-        print(input_)
         output = self.embedding(input_)
         if self.use_cpu_embedding:
             output = copy_to_gpu(output)
