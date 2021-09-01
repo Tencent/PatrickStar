@@ -23,7 +23,7 @@ from patrickstar.runtime import initialize_engine
 from patrickstar.deepspeed_helper.global_vars import set_global_variables
 from patrickstar.deepspeed_helper.global_vars import get_args
 
-from tests.bert_classification import get_bert_data_loader
+from tests.data_loader import get_bert_data_loader
 
 
 def test_bert_model(method,
@@ -62,7 +62,7 @@ def test_bert_model(method,
 
     if method == "patrickstar":
         def model_func():
-            return BertForSequenceClassification(cfg, use_cpu_embedding=True)
+            return BertForSequenceClassification(cfg)
 
         config = {
             # The same format as optimizer config of DeepSpeed
