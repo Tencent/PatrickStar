@@ -16,7 +16,6 @@ from torch.utils.data import SequentialSampler
 # from checkpoint.torch_checkpoint import checkpoint
 from torch.utils.checkpoint import checkpoint
 from patrickstar.utils import logger
-from patrickstar.ops.cpu_embedding import CpuBertEmbeddings, BertEmbeddings
 from transformers import BertConfig
 
 
@@ -99,10 +98,7 @@ class SimpleModel(torch.nn.Module):
         config.vocab_size = 25
         config.max_position_embeddings = 10
         config.hidden_size = hidden_dim
-        if use_cpu_embedding:
-            self.embeddings = CpuBertEmbeddings(config)
-        else:
-            self.embeddings = BertEmbeddings(config)
+        self.embeddings = torch.nn.Embedding(config.vocab_size, hidden_dim)
 
         self.encoder = Encoder(hidden_dim, is_ckp)
         self.cross_entropy_loss = torch.nn.CrossEntropyLoss()

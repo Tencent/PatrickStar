@@ -15,7 +15,6 @@ import unittest
 from patrickstar.core import PatrickStarClient, ChunkTensorIndex, ChunkList, AccessType
 import logging
 import torch
-from tests.simple_net import SimpleModel
 from common import distributed_test
 from patrickstar.ops import FP16Adam
 from transformers import BertModel, BertConfig
