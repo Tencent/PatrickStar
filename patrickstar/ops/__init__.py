@@ -13,4 +13,4 @@
 
 from .fp16_cpu_adam import FP16Adam
 from .torch_adam import TorchAdam
-from .cpu_embedding import *
+from .embedding import *
