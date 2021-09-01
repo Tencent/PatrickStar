@@ -32,7 +32,6 @@ from patrickstar.deepspeed_helper.global_vars import set_global_variables
 from patrickstar.deepspeed_helper.global_vars import get_args
 from patrickstar.manager import PatrickStarManager
 from patrickstar.utils.model_size_calculator import get_ps_model_size, estimate_bert_MAC
-from patrickstar.ops.cpu_embedding import Embedding
 import os
 
 
