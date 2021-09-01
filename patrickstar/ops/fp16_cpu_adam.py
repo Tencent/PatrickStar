@@ -500,8 +500,6 @@ class FP16Adam(torch.optim.Optimizer):
 
                     # record the step after step update
                     state_steps.append(state['step'])
-                else:
-                    raise RuntimeError(f"tensor id {p.ps_attr.grad_id()}")
 
         # 混合ADMA，根据预热获得的信息，放一部分Chunk在GPU上。
         self.FP16_f_adamv2(self.client, fp32_param_list,

@@ -12,8 +12,8 @@
 # See the AUTHORS file for names of contributors.
 
 import torch
-from tests.bert_classification import BertForSequenceClassification, get_bert_data_loader
-from transformers import BertConfig
+from tests.bert_classification import get_bert_data_loader
+from transformers import BertConfig, BertForSequenceClassification
 import enum
 import time
 import sys
@@ -33,8 +33,6 @@ from patrickstar.deepspeed_helper.global_vars import get_args
 from patrickstar.manager import PatrickStarManager
 from patrickstar.utils.model_size_calculator import get_ps_model_size, estimate_bert_MAC
 import os
-
-from deepspeed.profiling.flops_profiler import FlopsProfiler
 
 
 def show_params(model, is_ps, step):
@@ -131,8 +129,7 @@ def test_bert_model(is_ckp: bool = False,
         assert is_fp16, f"use_ps must use fp16"
 
         def model_func():
-            return BertForSequenceClassification(
-                cfg, use_cpu_embedding=args.use_cpu_embedding)
+            return BertForSequenceClassification(cfg)
 
         config = {
             # The same format as optimizer config of DeepSpeed

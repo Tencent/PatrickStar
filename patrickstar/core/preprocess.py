@@ -19,6 +19,7 @@ from patrickstar.utils import see_memory_usage
 from patrickstar.utils import logger, print_rank
 from patrickstar.core import PatrickStarClient, AccessType, ChunkListType, ChunkTensorIndex, ChunkList
 from patrickstar.core import PSParameter, register_param, is_param_registered, ParamType
+from patrickstar.ops import Embedding
 from typing import List
 _orig_torch_empty = torch.empty
 
@@ -106,6 +107,8 @@ class InsertPostInitMethodToModuleSubClasses(object):
             torch.Tensor.__new__ = new_cpu_tensor
             torch.empty = empty_cpu_tensor
 
+        self._pre_context_exec()
+
     def __exit__(self, exc_type, exc_value, traceback):
         def _disable_class(cls):
             cls.__init__ = cls._old_init
@@ -127,6 +130,9 @@ class InsertPostInitMethodToModuleSubClasses(object):
 
     # To be implemented by inheriting classes
     def _post_init_method(self, module):
+        pass
+
+    def _pre_context_exec(self):
         pass
 
     def _post_context_exec(self):
@@ -161,7 +167,16 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
         self.use_fake_dist = use_fake_dist
         self.use_cpu_embedding = use_cpu_embedding
 
+
         self.submodule_id = -1
+    def _pre_context_exec(self):
+        _old_new = torch.nn.Embedding.__new__
+        def _new(cls, *args, **kwargs):
+            embedding = _old_new(cls)
+            embedding.__init__(*args, **kwargs)
+            return Embedding(embedding, use_cpu_embedding=self.use_cpu_embedding)
+        torch.nn.Embedding._old_new = _old_new
+        torch.nn.Embedding.__new__ = _new
 
     def _post_context_exec(self):
         """
@@ -170,6 +185,10 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
         2. append dummy chunk，使chunk num是进程数的整数倍 TODO(jiaruifang)
         """
         logger.info('Post Model Init Context')
+
+        torch.nn.Embedding.__new__ = torch.nn.Embedding._old_new
+        del torch.nn.Embedding._old_new
+
         chunk_num = 0
         for param_fp16_chunk_id, param_fp32_chunk_id in zip(
                 self.client.chunk_ids_generator(ChunkListType.PARAM_FP16),
