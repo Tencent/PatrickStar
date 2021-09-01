@@ -161,6 +161,8 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
         self.use_fake_dist = use_fake_dist
         self.use_cpu_embedding = use_cpu_embedding
 
+        self.submodule_id = -1
+
     def _post_context_exec(self):
         """
         初始化context退出时执行本函数
@@ -225,6 +227,7 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
         1. 保留local的tensor，通过删除remote tensor的方式
         2. 将model param拷贝到chunk对应的内存中
         """
+        self.submodule_id += 1
         see_memory_usage(
             f"Before converting parmas in {module.__class__.__name__}",
             force=False)
@@ -251,7 +254,9 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
             name = f'{name}_{self.param_idx}'
             register_param(param, ParamType.CHUNK_BASED, torch.half, name)
             self.param_idx += 1
-            # logger.info(f'** Converting Params {name}')
+            logger.info(
+                f'** Converting Params {name} in module id {self.submodule_id}'
+            )
             self.client.append_tensor(param, torch.half, AccessType.DATA,
                                       ChunkListType.PARAM_FP16, f'{name}_fp16')
 
