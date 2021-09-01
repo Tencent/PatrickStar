@@ -288,7 +288,7 @@ def setup_patrickstar_hooks(module, client):
                                          op=torch.distributed.ReduceOp.SUM,
                                          group=client.cpu_comm_group,
                                          async_op=False)
-            param.data /= world_size
+            param.grad /= world_size
             logger.debug(
                 f'rank {torch.distributed.get_rank} allreduce grad {param.ps_attr.name}'
             )
