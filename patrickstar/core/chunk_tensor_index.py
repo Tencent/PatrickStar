@@ -46,7 +46,32 @@ class ChunkTensorIndex(object):
         self.chunk_type_to_chunk_id_list_map = {}
         self.default_chunk_size = default_chunk_size
 
-        self.param_fp16_chunk_id_to_os_chunk_id = {}
+        # key is a tuple (torch.nn.Parameter, ParamListType) -> value: int
+        self.param_fp16_chunk_id_to_os_chunk_id_map = {}
+
+    def register_optimizer_state_chunk_id(self, ref_param,
+                                          access_type: AccessType,
+                                          chunk_list_type: ChunkListType,
+                                          chunk_id: int):
+        ref_chunk_id = self.get_chunk_id(ref_param, access_type)
+        self.param_fp16_chunk_id_to_os_chunk_id_map[(
+            ref_chunk_id, chunk_list_type)] = chunk_id
+
+    def get_optimizer_state_chunk_id(self, ref_param: torch.nn.Parameter,
+                                     access_type: AccessType,
+                                     chunk_list_type: ChunkListType) -> int:
+        """
+        获取ref_param对应OS tensor所在的chunk_id
+        args:
+            @ref_param: 一个参考的param，一般是param fp16
+            @access_type: 访问类型
+            @chunk_list_type: os tensor的chunk类型
+        rets:
+            返回chunk id，如果不存在则返回None
+        """
+        ref_chunk_id = self.get_chunk_id(ref_param, access_type)
+        return self.param_fp16_chunk_id_to_os_chunk_id.get(
+            (ref_chunk_id, chunk_list_type))
 
     def is_local_chunk(self, chunk_id):
         """

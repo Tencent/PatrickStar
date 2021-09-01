@@ -137,6 +137,44 @@ class TestAccess(unittest.TestCase):
             0, param_list, torch.float, AccessType.DATA)
         self.assertTrue(is_success)
 
+    def test_chunk_layout_consistency(self):
+        """
+        检查OS的chunk layout是否和param fp16对齐
+        """
+        chunk_tensor_index = ChunkTensorIndex(20)
+
+        param_numel_list = [10, 5]
+        param_list = []
+
+        for param_id, numel in enumerate(param_numel_list):
+            param = torch.nn.Parameter(torch.zeros(numel))
+            register_param(param, ParamType.CHUNK_BASED, torch.float,
+                           f"param_{numel}")
+            is_success = chunk_tensor_index.try_insert_tensor(
+                0, param, torch.float, AccessType.DATA)
+
+        param_numel_list = [6, 9]
+        for param_id, numel in enumerate(param_numel_list):
+            param = torch.nn.Parameter(torch.zeros(numel))
+            register_param(param, ParamType.CHUNK_BASED, torch.float,
+                           f"param_{numel}")
+            is_success = chunk_tensor_index.try_insert_tensor(
+                1, param, torch.float, AccessType.DATA)
+
+        # Now, we have 2 chunks, (10, 5) (6, 9)
+        param_momentum = torch.nn.Parameter(torch.zeros(10))
+        register_param(param_momentum, ParamType.CHUNK_BASED, torch.float,
+                       f"param_{numel}")
+        chunk_id = chunk_tensor_index.get_optimizer_state_chunk_id(
+            param_list[0], AccessType.DATA, ChunkListType.MOMENTUM)
+        self.assertTrue(chunk_id is None)
+
+        chunk_tensor_index.register_optimizer_state_chunk_id(
+            param_momentum, AccessType.DATA, ChunkListType.MOMENTUM, 0)
+        chunk_id = chunk_tensor_index.get_optimizer_state_chunk_id(
+            param_list[0], AccessType.DATA, ChunkListType.MOMENTUM)
+        self.assertTrue(chunk_id == 0)
+
 
 if __name__ == "__main__":
     unittest.main()

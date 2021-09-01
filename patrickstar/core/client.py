@@ -55,9 +55,6 @@ class PatrickStarClient(object):
 
         self._time_profile = True
 
-        # 通过运行一次迭代来动态进行chunk scheduling
-        self._is_fp16 = is_fp16
-
         self._chunk_id = -1
         self.cpu_comm_group = torch.distributed.new_group(backend='gloo')
 
@@ -113,32 +110,6 @@ class PatrickStarClient(object):
             f'Append a dummy chunk to the Chunk List {chunk_list_type} comm group ({comm_group_idx} {comm_group_offset})'
         )
 
-    def get_optimizer_state_chunk_id(self, ref_param: torch.nn.Parameter,
-                                     access_type: AccessType,
-                                     chunk_list_type: ChunkListType) -> int:
-        """
-        获取ref_param对应OS tensor所在的chunk_id
-        args:
-            @ref_param: 一个参考的param，一般是param fp16
-            @access_type: 访问类型
-            @chunk_list_type: os tensor的chunk类型
-        rets:
-            返回chunk id，如果不存在则返回None
-        """
-        ref_chunk_id = self.chunk_tensor_index.get_chunk_id(
-            ref_param, access_type)
-        return self.chunk_tensor_index.param_fp16_chunk_id_to_os_chunk_id.get(
-            (ref_chunk_id, chunk_list_type))
-
-    def register_optimizer_state_chunk_id(self, ref_param,
-                                          access_type: AccessType,
-                                          chunk_list_type: ChunkListType,
-                                          chunk_id: int):
-        ref_chunk_id = self.chunk_tensor_index.get_chunk_id(
-            ref_param, access_type)
-        self.chunk_tensor_index.param_fp16_chunk_id_to_os_chunk_id[(
-            ref_chunk_id, chunk_list_type)] = chunk_id
-
     def append_tensor(self, param_list: List[torch.nn.Parameter],
                       data_type: torch.dtype, access_type: AccessType,
                       chunk_list_type: ChunkListType):
@@ -150,7 +121,6 @@ class PatrickStarClient(object):
             @data_type: tensor的数据类型，可以和param的类型不一致，因为param后面会被改变类型
             @access_type: 访问data或者grad
             @chunk_list_type: tensor插入队列的类型
-            @tensor_name: tensor名字的，debug用
         """
         assert type(
             data_type) == torch.dtype, f"data_type is {type(data_type)}"
@@ -188,8 +158,8 @@ class PatrickStarClient(object):
         按照ref_param的排布方式排布param
         ref_param和param所在的chunk id不同
         """
-        chunk_id = self.get_optimizer_state_chunk_id(ref_param, access_type,
-                                                     chunk_list_type)
+        chunk_id = self.chunk_tensor_index.get_optimizer_state_chunk_id(
+            ref_param, access_type, chunk_list_type)
         if chunk_id is None:
             # new a chunk
             chunk_id = self.chunk_list.generate_chunk_id()
@@ -203,13 +173,14 @@ class PatrickStarClient(object):
                                               chunk_list_type)
         ret = self.chunk_tensor_index.try_insert_tensor(
             chunk_id, param, data_type, access_type)
-        self.register_optimizer_state_chunk_id(ref_param, access_type,
-                                               chunk_list_type, chunk_id)
+        self.chunk_tensor_index.register_optimizer_state_chunk_id(
+            ref_param, access_type, chunk_list_type, chunk_id)
         assert ret is True
 
-    def get_param_fp16_chunks_mem_size(self):
+    def param_fp16_chunks_max_mem_usage(self):
         """
         获得param fp16使用Chunk所占的内存大小 (in Bytes)
+        在多机环境，需要包括allgather获得remote chunks
         """
         world_size = torch.distributed.get_world_size()
         # 本进程自己管理的Chunk，和Group Chunk Buff会分配的Chunk

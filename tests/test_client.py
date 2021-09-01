@@ -44,8 +44,8 @@ class TestClientAccess(unittest.TestCase):
 
             register_param(param, ParamType.CHUNK_BASED, torch.float,
                            f"param_{idx}")
-            self.client.append_tensor(param, torch.float, AccessType.DATA,
-                                      ChunkListType.PARAM_FP32, f"param{idx}")
+            self.client.append_tensor([param], torch.float, AccessType.DATA,
+                                      ChunkListType.PARAM_FP32)
 
             real_payload = self.client.access_data(param,
                                                    torch.device('cpu:0'))
@@ -78,8 +78,8 @@ class TestClientAccess(unittest.TestCase):
             register_param(param, ParamType.TORCH_BASED, torch.float,
                            f"param_{idx}")
             param_payload_ref_list.append(param.data.clone())
-            self.client.append_tensor(param, torch.float, AccessType.DATA,
-                                      ChunkListType.PARAM_FP32, f"param{idx}")
+            self.client.append_tensor([param], torch.float, AccessType.DATA,
+                                      ChunkListType.PARAM_FP32)
 
             real_payload = self.client.access_data(param,
                                                    torch.device('cpu:0'))

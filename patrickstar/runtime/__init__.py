@@ -51,15 +51,13 @@ def initialize_engine(model_func, local_rank, config=None):
                          use_cpu_embedding=use_cpu_embedding):
         model = model_func()
 
-    engine = PatrickStarEngine(model=model,
-                               client=client,
-                               config=config)
+    engine = PatrickStarEngine(model=model, client=client, config=config)
 
     # 开启预热优化
     mgr = PatrickStarManager()
     mgr.start_train(
         is_warmup=True,
-        param_fp16_chunk_size=client.get_param_fp16_chunks_mem_size(),
+        param_fp16_chunk_size=client.param_fp16_chunks_max_mem_usage(),
         chunk_size=client.default_chunk_size)
 
     return (engine, engine.optimizer)
