@@ -152,6 +152,7 @@ class TestAccess(unittest.TestCase):
                            f"param_{numel}")
             is_success = chunk_tensor_index.try_insert_tensor(
                 0, param, torch.float, AccessType.DATA)
+            param_list.append(param)
 
         param_numel_list = [6, 9]
         for param_id, numel in enumerate(param_numel_list):
@@ -160,6 +161,7 @@ class TestAccess(unittest.TestCase):
                            f"param_{numel}")
             is_success = chunk_tensor_index.try_insert_tensor(
                 1, param, torch.float, AccessType.DATA)
+            param_list.append(param)
 
         # Now, we have 2 chunks, (10, 5) (6, 9)
         param_momentum = torch.nn.Parameter(torch.zeros(10))
@@ -170,10 +172,10 @@ class TestAccess(unittest.TestCase):
         self.assertTrue(chunk_id is None)
 
         chunk_tensor_index.register_optimizer_state_chunk_id(
-            param_momentum, AccessType.DATA, ChunkListType.MOMENTUM, 0)
+            param_list[0], AccessType.DATA, ChunkListType.MOMENTUM, 3)
         chunk_id = chunk_tensor_index.get_optimizer_state_chunk_id(
             param_list[0], AccessType.DATA, ChunkListType.MOMENTUM)
-        self.assertTrue(chunk_id == 0)
+        self.assertTrue(chunk_id == 3, f"chunk_id is {chunk_id} should be 3")
 
 
 if __name__ == "__main__":
