@@ -12,7 +12,8 @@
 # See the AUTHORS file for names of contributors.
 
 import unittest
-from patrickstar.ops import CpuBertEmbeddings
+from torch.nn import Embedding as TorchEmbedding
+from patrickstar.ops import Embedding as PSEmbedding
 from patrickstar.utils import logger
 from transformers import BertConfig
 from transformers.models.bert.modeling_bert import BertEmbeddings
@@ -25,7 +26,7 @@ class TestClientAccess(unittest.TestCase):
         pass
 
     @distributed_test(world_size=[1])
-    def test_function(self):
+    def test_embedding(self):
         cfg = BertConfig()
         cfg.hidden_dropout_prob = 0
         test_device = torch.device('cuda:0')
@@ -38,18 +39,14 @@ class TestClientAccess(unittest.TestCase):
                                   device=test_device)
 
         torch.manual_seed(0)
-        cpu_embedding = CpuBertEmbeddings(cfg)
+        torch_embedding = TorchEmbedding(cfg.vocab_size, 64)
         torch.manual_seed(0)
-        bert_embedding = BertEmbeddings(cfg)
-        bert_embedding = bert_embedding.to(test_device)
+        ps_embedding = PSEmbedding(torch_embedding, True)
 
-        cpu_embedding.LayerNorm.to(test_device)
-        cpu_embedding.dropout.to(test_device)
-        res = cpu_embedding(input_ids)
+        res = ps_embedding(input_ids)
+        torch_res = torch_embedding.to(test_device)(input_ids)
 
-        # torch
-        torch_res = bert_embedding(input_ids)
-        self.assertLess(torch.max(torch_res.cpu() - res.cpu()), 1e-4)
+        self.assertLess(torch.max(torch_res.cpu() - res.cpu()), 1e-2)
 
 
 if __name__ == "__main__":

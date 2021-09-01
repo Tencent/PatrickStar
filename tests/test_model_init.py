@@ -17,7 +17,6 @@ from patrickstar import PatrickStarManager
 from patrickstar.core import PatrickStarClient, ChunkTensorIndex, ChunkList, AccessType, ParamType
 import logging
 import torch
-from patrickstar.deepspeed_helper.global_vars import set_global_variables
 from common import distributed_test
 from transformers import BertModel, BertConfig
 
@@ -66,5 +65,4 @@ class TestModelInitContext(unittest.TestCase):
 
 
 if __name__ == "__main__":
-    set_global_variables()
     unittest.main()
