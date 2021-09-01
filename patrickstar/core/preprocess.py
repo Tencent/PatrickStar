@@ -269,38 +269,48 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
         # 在模型初始化的过程构造模型，post_init_method调用粒度是一个SubModule，比如BertAttention模块。
         # 对于每个进程，将所有参数初始化出来。
         # (NOTE)模型初始化顺序和optimizer parameter group遍历顺序虽不一致，但很相似
+        param_fp16_list = []
+        param_fp32_list = []
         for name, param in module.named_parameters(recurse=False):
             name = f'{name}_{self.param_idx}'
             register_param(param, ParamType.CHUNK_BASED, torch.half, name)
             self.param_idx += 1
-            logger.info(
+            param_fp16_list.append(param)
+            logger.debug(
                 f'** Converting Params {name} in module id {self.submodule_id}'
             )
-            self.client.append_tensor(param, torch.half, AccessType.DATA,
-                                      ChunkListType.PARAM_FP16, f'{name}_fp16')
-
             # Append a tensor to the param fp32 chunk list.
             # Before that, we have to build a fp32 param.
             param_fp32 = torch.nn.Parameter(torch.tensor(
                 [], dtype=torch.float, device=torch.device('cpu:0')),
                                             requires_grad=False)
+            param_fp32_list.append(param_fp32)
             register_param(param_fp32, ParamType.CHUNK_BASED, torch.float,
                            f'{name}_fp32')
             param_fp32.ps_attr.reset_shape(param.shape)
-            self.client.append_tensor(param_fp32, torch.float, AccessType.DATA,
-                                      ChunkListType.PARAM_FP32, f'{name}_fp32')
-
             self.client.param_fp16_to_param_fp32_map[param] = param_fp32
             self.client.chunk_based_param_fp16.append(param)
+
+        self.client.append_tensor(param_fp16_list, torch.half, AccessType.DATA,
+                                  ChunkListType.PARAM_FP16)
+        self.client.append_tensor(param_fp32_list, torch.float,
+                                  AccessType.DATA, ChunkListType.PARAM_FP32)
+
+        for param_fp16, param_fp32 in zip(param_fp16_list, param_fp32_list):
             # Delete the memory of non local tensors
             if not self._is_local_param(param, AccessType.DATA):
-                param.ps_attr._is_local = False
+                param_fp16.ps_attr._is_local = False
                 param_fp32.ps_attr._is_local = False
-                # TODO(jiaruifang) fix bert init bug
+                # TODO(jiaruifang) fix distributed init bug.
+                # Check results will failed on multile GPUs without use_fake_dist
+                # NOTE(why dtype is torch.float rather than torch.half)
+                # PyTorch version lower than 1.5 can not initialize torch.half
+                # tensors on CPU. So although the param_fp16 is a fp16 type param,
+                # its pytorch dtype still be float.
                 if not self.use_fake_dist:
-                    param.data = torch.tensor([],
-                                              dtype=torch.half,
-                                              device=param.device)
+                    param_fp16.data = torch.tensor([],
+                                                   dtype=torch.float,
+                                                   device=param.device)
             else:
-                param.ps_attr._is_local = True
+                param_fp16.ps_attr._is_local = True
                 param_fp32.ps_attr._is_local = True

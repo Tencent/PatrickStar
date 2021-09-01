@@ -149,15 +149,16 @@ class FP16Adam(torch.optim.Optimizer):
                     state['exp_avg_sq'].ps_attr._is_local = p.ps_attr.is_local(
                     )
 
-                    self.client.append_tensor(state['exp_avg'], torch.float,
-                                              AccessType.DATA,
-                                              ChunkListType.MOMENTUM,
-                                              f'{name}_fp32')
+                    # Chunk layout of Momentum and Variance should be consist with param fp16
+                    self.client.append_tensor_as_ref(state['exp_avg'],
+                                                     torch.float,
+                                                     AccessType.DATA,
+                                                     ChunkListType.MOMENTUM, p)
 
-                    self.client.append_tensor(state['exp_avg_sq'], torch.float,
-                                              AccessType.DATA,
-                                              ChunkListType.VARIANCE,
-                                              f'{name}_fp32')
+                    self.client.append_tensor_as_ref(state['exp_avg_sq'],
+                                                     torch.float,
+                                                     AccessType.DATA,
+                                                     ChunkListType.VARIANCE, p)
 
         # 用作fp16 grad 存储的buffer
         self.read_chunk_buff = None

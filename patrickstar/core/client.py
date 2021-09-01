@@ -18,7 +18,7 @@ import datetime
 import logging
 from torch.multiprocessing import Process, Manager
 import time
-
+from typing import List
 from .hook import setup_patrickstar_hooks
 from .const import AccessType, PSChunkStatus, PSTensorStatus, TrainingStage
 from .chunk_data import Chunk
@@ -113,17 +113,40 @@ class PatrickStarClient(object):
             f'Append a dummy chunk to the Chunk List {chunk_list_type} comm group ({comm_group_idx} {comm_group_offset})'
         )
 
-    def append_tensor(self,
-                      param: torch.nn.Parameter,
-                      data_type: torch.dtype,
-                      access_type: AccessType,
-                      chunk_list_type: ChunkListType,
-                      tensor_name: str = "UNDEF"):
+    def get_optimizer_state_chunk_id(self, ref_param: torch.nn.Parameter,
+                                     access_type: AccessType,
+                                     chunk_list_type: ChunkListType) -> int:
+        """
+        获取ref_param对应OS tensor所在的chunk_id
+        args:
+            @ref_param: 一个参考的param，一般是param fp16
+            @access_type: 访问类型
+            @chunk_list_type: os tensor的chunk类型
+        rets:
+            返回chunk id，如果不存在则返回None
+        """
+        ref_chunk_id = self.chunk_tensor_index.get_chunk_id(
+            ref_param, access_type)
+        return self.chunk_tensor_index.param_fp16_chunk_id_to_os_chunk_id.get(
+            (ref_chunk_id, chunk_list_type))
+
+    def register_optimizer_state_chunk_id(self, ref_param,
+                                          access_type: AccessType,
+                                          chunk_list_type: ChunkListType,
+                                          chunk_id: int):
+        ref_chunk_id = self.chunk_tensor_index.get_chunk_id(
+            ref_param, access_type)
+        self.chunk_tensor_index.param_fp16_chunk_id_to_os_chunk_id[(
+            ref_chunk_id, chunk_list_type)] = chunk_id
+
+    def append_tensor(self, param_list: List[torch.nn.Parameter],
+                      data_type: torch.dtype, access_type: AccessType,
+                      chunk_list_type: ChunkListType):
         """
         将一个tensor交给client管理，这个tensor必须是某个parameter的data或者grad成员变量
         具体过程，如果这个param之前没有被client管理过，则在对应的chunk_list_type后append这个tensor
         args:
-            @param: tensor所在的Parameter，client管理的tensor必须属于parameter的data或者grad
+            @param_list: tensor list所在的Parameter list，client管理的tensor必须属于parameter的data或者grad
             @data_type: tensor的数据类型，可以和param的类型不一致，因为param后面会被改变类型
             @access_type: 访问data或者grad
             @chunk_list_type: tensor插入队列的类型
@@ -132,13 +155,12 @@ class PatrickStarClient(object):
         assert type(
             data_type) == torch.dtype, f"data_type is {type(data_type)}"
         assert type(access_type) == AccessType
-        assert is_param_registered(param)
         if self.chunk_list.is_empty(chunk_list_type):
             chunk_id = self.chunk_list.generate_chunk_id()
         else:
             last_chunk_id = self.chunk_list.last_chunk_id(chunk_list_type)
-            is_success = self.chunk_tensor_index.try_insert_tensor(
-                last_chunk_id, param, data_type, access_type)
+            is_success = self.chunk_tensor_index.try_insert_tensor_list(
+                last_chunk_id, param_list, data_type, access_type)
             if is_success:
                 return
             chunk_id = self.chunk_list.generate_chunk_id()
@@ -149,14 +171,41 @@ class PatrickStarClient(object):
         self.chunk_tensor_index.add_chunk(chunk_id, self.default_chunk_size,
                                           data_type, comm_group_idx,
                                           comm_group_offset, chunk_list_type)
-        is_success = self.chunk_tensor_index.try_insert_tensor(
-            chunk_id, param, data_type, access_type)
+        is_success = self.chunk_tensor_index.try_insert_tensor_list(
+            chunk_id, param_list, data_type, access_type)
         if not is_success:
             raise RuntimeError(
                 f"can not append a tensor to chunk_tensor_index."
-                "Tensor size {param.numel()} is larger than the default chunk size {self.default_chunk_size}."
+                f"Overall size of param list is larger than the default chunk size {self.default_chunk_size}."
             )
         return
+        ref_chunk_id = self.self.chunk_tensor_index.get_chunk_id(
+            ref_param, access_type)
+
+    def append_tensor_as_ref(self, param, data_type, access_type,
+                             chunk_list_type, ref_param):
+        """
+        按照ref_param的排布方式排布param
+        ref_param和param所在的chunk id不同
+        """
+        chunk_id = self.get_optimizer_state_chunk_id(ref_param, access_type,
+                                                     chunk_list_type)
+        if chunk_id is None:
+            # new a chunk
+            chunk_id = self.chunk_list.generate_chunk_id()
+            comm_group_idx, comm_group_offset = self.chunk_list.new_chunk(
+                chunk_id, self.default_chunk_size, data_type, False,
+                chunk_list_type)
+            self.chunk_tensor_index.add_chunk(chunk_id,
+                                              self.default_chunk_size,
+                                              data_type, comm_group_idx,
+                                              comm_group_offset,
+                                              chunk_list_type)
+        ret = self.chunk_tensor_index.try_insert_tensor(
+            chunk_id, param, data_type, access_type)
+        self.register_optimizer_state_chunk_id(ref_param, access_type,
+                                               chunk_list_type, chunk_id)
+        assert ret is True
 
     def get_param_fp16_chunks_mem_size(self):
         """
