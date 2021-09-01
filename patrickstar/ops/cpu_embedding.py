@@ -247,7 +247,14 @@ class Embedding(nn.Module):
     def __init__(self, embedding, use_cpu_embedding=False):
         super().__init__()
         if use_cpu_embedding:
-            # for huggingface
+            # A walkaround for huggingface.
+            # Huggingface will use the type of the first parameter as the
+            # dtype of the module. And we need the module to be identified as
+            # fp16 for the mixed precision training in patrickstar.
+            # However, when use_cpu_embedding is True, the weight of embedding
+            # remains to fp32 (otherwise cause error on older version of pytorch).
+            # As the embedding is usually the first submodule, we insert a
+            # dummy fp16 Parameter as the placeholder.
             self.dummy = nn.Parameter(torch.tensor([], dtype=torch.half),
                                       requires_grad=False)
         self.embedding = embedding
