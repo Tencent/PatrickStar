@@ -120,10 +120,6 @@ class ChunkTensorIndex(object):
 
         return None, None
 
-    def reset(self):
-        self.tensor_id_to_info_map.clear()
-        self.chunk_id_to_tensor_id_list_map.clear()
-
     def generate_grad_tensor_param(self):
         """
         按chunk内部排列顺序生成所有当前没有被free的grad tensor所在的param
@@ -265,9 +261,10 @@ class ChunkTensorIndex(object):
             yield chunk_id, comm_group_id, chunk
 
     def visit_chunk(self, chunk):
-        rank = torch.distributed.get_rank()
-        if rank != 1:
-            return
+        if torch.distributed.is_initialized():
+            rank = torch.distributed.get_rank()
+            if rank != 0:
+                return
         chunk_id = chunk.chunk_id
         comm_group_id, comm_group_offset, list_type = self.chunk_id_to_comm_group_map[
             chunk_id]
@@ -329,11 +326,45 @@ class ChunkTensorIndex(object):
         for tensor_id in self.chunk_id_to_tensor_id_list_map[chunk_id]:
             yield self.tensor_id_to_info_map[tensor_id].param
 
+    def delete_tensor(self, chunk_id, param, access_type):
+        assert is_param_registered(param)
+        target_tensor_id = param.ps_attr.get_tensor_id(access_type)
+        if target_tensor_id not in self.tensor_id_to_info_map:
+            return
+        self.tensor_id_to_info_map.pop(target_tensor_id)
+        tensor_id_list = self._get_tensor_id_list(chunk_id)
+        tensor_id_list.remove(target_tensor_id)
+
+    def try_insert_tensor_list(self, chunk_id, param_list, data_type,
+                               access_type):
+        """
+        向chunk_id所在的chunk插入param_list
+        先污染后治理，先插入每一个param，如果发现这个chunk无法满足，则删除之前插入
+        """
+        visited_params = []
+        success = True
+        for param in param_list:
+            success = self.try_insert_tensor(chunk_id, param, data_type,
+                                             access_type)
+            visited_params.append(param)
+            if not success:
+                break
+        if not success:
+            for param in visited_params:
+                self.delete_tensor(chunk_id, param, access_type)
+
+        return success
+
     def try_insert_tensor(self, chunk_id, param, data_type,
                           access_type) -> bool:
         """
         尝试向chunk内插入tensor，返回值表示是否成功
         如果param已经插入过了则不予处理
+        args:
+            @chunk_id: 插入目标chunk_id
+            @param: 待插入的参数
+            @data_type: param的数据类型
+            @access_type: param参数的访问方式
         """
         tensor_id_list = self._get_tensor_id_list(chunk_id)
         prev_end_pos = 0

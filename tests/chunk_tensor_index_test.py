@@ -12,7 +12,7 @@
 # See the AUTHORS file for names of contributors.
 
 import unittest
-from patrickstar.core import ChunkTensorIndex, ChunkListType, AccessType
+from patrickstar.core import ChunkTensorIndex, ChunkListType, AccessType, register_param, ParamType
 import logging
 import torch
 
@@ -31,10 +31,10 @@ class TestAccess(unittest.TestCase):
             start_offset_list.append(start_offset)
 
     def test_add_tensor(self):
-        chunk_tensor_index = ChunkTensorIndex()
+        chunk_tensor_index = ChunkTensorIndex(1024)
 
         chunk_tensor_index.add_chunk(chunk_id=0,
-                                     chunk_size=1000,
+                                     chunk_size=1024,
                                      data_type=torch.float,
                                      comm_group_id=0,
                                      comm_group_offset=0,
@@ -55,6 +55,87 @@ class TestAccess(unittest.TestCase):
             param_list.append(param)
 
         self._check_order(chunk_tensor_index, 0)
+
+    def test_append_tensor(self):
+        chunk_tensor_index = ChunkTensorIndex(20)
+        param_numel_list = [10, 20, 30, 20, 7, 2]
+        param_list = []
+
+        success_list = []
+        for param_id, numel in enumerate(param_numel_list):
+            param = torch.nn.Parameter(torch.zeros(numel))
+            register_param(param, ParamType.CHUNK_BASED, torch.float,
+                           f"param_{param_id}")
+            is_success = chunk_tensor_index.try_insert_tensor(
+                0, param, torch.float, AccessType.DATA)
+            success_list.append(is_success)
+        self.assertEqual(success_list, [True, False, False, False, True, True])
+
+    def test_append_tensor_list(self):
+        chunk_tensor_index = ChunkTensorIndex(20)
+        param_numel_list = [7, 2]
+        param_list = []
+
+        param_list = []
+        for param_id, numel in enumerate(param_numel_list):
+            param = torch.nn.Parameter(torch.zeros(numel))
+            register_param(param, ParamType.CHUNK_BASED, torch.float,
+                           f"param_{param_id}")
+            param_list.append(param)
+        # 7， 2
+        is_success = chunk_tensor_index.try_insert_tensor_list(
+            0, param_list, torch.float, AccessType.DATA)
+        self.assertTrue(is_success)
+
+        # 7， 2， 6， 5
+        param_numel_list = [6, 5]
+        param_list = []
+        for param_id, numel in enumerate(param_numel_list):
+            param = torch.nn.Parameter(torch.zeros(numel))
+            register_param(param, ParamType.CHUNK_BASED, torch.float,
+                           f"param_{param_id}")
+            param_list.append(param)
+
+        is_success = chunk_tensor_index.try_insert_tensor_list(
+            0, param_list, torch.float, AccessType.DATA)
+        self.assertTrue(is_success)
+
+        # 7， 2，(6), 5
+        chunk_tensor_index.delete_tensor(0, param_list[0], AccessType.DATA)
+        param_numel_list = [8]
+        param_list = []
+        for param_id, numel in enumerate(param_numel_list):
+            param = torch.nn.Parameter(torch.zeros(numel))
+            register_param(param, ParamType.CHUNK_BASED, torch.float,
+                           f"param_{param_id}")
+            param_list.append(param)
+        is_success = chunk_tensor_index.try_insert_tensor_list(
+            0, param_list, torch.float, AccessType.DATA)
+        self.assertFalse(is_success)
+
+        # 7， 2，(6) 5
+        param_numel_list = [7]
+        param_list = []
+        for param_id, numel in enumerate(param_numel_list):
+            param = torch.nn.Parameter(torch.zeros(numel))
+            register_param(param, ParamType.CHUNK_BASED, torch.float,
+                           f"param_{param_id}")
+            param_list.append(param)
+        is_success = chunk_tensor_index.try_insert_tensor_list(
+            0, param_list, torch.float, AccessType.DATA)
+        self.assertFalse(is_success)
+
+        # 7， 2，(6) 5
+        param_numel_list = [1, 2, 3]
+        param_list = []
+        for param_id, numel in enumerate(param_numel_list):
+            param = torch.nn.Parameter(torch.zeros(numel))
+            register_param(param, ParamType.CHUNK_BASED, torch.float,
+                           f"param_{param_id}")
+            param_list.append(param)
+        is_success = chunk_tensor_index.try_insert_tensor_list(
+            0, param_list, torch.float, AccessType.DATA)
+        self.assertTrue(is_success)
 
 
 if __name__ == "__main__":
