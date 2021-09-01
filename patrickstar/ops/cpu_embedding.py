@@ -244,17 +244,21 @@ class CpuBertEmbeddings(nn.Module):
         return embeddings
 
 class Embedding(nn.Module):
-    def __init__(self, *args, **kwargs):
+    def __init__(self, embedding, use_cpu_embedding=False):
         super().__init__()
-        # for huggingface
-        self.dummy = nn.Parameter(torch.tensor([], dtype=torch.half),
-                                  requires_grad=False)
-
-        embedding = args[0]
+        if use_cpu_embedding:
+            # for huggingface
+            self.dummy = nn.Parameter(torch.tensor([], dtype=torch.half),
+                                      requires_grad=False)
         self.embedding = embedding
+        self.use_cpu_embedding = use_cpu_embedding
 
     def forward(self, input):
-        new_input = copy_to_cpu(input)
-        output = self.embedding(new_input)
-        output = copy_to_gpu(output)
+        if self.use_cpu_embedding:
+            input = copy_to_cpu(input)
+        else:
+            input = copy_to_gpu(input)
+        output = self.embedding(input)
+        if self.use_cpu_embedding:
+            output = copy_to_gpu(output)
         return output.to(torch.half)

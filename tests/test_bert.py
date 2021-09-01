@@ -130,11 +130,7 @@ def test_bert_model(is_ckp: bool = False,
         assert is_fp16, f"use_ps must use fp16"
 
         def model_func():
-            model = BertForSequenceClassification(cfg)
-            model.bert.embeddings.word_embeddings = Embedding(model.bert.embeddings.word_embeddings)
-            model.bert.embeddings.position_embeddings = Embedding(model.bert.embeddings.position_embeddings)
-            model.bert.embeddings.token_type_embeddings = Embedding(model.bert.embeddings.token_type_embeddings)
-            return model
+            return BertForSequenceClassification(cfg)
 
         config = {
             # The same format as optimizer config of DeepSpeed
