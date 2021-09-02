@@ -17,10 +17,9 @@ import functools
 
 from patrickstar.utils import see_memory_usage
 from patrickstar.utils import logger, print_rank
-from patrickstar.core import PatrickStarClient, AccessType, ChunkListType, ChunkTensorIndex, ChunkList
-from patrickstar.core import PSParameter, register_param, is_param_registered, ParamType
+from patrickstar.core import PatrickStarClient, AccessType, ChunkListType
+from patrickstar.core import register_param, is_param_registered, ParamType
 from patrickstar.ops import Embedding
-from typing import List
 _orig_torch_empty = torch.empty
 
 
@@ -91,7 +90,10 @@ class InsertPostInitMethodToModuleSubClasses(object):
 
         # Replace .__init__() for all existing subclasses of torch.nn.Module
         for subclass in torch.nn.modules.module.Module.__subclasses__():
-            _enable_class(subclass)
+            if subclass == torch.nn.Embedding:
+                _enable_class(Embedding)
+            else:
+                _enable_class(subclass)
 
         # holding on to the current __init__subclass__ for exit
         torch.nn.modules.module.Module._old_init_subclass = torch.nn.modules.module.Module.__init_subclass__
@@ -115,7 +117,10 @@ class InsertPostInitMethodToModuleSubClasses(object):
 
         # Replace .__init__() for all existing subclasses of torch.nn.Module
         for subclass in torch.nn.modules.module.Module.__subclasses__():
-            _disable_class(subclass)
+            if subclass == torch.nn.Embedding:
+                _disable_class(Embedding)
+            else:
+                _disable_class(subclass)
 
         # Replace .__init__() for future subclasses of torch.nn.Module
         torch.nn.modules.module.Module.__init_subclass__ = torch.nn.modules.module.Module._old_init_subclass
@@ -167,13 +172,14 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
         self.use_fake_dist = use_fake_dist
         self.use_cpu_embedding = use_cpu_embedding
 
-
         self.submodule_id = -1
+
     def _pre_context_exec(self):
+        Embedding.use_cpu_embedding = self.use_cpu_embedding
         def _new(cls, *args, **kwargs):
-            embedding = object.__new__(cls)
-            embedding.__init__(*args, **kwargs)
-            return Embedding(embedding, use_cpu_embedding=self.use_cpu_embedding)
+            embedding = object.__new__(Embedding)
+            return embedding
+
         torch.nn.Embedding.__new__ = _new
 
     def _post_context_exec(self):
