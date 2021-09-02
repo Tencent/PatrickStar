@@ -279,7 +279,7 @@ class ChunkList(object):
         tmp_chunk_list_len = len(self.chunk_type_to_id_list_map[chunk_type])
         comm_group_offset = (tmp_chunk_list_len - 1) % world_size
         comm_group_idx = (tmp_chunk_list_len - 1) // world_size
-        logger.info(
+        logger.debug(
             f'global_rank {global_rank}, allocate with new chunk chunk_id {chunk_id} size {chunk_size} data_type {data_type} comm group ({comm_group_idx}, {comm_group_offset}, {chunk_type})'
         )
         return comm_group_idx, comm_group_offset

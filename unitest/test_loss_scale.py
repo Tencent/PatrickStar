@@ -11,7 +11,6 @@
 # permissions and limitations under the License.
 # See the AUTHORS file for names of contributors.
 
-
 import os
 import logging
 import torch
@@ -46,10 +45,10 @@ def test_bert_model(method,
     device = torch.device(f'cuda:{rank}')
 
     cfg = BertConfig(hidden_size=hidden_dim,
-                      intermediate_size=hidden_dim * 4,
-                      max_position_embeddings=sequence_length,
-                      num_attention_heads=num_head,
-                      num_hidden_layers=num_layer)
+                     intermediate_size=hidden_dim * 4,
+                     max_position_embeddings=sequence_length,
+                     num_attention_heads=num_head,
+                     num_hidden_layers=num_layer)
 
     lr = 0.001
     betas = (0.9, 0.999)
@@ -61,6 +60,7 @@ def test_bert_model(method,
     initial_scale_power = 16
 
     if method == "patrickstar":
+
         def model_func():
             return BertForSequenceClassification(cfg)
 
@@ -104,24 +104,28 @@ def test_bert_model(method,
                                      weight_decay=weight_decay)
 
         if method == "apex":
-            model, optimizer = amp.initialize(model, optimizer, opt_level="O2",
-                                              loss_scale="dynamic", max_loss_scale=2**initial_scale_power)
+            model, optimizer = amp.initialize(
+                model,
+                optimizer,
+                opt_level="O2",
+                loss_scale="dynamic",
+                max_loss_scale=2**initial_scale_power)
         else:
-            scaler = torch.cuda.amp.GradScaler(init_scale=2**initial_scale_power,
-                                              growth_factor=2,
-                                              backoff_factor=0.5,
-                                              growth_interval=1000)
+            scaler = torch.cuda.amp.GradScaler(
+                init_scale=2**initial_scale_power,
+                growth_factor=2,
+                backoff_factor=0.5,
+                growth_interval=1000)
 
         # DDP 不能要求模型部分在cpu部分在gpu
         model = torch.nn.parallel.DistributedDataParallel(model,
                                                           device_ids=[rank])
 
-    data_loader = get_bert_data_loader(
-        batch_size=batch_size,
-        total_samples=10000,
-        sequence_length=sequence_length,
-        device=device,
-        is_distrbuted=True)
+    data_loader = get_bert_data_loader(batch_size=batch_size,
+                                       total_samples=10000,
+                                       sequence_length=sequence_length,
+                                       device=device,
+                                       is_distrbuted=True)
 
     loss_list = []
     scale_list = []
@@ -190,37 +194,40 @@ if __name__ == "__main__":
     # apex O2 和 patrickstar 的策略基本相同。
     stop_step = 10
     torch.manual_seed(0)
-    torch_res_list, torch_scale_list = test_bert_model(method="torch",
-                                      hidden_dim=hidden_dim,
-                                      batch_size=batch_size,
-                                      sequence_length=sequence_length,
-                                      num_layer=num_layer,
-                                      num_head=num_head,
-                                      stop_step=stop_step)
+    torch_res_list, torch_scale_list = test_bert_model(
+        method="torch",
+        hidden_dim=hidden_dim,
+        batch_size=batch_size,
+        sequence_length=sequence_length,
+        num_layer=num_layer,
+        num_head=num_head,
+        stop_step=stop_step)
 
     torch.cuda.empty_cache()
     print("*" * 50)
 
     torch.manual_seed(0)
-    apex_res_list, apex_scale_list = test_bert_model(method="apex",
-                                      hidden_dim=hidden_dim,
-                                      batch_size=batch_size,
-                                      sequence_length=sequence_length,
-                                      num_layer=num_layer,
-                                      num_head=num_head,
-                                      stop_step=stop_step)
+    apex_res_list, apex_scale_list = test_bert_model(
+        method="apex",
+        hidden_dim=hidden_dim,
+        batch_size=batch_size,
+        sequence_length=sequence_length,
+        num_layer=num_layer,
+        num_head=num_head,
+        stop_step=stop_step)
 
     torch.cuda.empty_cache()
     print("*" * 50)
 
     torch.manual_seed(0)
-    ps_res_list, ps_scale_list = test_bert_model(method="patrickstar",
-                                  hidden_dim=hidden_dim,
-                                  batch_size=batch_size,
-                                  sequence_length=sequence_length,
-                                  num_layer=num_layer,
-                                  num_head=num_head,
-                                  stop_step=stop_step)
+    ps_res_list, ps_scale_list = test_bert_model(
+        method="patrickstar",
+        hidden_dim=hidden_dim,
+        batch_size=batch_size,
+        sequence_length=sequence_length,
+        num_layer=num_layer,
+        num_head=num_head,
+        stop_step=stop_step)
 
     print('loss:')
     print('torch amp:\t', torch_res_list)
