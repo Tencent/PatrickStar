@@ -22,6 +22,7 @@ import unittest
 
 from patrickstar.ops.op_builder import CPUAdamBuilder
 from patrickstar.utils import logger
+from common import distributed_test
 
 
 def torch_adam_update(step, lr, beta1, beta2, eps, weight_decay,
@@ -56,17 +57,11 @@ def torch_adam_update(step, lr, beta1, beta2, eps, weight_decay,
 
 class TestAccess(unittest.TestCase):
     def setUp(self):
-        self.ds_opt_adam = CPUAdamBuilder().load()
-        betas = [0.9, 0.99]
-        lr = 0.9
-        eps = 1e-6
-        weight_decay = 0
-        self.ds_opt_adam.create_adam(0, lr, betas[0], betas[1], eps,
-                                     weight_decay, False, True)
-        self.opt_id = 0
+        pass
 
-    def check_res(self, step, lr, eps, beta1, beta2, weight_decay, shape,
-                  grad_dtype, loss_scale):
+    def check_res(self, ds_opt_adam, step, lr, eps, beta1, beta2, weight_decay,
+                  shape, grad_dtype, loss_scale):
+        self.opt_id = 0
         p_data = torch.rand(shape)
         p_data_copy = p_data.clone()
         p_grad = torch.rand(shape, dtype=grad_dtype)
@@ -78,7 +73,7 @@ class TestAccess(unittest.TestCase):
         exp_avg_sq = torch.rand(shape)
         exp_avg_sq_copy = exp_avg_sq.clone()
 
-        self.ds_opt_adam.adam_update(
+        ds_opt_adam.adam_update(
             self.opt_id,
             step,
             lr,
@@ -129,7 +124,15 @@ class TestAccess(unittest.TestCase):
             f'Passed check, step {step}, lr {lr} eps {eps} beta1 {beta1} beta2 {beta2} '
             f'weight_decay {weight_decay} grad_dtype {grad_dtype}')
 
-    def test(self):
+    @distributed_test(world_size=[1])
+    def test_ds_adam(self):
+        betas = [0.9, 0.99]
+        lr = 0.9
+        eps = 1e-6
+        weight_decay = 0
+        ds_opt_adam = CPUAdamBuilder().load()
+        ds_opt_adam.create_adam(0, lr, betas[0], betas[1], eps, weight_decay,
+                                False, True)
         for shape in [(1023, ), (1024, 32)]:
             for step in range(1, 10):
                 for lr in [0.01, 0.1]:
@@ -142,10 +145,11 @@ class TestAccess(unittest.TestCase):
                                     ]:
                                         for loss_scale in [-1, 2**5]:
                                             self.check_res(
-                                                step, lr, eps, beta1, beta2,
-                                                weight_decay, shape,
-                                                grad_dtype, loss_scale)
+                                                ds_opt_adam, step, lr, eps,
+                                                beta1, beta2, weight_decay,
+                                                shape, grad_dtype, loss_scale)
 
 
 if __name__ == "__main__":
+    torch.multiprocessing.set_start_method('spawn')
     unittest.main()
