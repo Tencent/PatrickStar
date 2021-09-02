@@ -18,6 +18,4 @@ from .manager import PatrickStarManager
 from .ops import TorchAdam, FP16Adam
 from .utils import global_timer
 from .runtime import initialize_engine
-from .deepspeed_helper.global_vars import set_global_variables
-from .deepspeed_helper.global_vars import get_args
 from .utils.model_size_calculator import get_ps_model_size, estimate_bert_MAC

@@ -12,7 +12,7 @@
 # See the AUTHORS file for names of contributors.
 
 import torch
-from tests.data_loader import get_bert_data_loader
+from data_loader import get_bert_data_loader
 from transformers import BertConfig, BertForSequenceClassification
 import enum
 import time
@@ -28,40 +28,143 @@ from patrickstar.core import PatrickStarClient
 from patrickstar.ops import TorchAdam, FP16Adam
 import patrickstar.utils.global_timer as global_timer
 from patrickstar.runtime import initialize_engine
-from patrickstar.deepspeed_helper.global_vars import set_global_variables
-from patrickstar.deepspeed_helper.global_vars import get_args
 from patrickstar.manager import PatrickStarManager
 from patrickstar.utils.model_size_calculator import get_ps_model_size, estimate_bert_MAC
 import os
 
 
-def show_params(model, is_ps, step):
-    print(f'show params {step}')
-    for name, param in model.named_parameters(recurse=True):
-        print(
-            name,
-            torch.sum(param) if not is_ps else torch.sum(param.ps_data_tensor),
-            param.shape, param.requires_grad)
+def _add_patrick_star_args(parser):
+    group = parser.add_argument_group(title='partickstar')
+    group.add_argument('--use_fake_dist',
+                       dest='use_fake_dist',
+                       action='store_true',
+                       help='using one GPU to stimulate multiple card.')
+    group.add_argument('--batch_size',
+                       type=int,
+                       default=32,
+                       help='Batch size of input.')
+    group.add_argument('--default_chunk_size',
+                       type=int,
+                       default=32 * 1024 * 1024,
+                       help='Default Chunk Size in elements.')
+
+    group.add_argument(
+        '--use_cpu_embedding',
+        dest='use_cpu_embedding',
+        action='store_true',
+        help=
+        'using CPU to perform Embedding and do not assign embedding params to chunks'
+    )
+    group.add_argument('--use_deepspeed_cpu_adam',
+                       action='store_true',
+                       help='Use deepspeed cpu adam')
+    group.add_argument(
+        '--use_hybrid_adam',
+        action='store_true',
+        help=
+        'Use hybrid adam optimization. By default ADAM is on CPU and run ADAM on GPU if possible.'
+    )
+    group.add_argument('--overall_gpu_mem_ratio',
+                       type=float,
+                       default=0.8,
+                       help='Used GPU memory in manager / total gpu memory.')
+    group.add_argument('--overall_cpu_mem_ratio',
+                       type=float,
+                       default=0.8,
+                       help='Used CPU memory in manager / total gpu memory.')
+    group.add_argument('--warmup_gpu_chunk_mem_ratio',
+                       type=float,
+                       default=0.4,
+                       help='warmup used gpu memory ratio.')
+    group.add_argument('--margin_use_ratio',
+                       type=float,
+                       default=0.7,
+                       help='GPu margin use ratio')
+    group.add_argument(
+        '--always_warmup',
+        action='store_true',
+        help='always warmup cancel dynamic GPU chunkable memory.')
+    group.add_argument(
+        '--use_gpu_fp32_convert_for_adam',
+        action='store_true',
+        help='use gpu fp32 convert for adam grad fp16 -> grad fp32.')
+    return parser
 
 
-def test_bert_model(is_ckp: bool = False,
-                    is_fp16: bool = False,
-                    is_ps: bool = False,
-                    is_ds: bool = False,
-                    use_cpu_embedding: bool = False,
-                    batch_size=32,
-                    hidden_dim=768,
-                    sequence_length=256,
-                    num_layer=12,
-                    num_head=12,
-                    stop_step=5):
+def _add_test_bert_args(parser):
+    group = parser.add_argument_group(title='test_bert')
+    group.add_argument('--local_rank',
+                       type=int,
+                       default=None,
+                       help='local rank passed from distributed launcher.')
+    group.add_argument('--use_ckp',
+                       dest='use_ckp',
+                       action='store_true',
+                       help='using checkpointing for memory saveing.')
+    group.add_argument('--res_check',
+                       dest='res_check',
+                       action='store_true',
+                       help='check results correctness of checkpointing.')
+    group.add_argument('--use_fp16',
+                       dest='use_fp16',
+                       action='store_true',
+                       help='using FP16 for training.')
+    group.add_argument('--dist_plan',
+                       type=str,
+                       default='torch',
+                       help='Distributed Plan [torch, ps, ds]')
+    group.add_argument('--use_ds',
+                       dest='use_ds',
+                       action='store_true',
+                       help='using DeepSpeed for training.')
+    group.add_argument('--model_name',
+                       type=str,
+                       default='GPTsmall',
+                       help='The model name.')
+    return parser
+
+
+def _print_args(args):
+    """Print arguments."""
+    if args.rank == 0:
+        print('-------------------- arguments --------------------',
+              flush=True)
+        str_list = []
+        for arg in vars(args):
+            dots = '.' * (32 - len(arg))
+            str_list.append('  {} {} {}'.format(arg, dots, getattr(args, arg)))
+        for arg in sorted(str_list, key=lambda x: x.lower()):
+            print(arg, flush=True)
+        print('---------------- end of arguments ----------------', flush=True)
+
+
+def parse_args():
+    """Parse all arguments."""
+    parser = argparse.ArgumentParser(description='PatrickStar Arguments')
+    parser = _add_patrick_star_args(parser)
+    parser = _add_test_bert_args(parser)
+    args = parser.parse_args()
+    args.rank = int(os.getenv('RANK', '0'))
+    args.world_size = int(os.getenv("WORLD_SIZE", '1'))
+    _print_args(args)
+    return args
+
+
+def test_bert_model_helper(args,
+                           is_ckp: bool = False,
+                           is_fp16: bool = False,
+                           dist_plan: str = "torch",
+                           use_cpu_embedding: bool = False,
+                           batch_size=32,
+                           hidden_dim=768,
+                           sequence_length=256,
+                           num_layer=12,
+                           num_head=12,
+                           stop_step=5):
     logging.info(f'test a bert model with checkpoit {is_ckp} FP16 {is_fp16}')
     logging.info(
         f'batch_size {batch_size}, hidden_dim {hidden_dim}, sequence_length {sequence_length}, num_layer {num_layer}'
     )
-
-    args = get_args()
-
     # 用单卡模拟多卡
     if args.use_fake_dist:
         rank = 0
@@ -95,7 +198,7 @@ def test_bert_model(is_ckp: bool = False,
     weight_decay = 0
 
     # torch version
-    if is_ds:
+    if dist_plan == "ds":
         # TODO 测试并不正确
         import deepspeed
         model = BertForSequenceClassification(cfg)
@@ -108,7 +211,7 @@ def test_bert_model(is_ckp: bool = False,
             lr_scheduler=None,
             mpu=None,
             dist_init_required=True)
-    elif not is_ps:
+    elif dist_plan == "torch":
         model = BertForSequenceClassification(cfg)
         model.cuda(rank)
         if is_fp16:
@@ -125,7 +228,7 @@ def test_bert_model(is_ckp: bool = False,
         # DDP 不能要求模型部分在cpu部分在gpu
         model = torch.nn.parallel.DistributedDataParallel(model,
                                                           device_ids=[rank])
-    elif is_ps:
+    elif dist_plan == "ps":
         assert is_fp16, f"use_ps must use fp16"
 
         def model_func():
@@ -168,7 +271,8 @@ def test_bert_model(is_ckp: bool = False,
                                    model_numel)
 
     see_memory_usage(
-        f"ckp {is_ckp} fp16 {is_fp16} ps {is_ps} after model init", force=True)
+        f"ckp {is_ckp} fp16 {is_fp16} dist_plan {dist_plan} after model init",
+        force=True)
 
     data_loader = get_bert_data_loader(
         batch_size=batch_size,
@@ -196,9 +300,9 @@ def test_bert_model(is_ckp: bool = False,
         loss_res.append(loss.item())
 
         # logging.info(f'FWD finished moment {timer.moment()}')
-        if is_ds:
+        if dist_plan == "ds":
             model.backward(loss)
-        elif not is_ps:
+        elif dist_plan == "torch":
             if is_fp16:
                 optimizer.zero_grad(set_grads_to_None=True)
                 optimizer.backward(loss, update_master_grads=False)
@@ -206,7 +310,7 @@ def test_bert_model(is_ckp: bool = False,
             else:
                 optimizer.zero_grad()
                 loss.backward()
-        elif is_ps:
+        elif dist_plan == "ps":
             if is_fp16:
                 model.backward(loss)
             else:
@@ -214,27 +318,27 @@ def test_bert_model(is_ckp: bool = False,
                 loss.backward()
 
         # logging.info(f'BWD finished moment {timer.moment()}')
-        if is_ds:
+        if dist_plan == "ds":
             model.step()
-        else:
+        elif dist_plan == "torch" or dist_plan == "ps":
             optimizer.step()
 
         see_memory_usage(
-            f"ckp {is_ckp} fp16 {is_fp16} ps {is_ps}  after step {n}",
+            f"ckp {is_ckp} fp16 {is_fp16} dist_plan {dist_plan} after step {n}",
             force=True)
 
         step_elapse = time.time() - step_start_time
         if n == 0:
             logging.info(
-                f"warmup ckp {is_ckp} fp16 {is_fp16} ps {is_ps}: step elapse {step_elapse} sec/iter, {total_macs/1e12/step_elapse} GFlops"
+                f"warmup ckp {is_ckp} fp16 {is_fp16} dist_plan {dist_plan}: step elapse {step_elapse} sec/iter, {total_macs/1e12/step_elapse} GFlops"
             )
         else:
             logging.info(
-                f"ckp {is_ckp} fp16 {is_fp16} ps {is_ps}: step elapse {step_elapse} sec/iter, {total_macs/1e12/step_elapse} Tflops"
+                f"ckp {is_ckp} fp16 {is_fp16} dist_plan {dist_plan}: step elapse {step_elapse} sec/iter, {total_macs/1e12/step_elapse} Tflops"
             )
         logging.info(f'model {model_numel/1e9}')
 
-        if is_ps:
+        if dist_plan == "ps":
             global_timer.my_timer.print()
             global_timer.data_move_cnter.print()
 
@@ -253,19 +357,11 @@ def test_bert_model(is_ckp: bool = False,
 
 
 if __name__ == "__main__":
-    logging.basicConfig(
-        format=
-        '%(asctime)s,%(msecs)d %(levelname)-8s [%(filename)s:%(lineno)d] %(message)s',
-        datefmt='%Y-%m-%d:%H:%M:%S',
-        level=logging.INFO)
     os.environ["NCCL_DEBUG"] = "INFO"
-    set_global_variables()
-
-    args = get_args()
+    args = parse_args()
     use_ckp = args.use_ckp
     use_fp16 = args.use_fp16
-    use_ps = args.use_ps
-    use_ds = args.use_ds
+    dist_plan = args.dist_plan
     # 检查结果正确性
     res_check = args.res_check
     # hidden_dim 1024, batch 16, seqence_leng 1024, ckp True.
@@ -364,7 +460,6 @@ if __name__ == "__main__":
         sequence_length = 1024
         num_layer = 78
         num_head = 16
-
     else:
         raise RuntimeError(f"The model name {plan} is not valid!")
     if res_check:
@@ -377,41 +472,43 @@ if __name__ == "__main__":
     if not res_check:
         # 训练参数，可以自己定义
         torch.manual_seed(0)
-        loss_list = test_bert_model(is_ckp=use_ckp,
-                                    is_fp16=use_fp16,
-                                    is_ps=use_ps,
-                                    is_ds=use_ds,
-                                    batch_size=batch_size,
-                                    hidden_dim=hidden_dim,
-                                    sequence_length=sequence_length,
-                                    num_layer=num_layer,
-                                    num_head=num_head,
-                                    stop_step=5)
+        loss_list = test_bert_model_helper(args=args,
+                                           is_ckp=use_ckp,
+                                           is_fp16=use_fp16,
+                                           dist_plan=dist_plan,
+                                           batch_size=batch_size,
+                                           hidden_dim=hidden_dim,
+                                           sequence_length=sequence_length,
+                                           num_layer=num_layer,
+                                           num_head=num_head,
+                                           stop_step=5)
         print(loss_list)
-    # calculate_mem_need(hidden_dim = hidden_dim, batch_size = batch_size, is_fp16 = use_fp16)
 
     if res_check:
         torch.manual_seed(0)
-        torch_res_list = test_bert_model(is_ckp=use_ckp,
-                                         is_fp16=use_fp16,
-                                         is_ps=False,
-                                         hidden_dim=hidden_dim,
-                                         batch_size=batch_size,
-                                         sequence_length=sequence_length,
-                                         num_layer=num_layer,
-                                         num_head=num_head)
+        torch_res_list = test_bert_model_helper(
+            args=args,
+            is_ckp=use_ckp,
+            is_fp16=use_fp16,
+            dist_plan="torch",
+            hidden_dim=hidden_dim,
+            batch_size=batch_size,
+            sequence_length=sequence_length,
+            num_layer=num_layer,
+            num_head=num_head)
 
         torch.cuda.empty_cache()
         print("*" * 50)
         torch.manual_seed(0)
-        ps_res_list = test_bert_model(is_ckp=use_ckp,
-                                      is_fp16=use_fp16,
-                                      is_ps=True,
-                                      hidden_dim=hidden_dim,
-                                      batch_size=batch_size,
-                                      sequence_length=sequence_length,
-                                      num_layer=num_layer,
-                                      num_head=num_head)
+        ps_res_list = test_bert_model_helper(args=args,
+                                             is_ckp=use_ckp,
+                                             is_fp16=use_fp16,
+                                             dist_plan="ps",
+                                             hidden_dim=hidden_dim,
+                                             batch_size=batch_size,
+                                             sequence_length=sequence_length,
+                                             num_layer=num_layer,
+                                             num_head=num_head)
 
         print('torch', torch_res_list)
         print('ps', ps_res_list)
