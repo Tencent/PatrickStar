@@ -41,7 +41,8 @@ class TestClientAccess(unittest.TestCase):
         torch.manual_seed(0)
         torch_embedding = TorchEmbedding(cfg.vocab_size, 64)
         torch.manual_seed(0)
-        ps_embedding = PSEmbedding(torch_embedding, True)
+        PSEmbedding.use_cpu = True
+        ps_embedding = PSEmbedding(cfg.vocab_size, 64)
 
         res = ps_embedding(input_ids)
         torch_res = torch_embedding.to(test_device)(input_ids)
@@ -50,5 +51,4 @@ class TestClientAccess(unittest.TestCase):
 
 
 if __name__ == "__main__":
-    torch.multiprocessing.set_start_method('spawn')
     unittest.main()

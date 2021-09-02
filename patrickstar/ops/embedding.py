@@ -65,28 +65,19 @@ def copy_to_gpu(input_):
 
 
 class Embedding(nn.Embedding):
-    use_cpu_embedding = False
+    use_cpu = False
+    instances = []
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        if Embedding.use_cpu_embedding:
-            # A walkaround for huggingface.
-            # Huggingface will use the type of the first parameter as the
-            # dtype of the module. And we need the module to be identified as
-            # fp16 for the mixed precision training in patrickstar.
-            # However, when use_cpu_embedding is True, the weight of embedding
-            # remains to fp32 (otherwise cause error on older version of pytorch).
-            # As the embedding is usually the first submodule, we insert a
-            # dummy fp16 Parameter as the placeholder.
-            self.dummy = nn.Parameter(torch.tensor([], dtype=torch.half),
-                                      requires_grad=False)
-            self._parameters.move_to_end("dummy", last=False)
+        Embedding.instances.append(self)
 
     def forward(self, input_):
-        if Embedding.use_cpu_embedding:
+        if Embedding.use_cpu:
             input_ = copy_to_cpu(input_)
         else:
             input_ = copy_to_gpu(input_)
         output = super().forward(input_)
-        if Embedding.use_cpu_embedding:
+        if Embedding.use_cpu:
             output = copy_to_gpu(output)
         return output.to(torch.half)

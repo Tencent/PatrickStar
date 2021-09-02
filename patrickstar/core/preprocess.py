@@ -175,7 +175,7 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
         self.submodule_id = -1
 
     def _pre_context_exec(self):
-        Embedding.use_cpu_embedding = self.use_cpu_embedding
+        Embedding.use_cpu = self.use_cpu_embedding
         def _new(cls, *args, **kwargs):
             embedding = object.__new__(Embedding)
             return embedding
@@ -193,6 +193,28 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
         def _origin_new(cls, *arg, **kwargs):
             return object.__new__(cls)
         torch.nn.Embedding.__new__ = _origin_new
+
+        if Embedding.use_cpu:
+            for instance in Embedding.instances:
+                # A walkaround for huggingface.
+                # Huggingface will use the type of the first parameter as the
+                # dtype of the module. And we need the module to be identified as
+                # fp16 for the mixed precision training in patrickstar.
+                # However, when use_cpu_embedding is True, the weight of embedding
+                # remains to fp32 (otherwise cause error on older version of pytorch).
+                # As the embedding is usually the first submodule, we insert a
+                # dummy fp16 Parameter as the placeholder.
+                #
+                # TODO(zilinzhu) Figure out why dummy in the __init__ of Embedding will
+                # cause numeric error.
+                instance.dummy = torch.nn.Parameter(torch.tensor([], dtype=torch.half),
+                                      requires_grad=False)
+                register_param(instance.dummy, ParamType.TORCH_BASED, torch.half,
+                               f'embedding_dummy')
+                instance._parameters.move_to_end("dummy", last=False)
+            # Clean the members to prevent elements not grabage collected.
+            Embedding.instances = []
+            Embedding.use_cpu = False
 
         chunk_num = 0
         for param_fp16_chunk_id, param_fp32_chunk_id in zip(
