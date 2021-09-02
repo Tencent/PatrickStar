@@ -19,10 +19,9 @@ import numpy as np
 from transformers import BertConfig, BertForSequenceClassification
 
 from patrickstar.runtime import initialize_engine
-from patrickstar.deepspeed_helper.global_vars import set_global_variables
-from patrickstar.deepspeed_helper.global_vars import get_args
-
-from tests.data_loader import get_bert_data_loader
+import unittest
+from common import distributed_test
+from examples.data_loader import get_bert_data_loader
 
 
 def test_bert_model(method,
@@ -33,16 +32,12 @@ def test_bert_model(method,
                     num_head=12,
                     stop_step=10):
 
-    args = get_args()
-
-    rank = args.local_rank
-
     # Avoid gpu0 use more memory.
     # https://discuss.pytorch.org/t/extra-10gb-memory-on-gpu-0-in-ddp-tutorial/118113
-    torch.cuda.set_device(rank)
+    rank = torch.distributed.get_rank()
     torch.cuda.empty_cache()
 
-    device = torch.device(f'cuda:{rank}')
+    device = torch.device(f'cuda:{torch.cuda.current_device()}')
 
     cfg = BertConfig(hidden_size=hidden_dim,
                      intermediate_size=hidden_dim * 4,
@@ -74,7 +69,7 @@ def test_bert_model(method,
                     "betas": betas,
                     "eps": eps,
                     "weight_decay": weight_decay,
-                    "use_hybrid_adam": args.use_hybrid_adam
+                    "use_hybrid_adam": True
                 }
             },
             "fp16": {
@@ -85,9 +80,9 @@ def test_bert_model(method,
                 "hysteresis": 2,
                 "min_loss_scale": 1
             },
-            "default_chunk_size": args.default_chunk_size,
-            "use_fake_dist": args.use_fake_dist,
-            "use_cpu_embedding": args.use_cpu_embedding
+            "default_chunk_size": 32 * 1024 * 1024,
+            "use_fake_dist": True,
+            "use_cpu_embedding": True
         }
 
         model, optimizer = initialize_engine(model_func=model_func,
@@ -95,7 +90,7 @@ def test_bert_model(method,
                                              config=config)
     else:
         model = BertForSequenceClassification(cfg)
-        model.cuda(rank)
+        model.cuda()
         model.train()
         optimizer = torch.optim.Adam(model.parameters(),
                                      lr=lr,
@@ -165,76 +160,74 @@ def test_bert_model(method,
     return loss_list, scale_list
 
 
+class TestModelInitContext(unittest.TestCase):
+    def setUp(self):
+        pass
+
+    @distributed_test(world_size=[1], backend='gloo', use_fake_dist=False)
+    def test_loss_scale(self):
+        # 0.11B
+        hidden_dim = 768
+        sequence_length = 512
+        num_layer = 6
+        num_head = 12
+
+        batch_size = 2
+
+        assert hidden_dim % num_head == 0
+
+        # 这里我们采用 torch amp (autocast)，apex O2 和 patrickstar 对比。
+        # 其中：
+        # torch amp 的策略类似于 apex O1，会更多地使用 fp32，所以其能够适应的 loss scale 可能会更大；
+        # apex O2 和 patrickstar 的策略基本相同。
+        stop_step = 10
+        torch.manual_seed(0)
+        torch_res_list, torch_scale_list = test_bert_model(
+            method="torch",
+            hidden_dim=hidden_dim,
+            batch_size=batch_size,
+            sequence_length=sequence_length,
+            num_layer=num_layer,
+            num_head=num_head,
+            stop_step=stop_step)
+
+        torch.cuda.empty_cache()
+        print("*" * 50)
+
+        torch.manual_seed(0)
+        apex_res_list, apex_scale_list = test_bert_model(
+            method="apex",
+            hidden_dim=hidden_dim,
+            batch_size=batch_size,
+            sequence_length=sequence_length,
+            num_layer=num_layer,
+            num_head=num_head,
+            stop_step=stop_step)
+
+        torch.cuda.empty_cache()
+        print("*" * 50)
+
+        torch.manual_seed(0)
+        ps_res_list, ps_scale_list = test_bert_model(
+            method="patrickstar",
+            hidden_dim=hidden_dim,
+            batch_size=batch_size,
+            sequence_length=sequence_length,
+            num_layer=num_layer,
+            num_head=num_head,
+            stop_step=stop_step)
+
+        print('loss:')
+        print('torch amp:\t', torch_res_list)
+        print('apex O2:\t', apex_res_list)
+        print('patrickstar:\t', ps_res_list)
+        print('')
+        print('loss scale:')
+        print('torch scale:\t', torch_scale_list)
+        print('apex scale:\t', apex_scale_list)
+        print('patrickstar:\t', ps_scale_list)
+
+
 if __name__ == "__main__":
-    logging.basicConfig(
-        format=
-        '%(asctime)s,%(msecs)d %(levelname)-8s [%(filename)s:%(lineno)d] %(message)s',
-        datefmt='%Y-%m-%d:%H:%M:%S',
-        level=logging.WARNING)
-    os.environ["NCCL_DEBUG"] = "INFO"
-    set_global_variables()
-
-    args = get_args()
-
-    torch.distributed.init_process_group(backend='nccl')
-
-    # 0.11B
-    hidden_dim = 768
-    sequence_length = 512
-    num_layer = 6
-    num_head = 12
-
-    batch_size = 2
-
-    assert hidden_dim % num_head == 0
-
-    # 这里我们采用 torch amp (autocast)，apex O2 和 patrickstar 对比。
-    # 其中：
-    # torch amp 的策略类似于 apex O1，会更多地使用 fp32，所以其能够适应的 loss scale 可能会更大；
-    # apex O2 和 patrickstar 的策略基本相同。
-    stop_step = 10
-    torch.manual_seed(0)
-    torch_res_list, torch_scale_list = test_bert_model(
-        method="torch",
-        hidden_dim=hidden_dim,
-        batch_size=batch_size,
-        sequence_length=sequence_length,
-        num_layer=num_layer,
-        num_head=num_head,
-        stop_step=stop_step)
-
-    torch.cuda.empty_cache()
-    print("*" * 50)
-
-    torch.manual_seed(0)
-    apex_res_list, apex_scale_list = test_bert_model(
-        method="apex",
-        hidden_dim=hidden_dim,
-        batch_size=batch_size,
-        sequence_length=sequence_length,
-        num_layer=num_layer,
-        num_head=num_head,
-        stop_step=stop_step)
-
-    torch.cuda.empty_cache()
-    print("*" * 50)
-
-    torch.manual_seed(0)
-    ps_res_list, ps_scale_list = test_bert_model(
-        method="patrickstar",
-        hidden_dim=hidden_dim,
-        batch_size=batch_size,
-        sequence_length=sequence_length,
-        num_layer=num_layer,
-        num_head=num_head,
-        stop_step=stop_step)
-
-    print('loss:')
-    print('torch amp:\t', torch_res_list)
-    print('apex O2:\t', apex_res_list)
-    print('patrickstar:\t', ps_res_list)
-    print('')
-    print('loss scale:')
-    print('torch scale:\t', torch_scale_list)
-    print('apex scale:\t', apex_scale_list)
-    print('patrickstar:\t', ps_scale_list)
+    torch.multiprocessing.set_start_method('spawn')
+    unittest.main()

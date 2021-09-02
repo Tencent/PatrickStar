@@ -39,11 +39,12 @@ export use_gpu_fp32_convert_for_adam="--use_gpu_fp32_convert_for_adam"
 else
 export use_gpu_fp32_convert_for_adam=""
 fi
+mkdir -p ./logs
 python -m torch.distributed.launch --nproc_per_node=${GPU_NUM} \
-                             test_bert.py ${RES_CHECK_FLAG} \
+                             pretrain_bert_demo.py ${RES_CHECK_FLAG} \
                              --use_ckp \
                              --use_fp16 \
-                             --use_ps \
+                             --dist_plan="ps" \
                              ${use_gpu_fp32_convert_for_adam} \
                              --batch_size=${BS} \
                              --model_name=${MODEL_NAME} \
