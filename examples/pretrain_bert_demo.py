@@ -25,7 +25,7 @@ import argparse
 from patrickstar.utils import see_memory_usage
 from patrickstar.fp16 import FP16_Module, FP16_Optimizer
 from patrickstar.core import PatrickStarClient
-from patrickstar.ops import TorchAdam, FP16Adam
+from patrickstar.ops import FP16Adam
 import patrickstar.utils.global_timer as global_timer
 from patrickstar.runtime import initialize_engine
 from patrickstar.manager import PatrickStarManager
@@ -203,7 +203,11 @@ def test_bert_model_helper(args,
         import deepspeed
         model = BertForSequenceClassification(cfg)
         model.cuda(rank)
-        optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+        optimizer = torch.optim.Adam(model.parameters(),
+                                     lr=lr,
+                                     betas=betas,
+                                     eps=eps,
+                                     weight_decay=weight_decay)
         model, optimizer, _, lr_scheduler = deepspeed.initialize(
             model=model,
             optimizer=optimizer,
@@ -217,11 +221,11 @@ def test_bert_model_helper(args,
         if is_fp16:
             model = FP16_Module(model)
         model.train()
-        optimizer = TorchAdam(model.parameters(),
-                              lr=lr,
-                              betas=betas,
-                              eps=eps,
-                              weight_decay=weight_decay)
+        optimizer = torch.optim.Adam(model.parameters(),
+                                     lr=lr,
+                                     betas=betas,
+                                     eps=eps,
+                                     weight_decay=weight_decay)
         if is_fp16:
             optimizer = FP16_Optimizer(optimizer)
 
