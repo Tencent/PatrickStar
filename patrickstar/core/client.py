@@ -28,7 +28,7 @@ from .chunk_tensor_index import ChunkTensorIndex
 from .parameter import PSParameter, register_param, is_param_registered, ParamType
 import patrickstar.utils.global_timer as global_timer
 from patrickstar.utils.memory_monitor import get_sys_memory_used, see_memory_usage
-from patrickstar.utils import logger
+from patrickstar.utils import logger, get_world_size, get_rank
 
 
 class PatrickStarClient(object):
@@ -56,7 +56,11 @@ class PatrickStarClient(object):
         self._time_profile = True
 
         self._chunk_id = -1
-        self.cpu_comm_group = torch.distributed.new_group(backend='gloo')
+
+        if torch.distributed.is_initialized():
+            self.cpu_comm_group = torch.distributed.new_group(backend='gloo')
+        else:
+            self.cpu_comm_group = None
 
         self.dummy_param_list = []
         self.torch_param_list = []
@@ -182,7 +186,7 @@ class PatrickStarClient(object):
         获得param fp16使用Chunk所占的内存大小 (in Bytes)
         在多机环境，需要包括allgather获得remote chunks
         """
-        world_size = torch.distributed.get_world_size()
+        world_size = get_world_size()
         # 本进程自己管理的Chunk，和Group Chunk Buff会分配的Chunk
         return self.chunk_tensor_index.chunk_num(
             ChunkListType.PARAM_FP16
@@ -260,8 +264,7 @@ class PatrickStarClient(object):
         """
         将chunk_id_list中远端的chunk取到本地
         """
-        world_size = torch.distributed.get_world_size()
-        rank = torch.distributed.get_rank()
+        rank = get_rank()
 
         # FWD过程，当global chunk中有param第一次被访问时，需要将global chunk收集到本地。
         # 如何判断global chunk中有param第一次被访问的时刻，从而正确触发allgather操作。
@@ -357,7 +360,7 @@ class PatrickStarClient(object):
 
         chunk_id_list = self.chunk_tensor_index.chunk_ids_of_comm_group(
             chunk_id)
-        rank = torch.distributed.get_rank()
+        rank = get_rank()
 
         assert rank < len(
             chunk_id_list
@@ -458,13 +461,10 @@ class PatrickStarClient(object):
         is_first_init = False
         if chunk_id is None:
             raise RuntimeError(
-                "FP16 training shall not meet tensors with no chunk assigned. Every tensor has to be assigned to a chunk during a tensor-chunk-mapping process before training."
+                "FP16 training shall not meet tensors with no chunk assigned. "
+                "Every tensor has to be assigned to a chunk during a tensor-chunk-mapping "
+                "process before training."
             )
-            chunk_id = self._assign_chunk_for_tensor(param, access_type)
-            is_first_init = True
-        else:
-            pass
-        rank = torch.distributed.get_rank()
 
         self.chunk_list.access_chunk(chunk_id, compute_device)
 
@@ -534,7 +534,7 @@ class PatrickStarClient(object):
 
         if self._time_profile:
             global_timer.my_timer.start_profile('CLIENT_release_dist')
-        rank = torch.distributed.get_rank()
+        rank = get_rank()
 
         assert isinstance(reset_to_status, PSTensorStatus)
         assert torch.distributed.is_initialized()
@@ -569,7 +569,7 @@ class PatrickStarClient(object):
         # 判断chunk group中所有的chunk都被使用完毕，可以释放remote chunk
         # FWD: 当所有非dummy的chunk都是HOLD_AFTER_FWD
         # BWD: 当所有非dummy的chunk都是HOLD_AFTER_BWD
-        world_size = torch.distributed.get_world_size()
+        world_size = get_world_size()
         if world_size > 1:
             all_chunks_ready = True
             for i in chunk_id_list:
@@ -594,7 +594,7 @@ class PatrickStarClient(object):
                     if self._time_profile:
                         global_timer.my_timer.start_profile(
                             'CLIENT_release_dist_reduce_scatter')
-                    world_size = torch.distributed.get_world_size()
+                    world_size = get_world_size()
                     assert self.chunk_list[local_chunk_id].payload is not None
                     input_list = []
                     for i in chunk_id_list:
@@ -692,7 +692,7 @@ class PatrickStarClient(object):
             # Chunk状态从compute->HOLD_AFTER_BWD被触发
             if self.chunk_list[chunk_id].get_status(
             ) == PSChunkStatus.HOLD_AFTER_BWD:
-                world_size = torch.distributed.get_world_size()
+                world_size = get_world_size()
                 assert self.chunk_list[chunk_id].payload is not None
                 torch.distributed.all_reduce(self.chunk_list[chunk_id].payload,
                                              op=torch.distributed.ReduceOp.SUM,
@@ -722,7 +722,7 @@ class PatrickStarClient(object):
         raise NotImplementedError
 
     def visit(self):
-        rank = torch.distributed.get_rank()
+        rank = get_rank()
         for idx, chunk in self.chunk_list.generate_chunk():
             logging.info(
                 f"rank {rank} chunk {idx} on device {chunk.get_device()} status {chunk.get_status()}"

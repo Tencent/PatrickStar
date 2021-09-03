@@ -16,7 +16,7 @@ import psutil
 import logging as logger
 from torch.multiprocessing import Process, Manager
 
-from patrickstar.utils.memory_monitor import get_sys_memory_used
+from patrickstar.utils import get_sys_memory_used, get_rank, get_world_size
 from patrickstar.core.const import TrainingStage
 
 
@@ -108,18 +108,15 @@ class PatrickStarManager(metaclass=SingletonMeta):
             # 伪分布式训练是，大家共享一块GPU
             self._overall_gpu_mem = torch.cuda.get_device_properties(
                 0
-            ).total_memory * self._overall_gpu_mem_ratio / torch.distributed.get_world_size(
-            )
+            ).total_memory * self._overall_gpu_mem_ratio / get_world_size()
             self._overall_cpu_mem = psutil.virtual_memory(
-            ).total * self._overall_cpu_mem_ratio / torch.distributed.get_world_size(
-            )
+            ).total * self._overall_cpu_mem_ratio / get_world_size()
         else:
             # 获得系统的存储信息
             self._overall_gpu_mem = torch.cuda.get_device_properties(
                 self.local_rank).total_memory * self._overall_gpu_mem_ratio
             self._overall_cpu_mem = psutil.virtual_memory(
-            ).total * self._overall_cpu_mem_ratio / torch.distributed.get_world_size(
-            )
+            ).total * self._overall_cpu_mem_ratio / get_world_size()
 
         logger.info(
             f'Init Manager over all gpu mem {self._overall_gpu_mem/1e6} MB, '
@@ -317,7 +314,7 @@ class PatrickStarManager(metaclass=SingletonMeta):
                     # TODO(jiaruifang)瞎拍一个数，预热阶段三分之一GPU显存用来存储chunk
                     return self._overall_gpu_mem * self.warmup_gpu_chunk_mem_ratio
             else:
-                world_size = torch.distributed.get_world_size()
+                world_size = get_world_size()
                 if self._training_stage == TrainingStage.ADAM:
                     return self._overall_gpu_mem - 4 * self._default_chunk_size * 4
                 elif self._training_stage == TrainingStage.FWD:

@@ -11,11 +11,15 @@
 # permissions and limitations under the License.
 # See the AUTHORS file for names of contributors.
 
-from .core import PatrickStarClient
-from .utils import see_memory_usage
-from .fp16 import FP16_Module, FP16_Optimizer
-from .manager import PatrickStarManager
-from .ops import FP16Adam
-from .utils import global_timer
-from .runtime import initialize_engine
-from .utils.model_size_calculator import get_ps_model_size, estimate_bert_MAC
+import torch
+
+def get_rank():
+    if torch.distributed.is_initialized():
+        return torch.distributed.get_rank()
+    return 0
+
+
+def get_world_size():
+    if torch.distributed.is_initialized():
+        return torch.distributed.get_world_size()
+    return 1

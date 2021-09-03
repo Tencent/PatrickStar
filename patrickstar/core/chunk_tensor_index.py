@@ -18,7 +18,7 @@ import time
 from .const import AccessType, PSChunkStatus, PSTensorStatus, ChunkListType
 from .chunk_list import ChunkList
 import patrickstar.utils.global_timer as global_timer
-from patrickstar.utils import logger
+from patrickstar.utils import logger, get_rank
 
 from .parameter import PSParameter, is_param_registered, ParamType
 from .tensor_stub import TensorInfo
@@ -77,7 +77,7 @@ class ChunkTensorIndex(object):
         """
         chunk_id是否是local chunk
         """
-        rank = torch.distributed.get_rank()
+        rank = get_rank()
         grp_id, grp_offset, grp_type = self.chunk_id_to_comm_group_map[
             chunk_id]
         return rank == grp_offset
@@ -288,10 +288,9 @@ class ChunkTensorIndex(object):
             yield chunk_id, comm_group_id, chunk
 
     def visit_chunk(self, chunk):
-        if torch.distributed.is_initialized():
-            rank = torch.distributed.get_rank()
-            if rank != 0:
-                return
+        rank = get_rank()
+        if rank != 0:
+            return
         chunk_id = chunk.chunk_id
         comm_group_id, comm_group_offset, list_type = self.chunk_id_to_comm_group_map[
             chunk_id]
@@ -309,7 +308,7 @@ class ChunkTensorIndex(object):
             )
 
     def visit_chunks(self, chunk_list: ChunkList):
-        rank = torch.distributed.get_rank()
+        rank = get_rank()
         if rank != 0:
             return
         logger.info(f'visit chunks')

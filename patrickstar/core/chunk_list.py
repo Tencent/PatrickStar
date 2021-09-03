@@ -26,7 +26,7 @@ import psutil
 
 import patrickstar.utils.global_timer as global_timer
 from patrickstar.utils.memory_monitor import see_memory_usage, get_sys_memory_used
-from patrickstar.utils import logger, log_dist
+from patrickstar.utils import logger, log_dist, get_rank, get_world_size
 from patrickstar.manager import PatrickStarManager
 from patrickstar.core.const import ChunkListType
 
@@ -119,7 +119,7 @@ class ChunkList(object):
         # 分布式情况，需要分配一个全局的payload
         if chunk_status == PSChunkStatus.RELEASED:
             logger.debug(
-                f'rank {torch.distributed.get_rank()} access_chunk chunk {chunk_id}, '
+                f'rank {get_rank()} access_chunk chunk {chunk_id}, '
                 f'need to allocate {payload_space} B memory on {compute_device}'
             )
 
@@ -273,8 +273,8 @@ class ChunkList(object):
             chunk_id=chunk_id,
             local_rank=self.local_rank,
             is_dummy=is_dummy)
-        world_size = torch.distributed.get_world_size()
-        global_rank = torch.distributed.get_rank()
+        world_size = get_world_size()
+        global_rank = get_rank()
         self.chunk_type_to_id_list_map[chunk_type].append(chunk_id)
         tmp_chunk_list_len = len(self.chunk_type_to_id_list_map[chunk_type])
         comm_group_offset = (tmp_chunk_list_len - 1) % world_size

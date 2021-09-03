@@ -16,7 +16,7 @@ import torch
 import functools
 
 from patrickstar.utils import see_memory_usage
-from patrickstar.utils import logger, print_rank
+from patrickstar.utils import logger, print_rank, get_rank, get_world_size
 from patrickstar.core import PatrickStarClient, AccessType, ChunkListType
 from patrickstar.core import register_param, is_param_registered, ParamType
 from patrickstar.ops import Embedding
@@ -160,11 +160,8 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
                  use_cpu_embedding=False,
                  dtype=None):
         super().__init__(config=None, dtype=dtype)
-        if not torch.distributed.is_initialized():
-            assert torch.distributed.is_initialized(
-            ), "Parameters cannot be scattered without initializing torch.distributed"
-        self.rank = torch.distributed.get_rank()
-        self.world_size = torch.distributed.get_world_size()
+        self.rank = get_rank()
+        self.world_size = get_world_size()
         self.client = client
         self.dummy_param_list = []
         self.param_idx = 0
@@ -244,7 +241,7 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
                         param_fp16 = param_fp16.to(torch.half)
             chunk_num += 1
 
-        world_size = torch.distributed.get_world_size()
+        world_size = get_world_size()
         logger.info(f'param fp16 chunk num {chunk_num}')
         while chunk_num % world_size != 0:
             self.client.append_dummy_chunk(torch.half,
@@ -265,7 +262,7 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
             param, access_type)
         comm_group_id, comm_group_offset, list_type = self.client.chunk_tensor_index.chunk_id_to_comm_group_map[
             chunk_id]
-        return torch.distributed.get_rank() == comm_group_offset
+        return get_rank() == comm_group_offset
 
     def _post_init_method(self, module):
         """
