@@ -17,7 +17,7 @@ import gc
 import torch
 import logging
 from pynvml import *
-
+from .distributed import get_rank, get_world_size
 
 def get_sys_memory_used(device):
     """
@@ -30,17 +30,13 @@ def get_sys_memory_used(device):
         return torch.cuda.memory_allocated()
     elif device.type == 'cpu':
         vm_stats = psutil.virtual_memory()
-        if torch.distributed.is_initialized():
-            return vm_stats.used / torch.distributed.get_world_size()
-        else:
-            return vm_stats.used  #available
+        return vm_stats.used / get_world_size()
 
 
 def see_memory_usage(message, force=False, scale_name="MB"):
     if not force:
         return
-    if torch.distributed.is_initialized(
-    ) and not torch.distributed.get_rank() == 0:
+    if not get_rank() == 0:
         return
 
     # python doesn't do real-time garbage collection so do it explicitly to get the correct RAM reports

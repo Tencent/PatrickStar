@@ -14,7 +14,7 @@
 import torch
 from patrickstar.core import ChunkList, ChunkTensorIndex, ParamType
 from patrickstar.manager import PatrickStarManager
-from patrickstar.utils import logger
+from patrickstar.utils import logger, get_rank
 
 
 class FP16ChunkWriteBuffer(object):
@@ -73,7 +73,7 @@ class FP16ChunkWriteBuffer(object):
         """
         if self.cached_src_chunk_id is None:
             return
-        global_rank = torch.distributed.get_rank()
+        global_rank = get_rank()
         logger.info(
             f'global_rank {global_rank} finally, write chunk {self.cached_target_chunk_id}'
         )

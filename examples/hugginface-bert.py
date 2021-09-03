@@ -10,12 +10,8 @@ from transformers import BertForSequenceClassification, AdamW
 
 from patrickstar.runtime import initialize_engine
 
-import os
-os.environ["RANK"] = "0"
-os.environ["WORLD_SIZE"] = "1"
-os.environ["MASTER_ADDR"] = "127.0.0.1"
-os.environ["MASTER_PORT"] = "29500"
-torch.distributed.init_process_group(backend='nccl')
+# Uncomment this line when doing multiprocess training
+# torch.distributed.init_process_group(backend='nccl')
 
 def read_imdb_split(split_dir):
     split_dir = Path(split_dir)

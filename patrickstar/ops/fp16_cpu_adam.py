@@ -22,7 +22,7 @@ import logging
 
 from patrickstar.core.const import PSTensorStatus, AccessType, TrainingStage
 import patrickstar.utils.global_timer as global_timer
-from patrickstar.utils import print_rank, logger, get_sys_memory_used
+from patrickstar.utils import print_rank, logger, get_sys_memory_used, get_rank
 from patrickstar.core.parameter import register_param, ParamType
 from patrickstar.manager import PatrickStarManager
 from patrickstar.core import ChunkList, ChunkTensorIndex, ChunkListType
@@ -409,7 +409,7 @@ class FP16Adam(torch.optim.Optimizer):
             closure (callable, optional): A closure that reevaluates the model
                 and returns the loss.
         """
-        rank = torch.distributed.get_rank()
+        rank = get_rank()
 
         for name, param in self.client.module.named_parameters():
             if param.ps_attr.param_type == ParamType.TORCH_BASED:
