@@ -131,6 +131,10 @@ def pre_sub_module_forward_function(sub_module, client, name):
             torch.device(f'cuda:{client.local_rank}'),
             training_stage=TrainingStage.FWD)
         flag = True
+    # TODO(zilinzhu) Currently we move all buffers to GPU as the buffer size is
+    # relatively small. Maybe find a better way to deal with them.
+    for _, buffer in sub_module.named_buffers(recurse=False):
+        buffer.data = buffer.data.to(torch.device(f'cuda:{client.local_rank}'))
     if flag:
         mgr = PatrickStarManager()
         mgr.tiktac(client)
