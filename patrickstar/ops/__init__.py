@@ -12,5 +12,4 @@
 # See the AUTHORS file for names of contributors.
 
 from .fp16_cpu_adam import FP16Adam
-from .torch_adam import TorchAdam
 from .embedding import *

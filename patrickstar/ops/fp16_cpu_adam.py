@@ -52,9 +52,10 @@ class FP16Adam(torch.optim.Optimizer):
                  betas=(0.9, 0.999),
                  eps=1e-8,
                  weight_decay=0,
+                 use_adamw=False,
                  amsgrad=False,
                  prefer_device=torch.device('cpu:0'),
-                 use_hybrid_adam: bool = True):
+                 use_hybrid_adam=True):
         """
         父类Optimzer实现细节
         https://github.com/pytorch/pytorch/blob/c371542efc/torch/optim/optimizer.py
@@ -163,12 +164,13 @@ class FP16Adam(torch.optim.Optimizer):
         # 用作fp16 grad 存储的buffer
         self.read_chunk_buff = None
         self.use_ds_adam = True
+        self.use_adamw = use_adamw
         if self.use_ds_adam:
             self.opt_id = FP16Adam.optimizer_id
             FP16Adam.optimizer_id = FP16Adam.optimizer_id + 1
             self.ds_opt_adam = CPUAdamBuilder().load()
             self.ds_opt_adam.create_adam(self.opt_id, lr, betas[0], betas[1],
-                                         eps, weight_decay, False, True)
+                                         eps, weight_decay, self.use_adamw, True)
 
     def __del__(self):
         # need to destroy the C++ object explicitly to avoid a memory leak when deepspeed.initialize
@@ -205,8 +207,13 @@ class FP16Adam(torch.optim.Optimizer):
         if self.loss_scaler is not None:
             grad.div_(self.loss_scaler.loss_scale)
         if weight_decay != 0:
-            grad = grad.add(data, alpha=weight_decay)
+            if self.use_adamw:
+                # Perform stepweight decay
+                data.mul_(1 - lr * weight_decay)
+            else:
+                grad = grad.add(data, alpha=weight_decay)
 
+        # Decay the first and second moment running average coefficient
         exp_avg.mul_(beta1).add_(grad, alpha=1 - beta1)
         exp_avg_sq.mul_(beta2).addcmul_(grad, grad, value=1 - beta2)
         if False:  # amsgrad

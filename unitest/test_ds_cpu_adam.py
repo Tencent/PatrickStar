@@ -26,21 +26,23 @@ from common import distributed_test
 
 
 def torch_adam_update(step, lr, beta1, beta2, eps, weight_decay,
-                      bias_correction, fp32_data_tensor, fp32_grad_tensor,
-                      exp_avg, exp_avg_sq, loss_scale):
+                      bias_correction, param, grad,
+                      exp_avg, exp_avg_sq, loss_scale, use_adamw):
     if loss_scale > 0:
-        fp32_grad_tensor.div_(loss_scale)
+        grad.div_(loss_scale)
     bias_correction1 = 1 - beta1**step
     bias_correction2 = 1 - beta2**step
 
     if weight_decay != 0:
-        fp32_grad_tensor = fp32_grad_tensor.add(fp32_data_tensor,
-                                                alpha=weight_decay)
+        if use_adamw:
+            # Perform stepweight decay
+            param.mul_(1 - lr * weight_decay)
+        else:
+            grad = grad.add(param, alpha=weight_decay)
 
-    exp_avg.mul_(beta1).add_(fp32_grad_tensor, alpha=1 - beta1)
-    exp_avg_sq.mul_(beta2).addcmul_(fp32_grad_tensor,
-                                    fp32_grad_tensor,
-                                    value=1 - beta2)
+    # Decay the first and second moment running average coefficient
+    exp_avg.mul_(beta1).add_(grad, alpha=1 - beta1)
+    exp_avg_sq.mul_(beta2).addcmul_(grad, grad, value=1 - beta2)
     if False:
         # Maintains the maximum of all 2nd moment running avg. till now
         torch.maximum(max_exp_avg_sqs[i], exp_avg_sq, out=max_exp_avg_sqs[i])
@@ -52,7 +54,7 @@ def torch_adam_update(step, lr, beta1, beta2, eps, weight_decay,
 
     step_size = lr / bias_correction1
 
-    fp32_data_tensor.addcdiv_(exp_avg, denom, value=-step_size)
+    param.addcdiv_(exp_avg, denom, value=-step_size)
 
 
 class TestAccess(unittest.TestCase):
@@ -60,7 +62,7 @@ class TestAccess(unittest.TestCase):
         pass
 
     def check_res(self, ds_opt_adam, step, lr, eps, beta1, beta2, weight_decay,
-                  shape, grad_dtype, loss_scale):
+                  shape, grad_dtype, loss_scale, use_adamw):
         self.opt_id = 0
         p_data = torch.rand(shape)
         p_data_copy = p_data.clone()
@@ -100,7 +102,8 @@ class TestAccess(unittest.TestCase):
             p_grad_copy,  #fp32 grad
             exp_avg_copy,
             exp_avg_sq_copy,
-            loss_scale)
+            loss_scale,
+            use_adamw)
 
         # torch_adam_update update the grad inplace.
         if loss_scale > 0:
@@ -130,24 +133,25 @@ class TestAccess(unittest.TestCase):
         lr = 0.9
         eps = 1e-6
         weight_decay = 0
-        ds_opt_adam = CPUAdamBuilder().load()
-        ds_opt_adam.create_adam(0, lr, betas[0], betas[1], eps, weight_decay,
-                                False, True)
-        for shape in [(1023, ), (1024, 32)]:
-            for step in range(1, 10):
-                for lr in [0.01, 0.1]:
-                    for eps in [1e-8]:
-                        for beta1 in [0.9, 0.8]:
-                            for beta2 in [0.999, 0.9]:
-                                for weight_decay in [0.001, 0]:
-                                    for grad_dtype in [
-                                            torch.float, torch.half
-                                    ]:
-                                        for loss_scale in [-1, 2**5]:
-                                            self.check_res(
-                                                ds_opt_adam, step, lr, eps,
-                                                beta1, beta2, weight_decay,
-                                                shape, grad_dtype, loss_scale)
+        for use_adamw in [False, True]:
+            ds_opt_adam = CPUAdamBuilder().load()
+            ds_opt_adam.create_adam(0, lr, betas[0], betas[1], eps, weight_decay,
+                                    use_adamw, True)
+            for shape in [(1023, ), (1024, 32)]:
+                for step in range(1, 10):
+                    for lr in [0.01, 0.1]:
+                        for eps in [1e-8]:
+                            for beta1 in [0.9, 0.8]:
+                                for beta2 in [0.999, 0.9]:
+                                    for weight_decay in [0.001, 0]:
+                                        for grad_dtype in [
+                                                torch.float, torch.half
+                                        ]:
+                                            for loss_scale in [-1, 2**5]:
+                                                self.check_res(
+                                                    ds_opt_adam, step, lr, eps,
+                                                    beta1, beta2, weight_decay,
+                                                    shape, grad_dtype, loss_scale, use_adamw)
 
 
 if __name__ == "__main__":

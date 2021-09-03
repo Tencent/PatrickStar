@@ -40,8 +40,8 @@ class PatrickStarEngine(Module):
             # Optimizer configuration
             optim_config = config["optimizer"]
             optim_type = optim_config["type"]
-            if optim_type != "Adam":
-                raise ValueError(f"Only support adam at the moment. "
+            if optim_type not in ["Adam", "AdamW"]:
+                raise ValueError(f"Only support Adam and AdamW at the moment. "
                                  f"Get optimizer type {optim_type}")
             optim_params = optim_config["params"]
 
@@ -69,6 +69,7 @@ class PatrickStarEngine(Module):
                 self.gradient_clipping = config["gradient_clipping"]
         else:
             # default parameter for adam.
+            optim_type = "Adam"
             optim_params = {
                 "lr": 0.01,
                 "betas": (0.9, 0.999),
@@ -88,6 +89,7 @@ class PatrickStarEngine(Module):
             betas=optim_params["betas"],
             eps=optim_params["eps"],
             weight_decay=optim_params["weight_decay"],
+            use_adamw=(optim_type == "AdamW"),
             prefer_device=prefer_device,
             use_hybrid_adam=optim_params["use_hybrid_adam"])
         # 这个hook并没啥意义，为何不能和postbwd hook一起？
