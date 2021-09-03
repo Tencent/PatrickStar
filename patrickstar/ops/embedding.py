@@ -70,14 +70,15 @@ class Embedding(nn.Embedding):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        self.use_cpu = Embedding.use_cpu
         Embedding.instances.append(self)
 
     def forward(self, input_):
-        if Embedding.use_cpu:
+        if self.use_cpu:
             input_ = copy_to_cpu(input_)
         else:
             input_ = copy_to_gpu(input_)
         output = super().forward(input_)
-        if Embedding.use_cpu:
+        if self.use_cpu:
             output = copy_to_gpu(output)
         return output.to(torch.half)
