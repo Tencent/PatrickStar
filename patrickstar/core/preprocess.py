@@ -17,10 +17,9 @@ import functools
 
 from patrickstar.utils import see_memory_usage
 from patrickstar.utils import logger, print_rank
-from patrickstar.core import PatrickStarClient, AccessType, ChunkListType, ChunkTensorIndex, ChunkList
-from patrickstar.core import PSParameter, register_param, is_param_registered, ParamType
+from patrickstar.core import PatrickStarClient, AccessType, ChunkListType
+from patrickstar.core import register_param, is_param_registered, ParamType
 from patrickstar.ops import Embedding
-from typing import List
 _orig_torch_empty = torch.empty
 
 
@@ -91,7 +90,10 @@ class InsertPostInitMethodToModuleSubClasses(object):
 
         # Replace .__init__() for all existing subclasses of torch.nn.Module
         for subclass in torch.nn.modules.module.Module.__subclasses__():
-            _enable_class(subclass)
+            if subclass == torch.nn.Embedding:
+                _enable_class(Embedding)
+            else:
+                _enable_class(subclass)
 
         # holding on to the current __init__subclass__ for exit
         torch.nn.modules.module.Module._old_init_subclass = torch.nn.modules.module.Module.__init_subclass__
@@ -115,7 +117,10 @@ class InsertPostInitMethodToModuleSubClasses(object):
 
         # Replace .__init__() for all existing subclasses of torch.nn.Module
         for subclass in torch.nn.modules.module.Module.__subclasses__():
-            _disable_class(subclass)
+            if subclass == torch.nn.Embedding:
+                _disable_class(Embedding)
+            else:
+                _disable_class(subclass)
 
         # Replace .__init__() for future subclasses of torch.nn.Module
         torch.nn.modules.module.Module.__init_subclass__ = torch.nn.modules.module.Module._old_init_subclass
@@ -167,13 +172,14 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
         self.use_fake_dist = use_fake_dist
         self.use_cpu_embedding = use_cpu_embedding
 
-
         self.submodule_id = -1
+
     def _pre_context_exec(self):
+        Embedding.use_cpu = self.use_cpu_embedding
         def _new(cls, *args, **kwargs):
-            embedding = object.__new__(cls)
-            embedding.__init__(*args, **kwargs)
-            return Embedding(embedding, use_cpu_embedding=self.use_cpu_embedding)
+            embedding = object.__new__(Embedding)
+            return embedding
+
         torch.nn.Embedding.__new__ = _new
 
     def _post_context_exec(self):
@@ -187,6 +193,28 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
         def _origin_new(cls, *arg, **kwargs):
             return object.__new__(cls)
         torch.nn.Embedding.__new__ = _origin_new
+
+        if Embedding.use_cpu:
+            for instance in Embedding.instances:
+                # A walkaround for huggingface.
+                # Huggingface will use the type of the first parameter as the
+                # dtype of the module. And we need the module to be identified as
+                # fp16 for the mixed precision training in patrickstar.
+                # However, when use_cpu_embedding is True, the weight of embedding
+                # remains to fp32 (otherwise cause error on older version of pytorch).
+                # As the embedding is usually the first submodule, we insert a
+                # dummy fp16 Parameter as the placeholder.
+                #
+                # TODO(zilinzhu) Figure out why dummy in the __init__ of Embedding will
+                # cause numeric error.
+                instance.dummy = torch.nn.Parameter(torch.tensor([], dtype=torch.half),
+                                      requires_grad=False)
+                register_param(instance.dummy, ParamType.TORCH_BASED, torch.half,
+                               f'embedding_dummy')
+                instance._parameters.move_to_end("dummy", last=False)
+            # Clean the members to prevent elements not grabage collected.
+            Embedding.instances = []
+            Embedding.use_cpu = False
 
         chunk_num = 0
         for param_fp16_chunk_id, param_fp32_chunk_id in zip(
