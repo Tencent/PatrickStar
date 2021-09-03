@@ -31,6 +31,7 @@ from patrickstar.runtime import initialize_engine
 from patrickstar.manager import PatrickStarManager
 from patrickstar.utils.model_size_calculator import get_ps_model_size, estimate_bert_MAC
 import os
+from patrickstar.utils.logging import logger
 
 
 def _add_patrick_star_args(parser):
@@ -170,7 +171,6 @@ def test_bert_model_helper(args,
         rank = 0
     else:
         rank = args.local_rank
-
     # Avoid gpu0 use more memory.
     # https://discuss.pytorch.org/t/extra-10gb-memory-on-gpu-0-in-ddp-tutorial/118113
     torch.cuda.set_device(rank)
@@ -367,6 +367,7 @@ if __name__ == "__main__":
     # hidden_dim 1024, batch 16, seqence_leng 1024, ckp True.
     # PS is able to run the training, while PyTorch failed.
 
+    logger.setLevel(logging.ERROR)
     if not torch.distributed.is_initialized():
         torch.distributed.init_process_group(
             backend='gloo' if args.use_fake_dist else 'nccl')
