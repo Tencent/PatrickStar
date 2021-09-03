@@ -474,7 +474,7 @@ class FP16Adam(torch.optim.Optimizer):
         if self.has_overflow_and_reset_param(
                 write_chunk_buff=self.write_chunk_buff):
             global_timer.my_timer.finish_profile('ADAM')
-            logger.info("gradient overflow!")
+            logger.warning("gradient overflow!")
             return loss
 
         max_param_size = 0
