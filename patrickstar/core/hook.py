@@ -120,9 +120,11 @@ class PostBackwardFunction(torch.autograd.Function):
 # 必须具备重复调用，第二次无效的能力 fetch submodule
 def pre_sub_module_forward_function(sub_module, client, name):
     flag = False
+    rank = get_rank()
+    logger.debug(
+        f'rank {rank} FWD pre {name}.{sub_module.__class__.__name__} access data'
+    )
     for sub_name, param in sub_module.named_parameters(recurse=False):
-        rank = get_rank()
-        logger.debug(f'rank {rank} FWD pre {name}.{sub_name} access data')
         if param.ps_attr.param_type == ParamType.TORCH_BASED:
             continue
         param.data = client.access_dist(
@@ -155,6 +157,9 @@ def post_sub_module_forward_function(sub_module, client, name):
                                 is_allreduce=False)
         else:
             client.release_data(param, PSTensorStatus.HOLD)
+
+        param.ps_attr.fwd_used_cnt += 1
+
     mgr = PatrickStarManager()
     mgr.tiktac(client)
 
@@ -173,10 +178,13 @@ def pre_sub_module_backward_function(sub_module, client, name):
                 torch.device(f'cuda:{client.local_rank}'),
                 training_stage=TrainingStage.BWD)
             param.data = tmp_tensor
-            param.grad = torch.zeros_like(tmp_tensor)
+
+            # NOTE() bwd first visits this param
+            if param.ps_attr.bwd_used_cnt == 0:
+                param.grad = torch.zeros_like(tmp_tensor)
             assert param.data.data_ptr() != param.grad.data_ptr()
 
-            assert param.ps_attr.bwd_cnt == 0, f"Backward Propagation updates the gradient of a parameter twice. This is not allowed when using chunk reusing."
+            # assert param.ps_attr.used_cnt == 0, f"{sub_module.__class__.__name__} Backward Propagation updates the gradient of a parameter twice. This is not allowed when using chunk reusing."
 
         elif param.ps_attr.data_type == torch.float:
             raise RuntimeError("fp32 training is not supported!")
@@ -190,32 +198,38 @@ def post_sub_module_backward_function(sub_module, client, name):
     for sub_name, param in sub_module.named_parameters(recurse=False):
         if param.ps_attr.param_type == ParamType.TORCH_BASED:
             continue
-        # TODO(jiaruifang)以后给所有param的ps_attr加一个FP16或者FP32的标识。
-        # 不要用param的本身类型判断。因为这个我们可以随意更改param，并没有加检测或者权限限制。
+        # NOTE() We add a fp16 or fp32 attribute to the ps_attr of param.
+        # We should not use the data type of param.data in the condition judgment.
+        # Since the data type of param.data and ps_attr are not the same.
+        # We can change the param.data at will, and there is no restriction to do this.
         if param.ps_attr.data_type == torch.half:
+            # NOTE() When a parameter is shared by multiple operators,
+            # a reference counter is needed to correctly trigger the chunk reusing.
+            # The memory space of the last updated param fp16 is covered by grad fp16.
             client.optimizer.check_overflow(param)
-            tmp_tensor = param.ps_attr.access_tensor(AccessType.DATA)
-            tmp_tensor.copy_(param.grad)
-            if torch.distributed.is_initialized():
-                rank = get_rank()
-                # 正确的梯度
-                logger.debug(
-                    f'rank {rank} BWD post before release_dist {name}.{sub_name}'
-                )
-                client.release_dist(param,
-                                    AccessType.DATA,
-                                    PSTensorStatus.HOLD_AFTER_BWD,
-                                    training_stage=TrainingStage.BWD,
-                                    is_allreduce=True)
+            # NOTE() bwd last visits this pardam
+            if param.ps_attr.bwd_used_cnt == param.ps_attr.fwd_used_cnt:
+                tmp_tensor = param.ps_attr.access_tensor(AccessType.DATA)
+                tmp_tensor.copy_(param.grad)
+                if torch.distributed.is_initialized():
+                    rank = get_rank()
+                    # 正确的梯度
+                    logger.debug(
+                        f'rank {rank} BWD post before release_dist {name}.{sub_name}'
+                    )
+                    client.release_dist(param,
+                                        AccessType.DATA,
+                                        PSTensorStatus.HOLD_AFTER_BWD,
+                                        training_stage=TrainingStage.BWD,
+                                        is_allreduce=True)
+                else:
+                    client.release_data(param, PSTensorStatus.HOLD)
 
-            else:
-                client.release_data(param, PSTensorStatus.HOLD)
-
-            param.grad = None
-            param.ps_attr.bwd_cnt += 1
+                param.grad = None
+                param.ps_attr.used_cnt += 1
         elif param.ps_attr.data_type == torch.float:
-            client.release_grad(param, PSTensorStatus.HOLD)
-            client.release_data(param, PSTensorStatus.HOLD)
+            raise RuntimeError
+
     mgr = PatrickStarManager()
     mgr.tiktac(client)
 
@@ -286,6 +300,7 @@ def setup_patrickstar_hooks(module, client):
     _register_hooks_recursively(module, client)
 
     if torch.distributed.is_initialized():
+
         def make_post_backward_hook(param):
             def hook(*ignore):
                 global_timer.my_timer.start_profile('HOOK_torch_allreduce')
@@ -298,8 +313,7 @@ def setup_patrickstar_hooks(module, client):
                                              async_op=False)
                 param.grad /= world_size
                 logger.debug(
-                    f'rank {get_rank()} allreduce grad {param.ps_attr.name}'
-                )
+                    f'rank {get_rank()} allreduce grad {param.ps_attr.name}')
                 global_timer.my_timer.finish_profile('HOOK_torch_allreduce')
 
             return hook
