@@ -301,19 +301,19 @@ def setup_patrickstar_hooks(module, client):
 
     def make_post_backward_hook(param):
         def hook(*ignore):
-            global_timer.my_timer.start_profile('HOOK_torch_allreduce')
             client.optimizer.check_overflow(param)
             # Here we use gloo backend group for the cpu tensors (embedding).
             if torch.distributed.is_initialized():
+                global_timer.my_timer.start_profile('HOOK_torch_allreduce')
                 world_size = get_world_size()
                 torch.distributed.all_reduce(param.grad,
                                              op=torch.distributed.ReduceOp.SUM,
                                              group=client.cpu_comm_group,
                                              async_op=False)
                 param.grad /= world_size
+                global_timer.my_timer.finish_profile('HOOK_torch_allreduce')
             logger.debug(
                 f'rank {get_rank()} allreduce grad {param.ps_attr.name}')
-            global_timer.my_timer.finish_profile('HOOK_torch_allreduce')
 
         return hook
 
