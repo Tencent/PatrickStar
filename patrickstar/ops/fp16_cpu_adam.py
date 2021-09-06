@@ -418,25 +418,21 @@ class FP16Adam(torch.optim.Optimizer):
             if param.ps_attr.get_status(
                     AccessType.DATA) == PSTensorStatus.COMPUTE:
                 logger.debug(
-                    f'rank {rank} release param {name} from COMPUTE to HOLD_AFTER_BWD'
+                    f'adam forces rank {rank} to'
+                    f'release param {self.client.module.__class__.__name__}.{name} from COMPUTE to HOLD_AFTER_BWD'
                 )
-                if param.ps_attr.bwd_used_cnt == param.ps_attr.fwd_used_cnt:
-                    tmp_tensor = param.ps_attr.access_tensor(AccessType.DATA)
-                    tmp_tensor.copy_(param.grad)
-                    param.grad = None
+                tmp_tensor = param.ps_attr.access_tensor(AccessType.DATA)
+                tmp_tensor.copy_(param.grad)
+                param.grad = None
 
-                    if torch.distributed.is_initialized():
-                        self.client.release_dist(
-                            param,
-                            AccessType.DATA,
-                            PSTensorStatus.HOLD_AFTER_BWD,
-                            training_stage=TrainingStage.BWD,
-                            is_allreduce=True)
-                    else:
-                        self.client.release_data(param, PSTensorStatus.HOLD)
-                if mgr._training_stage == TrainingStage.BWD:
-                    param.ps_attr.bwd_used_cnt += 1
-
+                if torch.distributed.is_initialized():
+                    self.client.release_dist(param,
+                                             AccessType.DATA,
+                                             PSTensorStatus.HOLD_AFTER_BWD,
+                                             training_stage=TrainingStage.BWD,
+                                             is_allreduce=True)
+                else:
+                    self.client.release_data(param, PSTensorStatus.HOLD)
         mgr._training_stage = TrainingStage.ADAM
         logger.info(f'Entering ADAM Stage')
 

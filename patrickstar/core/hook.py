@@ -209,16 +209,13 @@ def post_sub_module_backward_function(sub_module, client, name):
             # a reference counter is needed to correctly trigger the chunk reusing.
             # The memory space of the last updated param fp16 is covered by grad fp16.
             client.optimizer.check_overflow(param)
+            if mgr._training_stage == TrainingStage.BWD:
+                param.ps_attr.bwd_used_cnt += 1
             # NOTE() bwd last visits this pardam
             if param.ps_attr.bwd_used_cnt == param.ps_attr.fwd_used_cnt:
                 tmp_tensor = param.ps_attr.access_tensor(AccessType.DATA)
                 tmp_tensor.copy_(param.grad)
                 if torch.distributed.is_initialized():
-                    rank = get_rank()
-                    # 正确的梯度
-                    logger.debug(
-                        f'rank {rank} BWD post before release_dist {name}.{sub_name}'
-                    )
                     client.release_dist(param,
                                         AccessType.DATA,
                                         PSTensorStatus.HOLD_AFTER_BWD,
@@ -226,10 +223,11 @@ def post_sub_module_backward_function(sub_module, client, name):
                                         is_allreduce=True)
                 else:
                     client.release_data(param, PSTensorStatus.HOLD)
-
+                rank = get_rank()
+                logger.debug(
+                    f'rank {rank} BWD post before release_dist {name}.{sub_name}'
+                )
                 param.grad = None
-            if mgr._training_stage == TrainingStage.BWD:
-                param.ps_attr.bwd_used_cnt += 1
         elif param.ps_attr.data_type == torch.float:
             raise RuntimeError
 
