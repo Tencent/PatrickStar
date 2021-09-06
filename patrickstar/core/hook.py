@@ -299,30 +299,29 @@ def _register_hooks_recursively(module, client, count=[0], name=""):
 def setup_patrickstar_hooks(module, client):
     _register_hooks_recursively(module, client)
 
-    if torch.distributed.is_initialized():
-
-        def make_post_backward_hook(param):
-            def hook(*ignore):
+    def make_post_backward_hook(param):
+        def hook(*ignore):
+            client.optimizer.check_overflow(param)
+            # Here we use gloo backend group for the cpu tensors (embedding).
+            if torch.distributed.is_initialized():
                 global_timer.my_timer.start_profile('HOOK_torch_allreduce')
                 world_size = get_world_size()
-                client.optimizer.check_overflow(param)
-                # Here we use gloo backend group for the cpu tensors (embedding).
                 torch.distributed.all_reduce(param.grad,
                                              op=torch.distributed.ReduceOp.SUM,
                                              group=client.cpu_comm_group,
                                              async_op=False)
                 param.grad /= world_size
-                logger.debug(
-                    f'rank {get_rank()} allreduce grad {param.ps_attr.name}')
                 global_timer.my_timer.finish_profile('HOOK_torch_allreduce')
+            logger.debug(
+                f'rank {get_rank()} allreduce grad {param.ps_attr.name}')
 
-            return hook
+        return hook
 
-        # torch param will not override data with grad,
-        # we could use the standard register_hook on them.
-        for param in client.torch_param_list:
-            if param.requires_grad:
-                param_tmp = param.expand_as(param)
-                grad_acc = param_tmp.grad_fn.next_functions[0][0]
-                grad_acc.register_hook(make_post_backward_hook(param))
-                client.grad_accs.append(grad_acc)
+    # torch param will not override data with grad,
+    # we could use the standard register_hook on them.
+    for param in client.torch_param_list:
+        if param.requires_grad:
+            param_tmp = param.expand_as(param)
+            grad_acc = param_tmp.grad_fn.next_functions[0][0]
+            grad_acc.register_hook(make_post_backward_hook(param))
+            client.grad_accs.append(grad_acc)
