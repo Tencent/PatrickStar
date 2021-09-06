@@ -37,7 +37,7 @@ def model_func():
     return SimpleModel(hidden_dim=hidden_dim,
                        seq_len=seq_len,
                        is_ckp=True,
-                       is_share_param=False)
+                       is_share_param=True)
 
 
 lr = 5e-5
@@ -45,9 +45,10 @@ betas = (0.9, 0.999)
 eps = 1e-6
 weight_decay = 0
 
-test_case = "torch"
+# test_case = "torch"
+test_case = "patrickstar"
 logger.setLevel(logging.WARNING)
-
+print(f"test_case {test_case}")
 config = {
     # The same format as optimizer config of DeepSpeed
     # https://www.deepspeed.ai/docs/config-json/#optimizer-parameters
