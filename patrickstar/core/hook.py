@@ -183,8 +183,9 @@ def pre_sub_module_backward_function(sub_module, client, name):
             # NOTE() bwd first visits this param
             if param.ps_attr.bwd_used_cnt == 0:
                 param.grad = torch.zeros_like(tmp_tensor)
-            assert param.data.data_ptr() != param.grad.data_ptr()
-
+                logger.debug(f'init grad tensor for {name}.{sub_name}')
+            param.ps_attr.bwd_used_cnt += 1
+            # assert param.data.data_ptr() != param.grad.data_ptr()
             # assert param.ps_attr.used_cnt == 0, f"{sub_module.__class__.__name__} Backward Propagation updates the gradient of a parameter twice. This is not allowed when using chunk reusing."
 
         elif param.ps_attr.data_type == torch.float:
@@ -209,8 +210,6 @@ def post_sub_module_backward_function(sub_module, client, name):
             # a reference counter is needed to correctly trigger the chunk reusing.
             # The memory space of the last updated param fp16 is covered by grad fp16.
             client.optimizer.check_overflow(param)
-            if mgr._training_stage == TrainingStage.BWD:
-                param.ps_attr.bwd_used_cnt += 1
             # NOTE() bwd last visits this pardam
             if param.ps_attr.bwd_used_cnt == param.ps_attr.fwd_used_cnt:
                 tmp_tensor = param.ps_attr.access_tensor(AccessType.DATA)
@@ -224,9 +223,8 @@ def post_sub_module_backward_function(sub_module, client, name):
                 else:
                     client.release_data(param, PSTensorStatus.HOLD)
                 rank = get_rank()
-                logger.debug(
-                    f'rank {rank} BWD post before release_dist {name}.{sub_name}'
-                )
+                logger.debug
+                (f'rank {rank} BWD post before release_dist {name}.{sub_name}')
                 param.grad = None
         elif param.ps_attr.data_type == torch.float:
             raise RuntimeError
