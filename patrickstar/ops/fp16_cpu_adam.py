@@ -170,7 +170,8 @@ class FP16Adam(torch.optim.Optimizer):
             FP16Adam.optimizer_id = FP16Adam.optimizer_id + 1
             self.ds_opt_adam = CPUAdamBuilder().load()
             self.ds_opt_adam.create_adam(self.opt_id, lr, betas[0], betas[1],
-                                         eps, weight_decay, self.use_adamw, True)
+                                         eps, weight_decay, self.use_adamw,
+                                         True)
 
     def __del__(self):
         # need to destroy the C++ object explicitly to avoid a memory leak when deepspeed.initialize
@@ -410,7 +411,7 @@ class FP16Adam(torch.optim.Optimizer):
                 and returns the loss.
         """
         rank = get_rank()
-
+        mgr = PatrickStarManager()
         for name, param in self.client.module.named_parameters():
             if param.ps_attr.param_type == ParamType.TORCH_BASED:
                 continue
@@ -419,20 +420,23 @@ class FP16Adam(torch.optim.Optimizer):
                 logger.debug(
                     f'rank {rank} release param {name} from COMPUTE to HOLD_AFTER_BWD'
                 )
-                tmp_tensor = param.ps_attr.access_tensor(AccessType.DATA)
-                tmp_tensor.copy_(param.grad)
-                param.grad = None
+                if param.ps_attr.bwd_used_cnt == param.ps_attr.fwd_used_cnt:
+                    tmp_tensor = param.ps_attr.access_tensor(AccessType.DATA)
+                    tmp_tensor.copy_(param.grad)
+                    param.grad = None
 
-                if torch.distributed.is_initialized():
-                    self.client.release_dist(param,
-                                             AccessType.DATA,
-                                             PSTensorStatus.HOLD_AFTER_BWD,
-                                             training_stage=TrainingStage.BWD,
-                                             is_allreduce=True)
-                else:
-                    self.client.release_data(param, PSTensorStatus.HOLD)
+                    if torch.distributed.is_initialized():
+                        self.client.release_dist(
+                            param,
+                            AccessType.DATA,
+                            PSTensorStatus.HOLD_AFTER_BWD,
+                            training_stage=TrainingStage.BWD,
+                            is_allreduce=True)
+                    else:
+                        self.client.release_data(param, PSTensorStatus.HOLD)
+                if mgr._training_stage == TrainingStage.BWD:
+                    param.ps_attr.bwd_used_cnt += 1
 
-        mgr = PatrickStarManager()
         mgr._training_stage = TrainingStage.ADAM
         logger.info(f'Entering ADAM Stage')
 

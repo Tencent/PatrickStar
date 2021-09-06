@@ -144,6 +144,7 @@ def pre_sub_module_forward_function(sub_module, client, name):
 
 # release submodule
 def post_sub_module_forward_function(sub_module, client, name):
+    mgr = PatrickStarManager()
     for sub_name, param in sub_module.named_parameters(recurse=False):
         if param.ps_attr.param_type == ParamType.TORCH_BASED:
             continue
@@ -158,9 +159,9 @@ def post_sub_module_forward_function(sub_module, client, name):
         else:
             client.release_data(param, PSTensorStatus.HOLD)
 
-        param.ps_attr.fwd_used_cnt += 1
+        if mgr._training_stage == TrainingStage.FWD:
+            param.ps_attr.fwd_used_cnt += 1
 
-    mgr = PatrickStarManager()
     mgr.tiktac(client)
 
 
@@ -195,6 +196,7 @@ def pre_sub_module_backward_function(sub_module, client, name):
 
 
 def post_sub_module_backward_function(sub_module, client, name):
+    mgr = PatrickStarManager()
     for sub_name, param in sub_module.named_parameters(recurse=False):
         if param.ps_attr.param_type == ParamType.TORCH_BASED:
             continue
@@ -226,11 +228,11 @@ def post_sub_module_backward_function(sub_module, client, name):
                     client.release_data(param, PSTensorStatus.HOLD)
 
                 param.grad = None
-                param.ps_attr.used_cnt += 1
+            if mgr._training_stage == TrainingStage.BWD:
+                param.ps_attr.bwd_used_cnt += 1
         elif param.ps_attr.data_type == torch.float:
             raise RuntimeError
 
-    mgr = PatrickStarManager()
     mgr.tiktac(client)
 
 
