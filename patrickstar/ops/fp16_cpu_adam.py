@@ -417,6 +417,7 @@ class FP16Adam(torch.optim.Optimizer):
                 continue
             if param.ps_attr.get_status(
                     AccessType.DATA) == PSTensorStatus.COMPUTE:
+                self.client.optimizer.check_overflow(param)
                 logger.debug(
                     f'adam forces rank {rank} to'
                     f'release param {self.client.module.__class__.__name__}.{name} from COMPUTE to HOLD_AFTER_BWD'
