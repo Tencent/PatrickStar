@@ -151,6 +151,9 @@ class PatrickStarEngine(Module):
         mgr = PatrickStarManager()
         mgr._training_stage = TrainingStage.FWD
 
+        for param_fp16 in self.client.chunk_based_param_fp16:
+            param_fp16.ps_attr.fwd_used_cnt = 0
+
         loss = self.module(*inputs, **kwargs)
         for chunk_id, chunk in self.client.chunk_list.generate_chunk():
             if chunk.get_status() == PSChunkStatus.HOLD_AFTER_FWD:
@@ -166,10 +169,11 @@ class PatrickStarEngine(Module):
             allreduce_gradients: is deprecated, ignored, and will soon be removed'
         """
         global_timer.my_timer.start_profile("BWD")
-        for param_fp16 in self.client.chunk_based_param_fp16:
-            param_fp16.ps_attr.bwd_cnt = 0
         mgr = PatrickStarManager()
         mgr._training_stage = TrainingStage.BWD
+        for param_fp16 in self.client.chunk_based_param_fp16:
+            param_fp16.ps_attr.bwd_used_cnt = 0
+
         self.optimizer.zero_grad()
         if self.loss_scaler:
             self.loss_scaler.backward(loss)
