@@ -7,8 +7,16 @@
 派大星采用异构训练方式（它也被DeepSpeed Zero Stage3采用），利用CPU内存和GPU显存存储训练过程的模型数据。
 我们观察到可用于模型数据的GPU内存有规律地变化，以类似潮汐的模式，迭代地减少和增加。
 然而，现有的异构训练工作并没有利用这种模式。相反，它们在CPU和GPU之间静态划分模型数据，从而导致内存浪费和内存滥用。相比之下，PatrickStar以Chunk的形式管理模型数据，这些数据动态分布在异构内存空间中，因此可以获得更高的内存利用效率和计算效率。
-实验结果表明，PatrickStar在8xV100和240GBCPU 内存节点上训练了一个 120亿(12 Billion)参数的GPT-2模型，比STOA工作大2倍，并且在相同的模型大小上也更高效。
+实验结果表明，PatrickStar在8xV100和240GB CPU 内存节点上训练了一个 120亿(12 Billion)参数的GPT-2模型，比STOA工作大2倍，并且在相同的模型大小上也更高效。
 
+### 使用方法
+派大星核心逻辑使用PyTorch编写，具有很好的可移植性，如下Linux命令展示了派大星的用法
+```
+pip install .
+cd examples && run run_bert.sh
+```
+
+派大星正在被集成到[TencentPretrain](https://git.woa.com/TencentNLP/TencentPretrain)之中，参考我们的[MR](https://git.woa.com/TencentNLP/TencentPretrain/merge_requests/61)。
 
 ### 引用派大星
 ```
@@ -19,3 +27,7 @@
   year={2021}
 }
 ```
+
+### 联系我们
+企业微信
+jiaruifang, zilinzhu, josephyu
