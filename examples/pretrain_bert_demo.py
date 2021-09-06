@@ -371,7 +371,7 @@ if __name__ == "__main__":
     # hidden_dim 1024, batch 16, seqence_leng 1024, ckp True.
     # PS is able to run the training, while PyTorch failed.
 
-    logger.setLevel(logging.ERROR)
+    logger.setLevel(logging.WARNING)
     if not torch.distributed.is_initialized():
         torch.distributed.init_process_group(
             backend='gloo' if args.use_fake_dist else 'nccl')
