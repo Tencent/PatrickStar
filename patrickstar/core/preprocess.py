@@ -296,9 +296,13 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
         param_fp16_list = []
         param_fp32_list = []
         for name, param in module.named_parameters(recurse=False):
-            name = f'{name}_{self.param_idx}'
-            register_param(param, ParamType.CHUNK_BASED, torch.half, name)
+            name = f'{module.__class__.__name__}.{name}_{self.param_idx}'
+            ret_flag = register_param(param, ParamType.CHUNK_BASED, torch.half, name)
+            if ret_flag is False:
+                print(f'param {name} already registered')
+                continue
             self.param_idx += 1
+            # NOTE() because parameters may be shared, we should remove duplicated params
             param_fp16_list.append(param)
             logger.debug(
                 f'** Converting Params {name} in module id {self.submodule_id}'
@@ -322,7 +326,7 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
 
         for param_fp16, param_fp32 in zip(param_fp16_list, param_fp32_list):
             # Delete the memory of non local tensors
-            if not self._is_local_param(param, AccessType.DATA):
+            if not self._is_local_param(param_fp16, AccessType.DATA):
                 param_fp16.ps_attr._is_local = False
                 param_fp32.ps_attr._is_local = False
                 # TODO(jiaruifang) fix distributed init bug.
@@ -334,7 +338,7 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
                 if not self.use_fake_dist:
                     param_fp16.data = torch.tensor([],
                                                    dtype=torch.float,
-                                                   device=param.device)
+                                                   device=param_fp16.device)
             else:
                 param_fp16.ps_attr._is_local = True
                 param_fp32.ps_attr._is_local = True
