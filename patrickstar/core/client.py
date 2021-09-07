@@ -114,6 +114,13 @@ class PatrickStarClient(object):
             f'Append a dummy chunk to the Chunk List {chunk_list_type} comm group ({comm_group_idx} {comm_group_offset})'
         )
 
+    def delete_param(self, param, access_type):
+        """
+        TODO(jiaruifang) Remove tensor of the param
+        """
+        chunk_id = self.chunk_tensor_index.get_chunk_id(param, AccessType.DATA)
+        self.chunk_tensor_index.delete_tensor(chunk_id, param, AccessType.DATA)
+
     def append_tensor(self, param_list: List[torch.nn.Parameter],
                       data_type: torch.dtype, access_type: AccessType,
                       chunk_list_type: ChunkListType):
@@ -218,35 +225,6 @@ class PatrickStarClient(object):
         生成当前chunk list中所有grad tensors
         """
         return self.chunk_tensor_index.generate_grad_tensor_param()
-
-    def _assign_chunk_for_tensor(self, param, access_type):
-        """
-        为param分配一个chunk，如果已经存在的chunk有空隙则插在空隙中
-        如果没有空隙则分配一个新的chunk
-        """
-        numel = param.ps_attr.numel
-        data_type = param.dtype
-
-        chunk_id, offset = self.chunk_tensor_index.find_gap(numel, data_type)
-
-        # 如果没有gap需要新分配一个
-        # 还要拷贝数据
-        if chunk_id is None:
-            raise RuntimeError(
-                "client _assign_chunk_for_tensor meets a tensor not assigned chunk"
-            )
-        else:
-            pass
-
-        if access_type == AccessType.DATA:
-            self.chunk_tensor_index.add_tensor(chunk_id,
-                                               param.ps_attr.data_id(), offset,
-                                               numel, param, AccessType.DATA)
-        elif access_type == AccessType.GRAD:
-            self.chunk_tensor_index.add_tensor(chunk_id,
-                                               param.ps_attr.grad_id(), offset,
-                                               numel, param, AccessType.GRAD)
-        return chunk_id
 
     def is_local_tensor(self, param, access_type) -> bool:
         """
@@ -463,8 +441,7 @@ class PatrickStarClient(object):
             raise RuntimeError(
                 "FP16 training shall not meet tensors with no chunk assigned. "
                 "Every tensor has to be assigned to a chunk during a tensor-chunk-mapping "
-                "process before training."
-            )
+                "process before training.")
 
         self.chunk_list.access_chunk(chunk_id, compute_device)
 
