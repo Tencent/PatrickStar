@@ -17,6 +17,9 @@ from ..manager import PatrickStarManager
 from patrickstar.core import PSPreProcessCtx, PatrickStarClient
 
 
+DEFAULT_CHUNK_SIZE = 32 * 1024 * 1024
+
+
 def initialize_engine(model_func, local_rank, config=None):
     """Initialize the PatrickStar Engine.
     Arguments:
@@ -32,13 +35,15 @@ def initialize_engine(model_func, local_rank, config=None):
     if not callable(model_func):
         raise ValueError("model_func need to be callable.")
     if config is None:
-        default_chunk_size = 32 * 1024 * 1024
+        default_chunk_size = DEFAULT_CHUNK_SIZE
         use_fake_dist = False
+        release_during_init = True
         use_cpu_embedding = True
     else:
-        default_chunk_size = config["default_chunk_size"]
-        use_fake_dist = config["use_fake_dist"]
-        use_cpu_embedding = config["use_cpu_embedding"]
+        default_chunk_size = config.pop("default_chunk_size", DEFAULT_CHUNK_SIZE)
+        use_fake_dist = config.pop("use_fake_dist", False)
+        release_during_init = config.pop("release_during_init", True)
+        use_cpu_embedding = config.pop("use_cpu_embedding", True)
 
     mgr = PatrickStarManager(local_rank=local_rank)
     client = PatrickStarClient(rank=local_rank,
@@ -47,7 +52,7 @@ def initialize_engine(model_func, local_rank, config=None):
 
     with PSPreProcessCtx(client=client,
                          dtype=torch.float,
-                         use_fake_dist=use_fake_dist,
+                         release_during_init=release_during_init,
                          use_cpu_embedding=use_cpu_embedding):
         model = model_func()
 
