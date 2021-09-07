@@ -149,6 +149,9 @@ def register_param(param, param_type, data_type, name=None):
     assert isinstance(param, torch.nn.Parameter)
     if not hasattr(param, 'ps_attr'):
         param.ps_attr = PSParameter(param, param_type, data_type, name)
+        return True
+    else:
+        return False
 
 
 def is_param_registered(param) -> bool:

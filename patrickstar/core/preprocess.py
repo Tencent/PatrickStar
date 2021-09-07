@@ -173,6 +173,7 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
 
     def _pre_context_exec(self):
         Embedding.use_cpu = self.use_cpu_embedding
+
         def _new(cls, *args, **kwargs):
             embedding = object.__new__(Embedding)
             return embedding
@@ -189,6 +190,7 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
 
         def _origin_new(cls, *arg, **kwargs):
             return object.__new__(cls)
+
         torch.nn.Embedding.__new__ = _origin_new
 
         if Embedding.use_cpu:
@@ -204,10 +206,11 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
                 #
                 # TODO(zilinzhu) Figure out why dummy in the __init__ of Embedding will
                 # cause numeric error.
-                instance.dummy = torch.nn.Parameter(torch.tensor([], dtype=torch.half),
-                                      requires_grad=False)
-                register_param(instance.dummy, ParamType.TORCH_BASED, torch.half,
-                               f'embedding_dummy')
+                instance.dummy = torch.nn.Parameter(torch.tensor(
+                    [], dtype=torch.half),
+                                                    requires_grad=False)
+                register_param(instance.dummy, ParamType.TORCH_BASED,
+                               torch.half, f'embedding_dummy')
                 instance._parameters.move_to_end("dummy", last=False)
             # Clean the members to prevent elements not grabage collected.
             Embedding.instances = []
@@ -242,7 +245,8 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
             else:
                 for param_fp16 in self.client.chunk_tensor_index.params_generator(
                         param_fp16_chunk_id):
-                    assert not self._is_local_param(param_fp16, AccessType.DATA)
+                    assert not self._is_local_param(param_fp16,
+                                                    AccessType.DATA)
                     # When release_during_init is True, this will help cast dtype of
                     # remote params to torch.half (See the NOTE below).
                     # When release_during_init is False, we will release the remote
@@ -308,9 +312,10 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
         param_fp32_list = []
         for name, param in module.named_parameters(recurse=False):
             name = f'{module.__class__.__name__}.{name}_{self.param_idx}'
-            ret_flag = register_param(param, ParamType.CHUNK_BASED, torch.half, name)
+            ret_flag = register_param(param, ParamType.CHUNK_BASED, torch.half,
+                                      name)
             if ret_flag is False:
-                print(f'param {name} already registered')
+                logger.warn(f'param {param.ps_attr.name} already registered')
                 continue
             self.param_idx += 1
             # NOTE() because parameters may be shared, we should remove duplicated params
