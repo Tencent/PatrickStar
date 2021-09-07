@@ -314,9 +314,6 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
             name = f'{module.__class__.__name__}.{name}_{self.param_idx}'
             ret_flag = register_param(param, ParamType.CHUNK_BASED, torch.half,
                                       name)
-            if ret_flag is False:
-                logger.warn(f'param {param.ps_attr.name} already registered')
-                continue
             self.param_idx += 1
             # NOTE() because parameters may be shared, we should remove duplicated params
             param_fp16_list.append(param)
