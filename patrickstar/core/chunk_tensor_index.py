@@ -35,7 +35,6 @@ class ChunkTensorIndex(object):
         self.tensor_id_to_info_map: dict[int, TensorInfo] = {}
         # 1-N dict, chunk_id -> List(tensor_id) in order of start_offset
         self.chunk_id_to_tensor_id_list_map: dict[int, List[int]] = {}
-        self.chunk_id_to_info_map: dict[int, tuple] = {}
 
         # (comm_group_idx, chunk_list_type) -> chunk_id_list
         self.comm_group_idx_to_chunk_id_list_map = {}
@@ -101,8 +100,6 @@ class ChunkTensorIndex(object):
         @comm_group_id: 在当前list_type中当前通信组的id
         @list_type: chunk做在list的类型
         """
-        self.chunk_id_to_info_map[chunk_id] = (chunk_size, data_type)
-
         comm_group_info = (comm_group_id, list_type)
         if comm_group_info not in self.comm_group_idx_to_chunk_id_list_map:
             self.comm_group_idx_to_chunk_id_list_map[comm_group_info] = list()
@@ -115,37 +112,6 @@ class ChunkTensorIndex(object):
         if list_type not in self.chunk_type_to_chunk_id_list_map:
             self.chunk_type_to_chunk_id_list_map[list_type] = []
         self.chunk_type_to_chunk_id_list_map[list_type].append(chunk_id)
-
-    def get_cur_chunk_num(self):
-        return len(self.chunk_id_to_info_map)
-
-    def find_gap(self, numel, data_type):
-        """
-        在chunk list寻找满足numel大小，类型为data type的空隙
-        TODO(jiaruifang) 应该优先分配同设备的gap
-        实际使用场景非常具体：在fp16 BWD时，分配grad会在data的chunk内。
-        """
-        for chunk_id, tensor_info_list in self.chunk_id_to_tensor_id_list_map.items(
-        ):
-            chunk_size, chunk_data_type = self.chunk_id_to_info_map[chunk_id]
-            if chunk_data_type != data_type or chunk_size < numel:
-                continue
-            prev_end = 0
-            for tensor_id in tensor_info_list:
-                info = self.tensor_id_to_info_map[tensor_id]
-                status = info.status()
-                if status == PSTensorStatus.FREE:
-                    continue
-                start = info.start_offset
-                gap = start - prev_end
-                if gap >= numel:
-                    return chunk_id, prev_end
-                prev_end = start + info.numel
-
-            if chunk_size - prev_end >= numel:
-                return chunk_id, prev_end
-
-        return None, None
 
     def generate_grad_tensor_param(self):
         """
