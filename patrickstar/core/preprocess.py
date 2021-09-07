@@ -312,10 +312,8 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
         param_fp32_list = []
         for name, param in module.named_parameters(recurse=False):
             name = f'{module.__class__.__name__}.{name}_{self.param_idx}'
-            ret_flag = register_param(param, ParamType.CHUNK_BASED, torch.half,
-                                      name)
+            register_param(param, ParamType.CHUNK_BASED, torch.half, name)
             self.param_idx += 1
-            # NOTE() because parameters may be shared, we should remove duplicated params
             param_fp16_list.append(param)
             logger.debug(
                 f'** Converting Params {name} in module id {self.submodule_id}'
