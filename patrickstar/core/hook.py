@@ -12,7 +12,6 @@
 # See the AUTHORS file for names of contributors.
 
 import torch
-import logging
 from .const import PSTensorStatus, AccessType, TrainingStage
 import patrickstar.utils.global_timer as global_timer
 from patrickstar.utils import logger, get_rank, get_world_size
@@ -34,10 +33,10 @@ def _apply_forward_and_backward_to_tensors_only(module, forward_function,
     elif type(outputs) is torch.Tensor:
         forward_function(outputs)
         if outputs.requires_grad:
-            logging.debug('output require grad {outputs.shape}')
+            logger.debug('output require grad {outputs.shape}')
             outputs.register_hook(backward_function)
         else:
-            logging.debug('output dose not require grad {outputs}')
+            logger.debug('output dose not require grad {outputs}')
         return outputs
     else:
         return outputs
@@ -53,7 +52,7 @@ def _apply_to_tensors_only(module, functional, backward_function, outputs):
             touched_outputs.append(touched_output)
         return tuple(touched_outputs)
     elif type(outputs) is torch.Tensor:
-        # logging.debug(f'_apply_to_tensors_only {module}')
+        # logger.debug(f'_apply_to_tensors_only {module}')
         return functional.apply(module, backward_function, outputs)
     else:
         # print('_apply_to_tensors_only', outputs)
@@ -67,16 +66,14 @@ class PreBackwardFunction(torch.autograd.Function):
         ctx.module = module
         ctx.pre_backward_function = pre_backward_function
         module.applied_pre_backward = False
-        logging.log(logging.DEBUG,
-                    f"**After Forward: {ctx.module.__class__.__name__}")
+        logger.debug(f"**After Forward: {ctx.module.__class__.__name__}")
         # why detach?detach后给下一层作为输入，似乎没有用，fwd输出都会用backward作为反向
         outputs = outputs.detach()
         return outputs
 
     @staticmethod
     def backward(ctx, *args):
-        logging.log(logging.DEBUG,
-                    f"**Before Backward: {ctx.module.__class__.__name__}")
+        logger.debug(f"**Before Backward: {ctx.module.__class__.__name__}")
         ctx.pre_backward_function(ctx.module)
         return (None, None) + args
 
@@ -98,7 +95,7 @@ class PostBackwardFunction(torch.autograd.Function):
         #     ctx.pre_backward_function = pre_backward_function
         output = output.detach()
         # output = output * 1
-        logging.debug(
+        logger.debug(
             f"**PostBackwardFunction forward: {ctx.module.__class__.__name__}")
         ctx.pre_backward_function = pre_backward_function
         return output
@@ -109,10 +106,8 @@ class PostBackwardFunction(torch.autograd.Function):
         # ctx.module.ds_grads_remaining = ctx.module.ds_grads_remaining - 1
         # if ctx.module.ds_grads_remaining == 0:
         # 没有执行embedding
-        logging.log(
-            logging.DEBUG,
-            f"**PostBackwardFunction backward: {ctx.module.__class__.__name__}"
-        )
+        logger.debug(
+            f"**PostBackwardFunction backward: {ctx.module.__class__.__name__}")
         ctx.pre_backward_function(ctx.module)
         return (None, None) + args
 
@@ -239,10 +234,10 @@ def _register_hooks_recursively(module, client, count=[0], name=""):
     my_count = count[0]
     module.id = my_count
 
-    # logging.log(logging.DEBUG, f"{module.__class__.__name__} : {module.id}")
+    # logger.debug(f"{module.__class__.__name__} : {module.id}")
 
     for child_name, child in module.named_children():
-        logging.log(logging.DEBUG, f"{child.__class__.__name__}")
+        logger.debug(f"{child.__class__.__name__}")
         count[0] = count[0] + 1
         _register_hooks_recursively(child, client, count, name + child_name)
 
@@ -271,9 +266,9 @@ def _register_hooks_recursively(module, client, count=[0], name=""):
         for input in inputs:
             if input is not None:
                 if not isinstance(input, torch.Tensor):
-                    logging.debug(f'_post_backward_module_hook {input}')
+                    logger.debug(f'_post_backward_module_hook {input}')
                 else:
-                    logging.debug(
+                    logger.debug(
                         f'_post_backward_module_hook {module.id} {input.shape}'
                     )
 
