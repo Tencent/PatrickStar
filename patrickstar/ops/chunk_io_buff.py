@@ -121,12 +121,6 @@ class FP32ChunkReadBuffer(object):
         self.cached_chunk_num = 0
         self.ret_payload = None
 
-    def get_cached_chunk_num(self):
-        """
-        获得被cache过的chunk数目
-        """
-        return self.cached_chunk_num
-
     def access_from_cache(self, param) -> torch.Tensor:
         """
         访问param，如果param是chunk的第一个tensor则触发chunk拷贝
@@ -144,24 +138,21 @@ class FP32ChunkReadBuffer(object):
             if info.start_offset == 0:
                 # TODO GPU FP16->CPU FP32拷贝需要优化,
                 self.cached_chunk_num += 1
-
-                if self.get_cached_chunk_num(
-                ) < self.margin_chunk_num_for_gpu_adam:
+                if self.cached_chunk_num < self.margin_chunk_num_for_gpu_adam:
                     target_device = torch.device(f'cuda:{self.local_rank}')
                 else:
                     target_device = torch.device('cpu:0')
 
+                chunk_payload = self.chunk_list[info.chunk_id].payload
                 if target_device.type == 'cuda':
-                    self.gpu_payload.copy_(
-                        self.chunk_list[info.chunk_id].payload)
+                    self.gpu_payload.copy_(chunk_payload)
                     self.ret_payload = self.gpu_payload
                 elif target_device.type == 'cpu':
-                    self.cpu_payload.copy_(
-                        self.chunk_list[info.chunk_id].payload)
+                    self.cpu_payload.copy_(chunk_payload)
                     self.ret_payload = self.cpu_payload
                 logger.info(
-                    f'read chunk to cache {self.cached_chunk_id} {self.chunk_list[info.chunk_id].payload.device} '
-                    f'({self.chunk_list[info.chunk_id].payload.dtype}) -> {self.ret_payload.device} (Float)'
+                    f'read chunk to cache {self.cached_chunk_id} {chunk_payload.device} '
+                    f'({chunk_payload.dtype}) -> {self.ret_payload.device} (Float)'
                 )
                 self.cached_chunk_id = info.chunk_id
             else:

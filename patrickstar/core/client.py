@@ -450,7 +450,6 @@ class PatrickStarClient(object):
         chunk_id = self.chunk_tensor_index.get_chunk_id(param, access_type)
 
         # 这个tensor还没在chunk schema中
-        is_first_init = False
         if chunk_id is None:
             raise RuntimeError(
                 "FP16 training shall not meet tensors with no chunk assigned. "
@@ -476,13 +475,6 @@ class PatrickStarClient(object):
         # 如果是从free状态转换的需要清零，或者从
         if old_status == PSTensorStatus.FREE:
             param.ps_attr.access_tensor(access_type).zero_()
-
-        # 第一次分配ps data时候要把原来param的tensor拷贝过来
-        if is_first_init:
-            if access_type == AccessType.DATA:
-                param.ps_attr.access_tensor(access_type).copy_(param.data)
-            elif access_type == AccessType.GRAD and param.grad is not None:
-                param.ps_attr.access_tensor(access_type).copy_(param.grad)
 
         # 访问之后应该更新Tensor的状态，chunk的状态随之改变
         self.chunk_list.update_status(chunk_id, old_status,
