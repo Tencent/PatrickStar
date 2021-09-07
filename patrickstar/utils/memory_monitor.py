@@ -15,9 +15,9 @@ import os
 import psutil
 import gc
 import torch
-import logging
 from pynvml import *
 from .distributed import get_rank, get_world_size
+from .logging import logger
 
 def get_sys_memory_used(device):
     """
@@ -47,8 +47,8 @@ def see_memory_usage(message, force=False, scale_name="MB"):
     elif scale_name == "B":
         scale = 1
     # Print message except when distributed but not rank 0
-    logging.info(message)
-    logging.info(
+    logger.info(message)
+    logger.info(
         f"MA {round(torch.cuda.memory_allocated() / scale, 2)} {scale_name} \
         Max_MA {round(torch.cuda.max_memory_allocated() / scale,2)} {scale_name} \
         CA {round(torch.cuda.memory_reserved() / scale,2)} {scale_name} \
@@ -57,7 +57,7 @@ def see_memory_usage(message, force=False, scale_name="MB"):
 
     vm_stats = psutil.virtual_memory()
     used_GB = round(((vm_stats.total - vm_stats.available) / (1024**3)), 2)
-    logging.info(
+    logger.info(
         f'CPU Virtual Memory:  used = {used_GB} GB, percent = {vm_stats.percent}%'
     )
 

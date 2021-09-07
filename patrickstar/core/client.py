@@ -13,21 +13,13 @@
 
 import torch
 import os
-from typing import Dict
-import datetime
-import logging
-from torch.multiprocessing import Process, Manager
-import time
 from typing import List
 from .hook import setup_patrickstar_hooks
 from .const import AccessType, PSChunkStatus, PSTensorStatus, TrainingStage
-from .chunk_data import Chunk
 from .chunk_list import ChunkList, ChunkListType
-from .helper import getsizeof
 from .chunk_tensor_index import ChunkTensorIndex
-from .parameter import PSParameter, register_param, is_param_registered, ParamType
+from .parameter import register_param, is_param_registered, ParamType
 import patrickstar.utils.global_timer as global_timer
-from patrickstar.utils.memory_monitor import get_sys_memory_used, see_memory_usage
 from patrickstar.utils import logger, get_world_size, get_rank
 
 
@@ -546,7 +538,7 @@ class PatrickStarClient(object):
 
         local_chunk_id = chunk_id_list[rank]
 
-        logging.debug(
+        logger.debug(
             f'rank {rank} release tensor {param.ps_attr.name} of chunk_id {chunk_id} to {reset_to_status}'
         )
 
@@ -724,7 +716,7 @@ class PatrickStarClient(object):
     def visit(self):
         rank = get_rank()
         for idx, chunk in self.chunk_list.generate_chunk():
-            logging.info(
+            logger.info(
                 f"rank {rank} chunk {idx} on device {chunk.get_device()} status {chunk.get_status()}"
             )
             # chunk.visit(self.chunk_tensor_index)

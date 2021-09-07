@@ -18,8 +18,6 @@ from .helper import getsizeof
 
 from typing import Dict
 
-import datetime
-import logging
 import time
 
 from patrickstar.manager import PatrickStarManager
@@ -205,7 +203,7 @@ class Chunk(object):
         将这个chunk移动到target_device上。前提条件，target_device已经腾出足够的空间。
         """
         if self.get_device() is None:
-            logging.warning(f"chunk move payload None to {target_device}")
+            logger.warning(f"chunk move payload None to {target_device}")
             return
         if self.get_device() == target_device:
             return
@@ -218,7 +216,7 @@ class Chunk(object):
         src_device = self.get_device()
         ps_manager = PatrickStarManager()
 
-        logging.debug(
+        logger.debug(
             f'move chunk {self.chunk_id}, which has {self.payload.numel()/1e6} M {self.payload.dtype} elements, from {src_device} to {target_device}, used mem {ps_manager.used_chunk_mem(target_device.type)/1e6} MB'
         )
 

@@ -12,9 +12,9 @@
 # See the AUTHORS file for names of contributors.
 
 # 统计chunk的lifecycle开关
-import logging
 import time
 
+from .logging import logger
 
 class GlobalTimer(object):
     def __init__(self):
@@ -42,12 +42,12 @@ class GlobalTimer(object):
             self.elapse_stat[k] = 0
 
     def print(self):
-        logging.info('*********** PROFILE RESULTS *************')
+        logger.info('*********** PROFILE RESULTS *************')
         overall_elapse = 0.
         for k, v in self.elapse_stat.items():
             overall_elapse += v
         for k, v in self.elapse_stat.items():
-            logging.info(f'{k}, {v}, {v/overall_elapse*100} %')
+            logger.info(f'{k}, {v}, {v/overall_elapse*100} %')
 
 
 my_timer = GlobalTimer()
@@ -73,18 +73,18 @@ class DataMoveCnter(object):
             self.amount_dict[k] = 0
 
     def print(self):
-        logging.info('*********** DATA MOVE RESULTS *************')
+        logger.info('*********** DATA MOVE RESULTS *************')
         global my_timer
         for k, v in self.times_dict.items():
             bwd = 0
             if k in my_timer.elapse_stat and self.amount_dict[k] != 0:
                 bwd = self.amount_dict[k] / my_timer.elapse_stat[k]
-                logging.info(
+                logger.info(
                     f'{k}: {self.amount_dict[k]/1024/1024} MB, {v} times, {bwd/1024/1024} MB/s'
                 )
             else:
-                logging.info(f'{k}: {self.amount_dict[k]/1024/1024} MB')
-        logging.info('\n\n')
+                logger.info(f'{k}: {self.amount_dict[k]/1024/1024} MB')
+        logger.info('\n\n')
 
 
 data_move_cnter = DataMoveCnter()

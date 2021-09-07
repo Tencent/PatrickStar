@@ -16,7 +16,6 @@ from .const import PSChunkStatus, AccessType, PSTensorStatus
 from .helper import getsizeof
 
 import sys
-import logging
 import torch
 from typing import List
 import time
@@ -135,7 +134,7 @@ class ChunkList(object):
             return
         else:
             # 目标chunk已经在计算设备上了
-            logging.debug(
+            logger.debug(
                 f'access_chunk chunk {chunk_id} directly on {compute_device}')
 
     def prepare_device(self, target_device: torch.device, need_bytes: int):
@@ -245,8 +244,7 @@ class ChunkList(object):
                 f'The reason may be that the overall memory of CPU and GPU is not enough for the model.'
             )
         if chunk.get_device() != device:
-            logging.log(
-                logging.DEBUG,
+            logger.debug(
                 f'move chunk {chunk_id} from {chunk.get_device()} to {device}')
             chunk.move(device, self.copy_stream)
 
@@ -375,10 +373,10 @@ class ChunkList(object):
             old_status, new_status)
 
     def visit(self):
-        logging.info('* chunk list visit results:')
-        logging.info('** chunk_id, device, size(B), ' 'type, device, status')
+        logger.info('* chunk list visit results:')
+        logger.info('** chunk_id, device, size(B), ' 'type, device, status')
         for chunk_id, chunk in self.chunk_id_to_chunk_dict_map.items():
-            logging.info(
+            logger.info(
                 f'** {chunk_id}, {chunk.get_device()}, {chunk.get_chunk_space()}, '
                 f'{chunk.data_type}, {chunk.get_device()}, {chunk.get_status()}'
             )
