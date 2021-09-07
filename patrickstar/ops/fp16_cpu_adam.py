@@ -425,7 +425,6 @@ class FP16Adam(torch.optim.Optimizer):
                 tmp_tensor = param.ps_attr.access_tensor(AccessType.DATA)
                 tmp_tensor.copy_(param.grad)
                 param.grad = None
-
                 if torch.distributed.is_initialized():
                     self.client.release_dist(param,
                                              AccessType.DATA,
@@ -433,10 +432,10 @@ class FP16Adam(torch.optim.Optimizer):
                                              training_stage=TrainingStage.BWD,
                                              is_allreduce=True)
                 else:
-                    self.client.release_data(param, PSTensorStatus.HOLD)
+                    self.client.release_data(param,
+                                             PSTensorStatus.HOLD_AFTER_BWD)
         mgr._training_stage = TrainingStage.ADAM
         logger.info(f'Entering ADAM Stage')
-
         mgr.tiktac(self.client)
 
         global_timer.my_timer.start_profile('ADAM')

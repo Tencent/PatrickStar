@@ -157,7 +157,7 @@ def post_sub_module_forward_function(sub_module, client, name):
                                 training_stage=TrainingStage.FWD,
                                 is_allreduce=False)
         else:
-            client.release_data(param, PSTensorStatus.HOLD)
+            client.release_data(param, PSTensorStatus.HOLD_AFTER_FWD)
 
         if mgr._training_stage == TrainingStage.FWD:
             param.ps_attr.fwd_used_cnt += 1
@@ -183,11 +183,9 @@ def pre_sub_module_backward_function(sub_module, client, name):
             # NOTE() bwd first visits this param
             if param.ps_attr.bwd_used_cnt == 0:
                 param.grad = torch.zeros_like(tmp_tensor)
-                logger.debug(f'init grad tensor for {name}.{sub_name}')
             param.ps_attr.bwd_used_cnt += 1
             # assert param.data.data_ptr() != param.grad.data_ptr()
             # assert param.ps_attr.used_cnt == 0, f"{sub_module.__class__.__name__} Backward Propagation updates the gradient of a parameter twice. This is not allowed when using chunk reusing."
-
         elif param.ps_attr.data_type == torch.float:
             raise RuntimeError("fp32 training is not supported!")
         flag = True
@@ -221,7 +219,7 @@ def post_sub_module_backward_function(sub_module, client, name):
                                         training_stage=TrainingStage.BWD,
                                         is_allreduce=True)
                 else:
-                    client.release_data(param, PSTensorStatus.HOLD)
+                    client.release_data(param, PSTensorStatus.HOLD_AFTER_BWD)
                 rank = get_rank()
                 logger.debug
                 (f'rank {rank} BWD post before release_dist {name}.{sub_name}')
