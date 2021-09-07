@@ -156,7 +156,7 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
     """
     def __init__(self,
                  client: PatrickStarClient,
-                 use_fake_dist=False,
+                 release_during_init=False,
                  use_cpu_embedding=False,
                  dtype=None):
         super().__init__(config=None, dtype=dtype)
@@ -166,7 +166,7 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
         self.dummy_param_list = []
         self.param_idx = 0
 
-        self.use_fake_dist = use_fake_dist
+        self.release_during_init = release_during_init
         self.use_cpu_embedding = use_cpu_embedding
 
         self.submodule_id = -1
@@ -239,6 +239,17 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
                         self.client.release_data(param_fp16)
                         self.client.release_data(param_fp32)
                         param_fp16 = param_fp16.to(torch.half)
+            else:
+                for param_fp16 in self.client.chunk_tensor_index.params_generator(
+                        param_fp16_chunk_id):
+                    assert not self._is_local_param(param_fp16, AccessType.DATA)
+                    # When release_during_init is True, this will help cast dtype of
+                    # remote params to torch.half (See the NOTE below).
+                    # When release_during_init is False, we will release the remote
+                    # param tensor here.
+                    param_fp16.data = torch.tensor([],
+                                                   dtype=torch.half,
+                                                   device=param_fp16.device)
             chunk_num += 1
 
         world_size = get_world_size()
@@ -322,19 +333,21 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
 
         for param_fp16, param_fp32 in zip(param_fp16_list, param_fp32_list):
             # Delete the memory of non local tensors
-            if not self._is_local_param(param, AccessType.DATA):
+            if not self._is_local_param(param_fp16, AccessType.DATA):
                 param_fp16.ps_attr._is_local = False
                 param_fp32.ps_attr._is_local = False
                 # TODO(jiaruifang) fix distributed init bug.
-                # Check results will failed on multile GPUs without use_fake_dist
+                # Check results will fail when release_during_init.
+                # As release tensor here will make the random seed generator
+                # behave differently (less random number generated).
                 # NOTE(why dtype is torch.float rather than torch.half)
                 # PyTorch version lower than 1.5 can not initialize torch.half
                 # tensors on CPU. So although the param_fp16 is a fp16 type param,
                 # its pytorch dtype still be float.
-                if not self.use_fake_dist:
+                if self.release_during_init:
                     param_fp16.data = torch.tensor([],
                                                    dtype=torch.float,
-                                                   device=param.device)
+                                                   device=param_fp16.device)
             else:
                 param_fp16.ps_attr._is_local = True
                 param_fp32.ps_attr._is_local = True
