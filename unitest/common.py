@@ -19,7 +19,7 @@ import torch.distributed as dist
 from torch.multiprocessing import Process
 
 # Worker timeout *after* the first worker has completed.
-DEepsPEED_UNIT_WORKER_TIMEOUT = 120
+UNIT_WORKER_TIMEOUT = 120
 
 
 def distributed_test(world_size=2, backend='nccl', use_fake_dist=False):
@@ -78,7 +78,7 @@ def distributed_test(world_size=2, backend='nccl', use_fake_dist=False):
 
             # Wait for all other processes to complete
             for p in processes:
-                p.join(DEepsPEED_UNIT_WORKER_TIMEOUT)
+                p.join(UNIT_WORKER_TIMEOUT)
 
             failed = [(rank, p) for rank, p in enumerate(processes)
                       if p.exitcode != 0]

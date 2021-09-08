@@ -12,10 +12,9 @@
 # See the AUTHORS file for names of contributors.
 
 import torch
-from .engine import PatrickStarEngine
-from ..manager import PatrickStarManager
 from patrickstar.core import PSPreProcessCtx, PatrickStarClient
-
+from patrickstar.manager import PatrickStarManager
+from .engine import PatrickStarEngine
 
 DEFAULT_CHUNK_SIZE = 32 * 1024 * 1024
 
@@ -36,12 +35,11 @@ def initialize_engine(model_func, local_rank, config=None):
         raise ValueError("model_func need to be callable.")
     if config is None:
         default_chunk_size = DEFAULT_CHUNK_SIZE
-        use_fake_dist = False
         release_during_init = True
         use_cpu_embedding = True
     else:
-        default_chunk_size = config.pop("default_chunk_size", DEFAULT_CHUNK_SIZE)
-        use_fake_dist = config.pop("use_fake_dist", False)
+        default_chunk_size = config.pop("default_chunk_size",
+                                        DEFAULT_CHUNK_SIZE)
         release_during_init = config.pop("release_during_init", True)
         use_cpu_embedding = config.pop("use_cpu_embedding", True)
 

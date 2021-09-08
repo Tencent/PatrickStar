@@ -12,7 +12,6 @@
 # See the AUTHORS file for names of contributors.
 
 from .core import PatrickStarClient
-from .fp16 import fp16_module, fp16_optimizer
 from .manager import PatrickStarManager
 from .ops import FP16Adam
 from .runtime import initialize_engine

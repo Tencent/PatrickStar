@@ -11,8 +11,6 @@
 # permissions and limitations under the License.
 # See the AUTHORS file for names of contributors.
 
-import time
-
 import torch
 
 import patrickstar.utils.global_timer as global_timer

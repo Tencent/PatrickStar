@@ -12,7 +12,6 @@
 # See the AUTHORS file for names of contributors.
 
 from .fp16 import *
-from .fp16_config import *
 # coding=utf-8
 # Copyright (c) 2020, NVIDIA CORPORATION.  All rights reserved.
 #
