@@ -20,7 +20,6 @@ from patrickstar.core.const import TrainingStage
 from patrickstar.utils import get_sys_memory_used, get_world_size, SingletonMeta
 
 
-# Global Scheduler
 class Metronome(object):
     """节拍器"""
     def __init__(self):
@@ -44,14 +43,6 @@ class Metronome(object):
     def next_moment(self):
         assert self._total_moment is not None
         return (self._moment + 1) % self._total_moment
-
-
-class ManagerConfig(object):
-    def __init__(self, config):
-        self._overall_gpu_mem_ratio = config.overall_gpu_mem_ratio
-        self._overall_cpu_mem_ratio = config.overall_cpu_mem_ratio
-        self._margin_use_ratio = json.margin_use_ratio
-        self.warmup_gpu_chunk_mem_ratio = json.warmup_gpu_chunk_mem_ratio
 
 
 class PatrickStarManager(metaclass=SingletonMeta):
