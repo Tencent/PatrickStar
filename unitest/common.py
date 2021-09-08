@@ -82,7 +82,7 @@ def distributed_test(world_size=2, backend='nccl', use_fake_dist=False):
 
             failed = [(rank, p) for rank, p in enumerate(processes)
                       if p.exitcode != 0]
-            for rank, p in failed:
+            for _, p in failed:
                 # If it still hasn't terminated, kill it because it hung.
                 if p.exitcode is None:
                     p.terminate()

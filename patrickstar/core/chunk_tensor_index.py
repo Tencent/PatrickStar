@@ -75,8 +75,7 @@ class ChunkTensorIndex(object):
         chunk_id是否是local chunk
         """
         rank = get_rank()
-        grp_id, grp_offset, grp_type = self.chunk_id_to_comm_group_map[
-            chunk_id]
+        _, grp_offset, _ = self.chunk_id_to_comm_group_map[chunk_id]
         return rank == grp_offset
 
     def chunk_num(self, list_type: ChunkListType):
@@ -116,8 +115,7 @@ class ChunkTensorIndex(object):
         按chunk内部排列顺序生成所有当前没有被free的grad tensor所在的param
         """
         res_list = []
-        for chunk_id, tensor_id_list in self.chunk_id_to_tensor_id_list_map.items(
-        ):
+        for _, tensor_id_list in self.chunk_id_to_tensor_id_list_map.items():
             for tensor_id in tensor_id_list:
                 info = self.tensor_id_to_info_map[tensor_id]
                 if info.access_type == AccessType.GRAD and info.status(
@@ -129,7 +127,7 @@ class ChunkTensorIndex(object):
         """
         展示每个chunk中tensor的状态
         """
-        for chunk_id, tensor_info_list in self.tensor_id_to_info_map.items():
+        for _, tensor_info_list in self.tensor_id_to_info_map.items():
             for tensor_id in tensor_info_list:
                 yield self.tensor_id_to_info_map[tensor_id]
 
@@ -247,8 +245,7 @@ class ChunkTensorIndex(object):
     def generate_all_chunks(self, chunk_list):
         for chunk_id, _ in self.chunk_id_to_tensor_id_list_map.items():
             chunk = chunk_list[chunk_id]
-            comm_group_id, comm_group_offset, list_type = self.chunk_id_to_comm_group_map[
-                chunk_id]
+            comm_group_id, _, _ = self.chunk_id_to_comm_group_map[chunk_id]
             yield chunk_id, comm_group_id, chunk
 
     def visit_chunk(self, chunk):
@@ -301,7 +298,7 @@ class ChunkTensorIndex(object):
             return total_bytes
 
         overall_size = 0
-        for chunk_type, chunk_list_of_the_type in self.chunk_type_to_chunk_id_list_map.items(
+        for _, chunk_list_of_the_type in self.chunk_type_to_chunk_id_list_map.items(
         ):
             overall_size += print_chunk_list(chunk_list_of_the_type)
 

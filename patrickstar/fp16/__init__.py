@@ -28,7 +28,7 @@ from .fp16_config import *
 # See the License for the specific language governing permissions and
 # limitations under the License.
 from .fp16util import (
-    BN_convert_float,
+    bn_convert_float,
     network_to_half,
     prep_param_lists,
     model_grads_to_master_grads,

@@ -276,7 +276,7 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
         """
         chunk_id = self.client.chunk_tensor_index.get_chunk_id(
             param, access_type)
-        comm_group_id, comm_group_offset, list_type = self.client.chunk_tensor_index.chunk_id_to_comm_group_map[
+        _, comm_group_offset, _ = self.client.chunk_tensor_index.chunk_id_to_comm_group_map[
             chunk_id]
         return get_rank() == comm_group_offset
 

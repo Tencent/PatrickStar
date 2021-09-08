@@ -28,17 +28,10 @@ def get_ps_model_size(model):
     return numel
 
 
-def estimate_bert_MAC(config, batch_size, sequence_length, model_size):
-    B = batch_size
-    S = sequence_length
-    V = config.vocab_size
-    N = config.num_attention_heads
-    H = config.hidden_size
-    L = config.num_hidden_layers
-    P = config.max_position_embeddings
-    cisg_total_macs = 72 * B * S * N * H**2 + 12 * B * N * H * S**2
-    nvidia_total_macs = 96 * B * S * L * H**2 * (1 + S / (6 * H) + V /
-                                                 (16 * L * H))
+def estimate_bert_mac(config, batch_size, sequence_length, model_size):
+    nvidia_total_macs = 96 * batch_size * sequence_length * config.num_hidden_layers * config.hidden_size \
+                        ** 2 * (1 + sequence_length / (6 * config.hidden_size) + config.vocab_size /
+                                                   (16 * config.num_hidden_layers * config.hidden_size))
 
     tera_flops = model_size * batch_size * sequence_length * 2 * 4
     print(f'tera_flops total MACs {tera_flops}')

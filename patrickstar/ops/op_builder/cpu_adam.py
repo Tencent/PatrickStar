@@ -1,9 +1,21 @@
+# Copyright (C) 2021 THL A29 Limited, a Tencent company.
+# All rights reserved.
+# Licensed under the BSD 3-Clause License (the "License"); you may
+# not use this file except in compliance with the License. You may
+# obtain a copy of the License at
+# https://opensource.org/licenses/BSD-3-Clause
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" basis,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
+# implied. See the License for the specific language governing
+# permissions and limitations under the License.
+# See the AUTHORS file for names of contributors.
 """
 Copyright 2020 The Microsoft DeepSpeed Team
 """
 import os
 import sys
-import subprocess
+
 from .builder import CUDAOpBuilder
 
 
@@ -26,24 +38,25 @@ class CPUAdamBuilder(CUDAOpBuilder):
 
     def include_paths(self):
         import torch
-        CUDA_INCLUDE = os.path.join(torch.utils.cpp_extension.CUDA_HOME, "include")
-        return ['csrc/includes', CUDA_INCLUDE]
+        cuda_include = os.path.join(torch.utils.cpp_extension.CUDA_HOME,
+                                    "include")
+        return ['csrc/includes', cuda_include]
 
     def cxx_args(self):
         import torch
-        CUDA_LIB64 = os.path.join(torch.utils.cpp_extension.CUDA_HOME, "lib64")
-        CPU_ARCH = self.cpu_arch()
-        SIMD_WIDTH = self.simd_width()
+        cuda_lib64 = os.path.join(torch.utils.cpp_extension.CUDA_HOME, "lib64")
+        cpu_arch = self.cpu_arch()
+        simd_width = self.simd_width()
 
         return [
             '-O3',
             '-std=c++14',
-            f'-L{CUDA_LIB64}',
+            f'-L{cuda_lib64}',
             '-lcudart',
             '-lcublas',
             '-g',
             '-Wno-reorder',
-            CPU_ARCH,
+            cpu_arch,
             '-fopenmp',
-            SIMD_WIDTH,
+            simd_width,
         ]

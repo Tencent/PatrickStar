@@ -1,20 +1,31 @@
+# Copyright (C) 2021 THL A29 Limited, a Tencent company.
+# All rights reserved.
+# Licensed under the BSD 3-Clause License (the "License"); you may
+# not use this file except in compliance with the License. You may
+# obtain a copy of the License at
+# https://opensource.org/licenses/BSD-3-Clause
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" basis,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
+# implied. See the License for the specific language governing
+# permissions and limitations under the License.
+# See the AUTHORS file for names of contributors.
 """
 Copyright 2020 The Microsoft DeepSpeed Team
 """
-import os
-import sys
-import time
-import importlib
-from pathlib import Path
-import subprocess
-import shlex
-import shutil
-import tempfile
 import distutils.ccompiler
 import distutils.log
 import distutils.sysconfig
-from distutils.errors import CompileError, LinkError
+import os
+import shlex
+import shutil
+import subprocess
+import sys
+import tempfile
+import time
 from abc import ABC, abstractmethod
+from distutils.errors import CompileError, LinkError
+from pathlib import Path
 
 YELLOW = '\033[93m'
 END = '\033[0m'
@@ -36,15 +47,13 @@ def installed_cuda_version():
     cuda_home = torch.utils.cpp_extension.CUDA_HOME
     assert cuda_home is not None, "CUDA_HOME does not exist, unable to compile CUDA op(s)"
     # Ensure there is not a cuda version mismatch between torch and nvcc compiler
-    output = subprocess.check_output([cuda_home + "/bin/nvcc",
-                                      "-V"],
+    output = subprocess.check_output([cuda_home + "/bin/nvcc", "-V"],
                                      universal_newlines=True)
     output_split = output.split()
     release_idx = output_split.index("release")
     release = output_split[release_idx + 1].replace(',', '').split(".")
     # Ignore patch versions, only look at major + minor
     cuda_major, cuda_minor = release[:2]
-    installed_cuda_version = ".".join(release[:2])
     return int(cuda_major), int(cuda_minor)
 
 
@@ -53,7 +62,8 @@ def get_default_compute_capatabilities():
     import torch.utils.cpp_extension
     if torch.utils.cpp_extension.CUDA_HOME is not None and installed_cuda_version(
     )[0] >= 11:
-        if installed_cuda_version()[0] == 11 and installed_cuda_version()[1] == 0:
+        if installed_cuda_version()[0] == 11 and installed_cuda_version(
+        )[1] == 0:
             # Special treatment of CUDA 11.0 because compute_86 is not supported.
             compute_caps += ";8.0"
         else:
@@ -64,13 +74,8 @@ def get_default_compute_capatabilities():
 # list compatible minor CUDA versions - so that for example pytorch built with cuda-11.0 can be used
 # to build deepspeed and system-wide installed cuda 11.2
 cuda_minor_mismatch_ok = {
-    10: ["10.0",
-         "10.1",
-         "10.2"],
-    11: ["11.0",
-         "11.1",
-         "11.2",
-         "11.3"],
+    10: ["10.0", "10.1", "10.2"],
+    11: ["11.0", "11.1", "11.2", "11.3"],
 }
 
 
@@ -83,9 +88,11 @@ def assert_no_cuda_mismatch():
         if (cuda_major in cuda_minor_mismatch_ok
                 and sys_cuda_version in cuda_minor_mismatch_ok[cuda_major]
                 and torch_cuda_version in cuda_minor_mismatch_ok[cuda_major]):
-            print(f"Installed CUDA version {sys_cuda_version} does not match the "
-                  f"version torch was compiled with {torch.version.cuda} "
-                  "but since the APIs are compatible, accepting this combination")
+            print(
+                f"Installed CUDA version {sys_cuda_version} does not match the "
+                f"version torch was compiled with {torch.version.cuda} "
+                "but since the APIs are compatible, accepting this combination"
+            )
             return
         raise Exception(
             f"Installed CUDA version {sys_cuda_version} does not match the "
@@ -158,7 +165,6 @@ class OpBuilder(ABC):
 
     def libraries_installed(self, libraries):
         valid = False
-        check_cmd = 'dpkg -l'
         for lib in libraries:
             result = subprocess.Popen(f'dpkg -l {lib}',
                                       stdout=subprocess.PIPE,
@@ -195,8 +201,7 @@ class OpBuilder(ABC):
 
             # Define a simple C program that calls the function in question
             prog = "void %s(void); int main(int argc, char** argv) { %s(); return 0; }" % (
-                funcname,
-                funcname)
+                funcname, funcname)
 
             # Write the test program to a file.
             filename = os.path.join(tempdir, 'test.c')
@@ -211,17 +216,17 @@ class OpBuilder(ABC):
 
             # Attempt to compile the C program into an object file.
             cflags = shlex.split(os.environ.get('CFLAGS', ""))
-            objs = compiler.compile([filename],
-                                    extra_preargs=self.strip_empty_entries(cflags))
+            objs = compiler.compile(
+                [filename], extra_preargs=self.strip_empty_entries(cflags))
 
             # Attempt to link the object file into an executable.
             # Be sure to tack on any libraries that have been specified.
             ldflags = shlex.split(os.environ.get('LDFLAGS', ""))
-            compiler.link_executable(objs,
-                                     os.path.join(tempdir,
-                                                  'a.out'),
-                                     extra_preargs=self.strip_empty_entries(ldflags),
-                                     libraries=libraries)
+            compiler.link_executable(
+                objs,
+                os.path.join(tempdir, 'a.out'),
+                extra_preargs=self.strip_empty_entries(ldflags),
+                libraries=libraries)
 
             # Compile and link succeeded
             return True
@@ -303,7 +308,9 @@ class OpBuilder(ABC):
             cmds = [cmd]
         valid = False
         for cmd in cmds:
-            result = subprocess.Popen(f'type {cmd}', stdout=subprocess.PIPE, shell=True)
+            result = subprocess.Popen(f'type {cmd}',
+                                      stdout=subprocess.PIPE,
+                                      shell=True)
             valid = valid or result.wait() == 0
 
         if not valid and len(cmds) > 1:
@@ -323,7 +330,8 @@ class OpBuilder(ABC):
         if os.path.isabs(code_path):
             return code_path
         else:
-            return os.path.join(Path(__file__).parent.parent.absolute(), code_path)
+            return os.path.join(
+                Path(__file__).parent.parent.absolute(), code_path)
 
     def builder(self):
         from torch.utils.cpp_extension import CppExtension
@@ -331,7 +339,9 @@ class OpBuilder(ABC):
             name=self.absolute_name(),
             sources=self.strip_empty_entries(self.sources()),
             include_dirs=self.strip_empty_entries(self.include_paths()),
-            extra_compile_args={'cxx': self.strip_empty_entries(self.cxx_args())},
+            extra_compile_args={
+                'cxx': self.strip_empty_entries(self.cxx_args())
+            },
             extra_link_args=self.strip_empty_entries(self.extra_ldflags()))
 
     def load(self, verbose=True):
@@ -344,6 +354,7 @@ class OpBuilder(ABC):
             )
         try:
             import ninja
+            print(ninja.__version__)
         except ImportError:
             raise RuntimeError(
                 f"Unable to JIT load the {self.name} op due to ninja not being installed."
@@ -358,8 +369,7 @@ class OpBuilder(ABC):
         # Ensure directory exists to prevent race condition in some cases
         ext_path = os.path.join(
             os.environ.get('TORCH_EXTENSIONS_DIR',
-                           DEFAULT_TORCH_EXTENSION_PATH),
-            self.name)
+                           DEFAULT_TORCH_EXTENSION_PATH), self.name)
         os.makedirs(ext_path, exist_ok=True)
 
         start_build = time.time()
@@ -405,8 +415,8 @@ class CUDAOpBuilder(OpBuilder):
         if self.jit_mode:
             # Compile for underlying architectures since we know those at runtime
             for i in range(torch.cuda.device_count()):
-                CC_MAJOR, CC_MINOR = torch.cuda.get_device_capability(i)
-                cc = f"{CC_MAJOR}.{CC_MINOR}"
+                cc_major, cc_minor = torch.cuda.get_device_capability(i)
+                cc = f"{cc_major}.{cc_minor}"
                 if cc not in ccs:
                     ccs.append(cc)
             ccs = sorted(ccs)
@@ -414,11 +424,13 @@ class CUDAOpBuilder(OpBuilder):
         else:
             # Cross-compile mode, compile for various architectures
             # env override takes priority
-            cross_compile_archs_env = os.environ.get('TORCH_CUDA_ARCH_LIST', None)
+            cross_compile_archs_env = os.environ.get('TORCH_CUDA_ARCH_LIST',
+                                                     None)
             if cross_compile_archs_env is not None:
                 if cross_compile_archs is not None:
                     print(
-                        f"{WARNING} env var `TORCH_CUDA_ARCH_LIST={cross_compile_archs_env}` overrides `cross_compile_archs={cross_compile_archs}`"
+                        f"{WARNING} env var `TORCH_CUDA_ARCH_LIST={cross_compile_archs_env}` "
+                        f"overrides `cross_compile_archs={cross_compile_archs}`"
                     )
                 cross_compile_archs = cross_compile_archs_env.replace(' ', ';')
             else:
@@ -437,16 +449,16 @@ class CUDAOpBuilder(OpBuilder):
 
     def version_dependent_macros(self):
         # Fix from apex that might be relevant for us as well, related to https://github.com/NVIDIA/apex/issues/456
-        TORCH_MAJOR = int(torch.__version__.split('.')[0])
-        TORCH_MINOR = int(torch.__version__.split('.')[1])
+        torch_major = int(torch.__version__.split('.')[0])
+        torch_minor = int(torch.__version__.split('.')[1])
         version_ge_1_1 = []
-        if (TORCH_MAJOR > 1) or (TORCH_MAJOR == 1 and TORCH_MINOR > 0):
+        if (torch_major > 1) or (torch_major == 1 and torch_minor > 0):
             version_ge_1_1 = ['-DVERSION_GE_1_1']
         version_ge_1_3 = []
-        if (TORCH_MAJOR > 1) or (TORCH_MAJOR == 1 and TORCH_MINOR > 2):
+        if (torch_major > 1) or (torch_major == 1 and torch_minor > 2):
             version_ge_1_3 = ['-DVERSION_GE_1_3']
         version_ge_1_5 = []
-        if (TORCH_MAJOR > 1) or (TORCH_MAJOR == 1 and TORCH_MINOR > 4):
+        if (torch_major > 1) or (torch_major == 1 and torch_minor > 4):
             version_ge_1_5 = ['-DVERSION_GE_1_5']
         return version_ge_1_1 + version_ge_1_3 + version_ge_1_5
 
@@ -456,14 +468,15 @@ class CUDAOpBuilder(OpBuilder):
     def builder(self):
         from torch.utils.cpp_extension import CUDAExtension
         assert_no_cuda_mismatch()
-        return CUDAExtension(name=self.absolute_name(),
-                             sources=self.strip_empty_entries(self.sources()),
-                             include_dirs=self.strip_empty_entries(self.include_paths()),
-                             libraries=self.strip_empty_entries(self.libraries_args()),
-                             extra_compile_args={
-                                 'cxx': self.strip_empty_entries(self.cxx_args()),
-                                 'nvcc': self.strip_empty_entries(self.nvcc_args())
-                             })
+        return CUDAExtension(
+            name=self.absolute_name(),
+            sources=self.strip_empty_entries(self.sources()),
+            include_dirs=self.strip_empty_entries(self.include_paths()),
+            libraries=self.strip_empty_entries(self.libraries_args()),
+            extra_compile_args={
+                'cxx': self.strip_empty_entries(self.cxx_args()),
+                'nvcc': self.strip_empty_entries(self.nvcc_args())
+            })
 
     def cxx_args(self):
         if sys.platform == "win32":
@@ -473,11 +486,9 @@ class CUDAOpBuilder(OpBuilder):
 
     def nvcc_args(self):
         args = [
-            '-O3',
-            '--use_fast_math',
+            '-O3', '--use_fast_math',
             '-std=c++17' if sys.platform == "win32" else '-std=c++14',
-            '-U__CUDA_NO_HALF_OPERATORS__',
-            '-U__CUDA_NO_HALF_CONVERSIONS__',
+            '-U__CUDA_NO_HALF_OPERATORS__', '-U__CUDA_NO_HALF_CONVERSIONS__',
             '-U__CUDA_NO_HALF2_OPERATORS__'
         ]
 

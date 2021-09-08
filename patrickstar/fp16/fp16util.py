@@ -49,7 +49,7 @@ class tofp16(nn.Module):
         return input.half()
 
 
-def BN_convert_float(module):
+def bn_convert_float(module):
     """
     Utility function for network_to_half().
     Retained for legacy purposes.
@@ -59,7 +59,7 @@ def BN_convert_float(module):
             torch.nn.modules.batchnorm._BatchNorm) and module.affine is True:
         module.float()
     for child in module.children():
-        BN_convert_float(child)
+        bn_convert_float(child)
     return module
 
 
@@ -68,7 +68,7 @@ def network_to_half(network):
     Convert model to half precision in a batchnorm-safe way.
     Retained for legacy purposes. It is recommended to use FP16Model.
     """
-    return nn.Sequential(tofp16(), BN_convert_float(network.half()))
+    return nn.Sequential(tofp16(), bn_convert_float(network.half()))
 
 
 def convert_module(module, dtype):
@@ -123,13 +123,18 @@ def prep_param_lists(model, flat_master=False):
     `Training Neural Networks with Mixed Precision:  Real Examples`_.
     Args:
         model (torch.nn.Module): Existing Pytorch model
-        flat_master (bool, optional, default=False):  Flatten the master parameters into a single tensor, as a performance optimization.
+        flat_master (bool, optional, default=False):  Flatten the master parameters into a single tensor,
+        as a performance optimization.
     Returns:
-        A tuple (``model_params``, ``master_params``). ``model_params`` is a list of the model's parameters for later use with :func:`model_grads_to_master_grads` and :func:`master_params_to_model_params`.  ``master_params`` is a list of FP32 master gradients.  If ``flat_master=True``, ``master_params`` will be a list with one element.
+        A tuple (``model_params``, ``master_params``). ``model_params`` is a list of the model's parameters for later
+        use with :func:`model_grads_to_master_grads` and :func:`master_params_to_model_params`.  ``master_params``
+        is a list of FP32 master gradients.  If ``flat_master=True``,
+        ``master_params`` will be a list with one element.
     Example::
         model_params, master_params = prep_param_lists(model)
     .. warning::
-        Currently, if ``flat_master=True``, all the model's parameters must be the same type.  If the model has parameters of different types, use ``flat_master=False``, or use :class:`FP16_Optimizer`.
+        Currently, if ``flat_master=True``, all the model's parameters must be the same type.
+        If the model has parameters of different types, use ``flat_master=False``, or use :class:`fp16_optimizer`.
     .. _`Training Neural Networks with Mixed Precision:  Real Examples`:
         http://on-demand.gputechconf.com/gtc/2018/video/S81012/
     """
@@ -171,7 +176,9 @@ def model_grads_to_master_grads(model_params, master_params,
     Copy model gradients to master gradients.
     Args:
         model_params:  List of model parameters created by :func:`prep_param_lists`.
-        master_params:  List of FP32 master parameters created by :func:`prep_param_lists`.  If ``master_params`` was created with ``flat_master=True``, ``flat_master=True`` should also be supplied to :func:`model_grads_to_master_grads`.
+        master_params:  List of FP32 master parameters created by :func:`prep_param_lists`.
+        If ``master_params`` was created with ``flat_master=True``, ``flat_master=True``
+        should also be supplied to :func:`model_grads_to_master_grads`.
     """
     if flat_master:
         raise NotImplementedError(
@@ -204,7 +211,9 @@ def master_params_to_model_params(model_params,
     Copy master parameters to model parameters.
     Args:
         model_params:  List of model parameters created by :func:`prep_param_lists`.
-        master_params:  List of FP32 master parameters created by :func:`prep_param_lists`.  If ``master_params`` was created with ``flat_master=True``, ``flat_master=True`` should also be supplied to :func:`master_params_to_model_params`.
+        master_params:  List of FP32 master parameters created by :func:`prep_param_lists`.
+        If ``master_params`` was created with ``flat_master=True``, ``flat_master=True``
+        should also be supplied to :func:`master_params_to_model_params`.
     """
     if flat_master:
         raise NotImplementedError(

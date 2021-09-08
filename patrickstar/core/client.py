@@ -105,8 +105,8 @@ class PatrickStarClient(object):
             dummy.numel(), self.dummy_param_list[-1], AccessType.DATA)
 
         logger.info(
-            f'Append a dummy chunk to the Chunk List {chunk_list_type} comm group ({comm_group_idx} {comm_group_offset})'
-        )
+            f'Append a dummy chunk to the Chunk List {chunk_list_type} '
+            f'comm group ({comm_group_idx} {comm_group_offset})')
 
     def delete_param(self, param, access_type):
         """
@@ -154,8 +154,6 @@ class PatrickStarClient(object):
                 f"Overall size of param list is larger than the default chunk size {self.default_chunk_size}."
             )
         return
-        ref_chunk_id = self.self.chunk_tensor_index.get_chunk_id(
-            ref_param, access_type)
 
     def append_tensor_as_ref(self, param, data_type, access_type,
                              chunk_list_type, ref_param):
@@ -199,7 +197,6 @@ class PatrickStarClient(object):
         把一个chunk所有的tensor状态设置为status，chunk的状态也随之改变
         不管payload是否被分配
         """
-        chunk = self.chunk_list[chunk_id]
         for info in self.chunk_tensor_index.generate_tensor_info_in_order(
                 chunk_id):
             param = info.param
@@ -289,9 +286,9 @@ class PatrickStarClient(object):
                 'CLIENT_fetch_remote_chunks_allgather')
 
         logger.info(f'rank {rank} allgather {chunk_id_list}')
-        handle = torch.distributed.all_gather(allgather_payload_buff,
-                                              local_chunk_payload,
-                                              async_op=False)
+        torch.distributed.all_gather(allgather_payload_buff,
+                                     local_chunk_payload,
+                                     async_op=False)
 
         allgather_payload_buff = []
         if self._time_profile:
@@ -368,7 +365,9 @@ class PatrickStarClient(object):
         assert self.chunk_list[
             chunk_id].payload is not None, f"rank {rank} chunk id {chunk_id}' payload is None'"
         assert self.chunk_list[
-            chunk_id].payload.device == compute_device, f"rank {rank} chunk id {chunk_id}' payload is not on {compute_device}, but on {self.chunk_list[chunk_id].payload.device}"
+            chunk_id].payload.device == compute_device, f"rank {rank} chunk id {chunk_id}' payload is not on" \
+                                                        f" {compute_device}, but on" \
+                                                        f" {self.chunk_list[chunk_id].payload.device}"
 
         param.ps_attr.set_tensor(
             self.chunk_list[chunk_id].payload.narrow(0, start_offset, numel),
@@ -476,7 +475,8 @@ class PatrickStarClient(object):
                     compute_device: torch.device):
         """
         将param的ps_grad_tensor的数据放置到compute_device上
-        NOTE，并没有正确设置param的grad，此时grad的数据无效。因为grad的设备属性并不自由，需要看data的脸色行事。我们使用grad时候，需要显式设置
+        NOTE，并没有正确设置param的grad，此时grad的数据无效。因为grad的设备属性并不自由，
+        需要看data的脸色行事。我们使用grad时候，需要显式设置
         `param.grad = param.ps_grad_tensore`
         """
         return self.access(param, AccessType.GRAD, compute_device)

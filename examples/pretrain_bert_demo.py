@@ -21,11 +21,11 @@ from transformers import BertConfig, BertForSequenceClassification
 
 import patrickstar.utils.global_timer as global_timer
 from data_loader import get_bert_data_loader
-from patrickstar.fp16 import FP16_Module, FP16_Optimizer
+from patrickstar.fp16 import fp16_module, fp16_optimizer
 from patrickstar.runtime import initialize_engine
 from patrickstar.utils import see_memory_usage
 from patrickstar.utils.logging import logger
-from patrickstar.utils.model_size_calculator import get_ps_model_size, estimate_bert_MAC
+from patrickstar.utils.model_size_calculator import get_ps_model_size, estimate_bert_mac
 
 
 def _add_patrick_star_args(parser):
@@ -202,18 +202,17 @@ def test_bert_model_helper(args,
                                      betas=betas,
                                      eps=eps,
                                      weight_decay=weight_decay)
-        model, optimizer, _, lr_scheduler = deepspeed.initialize(
-            model=model,
-            optimizer=optimizer,
-            args=args,
-            lr_scheduler=None,
-            mpu=None,
-            dist_init_required=True)
+        model, optimizer, _, _ = deepspeed.initialize(model=model,
+                                                      optimizer=optimizer,
+                                                      args=args,
+                                                      lr_scheduler=None,
+                                                      mpu=None,
+                                                      dist_init_required=True)
     elif dist_plan == "torch":
         model = BertForSequenceClassification(cfg)
         model.cuda(rank)
         if is_fp16:
-            model = FP16_Module(model)
+            model = fp16_module(model)
         model.train()
         optimizer = torch.optim.Adam(model.parameters(),
                                      lr=lr,
@@ -221,7 +220,7 @@ def test_bert_model_helper(args,
                                      eps=eps,
                                      weight_decay=weight_decay)
         if is_fp16:
-            optimizer = FP16_Optimizer(optimizer)
+            optimizer = fp16_optimizer(optimizer)
 
         # DDP 不能要求模型部分在cpu部分在gpu
         model = torch.nn.parallel.DistributedDataParallel(model,
@@ -238,10 +237,10 @@ def test_bert_model_helper(args,
             "optimizer": {
                 "type": "Adam",
                 "params": {
-                    "lr": lr,
-                    "betas": betas,
-                    "eps": eps,
-                    "weight_decay": weight_decay,
+                    "LR": lr,
+                    "BETAS": betas,
+                    "EPS": eps,
+                    "WEIGHT_DECAY": weight_decay,
                     "use_hybrid_adam": args.use_hybrid_adam
                 }
             },
@@ -265,7 +264,7 @@ def test_bert_model_helper(args,
         raise RuntimeError
 
     model_numel = get_ps_model_size(model)
-    total_macs = estimate_bert_MAC(cfg, batch_size, sequence_length,
+    total_macs = estimate_bert_mac(cfg, batch_size, sequence_length,
                                    model_numel)
 
     see_memory_usage(
@@ -292,7 +291,6 @@ def test_bert_model_helper(args,
 
         output = model(input_ids=batch[0], labels=batch[1])
         loss = output.loss
-        logits = output.logits
         # if torch.distributed.get_rank() == 0:
         logging.info(f"LOSS of step {n}: {loss.item()}")
         loss_res.append(loss.item())
@@ -302,7 +300,7 @@ def test_bert_model_helper(args,
             model.backward(loss)
         elif dist_plan == "torch":
             if is_fp16:
-                optimizer.zero_grad(set_grads_to_None=True)
+                optimizer.zero_grad(set_grads_to_none=True)
                 optimizer.backward(loss, update_master_grads=False)
                 optimizer.update_master_grads()
             else:
@@ -328,12 +326,13 @@ def test_bert_model_helper(args,
         step_elapse = time.time() - step_start_time
         if n == 0:
             logging.info(
-                f"warmup ckp {is_ckp} fp16 {is_fp16} dist_plan {dist_plan}: step elapse {step_elapse} sec/iter, {total_macs / 1e12 / step_elapse} GFlops"
+                f"warmup ckp {is_ckp} fp16 {is_fp16} dist_plan {dist_plan}: step elapse "
+                f"{step_elapse} sec/iter, {total_macs / 1e12 / step_elapse} GFlops"
             )
         else:
             logging.info(
-                f"ckp {is_ckp} fp16 {is_fp16} dist_plan {dist_plan}: step elapse {step_elapse} sec/iter, {total_macs / 1e12 / step_elapse} Tflops"
-            )
+                f"ckp {is_ckp} fp16 {is_fp16} dist_plan {dist_plan}: step elapse {step_elapse} sec/iter, "
+                f"{total_macs / 1e12 / step_elapse} Tflops")
         logging.info(f'model {model_numel / 1e9}')
 
         if dist_plan == "ps":
@@ -342,9 +341,8 @@ def test_bert_model_helper(args,
 
             global_timer.my_timer.reset()
             global_timer.data_move_cnter.reset()
-        if n == stop_step: break
-
-    elapse = time.time() - start_time
+        if n == stop_step:
+            break
 
     # if is_ps:
     #     mgr = PatrickStarManager()
@@ -362,7 +360,7 @@ if __name__ == "__main__":
     dist_plan = args.dist_plan
     # 检查结果正确性
     res_check = args.res_check
-    # hidden_dim 1024, batch 16, seqence_leng 1024, ckp True.
+    # HIDDEN_DIM 1024, batch 16, seqence_leng 1024, ckp True.
     # PS is able to run the training, while PyTorch failed.
 
     logger.setLevel(logging.WARNING)
@@ -372,102 +370,102 @@ if __name__ == "__main__":
 
     world_size = torch.distributed.get_world_size()
 
-    plan = args.model_name
+    MODEL_NAME = args.model_name
     if res_check:
-        plan = "Bert"
-    if plan == "Bert":
+        MODEL_NAME = "Bert"
+    if MODEL_NAME == "Bert":
         # 0.11B
-        hidden_dim = 768
-        sequence_length = 512
-        num_layer = 6
-        num_head = 12
-    elif plan == 'Bertlarge':
+        HIDDEN_DIM = 768
+        SEQ_LEN = 512
+        NUM_LAYER = 6
+        NUM_HEAD = 12
+    elif MODEL_NAME == 'Bertlarge':
         # 0.35B
         # PatrickStar and Torch都可以
-        hidden_dim = 1024
-        sequence_length = 512
-        num_layer = 24
-        num_head = 16
-    elif plan == 'GPT2small':
+        HIDDEN_DIM = 1024
+        SEQ_LEN = 512
+        NUM_LAYER = 24
+        NUM_HEAD = 16
+    elif MODEL_NAME == 'GPT2small':
         # 0.7B
-        hidden_dim = 1536
-        sequence_length = 128
-        num_layer = 24
-        num_head = 16
-    elif plan == 'GPT2_1B':
+        HIDDEN_DIM = 1536
+        SEQ_LEN = 128
+        NUM_LAYER = 24
+        NUM_HEAD = 16
+    elif MODEL_NAME == 'GPT2_1B':
         # 0.9B
-        hidden_dim = 2048
-        sequence_length = 1024
-        num_layer = 20
-        num_head = 16
-    elif plan == 'megatron_1.3B':
-        hidden_dim = 2048
-        sequence_length = 1024
-        num_layer = 24
-        num_head = 32
-    elif plan == 'GPT2_2B':
+        HIDDEN_DIM = 2048
+        SEQ_LEN = 1024
+        NUM_LAYER = 20
+        NUM_HEAD = 16
+    elif MODEL_NAME == 'megatron_1.3B':
+        HIDDEN_DIM = 2048
+        SEQ_LEN = 1024
+        NUM_LAYER = 24
+        NUM_HEAD = 32
+    elif MODEL_NAME == 'GPT2_2B':
         # zero-offload
-        hidden_dim = 2048
-        sequence_length = 1024
-        num_layer = 40
-        num_head = 16
-    elif plan == 'megatron_3.9B':
+        HIDDEN_DIM = 2048
+        SEQ_LEN = 1024
+        NUM_LAYER = 40
+        NUM_HEAD = 16
+    elif MODEL_NAME == 'megatron_3.9B':
         # Table 4 in Megatron Paper
-        hidden_dim = 2560
-        sequence_length = 1024
-        num_layer = 24
-        num_head = 40
-    elif plan == 'GPT2_4B':
-        hidden_dim = 2304  # 2048
-        sequence_length = 1024
-        num_layer = 64
-        num_head = 16
-    elif plan == 'GPT3_6B':
+        HIDDEN_DIM = 2560
+        SEQ_LEN = 1024
+        NUM_LAYER = 24
+        NUM_HEAD = 40
+    elif MODEL_NAME == 'GPT2_4B':
+        HIDDEN_DIM = 2304  # 2048
+        SEQ_LEN = 1024
+        NUM_LAYER = 64
+        NUM_HEAD = 16
+    elif MODEL_NAME == 'GPT3_6B':
         # 6.7B model
-        hidden_dim = 3072
-        sequence_length = 1024
-        num_layer = 53
-        num_head = 16
-    elif plan == 'GPT3_8B':
+        HIDDEN_DIM = 3072
+        SEQ_LEN = 1024
+        NUM_LAYER = 53
+        NUM_HEAD = 16
+    elif MODEL_NAME == 'GPT3_8B':
         # 6.7B model
-        hidden_dim = 3072
-        sequence_length = 1024
-        num_layer = 72
-        num_head = 16
-    elif plan == 'GPT3_10B':
-        hidden_dim = 4096
-        sequence_length = 1024
-        num_layer = 50
-        num_head = 16
-    elif plan == 'GPT3_11B':
-        hidden_dim = 4096
-        sequence_length = 1024
-        num_layer = 55
-        num_head = 16
-    elif plan == 'GPT3_12B':
-        hidden_dim = 4096
-        sequence_length = 1024
-        num_layer = 60
-        num_head = 16
-    elif plan == 'GPT3_13B':
-        hidden_dim = 4096
-        sequence_length = 1024
-        num_layer = 65
-        num_head = 16
-    elif plan == 'GPT3_15B':
-        hidden_dim = 4096
-        sequence_length = 1024
-        num_layer = 78
-        num_head = 16
+        HIDDEN_DIM = 3072
+        SEQ_LEN = 1024
+        NUM_LAYER = 72
+        NUM_HEAD = 16
+    elif MODEL_NAME == 'GPT3_10B':
+        HIDDEN_DIM = 4096
+        SEQ_LEN = 1024
+        NUM_LAYER = 50
+        NUM_HEAD = 16
+    elif MODEL_NAME == 'GPT3_11B':
+        HIDDEN_DIM = 4096
+        SEQ_LEN = 1024
+        NUM_LAYER = 55
+        NUM_HEAD = 16
+    elif MODEL_NAME == 'GPT3_12B':
+        HIDDEN_DIM = 4096
+        SEQ_LEN = 1024
+        NUM_LAYER = 60
+        NUM_HEAD = 16
+    elif MODEL_NAME == 'GPT3_13B':
+        HIDDEN_DIM = 4096
+        SEQ_LEN = 1024
+        NUM_LAYER = 65
+        NUM_HEAD = 16
+    elif MODEL_NAME == 'GPT3_15B':
+        HIDDEN_DIM = 4096
+        SEQ_LEN = 1024
+        NUM_LAYER = 78
+        NUM_HEAD = 16
     else:
-        raise RuntimeError(f"The model name {plan} is not valid!")
+        raise RuntimeError(f"The model name {MODEL_NAME} is not valid!")
     if res_check:
         batch_size = 2
     else:
         batch_size = args.batch_size
 
-    assert hidden_dim % num_head == 0
-    logging.info(f'Benchmarking {plan}')
+    assert HIDDEN_DIM % NUM_HEAD == 0
+    logging.info(f'Benchmarking {MODEL_NAME}')
     if not res_check:
         # 训练参数，可以自己定义
         torch.manual_seed(0)
@@ -476,25 +474,24 @@ if __name__ == "__main__":
                                            is_fp16=use_fp16,
                                            dist_plan=dist_plan,
                                            batch_size=batch_size,
-                                           hidden_dim=hidden_dim,
-                                           sequence_length=sequence_length,
-                                           num_layer=num_layer,
-                                           num_head=num_head,
+                                           hidden_dim=HIDDEN_DIM,
+                                           sequence_length=SEQ_LEN,
+                                           num_layer=NUM_LAYER,
+                                           num_head=NUM_HEAD,
                                            stop_step=5)
         print(loss_list)
 
     if res_check:
         torch.manual_seed(0)
-        torch_res_list = test_bert_model_helper(
-            args=args,
-            is_ckp=use_ckp,
-            is_fp16=use_fp16,
-            dist_plan="torch",
-            hidden_dim=hidden_dim,
-            batch_size=batch_size,
-            sequence_length=sequence_length,
-            num_layer=num_layer,
-            num_head=num_head)
+        torch_res_list = test_bert_model_helper(args=args,
+                                                is_ckp=use_ckp,
+                                                is_fp16=use_fp16,
+                                                dist_plan="torch",
+                                                hidden_dim=HIDDEN_DIM,
+                                                batch_size=batch_size,
+                                                sequence_length=SEQ_LEN,
+                                                num_layer=NUM_LAYER,
+                                                num_head=NUM_HEAD)
 
         torch.cuda.empty_cache()
         print("*" * 50)
@@ -503,11 +500,11 @@ if __name__ == "__main__":
                                              is_ckp=use_ckp,
                                              is_fp16=use_fp16,
                                              dist_plan="ps",
-                                             hidden_dim=hidden_dim,
+                                             hidden_dim=HIDDEN_DIM,
                                              batch_size=batch_size,
-                                             sequence_length=sequence_length,
-                                             num_layer=num_layer,
-                                             num_head=num_head)
+                                             sequence_length=SEQ_LEN,
+                                             num_layer=NUM_LAYER,
+                                             num_head=NUM_HEAD)
 
         print('torch', torch_res_list)
         print('ps', ps_res_list)

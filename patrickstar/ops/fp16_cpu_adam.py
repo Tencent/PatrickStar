@@ -70,7 +70,7 @@ class FP16Adam(torch.optim.Optimizer):
                 betas[1]))
         if not 0.0 <= weight_decay:
             raise ValueError(
-                "Invalid weight_decay value: {}".format(weight_decay))
+                "Invalid WEIGHT_DECAY value: {}".format(weight_decay))
         defaults = dict(lr=lr,
                         betas=betas,
                         eps=eps,
@@ -91,10 +91,10 @@ class FP16Adam(torch.optim.Optimizer):
             for p in group['params']:
                 state = self.state[p]
                 # 将group参数放置到每个param内部，可以按照参数切分并行计算adam
-                self.state[p]['betas'] = group['betas']
-                self.state[p]['lr'] = group['lr']
-                self.state[p]['weight_decay'] = group['weight_decay']
-                self.state[p]['eps'] = group['eps']
+                self.state[p]['BETAS'] = group['BETAS']
+                self.state[p]['LR'] = group['LR']
+                self.state[p]['WEIGHT_DECAY'] = group['WEIGHT_DECAY']
+                self.state[p]['EPS'] = group['EPS']
 
                 state['step'] = 0
 
@@ -213,14 +213,9 @@ class FP16Adam(torch.optim.Optimizer):
         # Decay the first and second moment running average coefficient
         exp_avg.mul_(beta1).add_(grad, alpha=1 - beta1)
         exp_avg_sq.mul_(beta2).addcmul_(grad, grad, value=1 - beta2)
-        if False:  # amsgrad
-            # Maintains the maximum of all 2nd moment running avg. till now
-            torch.maximum(max_exp_avg_sqs, exp_avg_sq, out=max_exp_avg_sqs)
-            # Use the max. for normalizing running avg. of gradient
-            denom = (max_exp_avg_sqs.sqrt() /
-                     math.sqrt(bias_correction2)).add_(eps)
-        else:
-            denom = (exp_avg_sq.sqrt() / math.sqrt(bias_correction2)).add_(eps)
+
+        # TODO(jiaruifang) dose not support amsgrad
+        denom = (exp_avg_sq.sqrt() / math.sqrt(bias_correction2)).add_(eps)
 
         step_size = lr / bias_correction1
 
@@ -255,25 +250,25 @@ class FP16Adam(torch.optim.Optimizer):
             return True
         return False
 
-    def FP16_f_adamv2(self,
-                      client,
-                      fp32_params: List[torch.nn.Parameter],
-                      fp16_param_with_grad_list,
-                      exp_avgs: List[torch.nn.Parameter],
-                      exp_avg_sqs: List[torch.nn.Parameter],
-                      max_exp_avg_sqs: List[Tensor],
-                      state_steps: List[int],
-                      amsgrad: bool,
-                      beta1_list: List[float],
-                      beta2_list: List[float],
-                      lr_list: List[float],
-                      weight_decay_list: List[float],
-                      eps_list: List[float],
-                      prefer_device,
-                      read_chunk_buff,
-                      write_chunk_buff,
-                      time_profile=True,
-                      margin_chunk_num_for_gpu_adam=0):
+    def fp16_chunk_adam_ops(self,
+                            client,
+                            fp32_params: List[torch.nn.Parameter],
+                            fp16_param_with_grad_list,
+                            exp_avgs: List[torch.nn.Parameter],
+                            exp_avg_sqs: List[torch.nn.Parameter],
+                            max_exp_avg_sqs: List[Tensor],
+                            state_steps: List[int],
+                            amsgrad: bool,
+                            beta1_list: List[float],
+                            beta2_list: List[float],
+                            lr_list: List[float],
+                            weight_decay_list: List[float],
+                            eps_list: List[float],
+                            prefer_device,
+                            read_chunk_buff,
+                            write_chunk_buff,
+                            time_profile=True,
+                            margin_chunk_num_for_gpu_adam=0):
         r"""Functional API that performs Adam algorithm computation.
         按照在chunk内的存储顺序连续访问fp16_param_with_grad_list的参数，获取fp16 grad，
         以chunk为单位拷贝到一个tmp buff之中
@@ -444,7 +439,6 @@ class FP16Adam(torch.optim.Optimizer):
         fp32_param_list = []
         exp_avgs = []
         exp_avg_sqs = []
-        state_sums = []
         max_exp_avg_sqs = []
         state_steps = []
         beta1_list = []
@@ -474,8 +468,8 @@ class FP16Adam(torch.optim.Optimizer):
             return loss
 
         max_param_size = 0
-        for i, group in enumerate(self.param_groups):
-            for j, p in enumerate(group['params']):
+        for _, group in enumerate(self.param_groups):
+            for _, p in enumerate(group['params']):
                 if p.requires_grad:
                     # update the steps for each param group update
                     state = self.state[p]
@@ -494,32 +488,31 @@ class FP16Adam(torch.optim.Optimizer):
                     exp_avgs.append(state['exp_avg'])
                     exp_avg_sqs.append(state['exp_avg_sq'])
                     fp32_param_list.append(state['fp32_param_data'])
-                    beta1, beta2 = state['betas']
+                    beta1, beta2 = state['BETAS']
 
                     beta1_list.append(beta1)
                     beta2_list.append(beta2)
-                    lr_list.append(state['lr'])
-                    weight_decay_list.append(state['weight_decay'])
-                    eps_list.append(state['eps'])
+                    lr_list.append(state['LR'])
+                    weight_decay_list.append(state['WEIGHT_DECAY'])
+                    eps_list.append(state['EPS'])
 
                     # record the step after step update
                     state_steps.append(state['step'])
 
         # 混合ADMA，根据预热获得的信息，放一部分Chunk在GPU上。
-        self.FP16_f_adamv2(self.client, fp32_param_list,
-                           fp16_param_with_grad_list, exp_avgs, exp_avg_sqs,
-                           max_exp_avg_sqs, state_steps, False, beta1_list,
-                           beta2_list, lr_list, weight_decay_list, eps_list,
-                           self.prefer_device, self.read_chunk_buff,
-                           self.write_chunk_buff, True,
-                           margin_chunk_num_for_gpu_adam)
+        self.fp16_chunk_adam_ops(
+            self.client, fp32_param_list, fp16_param_with_grad_list, exp_avgs,
+            exp_avg_sqs, max_exp_avg_sqs, state_steps, False, beta1_list,
+            beta2_list, lr_list, weight_decay_list, eps_list,
+            self.prefer_device, self.read_chunk_buff, self.write_chunk_buff,
+            True, margin_chunk_num_for_gpu_adam)
 
         global_timer.my_timer.finish_profile('ADAM')
         mgr = PatrickStarManager()
 
         if mgr.is_warmup_training():
             logger.info('******** SHOW ACCESS INFO ********')
-            for idx, chunk in self.client.chunk_list.generate_chunk():
+            for _, chunk in self.client.chunk_list.generate_chunk():
                 chunk.display_access_mom_info()
         mgr.reset_metronome()
 

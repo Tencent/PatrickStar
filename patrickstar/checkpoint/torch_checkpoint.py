@@ -11,10 +11,10 @@
 # permissions and limitations under the License.
 # See the AUTHORS file for names of contributors.
 
-import torch
 import warnings
 from typing import Any, Iterable, List, Tuple
-import logging
+
+import torch
 
 # TODO(jiaruifang) 设置这个flag来实现activation checkpoint offload到cpu
 CPU_OFFLOAD_FLAG = False
@@ -125,7 +125,7 @@ class CheckpointFunction(torch.autograd.Function):
             del inputs_cuda
 
             inputs = []
-            for i, arg in enumerate(args):
+            for _, arg in enumerate(args):
                 item = arg
                 if torch.is_tensor(item):
                     item.data = arg.data.cpu()

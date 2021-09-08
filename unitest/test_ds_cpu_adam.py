@@ -108,8 +108,8 @@ class TestAccess(unittest.TestCase):
         data_diff = torch.max(torch.abs(p_data_copy - p_data))
         self.assertLess(
             data_diff, 1e-4,
-            f"p_data diff {data_diff}. Failed check, step {step}, lr {lr} eps {eps} beta1 {beta1} beta2 {beta2} weight_decay {weight_decay}"
-        )
+            f"p_data diff {data_diff}. Failed check, step {step}, lr {lr} eps "
+            f"{eps} beta1 {beta1} beta2 {beta2} weight_decay {weight_decay}")
         max_grad_diff = torch.max(torch.abs(p_grad_copy - p_grad))
         self.assertTrue(max_grad_diff < 1e-4, f"diff {max_grad_diff}")
         max_exp_avg_diff = torch.max(torch.abs(exp_avg_copy - exp_avg))

@@ -62,10 +62,10 @@ def test_bert_model(method,
             "optimizer": {
                 "type": "Adam",
                 "params": {
-                    "lr": lr,
-                    "betas": betas,
-                    "eps": eps,
-                    "weight_decay": weight_decay,
+                    "LR": lr,
+                    "BETAS": betas,
+                    "EPS": eps,
+                    "WEIGHT_DECAY": weight_decay,
                     "use_hybrid_adam": True
                 }
             },

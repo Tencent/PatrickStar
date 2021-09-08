@@ -12,10 +12,10 @@
 # See the AUTHORS file for names of contributors.
 
 from .core import PatrickStarClient
-from .fp16 import FP16_Module, FP16_Optimizer
+from .fp16 import fp16_module, fp16_optimizer
 from .manager import PatrickStarManager
 from .ops import FP16Adam
 from .runtime import initialize_engine
 from .utils import global_timer
 from .utils import see_memory_usage
-from .utils.model_size_calculator import get_ps_model_size, estimate_bert_MAC
+from .utils.model_size_calculator import get_ps_model_size, estimate_bert_mac

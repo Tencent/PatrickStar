@@ -95,9 +95,9 @@ class FP16_UnfusedOptimizer(object):
         self.clip_grad = clip_grad
         self.norm_type = 2
 
-        TORCH_MAJOR = int(torch.__version__.split('.')[0])
-        TORCH_MINOR = int(torch.__version__.split('.')[1])
-        if TORCH_MAJOR == 0 and TORCH_MINOR <= 4:
+        torch_major = int(torch.__version__.split('.')[0])
+        torch_minor = int(torch.__version__.split('.')[1])
+        if torch_major == 0 and torch_minor <= 4:
             self.clip_grad_norm = torch.nn.utils.clip_grad_norm
         else:
             self.clip_grad_norm = torch.nn.utils.clip_grad_norm_
@@ -109,7 +109,7 @@ class FP16_UnfusedOptimizer(object):
 
         self.initialize_optimizer_states()
 
-    def zero_grad(self, set_grads_to_None=True):
+    def zero_grad(self, set_grads_to_none=True):
         """
         Zero FP16 parameter grads.
         """
@@ -117,7 +117,7 @@ class FP16_UnfusedOptimizer(object):
         # For speed, set model fp16 grad to None by default
         for group in self.fp16_groups:
             for p in group:
-                if set_grads_to_None:
+                if set_grads_to_none:
                     p.grad = None
                 else:
                     if p.grad is not None:
@@ -234,7 +234,8 @@ class FP16_UnfusedOptimizer(object):
         :attr:`backward` performs the following steps:
         1. fp32_loss = loss.float()
         2. scaled_loss = fp32_loss*loss_scale
-        3. scaled_loss.backward(), which accumulates scaled gradients into the ``.grad`` attributes of the model's fp16 leaves
+        3. scaled_loss.backward(), which accumulates scaled gradients into the ``.grad`` attributes
+        of the model's fp16 leaves
         """
         scaled_loss = (loss.float()) * self.cur_scale
         scaled_loss.backward()
@@ -292,8 +293,8 @@ class FP16_UnfusedOptimizer(object):
 
     def state_dict(self):
         """
-        Returns a dict containing the current state of this :class:`FP16_Optimizer` instance.
-        This dict contains attributes of :class:`FP16_Optimizer`, as well as the state_dict
+        Returns a dict containing the current state of this :class:`fp16_optimizer` instance.
+        This dict contains attributes of :class:`fp16_optimizer`, as well as the state_dict
         of the contained Pytorch optimizer.
         Example::
             checkpoint = {}
@@ -322,8 +323,8 @@ class FP16_UnfusedOptimizer(object):
         ``fp16_optimizer_instance.load_state_dict()`` is called.
         Example::
             model = torch.nn.Linear(D_in, D_out).cuda().half()
-            optimizer = torch.optim.SGD(model.parameters(), lr=1e-3)
-            optimizer = FP16_Optimizer(optimizer, static_loss_scale = 128.0)
+            optimizer = torch.optim.SGD(model.parameters(), LR=1e-3)
+            optimizer = fp16_optimizer(optimizer, static_loss_scale = 128.0)
             ...
             checkpoint = torch.load("saved.pth")
             model.load_state_dict(checkpoint['model'])
@@ -351,7 +352,7 @@ class FP16_UnfusedOptimizer(object):
         #
         # Pytorch Optimizer.load_state_dict casts saved buffers (e.g. momentum) to the type and device
         # of their associated parameters, because it's possible those buffers might not exist yet in
-        # the current optimizer instance.  In our case, as long as the current FP16_Optimizer has been
+        # the current optimizer instance.  In our case, as long as the current fp16_optimizer has been
         # constructed in the same way as the one whose state_dict we are loading, the same master params
         # are guaranteed to exist, so we can just copy_() from the saved master params.
         for current_group, saved_group in zip(self.fp32_groups,
@@ -363,13 +364,13 @@ class FP16_UnfusedOptimizer(object):
         return repr(self.optimizer)
 
     def initialize_optimizer_states(self):
-        for i, group in enumerate(self.fp16_groups):
+        for _, group in enumerate(self.fp16_groups):
             for param in group:
                 param.grad = torch.zeros(param.size(),
                                          dtype=param.dtype,
                                          device=torch.cuda.current_device())
 
-        for i, group in enumerate(self.fp32_groups):
+        for _, group in enumerate(self.fp32_groups):
             for param in group:
                 param.grad = torch.zeros(param.size(),
                                          dtype=param.dtype,

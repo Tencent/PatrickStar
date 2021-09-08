@@ -147,12 +147,12 @@ class TestAccess(unittest.TestCase):
         param_numel_list = [10, 5]
         param_list = []
 
-        for param_id, numel in enumerate(param_numel_list):
+        for _, numel in enumerate(param_numel_list):
             param = torch.nn.Parameter(torch.zeros(numel))
             register_param(param, ParamType.CHUNK_BASED, torch.float,
                            f"param_{numel}")
-            is_success = chunk_tensor_index.try_insert_tensor(
-                0, param, torch.float, AccessType.DATA)
+            chunk_tensor_index.try_insert_tensor(0, param, torch.float,
+                                                 AccessType.DATA)
             param_list.append(param)
 
         param_numel_list = [6, 9]
