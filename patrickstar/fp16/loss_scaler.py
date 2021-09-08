@@ -27,13 +27,6 @@
 # limitations under the License.
 
 
-def to_python_float(t):
-    if hasattr(t, 'item'):
-        return t.item()
-    else:
-        return t[0]
-
-
 class LossScaler:
     """
     Class that manages a static loss scale.  This class is intended to interact with

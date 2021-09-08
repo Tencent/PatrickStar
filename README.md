@@ -15,7 +15,7 @@
 派大星核心逻辑使用PyTorch编写，具有很好的可移植性，如下Linux命令展示了派大星的用法
 ```
 pip install .
-cd examples && run run_bert.sh
+cd examples && bash run_bert.sh
 ```
 
 派大星正在被集成到[TencentPretrain](https://git.woa.com/TencentNLP/TencentPretrain)之中，参考我们的[MR](https://git.woa.com/TencentNLP/TencentPretrain/merge_requests/61)。
