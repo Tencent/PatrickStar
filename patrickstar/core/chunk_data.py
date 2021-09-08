@@ -136,8 +136,8 @@ class Chunk(object):
             self.payload = torch.zeros(payload_size,
                                        dtype=self.data_type,
                                        device=device)
-        ps_manager = PatrickStarManager()
-        ps_manager.add(device.type, self.get_payload_space())
+        mgr = PatrickStarManager()
+        mgr.add(device.type, self.get_payload_space())
 
         if self._time_profile:
             global_timer.my_timer.finish_profile('CHUNK_allocate_payload')
@@ -147,8 +147,8 @@ class Chunk(object):
         释放负载
         确保此时所有tensor都是free
         """
-        ps_manager = PatrickStarManager()
-        ps_manager.delete(self.get_device().type, self.get_payload_space())
+        mgr = PatrickStarManager()
+        mgr.delete(self.get_device().type, self.get_payload_space())
 
         # 删除chunk的内存
         del self.payload
@@ -208,17 +208,17 @@ class Chunk(object):
             else:
                 global_timer.my_timer.start_profile('chunk_gpu_cpu_move')
         src_device = self.get_device()
-        ps_manager = PatrickStarManager()
+        mgr = PatrickStarManager()
 
         logger.debug(
             f'move chunk {self.chunk_id}, which has {self.payload.numel() / 1e6} M {self.payload.dtype} elements, '
             f'from {src_device} to {target_device}, '
-            f'used mem {ps_manager.used_chunk_mem(target_device.type) / 1e6} MB'
+            f'used mem {mgr.used_chunk_mem(target_device.type) / 1e6} MB'
         )
 
         # TODO(jiaruifang)异步
-        ps_manager = PatrickStarManager()
-        ps_manager.delete(self.get_device().type, self.get_payload_space())
+        mgr = PatrickStarManager()
+        mgr.delete(self.get_device().type, self.get_payload_space())
         if is_async:
             if target_device.type == 'cpu':
                 pinned_payload_cpu = torch.empty(self.payload.shape,
@@ -263,7 +263,7 @@ class Chunk(object):
             elif target_device.type == 'cuda':
                 self.payload = self.payload.to(target_device)
 
-        ps_manager.add(target_device.type, self.get_payload_space())
+        mgr.add(target_device.type, self.get_payload_space())
 
         if self._time_profile:
             if target_device.type == 'cuda':
