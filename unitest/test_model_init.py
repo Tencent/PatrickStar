@@ -38,7 +38,9 @@ class TestModelInitContext(unittest.TestCase):
         client = PatrickStarClient(0, default_chunk_size, is_fp16=True)
 
         torch.manual_seed(0)
-        with PSPreProcessCtx(client, dtype=torch.float, use_fake_dist=True):
+        with PSPreProcessCtx(client,
+                             dtype=torch.float,
+                             release_during_init=False):
             ps_model = model_provider()
 
         torch.manual_seed(0)

@@ -129,13 +129,13 @@ def test_bert_model(method,
 
         if method == "patrickstar":
             output = model(input_ids=batch[0], labels=batch[1])
-            loss = output.loss
+            loss = output[0]
             model.backward(loss)
             optimizer.step()
             scale_list.append(optimizer.loss_scaler.loss_scale)
         elif method == "apex":
             output = model(input_ids=batch[0], labels=batch[1])
-            loss = output['loss']
+            loss = output[0]  #['loss']
             with amp.scale_loss(loss, optimizer) as scaled_loss:
                 scaled_loss.backward()
             optimizer.step()
@@ -143,7 +143,7 @@ def test_bert_model(method,
         else:
             with torch.cuda.amp.autocast():
                 output = model(input_ids=batch[0], labels=batch[1])
-            loss = output.loss
+            loss = output[0]
             scaler.scale(loss).backward()
             scaler.step(optimizer)
             scaler.update()
