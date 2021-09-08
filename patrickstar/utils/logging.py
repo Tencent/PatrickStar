@@ -13,9 +13,11 @@
 
 import logging
 import sys
-import torch
+
 import torch.distributed as dist
+
 from .distributed import get_rank
+
 
 class LoggerFactory:
     @staticmethod

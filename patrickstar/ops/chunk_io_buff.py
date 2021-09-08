@@ -12,8 +12,8 @@
 # See the AUTHORS file for names of contributors.
 
 import torch
+
 from patrickstar.core import ChunkList, ChunkTensorIndex, ParamType
-from patrickstar.manager import PatrickStarManager
 from patrickstar.utils import logger, get_rank
 
 
@@ -107,14 +107,15 @@ class FP32ChunkReadBuffer(object):
                                        pin_memory=True)
         self.local_rank = chunk_list.local_rank
         logger.info(
-            f"Allocate fp32 Chunk Buffer of size {chunk_size/1e6} MB on CPU.")
+            f"Allocate fp32 Chunk Buffer of size {chunk_size / 1e6} MB on CPU."
+        )
         if margin_chunk_num_for_gpu_adam > 0:
             gpu_device = torch.device(f'cuda:{self.local_rank}')
             self.gpu_payload = torch.empty(chunk_size,
                                            dtype=torch.half,
                                            device=gpu_device)
             logger.info(
-                f"Allocate fp32 Chunk Buffer of size {chunk_size/1e6} MB on {gpu_device}."
+                f"Allocate fp32 Chunk Buffer of size {chunk_size / 1e6} MB on {gpu_device}."
             )
         self.cached_chunk_id = None
         self.margin_chunk_num_for_gpu_adam = margin_chunk_num_for_gpu_adam

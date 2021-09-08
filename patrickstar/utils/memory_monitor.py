@@ -11,13 +11,15 @@
 # permissions and limitations under the License.
 # See the AUTHORS file for names of contributors.
 
-import os
-import psutil
 import gc
+
+import psutil
 import torch
 from pynvml import *
+
 from .distributed import get_rank, get_world_size
 from .logging import logger
+
 
 def get_sys_memory_used(device):
     """
@@ -50,8 +52,8 @@ def see_memory_usage(message, force=False, scale_name="MB"):
     logger.info(message)
     logger.info(
         f"MA {round(torch.cuda.memory_allocated() / scale, 2)} {scale_name} \
-        Max_MA {round(torch.cuda.max_memory_allocated() / scale,2)} {scale_name} \
-        CA {round(torch.cuda.memory_reserved() / scale,2)} {scale_name} \
+        Max_MA {round(torch.cuda.max_memory_allocated() / scale, 2)} {scale_name} \
+        CA {round(torch.cuda.memory_reserved() / scale, 2)} {scale_name} \
         Max_CA {round(torch.cuda.max_memory_reserved() / scale)} {scale_name} "
     )
 

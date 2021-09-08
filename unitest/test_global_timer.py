@@ -11,8 +11,8 @@
 # permissions and limitations under the License.
 # See the AUTHORS file for names of contributors.
 
-import unittest
 import logging
+import unittest
 
 if __name__ == "__main__":
     logging.basicConfig(

@@ -12,15 +12,13 @@
 # See the AUTHORS file for names of contributors.
 
 from typing import List
+
 import torch
-import time
 
-from .const import AccessType, PSChunkStatus, PSTensorStatus, ChunkListType
-from .chunk_list import ChunkList
-import patrickstar.utils.global_timer as global_timer
 from patrickstar.utils import logger, get_rank
-
-from .parameter import PSParameter, is_param_registered, ParamType
+from .chunk_list import ChunkList
+from .const import AccessType, PSTensorStatus, ChunkListType
+from .parameter import is_param_registered
 from .tensor_stub import TensorInfo
 
 
@@ -307,7 +305,7 @@ class ChunkTensorIndex(object):
         ):
             overall_size += print_chunk_list(chunk_list_of_the_type)
 
-        logger.info(f'OVERALL CHUNK SIZE {overall_size/1e9} GB')
+        logger.info(f'OVERALL CHUNK SIZE {overall_size / 1e9} GB')
 
     def _get_tensor_id_list(self, chunk_id):
         if chunk_id not in self.chunk_id_to_tensor_id_list_map:

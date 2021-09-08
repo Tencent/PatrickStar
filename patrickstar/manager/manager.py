@@ -11,13 +11,13 @@
 # permissions and limitations under the License.
 # See the AUTHORS file for names of contributors.
 
-import torch
-import psutil
 import logging as logger
-from torch.multiprocessing import Process, Manager
 
-from patrickstar.utils import get_sys_memory_used, get_rank, get_world_size
+import psutil
+import torch
+
 from patrickstar.core.const import TrainingStage
+from patrickstar.utils import get_sys_memory_used, get_world_size
 
 
 ######### Global Scheduler ###########
@@ -107,8 +107,8 @@ class PatrickStarManager(metaclass=SingletonMeta):
         if self.use_fake_dist:
             # 伪分布式训练是，大家共享一块GPU
             self._overall_gpu_mem = torch.cuda.get_device_properties(
-                0
-            ).total_memory * self._overall_gpu_mem_ratio / get_world_size()
+                0).total_memory * self._overall_gpu_mem_ratio / get_world_size(
+                )
             self._overall_cpu_mem = psutil.virtual_memory(
             ).total * self._overall_cpu_mem_ratio / get_world_size()
         else:
@@ -119,8 +119,8 @@ class PatrickStarManager(metaclass=SingletonMeta):
             ).total * self._overall_cpu_mem_ratio / get_world_size()
 
         logger.info(
-            f'Init Manager over all gpu mem {self._overall_gpu_mem/1e6} MB, '
-            f'cpu mem {self._overall_cpu_mem/1e6} MB')
+            f'Init Manager over all gpu mem {self._overall_gpu_mem / 1e6} MB, '
+            f'cpu mem {self._overall_cpu_mem / 1e6} MB')
         # 统计信息
         self.cpu_used_list = []
         self.cpu_chunk_used_list = []
@@ -168,12 +168,12 @@ class PatrickStarManager(metaclass=SingletonMeta):
 
         logger.info("*********** GPU INFO AFTER BWD ***************")
         logger.info(
-            f'Max GPU System Mem (non-chunk) Used {max(self.gpu_sys_used_list)/1e6} MB'
+            f'Max GPU System Mem (non-chunk) Used {max(self.gpu_sys_used_list) / 1e6} MB'
         )
         logger.info(
-            f'Param FP16 Chunk Size {self._param_fp16_chunk_size/1e6} MB')
+            f'Param FP16 Chunk Size {self._param_fp16_chunk_size / 1e6} MB')
         logger.info(
-            f'Margin Mem Size {margin_mem_size/1e6} MB, '
+            f'Margin Mem Size {margin_mem_size / 1e6} MB, '
             f'available chunk num for Optimizer States {self._margin_chunk_num_for_gpu_adam}'
         )
         logger.info(f'OVERALL GPU MEM {self._overall_gpu_mem}')
@@ -276,7 +276,7 @@ class PatrickStarManager(metaclass=SingletonMeta):
         size = self.available_chunk_mem(device_type) - self.used_chunk_mem(
             device_type)
         logger.debug(
-            f'free_chunk_mem on {device_type} {size/1e6} MB on mement {self.metronome.moment()}'
+            f'free_chunk_mem on {device_type} {size / 1e6} MB on mement {self.metronome.moment()}'
         )
         return size
 
@@ -308,7 +308,7 @@ class PatrickStarManager(metaclass=SingletonMeta):
                     # ADAM时没有activation所以显存可以全部给Chunk，需要两个default chunk size做buffer，这里先预留6个
                     ava_mem = self._overall_gpu_mem - 4 * self._default_chunk_size * 4
                     logger.debug(
-                        f'GPU available_chunk_mem is {ava_mem/1e6} MB')
+                        f'GPU available_chunk_mem is {ava_mem / 1e6} MB')
                     return ava_mem
                 else:
                     # TODO(jiaruifang)瞎拍一个数，预热阶段三分之一GPU显存用来存储chunk
@@ -339,18 +339,18 @@ class PatrickStarManager(metaclass=SingletonMeta):
     def show_mem_curve(self):
         with open('gpu_used_curve.txt', 'w') as fh:
             fh.write(
-                f'gpu_chunk_used_list {len(self.gpu_chunk_used_list)} \n {list(map(lambda x : x/1e6, self.gpu_chunk_used_list))}\n'
+                f'gpu_chunk_used_list {len(self.gpu_chunk_used_list)} \n {list(map(lambda x: x / 1e6, self.gpu_chunk_used_list))}\n'
             )
             fh.write(
-                f'gpu_sys_used_list {list(map(lambda x: x/1e6, self.gpu_sys_used_list))}\n'
+                f'gpu_sys_used_list {list(map(lambda x: x / 1e6, self.gpu_sys_used_list))}\n'
             )
             fh.write(
-                f'gpu_used_list \n {list(map(lambda  x: x/1e6, self.gpu_used_list))}\n'
+                f'gpu_used_list \n {list(map(lambda x: x / 1e6, self.gpu_used_list))}\n'
             )
 
         with open('cpu_used_curve.txt', 'w') as fh:
             fh.write(
-                f'cpu_chunk_used_list {len(self.gpu_chunk_used_list)} \n {list(map(lambda x : x/1e6, self.cpu_chunk_used_list))}\n'
+                f'cpu_chunk_used_list {len(self.gpu_chunk_used_list)} \n {list(map(lambda x: x / 1e6, self.cpu_chunk_used_list))}\n'
             )
             # fh.write(
             #     f'cpu_sys_used_list {list(map(lambda x: x/1e6, self.cpu_sys_used_list))}\n'

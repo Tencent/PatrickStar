@@ -12,13 +12,13 @@
 # See the AUTHORS file for names of contributors.
 
 import unittest
-from torch.nn import Embedding as TorchEmbedding
-from patrickstar.ops import Embedding as PSEmbedding
-from patrickstar.utils import logger
-from transformers import BertConfig
-from transformers.models.bert.modeling_bert import BertEmbeddings
-from common import distributed_test
+
 import torch
+from torch.nn import Embedding as TorchEmbedding
+from transformers import BertConfig
+
+from common import distributed_test
+from patrickstar.ops import Embedding as PSEmbedding
 
 
 class TestClientAccess(unittest.TestCase):

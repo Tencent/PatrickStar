@@ -11,23 +11,19 @@
 # permissions and limitations under the License.
 # See the AUTHORS file for names of contributors.
 
-import argparse
-import torch
-import time
-import numpy as np
-import pytest
-import copy
 import math
 import unittest
 
+import torch
+
+from common import distributed_test
 from patrickstar.ops.op_builder import CPUAdamBuilder
 from patrickstar.utils import logger
-from common import distributed_test
 
 
 def torch_adam_update(step, lr, beta1, beta2, eps, weight_decay,
-                      bias_correction, param, grad,
-                      exp_avg, exp_avg_sq, loss_scale, use_adamw):
+                      bias_correction, param, grad, exp_avg, exp_avg_sq,
+                      loss_scale, use_adamw):
     if loss_scale > 0:
         grad.div_(loss_scale)
     bias_correction1 = 1 - beta1**step
@@ -84,8 +80,8 @@ class TestAccess(unittest.TestCase):
             eps,
             weight_decay,
             True,
-            p_data.view(-1),  #fp32 data
-            p_grad.view(-1),  #fp32 grad
+            p_data.view(-1),  # fp32 data
+            p_grad.view(-1),  # fp32 grad
             exp_avg.view(-1),
             exp_avg_sq.view(-1),
             loss_scale)
@@ -98,8 +94,8 @@ class TestAccess(unittest.TestCase):
             eps,
             weight_decay,
             True,
-            p_data_copy,  #fp32 data
-            p_grad_copy,  #fp32 grad
+            p_data_copy,  # fp32 data
+            p_grad_copy,  # fp32 grad
             exp_avg_copy,
             exp_avg_sq_copy,
             loss_scale,
@@ -135,8 +131,8 @@ class TestAccess(unittest.TestCase):
         weight_decay = 0
         for use_adamw in [False, True]:
             ds_opt_adam = CPUAdamBuilder().load()
-            ds_opt_adam.create_adam(0, lr, betas[0], betas[1], eps, weight_decay,
-                                    use_adamw, True)
+            ds_opt_adam.create_adam(0, lr, betas[0], betas[1], eps,
+                                    weight_decay, use_adamw, True)
             for shape in [(1023, ), (1024, 32)]:
                 for step in range(1, 10):
                     for lr in [0.01, 0.1]:
@@ -151,7 +147,8 @@ class TestAccess(unittest.TestCase):
                                                 self.check_res(
                                                     ds_opt_adam, step, lr, eps,
                                                     beta1, beta2, weight_decay,
-                                                    shape, grad_dtype, loss_scale, use_adamw)
+                                                    shape, grad_dtype,
+                                                    loss_scale, use_adamw)
 
 
 if __name__ == "__main__":

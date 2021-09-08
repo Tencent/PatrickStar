@@ -11,17 +11,15 @@
 # permissions and limitations under the License.
 # See the AUTHORS file for names of contributors.
 
-import os
-import logging
+import unittest
+
 import torch
 from apex import amp
-import numpy as np
 from transformers import BertConfig, BertForSequenceClassification
 
-from patrickstar.runtime import initialize_engine
-import unittest
 from common import distributed_test
 from examples.data_loader import get_bert_data_loader
+from patrickstar.runtime import initialize_engine
 
 
 def test_bert_model(method,
@@ -31,7 +29,6 @@ def test_bert_model(method,
                     num_layer=12,
                     num_head=12,
                     stop_step=10):
-
     # Avoid gpu0 use more memory.
     # https://discuss.pytorch.org/t/extra-10gb-memory-on-gpu-0-in-ddp-tutorial/118113
     rank = torch.distributed.get_rank()

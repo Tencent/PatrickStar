@@ -11,7 +11,6 @@
 # permissions and limitations under the License.
 # See the AUTHORS file for names of contributors.
 
-import torch
 from patrickstar.core.parameter import is_param_registered
 
 
@@ -25,7 +24,7 @@ def get_ps_model_size(model):
             numel += param.numel()
         param_cnt += 1
     # numel *= args.world_size
-    print(f"PS model size {numel/1e9} B, param cnt {param_cnt}")
+    print(f"PS model size {numel / 1e9} B, param cnt {param_cnt}")
     return numel
 
 

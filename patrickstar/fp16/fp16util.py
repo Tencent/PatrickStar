@@ -26,17 +26,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import amp_C
 import torch
 import torch.nn as nn
-from torch.autograd import Variable
-from torch._utils import _flatten_dense_tensors, _unflatten_dense_tensors
-
 from apex.multi_tensor_apply import multi_tensor_applier
-import amp_C
+from torch._utils import _flatten_dense_tensors, _unflatten_dense_tensors
+from torch.autograd import Variable
 
 # from megatron import mpu
-import logging
-import patrickstar.utils.global_timer as global_timer
 
 
 class tofp16(nn.Module):

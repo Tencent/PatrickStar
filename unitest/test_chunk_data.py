@@ -12,12 +12,12 @@
 # See the AUTHORS file for names of contributors.
 
 import unittest
-from patrickstar.core import PatrickStarClient, ChunkList, PSTensorStatus, AccessType, ChunkTensorIndex, Chunk
-import logging
+
 import torch
-from patrickstar.core import PSChunkStatus, register_param, ParamType
+
 from common import distributed_test
-from patrickstar import PatrickStarManager
+from patrickstar.core import AccessType, ChunkTensorIndex
+from patrickstar.core import register_param, ParamType
 
 
 class TestChunkData(unittest.TestCase):

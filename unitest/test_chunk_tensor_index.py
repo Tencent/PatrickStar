@@ -12,9 +12,10 @@
 # See the AUTHORS file for names of contributors.
 
 import unittest
-from patrickstar.core import ChunkTensorIndex, ChunkListType, AccessType, register_param, ParamType
-import logging
+
 import torch
+
+from patrickstar.core import ChunkTensorIndex, ChunkListType, AccessType, register_param, ParamType
 
 
 class TestAccess(unittest.TestCase):

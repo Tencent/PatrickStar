@@ -13,14 +13,13 @@
 
 # from deepspeed.runtime.fp16.unfused_optimizer import FP16_UnfusedOptimizer
 import logging
-
-import torch
-from torch._utils import _flatten_dense_tensors, _unflatten_dense_tensors
 import math
 
-from deepspeed.runtime.utils import get_grad_norm, CheckOverflow, get_weight_norm
+import torch
 from deepspeed.runtime.fp16.loss_scaler import INITIAL_LOSS_SCALE, SCALE_WINDOW, MIN_LOSS_SCALE
+from deepspeed.runtime.utils import get_grad_norm, CheckOverflow, get_weight_norm
 from deepspeed.utils import logger
+from torch._utils import _flatten_dense_tensors
 
 
 class FP16_UnfusedOptimizer(object):
@@ -53,22 +52,22 @@ class FP16_UnfusedOptimizer(object):
 
         # loop to deal with groups
         for i, param_group in enumerate(self.optimizer.param_groups):
-            #fp16 weights that represents the actual model weights
+            # fp16 weights that represents the actual model weights
             self.fp16_groups.append(param_group['params'])
 
-            #creating a fp32 copy of the weights that will be updated first then
-            #copied to fp16 weights
+            # creating a fp32 copy of the weights that will be updated first then
+            # copied to fp16 weights
             fp32_group = [
                 p.clone().float().detach() for p in param_group['params']
             ]
 
-            #incase the internal optimizer needs it
+            # incase the internal optimizer needs it
             for p in fp32_group:
                 p.requires_grad = True
 
-            #setting the param groups in the optimizer to point to fp32
-            #note these are not the weights used by the model
-            #the model uses the fp16 version that we added to fp16_group
+            # setting the param groups in the optimizer to point to fp32
+            # note these are not the weights used by the model
+            # the model uses the fp16 version that we added to fp16_group
             self.fp32_groups.append(fp32_group)
             param_group['params'] = self.fp32_groups[i]
 
@@ -200,11 +199,10 @@ class FP16_UnfusedOptimizer(object):
 
         for fp32_group, fp16_group in zip(self.fp32_groups, self.fp16_groups):
             for fp32_param, fp16_param in zip(fp32_group, fp16_group):
-
-                #remove the fp32 grad
+                # remove the fp32 grad
                 fp32_param.grad = None
 
-                #copy data from fp32 to fp16
+                # copy data from fp32 to fp16
                 fp16_param.data.copy_(fp32_param.data)
 
         return self.overflow
@@ -400,8 +398,8 @@ def configure_fp16_optimizer(optimizer):
     logging.info('Creating fp16 unfused optimizer with dynamic loss scale')
     optimizer = FP16_UnfusedOptimizer(
         optimizer,
-        static_loss_scale=1.0,  #self.loss_scale(),
-        dynamic_loss_scale=False,  #self.dynamic_loss_scale(),
+        static_loss_scale=1.0,  # self.loss_scale(),
+        dynamic_loss_scale=False,  # self.dynamic_loss_scale(),
         dynamic_loss_args=None,
         mpu=None,
         clip_grad=0.0,
