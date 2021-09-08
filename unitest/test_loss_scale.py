@@ -135,7 +135,7 @@ def test_bert_model(method,
             scale_list.append(optimizer.loss_scaler.loss_scale)
         elif method == "apex":
             output = model(input_ids=batch[0], labels=batch[1])
-            loss = output[0]  #['loss']
+            loss = output['loss']
             with amp.scale_loss(loss, optimizer) as scaled_loss:
                 scaled_loss.backward()
             optimizer.step()
