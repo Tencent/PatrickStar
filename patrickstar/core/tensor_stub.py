@@ -38,6 +38,13 @@ class TensorInfo(object):
             access_type == AccessType.DATA) else f"{param_name}.grad"
         self.access_type = access_type
 
+    def __str__(self):
+        return (
+            f'tensor_id: {self.tensor_id}, name: {self.tensor_name}, '
+            f'shape: {self.param.shape}, chunk_id: {self.chunk_id}, '
+            f'start_offset: {self.start_offset}, numel: {self.numel}, status: {self.status()}'
+        )
+
     def status(self):
         """
         访问param中的成员变量很慢
@@ -47,9 +54,3 @@ class TensorInfo(object):
         else:
             return self.param.ps_attr.get_status(self.access_type)
 
-    def showme(self):
-        logger.info(
-            f'tensor_id {self.tensor_id}, name {self.tensor_name}, '
-            f'shape {self.param.shape}, chunk_id {self.chunk_id}, '
-            f'start_offset {self.start_offset}, nueml {self.numel}, status {self.status()}'
-        )
