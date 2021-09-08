@@ -11,8 +11,8 @@
 # permissions and limitations under the License.
 # See the AUTHORS file for names of contributors.
 
-import torch
 import logging
+import torch
 
 from patrickstar.runtime import initialize_engine
 from patrickstar.utils import logger
@@ -25,6 +25,7 @@ device = torch.device('cuda') if torch.cuda.is_available() else torch.device(
 BATCH_SIZE = 8
 HIDDEN_DIM = 4
 SEQ_LEN = 128
+
 
 def model_func():
     return SimpleModel(hidden_dim=HIDDEN_DIM,

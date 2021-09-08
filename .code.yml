@@ -1,3 +1,5 @@
 source:
   third_party_source:
-    filepath_regex: [".*/patrickstar/ops/csrc/*/.*", ".*/patrickstar/ops/op_builder/.*"]
+    filepath_regex: [".*/patrickstar/ops/csrc/*/.*",
+                     ".*/patrickstar/ops/op_builder/.*"，
+                     “.*/patrickstar/fp16/fp16.py”]

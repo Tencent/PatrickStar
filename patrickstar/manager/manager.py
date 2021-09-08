@@ -17,31 +17,11 @@ import psutil
 import torch
 
 from patrickstar.core.const import TrainingStage
-from patrickstar.utils import get_sys_memory_used, get_world_size
+from patrickstar.utils import get_sys_memory_used, get_world_size, SingletonMeta
 
 
 # Global Scheduler
-class SingletonMeta(type):
-    """
-    The Singleton class can be implemented in different ways in Python. Some
-    possible methods include: base class, decorator, metaclass. We will use the
-    metaclass because it is best suited for this purpose.
-    """
-
-    _instances = {}
-
-    def __call__(cls, *args, **kwargs):
-        """
-        Possible changes to the value of the `__init__` argument do not affect
-        the returned instance.
-        """
-        if cls not in cls._instances:
-            instance = super().__call__(*args, **kwargs)
-            cls._instances[cls] = instance
-        return cls._instances[cls]
-
-
-class Metronome():
+class Metronome(object):
     """节拍器"""
     def __init__(self):
         self._moment = 0
