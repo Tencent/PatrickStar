@@ -25,12 +25,6 @@ class TestChunkData(unittest.TestCase):
 
     @distributed_test(world_size=[1])
     def test_add_chunk(self):
-        default_chunk_size = 40
-
-        compute_device = torch.device(
-            f'cuda:{torch.cuda.current_device()}') if torch.cuda.is_available(
-            ) else torch.device('cpu:0')
-
         chunk_list = ChunkList(0)
         assert chunk_list.size() == 0
 

@@ -39,7 +39,7 @@ class GlobalTimer(object):
         self.start_time[key] = 0
 
     def reset(self):
-        for k, v in self.elapse_stat.items():
+        for k, _ in self.elapse_stat.items():
             self.elapse_stat[k] = 0
 
     def print(self):

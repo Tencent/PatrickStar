@@ -11,13 +11,7 @@
 # permissions and limitations under the License.
 # See the AUTHORS file for names of contributors.
 
-import os
-import sys
-import shutil
-import subprocess
-import warnings
-from setuptools import setup, find_packages
-import time
+from setuptools import setup
 
 
 def fetch_requirements(path):

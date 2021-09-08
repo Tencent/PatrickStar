@@ -58,9 +58,9 @@ def see_memory_usage(message, force=False, scale_name="MB"):
     )
 
     vm_stats = psutil.virtual_memory()
-    used_GB = round(((vm_stats.total - vm_stats.available) / (1024**3)), 2)
+    used_gb = round(((vm_stats.total - vm_stats.available) / (1024**3)), 2)
     logger.info(
-        f'CPU Virtual Memory:  used = {used_GB} GB, percent = {vm_stats.percent}%'
+        f'CPU Virtual Memory:  used = {used_gb} GB, percent = {vm_stats.percent}%'
     )
 
     # get the peak memory to report correct data, so reset the counter for the next call

@@ -71,7 +71,7 @@ class ChunkList(object):
         获得ChunkList中所有Chunk的payload占用的内存
         """
         mem_used = 0
-        for chunk_id, chunk in self.chunk_id_to_chunk_dict_map.items():
+        for _, chunk in self.chunk_id_to_chunk_dict_map.items():
             if chunk.get_device() is not None and chunk.get_device(
             ).type == device.type:
                 mem_used += chunk.get_payload_space()
@@ -79,7 +79,7 @@ class ChunkList(object):
 
     def max_chunk_size(self):
         max_size = 0
-        for chunk_id, chunk in self.chunk_id_to_chunk_dict_map.items():
+        for _, chunk in self.chunk_id_to_chunk_dict_map.items():
             max_size = max(chunk.capacity, max_size)
         return max_size
 
@@ -227,7 +227,6 @@ class ChunkList(object):
         chunk = self.chunk_id_to_chunk_dict_map[chunk_id]
 
         ps_manager = PatrickStarManager()
-        ava_chunk_mem_size = ps_manager.available_chunk_mem(device.type)
         free_chunk_mem_size = ps_manager.free_chunk_mem(device.type)
 
         chunk_mem_size = chunk.get_payload_space()
@@ -272,7 +271,8 @@ class ChunkList(object):
         comm_group_offset = (tmp_chunk_list_len - 1) % world_size
         comm_group_idx = (tmp_chunk_list_len - 1) // world_size
         logger.debug(
-            f'global_rank {global_rank}, allocate with new chunk chunk_id {chunk_id} size {chunk_size} data_type {data_type} comm group ({comm_group_idx}, {comm_group_offset}, {chunk_type})'
+            f'global_rank {global_rank}, allocate with new chunk chunk_id {chunk_id} size {chunk_size} '
+            f'data_type {data_type} comm group ({comm_group_idx}, {comm_group_offset}, {chunk_type})'
         )
         return comm_group_idx, comm_group_offset
 
@@ -303,9 +303,7 @@ class ChunkList(object):
         """
         # 释放cpu和gpu上所有free chunk，统计目标设备上腾出的空间
 
-        for chunk_id, chunk in self.chunk_id_to_chunk_dict_map.items():
-            # TODO(jiaruifang) 耗时
-            status = chunk.get_status()
+        for _, chunk in self.chunk_id_to_chunk_dict_map.items():
             self._delete_chunk(chunk)
 
     def _chunk_to_move_out_for_room_making(self, size_in_bytes: int,
@@ -326,7 +324,7 @@ class ChunkList(object):
 
         movable_chunk_info = []
 
-        Q = PriorityQueue()
+        q = PriorityQueue()
         for chunk_id, chunk in self.chunk_id_to_chunk_dict_map.items():
             if chunk.get_device() is not None and chunk.get_device(
             ).type == target_device.type and chunk.get_status(
@@ -334,12 +332,12 @@ class ChunkList(object):
                 # Chunk在本设备下一次被需要的时刻
                 next_mom = chunk.next_accessed_mom(target_device)
                 # 按照next_mom从大到小排序，如果相同则按照chunk_id排序（只在预热阶段出现）
-                Q.put((-next_mom, chunk_id))
+                q.put((-next_mom, chunk_id))
                 movable_chunk_info.append(f"{next_mom}_{chunk_id}")
             # TODO(jiaruifang)不立刻释放FREE chunk，而是让它参与复用
             # assert chunk.get_status() != PSChunkStatus.FREE
-        while not Q.empty():
-            next_mom, chunk_id = Q.get()
+        while not q.empty():
+            next_mom, chunk_id = q.get()
             moved_bytes += self.chunk_id_to_chunk_dict_map[
                 chunk_id].get_payload_space()
             moved_list.append(chunk_id)

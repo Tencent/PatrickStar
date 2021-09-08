@@ -34,7 +34,6 @@ class TestModelInitContext(unittest.TestCase):
             model = BertModel(cfg)
             return model
 
-        compute_device = torch.device('cpu:0')
         default_chunk_size = 32 * 1024 * 1024
         client = PatrickStarClient(0, default_chunk_size, is_fp16=True)
 

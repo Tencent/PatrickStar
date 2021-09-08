@@ -83,19 +83,9 @@ class PostBackwardFunction(torch.autograd.Function):
     @staticmethod
     def forward(ctx, module, pre_backward_function, output):
         ctx.module = module
-        # if output.requires_grad:
-        #     #TODO SOME TIMES post backward does not seem to be triggered debug in detail
-        #     #Should only cause increase in memory not correctness issue
-        #     #if output.grad_fn.__class__.__name__ == 'ViewBackward':
-        #     #    ctx.view=True
-        #     #    print(f"Warning view tensor for input to module : {module.__class__.__name__}. Backward hooks may not trigger properly")
-        #     #assert len(module.parameters(recurse=False)), "The input tensor to the module is a view, and autograd Function or register_hook is not triggered with view tensors."
-        #     #if module.ds_grads_remaining == 0:
-        #     #    print(f"Before Forward: {ctx.module.__class__.__name__}")
-        #     # module.ds_grads_remaining += 1
-        #     ctx.pre_backward_function = pre_backward_function
+        # if output.requires_grad:ç
         output = output.detach()
-        # output = output * 1
+        # output = output * 1∂
         logger.debug(
             f"**PostBackwardFunction forward: {ctx.module.__class__.__name__}")
         ctx.pre_backward_function = pre_backward_function
@@ -181,8 +171,6 @@ def pre_sub_module_backward_function(sub_module, client, name):
             if param.ps_attr.bwd_used_cnt == 0:
                 param.grad = torch.zeros_like(tmp_tensor)
             param.ps_attr.bwd_used_cnt += 1
-            # assert param.data.data_ptr() != param.grad.data_ptr()
-            # assert param.ps_attr.used_cnt == 0, f"{sub_module.__class__.__name__} Backward Propagation updates the gradient of a parameter twice. This is not allowed when using chunk reusing."
         elif param.ps_attr.data_type == torch.float:
             raise RuntimeError("fp32 training is not supported!")
         flag = True
@@ -227,21 +215,13 @@ def post_sub_module_backward_function(sub_module, client, name):
     mgr.tiktac(client)
 
 
-def _register_hooks_recursively(module, client, count=[0], name=""):
+def _register_hooks_recursively(module, client, name=""):
     """
     DFS方式递归注册hook，father module会在children module访问后被访问一次
-    但是father module的param和children module有所重复
-    是否DFS只访问叶子节点比较好？
     """
-    my_count = count[0]
-    module.id = my_count
-
-    # logger.debug(f"{module.__class__.__name__} : {module.id}")
-
     for child_name, child in module.named_children():
         logger.debug(f"{child.__class__.__name__}")
-        count[0] = count[0] + 1
-        _register_hooks_recursively(child, client, count, name + child_name)
+        _register_hooks_recursively(child, client, name + child_name)
 
     # 如下两个hook和backward的hook是否重复
     def _pre_forward_module_hook(module, *args):
@@ -264,16 +244,6 @@ def _register_hooks_recursively(module, client, count=[0], name=""):
                                       _run_before_backward_function, output)
 
     def _post_backward_module_hook(module, inputs):
-        # module.ds_grads_remaining = 0
-        for input in inputs:
-            if input is not None:
-                if not isinstance(input, torch.Tensor):
-                    logger.debug(f'_post_backward_module_hook {input}')
-                else:
-                    logger.debug(
-                        f'_post_backward_module_hook {module.id} {input.shape}'
-                    )
-
         def _run_after_backward_function(sub_module):
             # if sub_module.ds_grads_remaining == 0:
             post_sub_module_backward_function(sub_module, client, name)

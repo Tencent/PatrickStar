@@ -339,8 +339,8 @@ class PatrickStarManager(metaclass=SingletonMeta):
     def show_mem_curve(self):
         with open('gpu_used_curve.txt', 'w') as fh:
             fh.write(
-                f'gpu_chunk_used_list {len(self.gpu_chunk_used_list)} \n {list(map(lambda x: x / 1e6, self.gpu_chunk_used_list))}\n'
-            )
+                f'gpu_chunk_used_list {len(self.gpu_chunk_used_list)}\n'
+                f' {list(map(lambda x: x / 1e6, self.gpu_chunk_used_list))}\n')
             fh.write(
                 f'gpu_sys_used_list {list(map(lambda x: x / 1e6, self.gpu_sys_used_list))}\n'
             )
@@ -350,8 +350,8 @@ class PatrickStarManager(metaclass=SingletonMeta):
 
         with open('cpu_used_curve.txt', 'w') as fh:
             fh.write(
-                f'cpu_chunk_used_list {len(self.gpu_chunk_used_list)} \n {list(map(lambda x: x / 1e6, self.cpu_chunk_used_list))}\n'
-            )
+                f'cpu_chunk_used_list {len(self.gpu_chunk_used_list)}\n'
+                f' {list(map(lambda x: x / 1e6, self.cpu_chunk_used_list))}\n')
             # fh.write(
             #     f'cpu_sys_used_list {list(map(lambda x: x/1e6, self.cpu_sys_used_list))}\n'
             # )

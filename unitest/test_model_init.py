@@ -17,7 +17,6 @@ import torch
 from transformers import BertModel, BertConfig
 
 from common import distributed_test
-from patrickstar import PatrickStarManager
 from patrickstar.core import PatrickStarClient, ParamType
 from patrickstar.core.preprocess import PSPreProcessCtx
 
@@ -28,8 +27,6 @@ class TestModelInitContext(unittest.TestCase):
 
     @distributed_test(world_size=[2], backend="gloo", use_fake_dist=True)
     def test_model_init(self):
-        mgr = PatrickStarManager(0)
-
         def model_provider():
             cfg = BertConfig()
             cfg.vocab_size = 10

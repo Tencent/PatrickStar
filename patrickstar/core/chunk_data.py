@@ -205,7 +205,6 @@ class Chunk(object):
         if self.get_device() == target_device:
             return
         if self._time_profile:
-            start_time = time.time()
             if target_device.type == 'cuda':
                 global_timer.my_timer.start_profile('chunk_cpu_gpu_move')
             else:
@@ -214,7 +213,9 @@ class Chunk(object):
         ps_manager = PatrickStarManager()
 
         logger.debug(
-            f'move chunk {self.chunk_id}, which has {self.payload.numel() / 1e6} M {self.payload.dtype} elements, from {src_device} to {target_device}, used mem {ps_manager.used_chunk_mem(target_device.type) / 1e6} MB'
+            f'move chunk {self.chunk_id}, which has {self.payload.numel() / 1e6} M {self.payload.dtype} elements, '
+            f'from {src_device} to {target_device}, '
+            f'used mem {ps_manager.used_chunk_mem(target_device.type) / 1e6} MB'
         )
 
         # TODO(jiaruifang)异步
