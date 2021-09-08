@@ -11,16 +11,18 @@
 # permissions and limitations under the License.
 # See the AUTHORS file for names of contributors.
 
-import torch
 import os
 from typing import List
-from .hook import setup_patrickstar_hooks
-from .const import AccessType, PSChunkStatus, PSTensorStatus, TrainingStage
-from .chunk_list import ChunkList, ChunkListType
-from .chunk_tensor_index import ChunkTensorIndex
-from .parameter import register_param, is_param_registered, ParamType
+
+import torch
+
 import patrickstar.utils.global_timer as global_timer
 from patrickstar.utils import logger, get_world_size, get_rank
+from .chunk_list import ChunkList, ChunkListType
+from .chunk_tensor_index import ChunkTensorIndex
+from .const import AccessType, PSChunkStatus, PSTensorStatus, TrainingStage
+from .hook import setup_patrickstar_hooks
+from .parameter import register_param, is_param_registered, ParamType
 
 
 class PatrickStarClient(object):

@@ -26,20 +26,15 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """Stable version of apex FP16 Optimizer"""
+import amp_C
 import torch
-from torch import nn
+from apex.multi_tensor_apply import multi_tensor_applier
 from torch.autograd import Variable
 from torch.nn.parameter import Parameter
-from torch._utils import _flatten_dense_tensors, _unflatten_dense_tensors
 
-from .loss_scaler import DynamicLossScaler, LossScaler
 from .fp16util import model_grads_to_master_grads, master_params_to_model_params, clip_grad_norm
+from .loss_scaler import DynamicLossScaler, LossScaler
 
-from patrickstar.core import PatrickStarClient
-
-from apex.multi_tensor_apply import multi_tensor_applier
-import amp_C
-import logging
 # from megatron.module import MegatronModule
 
 FLOAT_TYPES = (torch.FloatTensor, torch.cuda.FloatTensor)

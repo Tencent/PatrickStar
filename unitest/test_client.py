@@ -11,12 +11,14 @@
 # permissions and limitations under the License.
 # See the AUTHORS file for names of contributors.
 
-import unittest
-from patrickstar.core import PatrickStarClient, ChunkList, PSTensorStatus, AccessType, ChunkTensorIndex, PSChunkStatus, register_param, ChunkListType
 import logging
+import unittest
+
 import torch
-from patrickstar import PatrickStarManager
+
 from common import distributed_test
+from patrickstar import PatrickStarManager
+from patrickstar.core import PatrickStarClient, AccessType, register_param, ChunkListType
 from patrickstar.core.parameter import ParamType
 
 

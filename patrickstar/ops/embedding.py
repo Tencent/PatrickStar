@@ -13,8 +13,9 @@
 
 import torch
 import torch.nn as nn
+
 from patrickstar.utils import logger
-from patrickstar.core import register_param, ParamType
+
 
 class _CopyInputToCPU(torch.autograd.Function):
     @staticmethod

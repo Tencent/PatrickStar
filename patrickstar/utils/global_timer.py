@@ -16,6 +16,7 @@ import time
 
 from .logging import logger
 
+
 class GlobalTimer(object):
     def __init__(self):
         """
@@ -47,7 +48,7 @@ class GlobalTimer(object):
         for k, v in self.elapse_stat.items():
             overall_elapse += v
         for k, v in self.elapse_stat.items():
-            logger.info(f'{k}, {v}, {v/overall_elapse*100} %')
+            logger.info(f'{k}, {v}, {v / overall_elapse * 100} %')
 
 
 my_timer = GlobalTimer()
@@ -80,10 +81,10 @@ class DataMoveCnter(object):
             if k in my_timer.elapse_stat and self.amount_dict[k] != 0:
                 bwd = self.amount_dict[k] / my_timer.elapse_stat[k]
                 logger.info(
-                    f'{k}: {self.amount_dict[k]/1024/1024} MB, {v} times, {bwd/1024/1024} MB/s'
+                    f'{k}: {self.amount_dict[k] / 1024 / 1024} MB, {v} times, {bwd / 1024 / 1024} MB/s'
                 )
             else:
-                logger.info(f'{k}: {self.amount_dict[k]/1024/1024} MB')
+                logger.info(f'{k}: {self.amount_dict[k] / 1024 / 1024} MB')
         logger.info('\n\n')
 
 

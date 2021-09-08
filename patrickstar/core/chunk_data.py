@@ -11,18 +11,15 @@
 # permissions and limitations under the License.
 # See the AUTHORS file for names of contributors.
 
-import os
-import torch
-from .const import PSTensorStatus, PSChunkStatus, AccessType
-from .helper import getsizeof
-
-from typing import Dict
-
 import time
 
-from patrickstar.manager import PatrickStarManager
+import torch
+
 import patrickstar.utils.global_timer as global_timer
+from patrickstar.manager import PatrickStarManager
 from patrickstar.utils import logger
+from .const import PSTensorStatus, PSChunkStatus
+from .helper import getsizeof
 
 
 # chunk是否应该感知param？
@@ -217,10 +214,10 @@ class Chunk(object):
         ps_manager = PatrickStarManager()
 
         logger.debug(
-            f'move chunk {self.chunk_id}, which has {self.payload.numel()/1e6} M {self.payload.dtype} elements, from {src_device} to {target_device}, used mem {ps_manager.used_chunk_mem(target_device.type)/1e6} MB'
+            f'move chunk {self.chunk_id}, which has {self.payload.numel() / 1e6} M {self.payload.dtype} elements, from {src_device} to {target_device}, used mem {ps_manager.used_chunk_mem(target_device.type) / 1e6} MB'
         )
 
-        #TODO(jiaruifang)异步
+        # TODO(jiaruifang)异步
         ps_manager = PatrickStarManager()
         ps_manager.delete(self.get_device().type, self.get_payload_space())
         if is_async:

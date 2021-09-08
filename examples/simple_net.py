@@ -12,10 +12,9 @@
 # See the AUTHORS file for names of contributors.
 
 import torch
-from torch.utils.data import SequentialSampler
 # from checkpoint.torch_checkpoint import checkpoint
 from torch.utils.checkpoint import checkpoint
-from patrickstar.utils import logger
+from torch.utils.data import SequentialSampler
 from transformers import BertConfig
 from transformers.models.bert.modeling_bert import BertEmbeddings
 

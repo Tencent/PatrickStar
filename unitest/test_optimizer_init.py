@@ -12,13 +12,14 @@
 # See the AUTHORS file for names of contributors.
 
 import unittest
-from patrickstar.core import PatrickStarClient, ChunkTensorIndex, ChunkList, AccessType
-import logging
+
 import torch
-from common import distributed_test
-from patrickstar.ops import FP16Adam
 from transformers import BertModel, BertConfig
+
+from common import distributed_test
 from patrickstar.core import PSPreProcessCtx
+from patrickstar.core import PatrickStarClient
+from patrickstar.ops import FP16Adam
 
 
 class TestModelInitContext(unittest.TestCase):

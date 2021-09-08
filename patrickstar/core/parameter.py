@@ -12,8 +12,8 @@
 # See the AUTHORS file for names of contributors.
 
 import torch
+
 from .const import PSTensorStatus, AccessType, ParamType
-import logging
 
 
 class PSTensor(object):

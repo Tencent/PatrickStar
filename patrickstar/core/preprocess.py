@@ -11,15 +11,16 @@
 # permissions and limitations under the License.
 # See the AUTHORS file for names of contributors.
 
-import os
-import torch
 import functools
 
-from patrickstar.utils import see_memory_usage
-from patrickstar.utils import logger, print_rank, get_rank, get_world_size
+import torch
+
 from patrickstar.core import PatrickStarClient, AccessType, ChunkListType
 from patrickstar.core import register_param, is_param_registered, ParamType
 from patrickstar.ops import Embedding
+from patrickstar.utils import logger, print_rank, get_rank, get_world_size
+from patrickstar.utils import see_memory_usage
+
 _orig_torch_empty = torch.empty
 
 

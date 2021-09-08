@@ -13,12 +13,12 @@
 import torch
 from torch.nn.modules import Module
 
-from patrickstar.utils import logger, global_timer
-from patrickstar.utils import print_rank as print_rank_0
-from patrickstar.core import PatrickStarClient, AccessType, PSChunkStatus, PSTensorStatus, TrainingStage
+from patrickstar.core import PSChunkStatus, PSTensorStatus, TrainingStage
+from patrickstar.fp16 import LossScaler, DynamicLossScaler
 from patrickstar.manager import PatrickStarManager
 from patrickstar.ops import FP16Adam
-from patrickstar.fp16 import LossScaler, DynamicLossScaler
+from patrickstar.utils import logger, global_timer
+from patrickstar.utils import print_rank as print_rank_0
 
 
 class PatrickStarEngine(Module):
@@ -113,12 +113,12 @@ class PatrickStarEngine(Module):
         for i, param_group in enumerate(self.optimizer.param_groups):
             for param in param_group['params']:
                 if param.requires_grad:
-                    #print_rank_0(f" Before all gather {param.device}, {param.shape}")
+                    # print_rank_0(f" Before all gather {param.device}, {param.shape}")
 
                     # The hook must be created in un-partitioned parameter
                     # param.all_gather()
 
-                    #print(f"After all gather {param.device}, {param.shape}")
+                    # print(f"After all gather {param.device}, {param.shape}")
                     def wrapper(param, i):
                         param_tmp = param.expand_as(param)
                         grad_acc = param_tmp.grad_fn.next_functions[0][0]

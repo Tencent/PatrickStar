@@ -11,6 +11,8 @@
 # permissions and limitations under the License.
 # See the AUTHORS file for names of contributors.
 
+from .fp16 import *
+from .fp16_config import *
 # coding=utf-8
 # Copyright (c) 2020, NVIDIA CORPORATION.  All rights reserved.
 #
@@ -38,7 +40,4 @@ from .fp16util import (
     convert_network,
     FP16Model,
 )
-
-from .fp16 import *
 from .loss_scaler import *
-from .fp16_config import *

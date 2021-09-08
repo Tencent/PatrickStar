@@ -11,20 +11,13 @@
 # permissions and limitations under the License.
 # See the AUTHORS file for names of contributors.
 
-import random
-from pathlib import Path
-import numpy as np
-from sklearn.model_selection import train_test_split
-
 import torch
-from torch.utils.data import DataLoader
-from transformers import BertTokenizerFast
-from transformers import BertForSequenceClassification, AdamW
 
 from patrickstar.runtime import initialize_engine
 from patrickstar.utils import logger
 import logging
 from simple_net import SimpleModel, get_bert_data_loader
+
 device = torch.device('cuda') if torch.cuda.is_available() else torch.device(
     'cpu')
 

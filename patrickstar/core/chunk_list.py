@@ -11,23 +11,17 @@
 # permissions and limitations under the License.
 # See the AUTHORS file for names of contributors.
 
-from .chunk_data import Chunk
-from .const import PSChunkStatus, AccessType, PSTensorStatus
-from .helper import getsizeof
-
-import sys
-import torch
-from typing import List
-import time
 from queue import PriorityQueue
-import gc
-import psutil
+from typing import List
+
+import torch
 
 import patrickstar.utils.global_timer as global_timer
-from patrickstar.utils.memory_monitor import see_memory_usage, get_sys_memory_used
-from patrickstar.utils import logger, log_dist, get_rank, get_world_size
-from patrickstar.manager import PatrickStarManager
 from patrickstar.core.const import ChunkListType
+from patrickstar.manager import PatrickStarManager
+from patrickstar.utils import logger, get_rank, get_world_size
+from .chunk_data import Chunk
+from .const import PSChunkStatus
 
 
 class ChunkList(object):
@@ -150,9 +144,9 @@ class ChunkList(object):
         free_chunk_mem_size = ps_manager.free_chunk_mem(target_device.type)
 
         logger.debug(
-            f'prepare_target: device {target_device} need_bytes {need_bytes/1e6} MB, '
-            f'ava_chunk_mem_size {ava_chunk_mem_size/1e6} MB, '
-            f'free_chunk_mem_size {free_chunk_mem_size/1e6} MB.')
+            f'prepare_target: device {target_device} need_bytes {need_bytes / 1e6} MB, '
+            f'ava_chunk_mem_size {ava_chunk_mem_size / 1e6} MB, '
+            f'free_chunk_mem_size {free_chunk_mem_size / 1e6} MB.')
 
         # TODO(jiaruifang) 无法分配的情况
         # 这个条件尚不充分，应该是如果cpu和gpu的的free_chunk都不足存放need bytes则放弃
@@ -162,16 +156,16 @@ class ChunkList(object):
             )
             # TODO(jiaruifang)可以爆表时候再释放
             raise RuntimeError(
-                f'{target_device} has not enough space for {need_bytes/1e6} MB. '
-                f'Device used Chunk Memory is {self.get_chunk_memory_used(target_device)/1e6} MB. '
-                f'Avaibale Chunk Memory is {ava_chunk_mem_size/1e6} MB')
+                f'{target_device} has not enough space for {need_bytes / 1e6} MB. '
+                f'Device used Chunk Memory is {self.get_chunk_memory_used(target_device) / 1e6} MB. '
+                f'Avaibale Chunk Memory is {ava_chunk_mem_size / 1e6} MB')
 
         extra_need_bytes = need_bytes - free_chunk_mem_size
 
         logger.debug(
-            f'{target_device} (ava_chunk_mem_size {ava_chunk_mem_size/1e6} MB) '
-            f'now free_chunk_mem_size size {free_chunk_mem_size/1e6} MB, '
-            f'needs {need_bytes/1e6} MB')
+            f'{target_device} (ava_chunk_mem_size {ava_chunk_mem_size / 1e6} MB) '
+            f'now free_chunk_mem_size size {free_chunk_mem_size / 1e6} MB, '
+            f'needs {need_bytes / 1e6} MB')
         # 不需要新分配
         if extra_need_bytes <= 0:
             if self._time_profile:
@@ -239,8 +233,8 @@ class ChunkList(object):
         chunk_mem_size = chunk.get_payload_space()
         if free_chunk_mem_size < chunk_mem_size:
             raise RuntimeError(
-                f'chunk move failed. {device} has not {chunk_mem_size/1e6} MB memory space. '
-                f'Free space is {free_chunk_mem_size/1e6} MB. '
+                f'chunk move failed. {device} has not {chunk_mem_size / 1e6} MB memory space. '
+                f'Free space is {free_chunk_mem_size / 1e6} MB. '
                 f'The reason may be that the overall memory of CPU and GPU is not enough for the model.'
             )
         if chunk.get_device() != device:
@@ -361,10 +355,10 @@ class ChunkList(object):
         if moved_bytes < still_need_bytes:
             # self.visit()
             raise RuntimeError(
-                f'device {target_device} still needs {still_need_bytes/1e6} MB, '
-                f'but there is not enough space on it, only {moved_bytes/1e6} MB available. '
+                f'device {target_device} still needs {still_need_bytes / 1e6} MB, '
+                f'but there is not enough space on it, only {moved_bytes / 1e6} MB available. '
                 f'chunk mem used memory on {target_device} is '
-                f'{self.get_chunk_memory_used(target_device)/1e6} MB')
+                f'{self.get_chunk_memory_used(target_device) / 1e6} MB')
 
         return moved_list
 

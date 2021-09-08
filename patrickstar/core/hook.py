@@ -12,15 +12,16 @@
 # See the AUTHORS file for names of contributors.
 
 import torch
-from .const import PSTensorStatus, AccessType, TrainingStage
+
 import patrickstar.utils.global_timer as global_timer
-from patrickstar.utils import logger, get_rank, get_world_size
 from patrickstar.core.parameter import ParamType
 from patrickstar.manager import PatrickStarManager
+from patrickstar.utils import logger, get_rank, get_world_size
+from .const import PSTensorStatus, AccessType, TrainingStage
 
 
 ############# HOOKS ####################
-#for each tensor in outputs run the forward_funciton and register backward_function as hook
+# for each tensor in outputs run the forward_funciton and register backward_function as hook
 def _apply_forward_and_backward_to_tensors_only(module, forward_function,
                                                 backward_function, outputs):
     if type(outputs) is tuple:
@@ -42,7 +43,7 @@ def _apply_forward_and_backward_to_tensors_only(module, forward_function,
         return outputs
 
 
-#apply torch.autograd.Function that calls a backward_function to tensors in output
+# apply torch.autograd.Function that calls a backward_function to tensors in output
 def _apply_to_tensors_only(module, functional, backward_function, outputs):
     if type(outputs) is tuple:
         touched_outputs = []
@@ -107,7 +108,8 @@ class PostBackwardFunction(torch.autograd.Function):
         # if ctx.module.ds_grads_remaining == 0:
         # 没有执行embedding
         logger.debug(
-            f"**PostBackwardFunction backward: {ctx.module.__class__.__name__}")
+            f"**PostBackwardFunction backward: {ctx.module.__class__.__name__}"
+        )
         ctx.pre_backward_function(ctx.module)
         return (None, None) + args
 

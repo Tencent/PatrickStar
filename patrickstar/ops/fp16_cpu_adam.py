@@ -12,22 +12,18 @@
 # See the AUTHORS file for names of contributors.
 
 import math
-from patrickstar.fp16 import loss_scaler
-import torch
-import time
-from pathlib import Path
-from torch import Tensor
-from typing import List, Optional
-import logging
+from typing import List
 
-from patrickstar.core.const import PSTensorStatus, AccessType, TrainingStage
+import torch
+from torch import Tensor
+
 import patrickstar.utils.global_timer as global_timer
-from patrickstar.utils import print_rank, logger, get_sys_memory_used, get_rank
+from patrickstar.core import ChunkListType
+from patrickstar.core.const import PSTensorStatus, AccessType, TrainingStage
 from patrickstar.core.parameter import register_param, ParamType
 from patrickstar.manager import PatrickStarManager
-from patrickstar.core import ChunkList, ChunkTensorIndex, ChunkListType
+from patrickstar.utils import logger, get_rank
 from .chunk_io_buff import FP32ChunkReadBuffer, FP16ChunkWriteBuffer
-
 from .op_builder import CPUAdamBuilder
 
 

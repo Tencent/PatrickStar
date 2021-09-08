@@ -11,27 +11,21 @@
 # permissions and limitations under the License.
 # See the AUTHORS file for names of contributors.
 
-import torch
-from data_loader import get_bert_data_loader
-from transformers import BertConfig, BertForSequenceClassification
-import enum
-import time
-import sys
-import copy
-import logging
-import time
 import argparse
-
-from patrickstar.utils import see_memory_usage
-from patrickstar.fp16 import FP16_Module, FP16_Optimizer
-from patrickstar.core import PatrickStarClient
-from patrickstar.ops import FP16Adam
-import patrickstar.utils.global_timer as global_timer
-from patrickstar.runtime import initialize_engine
-from patrickstar.manager import PatrickStarManager
-from patrickstar.utils.model_size_calculator import get_ps_model_size, estimate_bert_MAC
+import logging
 import os
+import time
+
+import torch
+from transformers import BertConfig, BertForSequenceClassification
+
+import patrickstar.utils.global_timer as global_timer
+from data_loader import get_bert_data_loader
+from patrickstar.fp16 import FP16_Module, FP16_Optimizer
+from patrickstar.runtime import initialize_engine
+from patrickstar.utils import see_memory_usage
 from patrickstar.utils.logging import logger
+from patrickstar.utils.model_size_calculator import get_ps_model_size, estimate_bert_MAC
 
 
 def _add_patrick_star_args(parser):
@@ -291,7 +285,7 @@ def test_bert_model_helper(args,
     start_time = time.time()
 
     logging.info(
-        f"MAC {total_macs/1e9} GFlop, model numel {model_numel/1e9} B")
+        f"MAC {total_macs / 1e9} GFlop, model numel {model_numel / 1e9} B")
 
     for n, batch in enumerate(data_loader):
         step_start_time = time.time()
@@ -334,13 +328,13 @@ def test_bert_model_helper(args,
         step_elapse = time.time() - step_start_time
         if n == 0:
             logging.info(
-                f"warmup ckp {is_ckp} fp16 {is_fp16} dist_plan {dist_plan}: step elapse {step_elapse} sec/iter, {total_macs/1e12/step_elapse} GFlops"
+                f"warmup ckp {is_ckp} fp16 {is_fp16} dist_plan {dist_plan}: step elapse {step_elapse} sec/iter, {total_macs / 1e12 / step_elapse} GFlops"
             )
         else:
             logging.info(
-                f"ckp {is_ckp} fp16 {is_fp16} dist_plan {dist_plan}: step elapse {step_elapse} sec/iter, {total_macs/1e12/step_elapse} Tflops"
+                f"ckp {is_ckp} fp16 {is_fp16} dist_plan {dist_plan}: step elapse {step_elapse} sec/iter, {total_macs / 1e12 / step_elapse} Tflops"
             )
-        logging.info(f'model {model_numel/1e9}')
+        logging.info(f'model {model_numel / 1e9}')
 
         if dist_plan == "ps":
             global_timer.my_timer.print()
@@ -424,7 +418,7 @@ if __name__ == "__main__":
         num_layer = 24
         num_head = 40
     elif plan == 'GPT2_4B':
-        hidden_dim = 2304  #2048
+        hidden_dim = 2304  # 2048
         sequence_length = 1024
         num_layer = 64
         num_head = 16
@@ -518,6 +512,7 @@ if __name__ == "__main__":
         print('torch', torch_res_list)
         print('ps', ps_res_list)
         import numpy as np
+
         print(np.array(ps_res_list) - np.array(torch_res_list))
         for loss, loss_ref in zip(torch_res_list, ps_res_list):
             assert abs(loss - loss_ref) < 1e-4
