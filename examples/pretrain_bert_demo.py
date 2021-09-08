@@ -21,7 +21,6 @@ from transformers import BertConfig, BertForSequenceClassification
 
 import patrickstar.utils.global_timer as global_timer
 from data_loader import get_bert_data_loader
-from patrickstar.fp16 import Fp16Module, Fp16Optimizer
 from patrickstar.runtime import initialize_engine
 from patrickstar.utils import see_memory_usage
 from patrickstar.utils.logging import logger
@@ -149,7 +148,6 @@ def test_bert_model_helper(args,
                            is_ckp: bool = False,
                            is_fp16: bool = False,
                            dist_plan: str = "torch",
-                           use_cpu_embedding: bool = False,
                            batch_size=32,
                            hidden_dim=768,
                            sequence_length=256,
@@ -191,7 +189,6 @@ def test_bert_model_helper(args,
     eps = 1e-6
     weight_decay = 0
 
-    # torch version
     if dist_plan == "ds":
         # TODO 测试并不正确
         import deepspeed
@@ -208,23 +205,6 @@ def test_bert_model_helper(args,
                                                       lr_scheduler=None,
                                                       mpu=None,
                                                       dist_init_required=True)
-    elif dist_plan == "torch":
-        model = BertForSequenceClassification(cfg)
-        model.cuda(rank)
-        if is_fp16:
-            model = Fp16Module(model)
-        model.train()
-        optimizer = torch.optim.Adam(model.parameters(),
-                                     lr=lr,
-                                     betas=betas,
-                                     eps=eps,
-                                     weight_decay=weight_decay)
-        if is_fp16:
-            optimizer = Fp16Optimizer(optimizer)
-
-        # DDP 不能要求模型部分在cpu部分在gpu
-        model = torch.nn.parallel.DistributedDataParallel(model,
-                                                          device_ids=[rank])
     elif dist_plan == "ps":
         assert is_fp16, f"use_ps must use fp16"
 
@@ -260,8 +240,25 @@ def test_bert_model_helper(args,
         model, optimizer = initialize_engine(model_func=model_func,
                                              local_rank=rank,
                                              config=config)
-    else:
-        raise RuntimeError
+    elif dist_plan == "torch":
+        model = BertForSequenceClassification(cfg)
+        model.cuda(rank)
+        model.train()
+        optimizer = torch.optim.Adam(model.parameters(),
+                                     lr=lr,
+                                     betas=betas,
+                                     eps=eps,
+                                     weight_decay=weight_decay)
+        if is_fp16:
+            scaler = torch.cuda.amp.GradScaler(
+                init_scale=2**10,
+                growth_factor=2,
+                backoff_factor=0.5,
+                growth_interval=1000)
+
+        # DDP 不能要求模型部分在cpu部分在gpu
+        model = torch.nn.parallel.DistributedDataParallel(model,
+                                                          device_ids=[rank])
 
     model_numel = get_ps_model_size(model)
     total_macs = estimate_bert_mac(cfg, batch_size, sequence_length,
@@ -287,34 +284,34 @@ def test_bert_model_helper(args,
     for n, batch in enumerate(data_loader):
         step_start_time = time.time()
 
-        output = model(input_ids=batch[0], labels=batch[1])
-        loss = output[0]
+        optimizer.zero_grad()
+
+        if dist_plan == "ds":
+            output = model(input_ids=batch[0], labels=batch[1])
+            loss = output[0]
+            model.backward(loss)
+            model.step()
+        elif dist_plan == "ps":
+            output = model(input_ids=batch[0], labels=batch[1])
+            loss = output[0]
+            model.backward(loss)
+            optimizer.step()
+        else:
+            if is_fp16:
+                with torch.cuda.amp.autocast():
+                    output = model(input_ids=batch[0], labels=batch[1])
+                loss = output[0]
+                scaler.scale(loss).backward()
+                scaler.step(optimizer)
+                scaler.update()
+            else:
+                output = model(input_ids=batch[0], labels=batch[1])
+                loss = output[0]
+                loss.backward()
+                optimizer.step()  
+
         logging.info(f"LOSS of step {n}: {loss.item()}")
         loss_res.append(loss.item())
-
-        # logging.info(f'FWD finished moment {timer.moment()}')
-        if dist_plan == "ds":
-            model.backward(loss)
-        elif dist_plan == "torch":
-            if is_fp16:
-                optimizer.zero_grad(set_grads_to_none=True)
-                optimizer.backward(loss, update_master_grads=False)
-                optimizer.update_master_grads()
-            else:
-                optimizer.zero_grad()
-                loss.backward()
-        elif dist_plan == "ps":
-            if is_fp16:
-                model.backward(loss)
-            else:
-                optimizer.zero_grad()
-                loss.backward()
-
-        # logging.info(f'BWD finished moment {timer.moment()}')
-        if dist_plan == "ds":
-            model.step()
-        elif dist_plan == "torch" or dist_plan == "ps":
-            optimizer.step()
 
         see_memory_usage(
             f"ckp {is_ckp} fp16 {is_fp16} dist_plan {dist_plan} after step {n}",
@@ -503,10 +500,10 @@ if __name__ == "__main__":
                                              num_layer=NUM_LAYER,
                                              num_head=NUM_HEAD)
 
-        print('torch', torch_res_list)
-        print('ps', ps_res_list)
+        print('torch\t', torch_res_list)
+        print('ps\t', ps_res_list)
         import numpy as np
 
-        print(np.array(ps_res_list) - np.array(torch_res_list))
+        print('diff\t', np.array(ps_res_list) - np.array(torch_res_list))
         # for loss, loss_ref in zip(torch_res_list, ps_res_list):
         #     assert abs(loss - loss_ref) < 1e-4
