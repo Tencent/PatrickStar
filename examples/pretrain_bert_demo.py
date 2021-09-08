@@ -17,6 +17,7 @@ import os
 import time
 
 import torch
+import numpy as np
 from transformers import BertConfig, BertForSequenceClassification
 
 import patrickstar.utils.global_timer as global_timer
@@ -106,7 +107,7 @@ def _add_test_bert_args(parser):
     group.add_argument('--dist_plan',
                        type=str,
                        default='torch',
-                       help='Distributed Plan [torch, ps, ds]')
+                       help='Distributed Plan [torch, patrickstar]')
     group.add_argument('--use_ds',
                        dest='use_ds',
                        action='store_true',
@@ -154,9 +155,12 @@ def test_bert_model_helper(args,
                            num_layer=12,
                            num_head=12,
                            stop_step=5):
-    logging.info(f'test a bert model with checkpoit {is_ckp} FP16 {is_fp16}')
-    logging.info(
-        f'batch_size {batch_size}, hidden_dim {hidden_dim}, sequence_length {sequence_length}, num_layer {num_layer}'
+    logger.info(
+        f'test a bert {"fp16" if is_fp16 else "fp32"} model '
+        f'{"with checkpoint" if is_ckp else ""}')
+    logger.info(
+        f'batch_size: {batch_size}, hidden_dim: {hidden_dim}, '
+        f'sequence_length: {sequence_length}, num_layer: {num_layer}'
     )
     # 用单卡模拟多卡
     if args.use_fake_dist:
@@ -189,24 +193,9 @@ def test_bert_model_helper(args,
     eps = 1e-6
     weight_decay = 0
 
-    if dist_plan == "ds":
-        # TODO 测试并不正确
-        import deepspeed
-        model = BertForSequenceClassification(cfg)
-        model.cuda(rank)
-        optimizer = torch.optim.Adam(model.parameters(),
-                                     lr=lr,
-                                     betas=betas,
-                                     eps=eps,
-                                     weight_decay=weight_decay)
-        model, optimizer, _, _ = deepspeed.initialize(model=model,
-                                                      optimizer=optimizer,
-                                                      args=args,
-                                                      lr_scheduler=None,
-                                                      mpu=None,
-                                                      dist_init_required=True)
-    elif dist_plan == "ps":
-        assert is_fp16, f"use_ps must use fp16"
+    if dist_plan == "patrickstar":
+        if not is_fp16:
+            logger.warning("PatrickStar will always use mixed precision training.")
 
         def model_func():
             return BertForSequenceClassification(cfg)
@@ -240,7 +229,7 @@ def test_bert_model_helper(args,
         model, optimizer = initialize_engine(model_func=model_func,
                                              local_rank=rank,
                                              config=config)
-    elif dist_plan == "torch":
+    else:
         model = BertForSequenceClassification(cfg)
         model.cuda(rank)
         model.train()
@@ -256,7 +245,6 @@ def test_bert_model_helper(args,
                 backoff_factor=0.5,
                 growth_interval=1000)
 
-        # DDP 不能要求模型部分在cpu部分在gpu
         model = torch.nn.parallel.DistributedDataParallel(model,
                                                           device_ids=[rank])
 
@@ -278,20 +266,18 @@ def test_bert_model_helper(args,
 
     loss_res = []
 
-    logging.info(
+    logger.info(
         f"MAC {total_macs / 1e9} GFlop, model numel {model_numel / 1e9} B")
 
     for n, batch in enumerate(data_loader):
+        if n == stop_step:
+            break
+
         step_start_time = time.time()
 
         optimizer.zero_grad()
 
-        if dist_plan == "ds":
-            output = model(input_ids=batch[0], labels=batch[1])
-            loss = output[0]
-            model.backward(loss)
-            model.step()
-        elif dist_plan == "ps":
+        if dist_plan == "patrickstar":
             output = model(input_ids=batch[0], labels=batch[1])
             loss = output[0]
             model.backward(loss)
@@ -310,7 +296,7 @@ def test_bert_model_helper(args,
                 loss.backward()
                 optimizer.step()  
 
-        logging.info(f"LOSS of step {n}: {loss.item()}")
+        logger.info(f"LOSS of step {n}: {loss.item()}")
         loss_res.append(loss.item())
 
         see_memory_usage(
@@ -319,15 +305,15 @@ def test_bert_model_helper(args,
 
         step_elapse = time.time() - step_start_time
         if n == 0:
-            logging.info(
+            logger.info(
                 f"warmup ckp {is_ckp} fp16 {is_fp16} dist_plan {dist_plan}: step elapse "
                 f"{step_elapse} sec/iter, {total_macs / 1e12 / step_elapse} GFlops"
             )
         else:
-            logging.info(
+            logger.info(
                 f"ckp {is_ckp} fp16 {is_fp16} dist_plan {dist_plan}: step elapse {step_elapse} sec/iter, "
                 f"{total_macs / 1e12 / step_elapse} Tflops")
-        logging.info(f'model {model_numel / 1e9}')
+        logger.info(f'model {model_numel / 1e9}')
 
         if dist_plan == "ps":
             global_timer.my_timer.print()
@@ -335,12 +321,6 @@ def test_bert_model_helper(args,
 
             global_timer.my_timer.reset()
             global_timer.data_move_cnter.reset()
-        if n == stop_step:
-            break
-
-    # if is_ps:
-    #     mgr = PatrickStarManager()
-    #     mgr.show_mem_curve()
 
     logging.info("*" * 20)
     return loss_res
@@ -473,37 +453,62 @@ if __name__ == "__main__":
                                            num_layer=NUM_LAYER,
                                            num_head=NUM_HEAD,
                                            stop_step=5)
-        print(loss_list)
+        print(f"loss: {loss_list}")
 
     if res_check:
+        logging.warning(
+            'Running to check result. This will use Bert model and batch size is 2.')
+
+        STOP_STEP = 5
+
         torch.manual_seed(0)
         torch_res_list = test_bert_model_helper(args=args,
                                                 is_ckp=use_ckp,
-                                                is_fp16=use_fp16,
+                                                is_fp16=False,
                                                 dist_plan="torch",
                                                 hidden_dim=HIDDEN_DIM,
                                                 batch_size=BATCH_SIZE,
                                                 sequence_length=SEQ_LEN,
                                                 num_layer=NUM_LAYER,
-                                                num_head=NUM_HEAD)
+                                                num_head=NUM_HEAD,
+                                                stop_step=STOP_STEP)
 
         torch.cuda.empty_cache()
-        print("*" * 50)
+        logging.info("*" * 50)
+
+        torch.manual_seed(0)
+        autocast_res_list = test_bert_model_helper(args=args,
+                                                   is_ckp=use_ckp,
+                                                   is_fp16=True,
+                                                   dist_plan="torch",
+                                                   hidden_dim=HIDDEN_DIM,
+                                                   batch_size=BATCH_SIZE,
+                                                   sequence_length=SEQ_LEN,
+                                                   num_layer=NUM_LAYER,
+                                                   num_head=NUM_HEAD,
+                                                   stop_step=STOP_STEP)
+
+        torch.cuda.empty_cache()
+        logging.info("*" * 50)
+
         torch.manual_seed(0)
         ps_res_list = test_bert_model_helper(args=args,
                                              is_ckp=use_ckp,
                                              is_fp16=use_fp16,
-                                             dist_plan="ps",
+                                             dist_plan="patrickstar",
                                              hidden_dim=HIDDEN_DIM,
                                              batch_size=BATCH_SIZE,
                                              sequence_length=SEQ_LEN,
                                              num_layer=NUM_LAYER,
-                                             num_head=NUM_HEAD)
+                                             num_head=NUM_HEAD,
+                                             stop_step=STOP_STEP)
 
-        print('torch\t', torch_res_list)
-        print('ps\t', ps_res_list)
-        import numpy as np
+        print(f'torch fp32 loss:  {torch_res_list}')
+        print(f'autocast loss:    {autocast_res_list}')
+        print(f'patrickstar loss: {ps_res_list}')
 
-        print('diff\t', np.array(ps_res_list) - np.array(torch_res_list))
-        # for loss, loss_ref in zip(torch_res_list, ps_res_list):
-        #     assert abs(loss - loss_ref) < 1e-4
+        def diff(array):
+            return list(np.array(ps_res_list) - np.array(array))
+        print('diff:')
+        print(f'vs torch fp32: {diff(torch_res_list)}')
+        print(f'vs autocast:   {diff(autocast_res_list)}')

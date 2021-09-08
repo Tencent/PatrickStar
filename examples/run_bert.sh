@@ -44,7 +44,7 @@ python -m torch.distributed.launch --nproc_per_node=${GPU_NUM} \
                              pretrain_bert_demo.py ${RES_CHECK_FLAG} \
                              --use_ckp \
                              --use_fp16 \
-                             --dist_plan="ps" \
+                             --dist_plan="patrickstar" \
                              ${use_gpu_fp32_convert_for_adam} \
                              --batch_size=${BS} \
                              --model_name=${MODEL_NAME} \
