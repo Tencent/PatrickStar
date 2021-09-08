@@ -11,8 +11,22 @@
 # permissions and limitations under the License.
 # See the AUTHORS file for names of contributors.
 
-from .distributed import get_world_size, get_rank
-from .global_timer import *
-from .memory_monitor import see_memory_usage, get_sys_memory_used
-from .logging import log_dist, logger, print_rank
-from .singleton_meta import SingletonMeta
+
+class SingletonMeta(type):
+    """
+    The Singleton class can be implemented in different ways in Python. Some
+    possible methods include: base class, decorator, metaclass. We will use the
+    metaclass because it is best suited for this purpose.
+    """
+
+    _instances = {}
+
+    def __call__(cls, *args, **kwargs):
+        """
+        Possible changes to the value of the `__init__` argument do not affect
+        the returned instance.
+        """
+        if cls not in cls._instances:
+            instance = super().__call__(*args, **kwargs)
+            cls._instances[cls] = instance
+        return cls._instances[cls]

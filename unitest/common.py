@@ -15,7 +15,6 @@ import os
 import time
 
 import torch
-import torch.distributed as dist
 from torch.multiprocessing import Process
 
 # Worker timeout *after* the first worker has completed.

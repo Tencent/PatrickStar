@@ -15,9 +15,10 @@
 import time
 
 from .logging import logger
+from .singleton_meta import SingletonMeta
 
 
-class GlobalTimer(object):
+class GlobalTimer(metaclass=SingletonMeta):
     def __init__(self):
         """
         存放时间统计，key命名规则 训练阶段_
@@ -55,7 +56,7 @@ my_timer = GlobalTimer()
 
 
 # 数据移动
-class DataMoveCnter(object):
+class DataMoveCnter(metaclass=SingletonMeta):
     def __init__(self):
         self.amount_dict = {}
         self.times_dict = {}
@@ -75,7 +76,7 @@ class DataMoveCnter(object):
 
     def print(self):
         logger.info('*********** DATA MOVE RESULTS *************')
-        global my_timer
+        my_timer = GlobalTimer()
         for k, v in self.times_dict.items():
             bwd = 0
             if k in my_timer.elapse_stat and self.amount_dict[k] != 0:
