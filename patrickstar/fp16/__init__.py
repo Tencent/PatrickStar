@@ -32,7 +32,7 @@ from .fp16util import (
     prep_param_lists,
     model_grads_to_master_grads,
     master_params_to_model_params,
-    tofp16,
+    ToFp16,
     to_python_float,
     clip_grad_norm,
     convert_module,

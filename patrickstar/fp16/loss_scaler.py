@@ -37,9 +37,9 @@ def to_python_float(t):
 class LossScaler:
     """
     Class that manages a static loss scale.  This class is intended to interact with
-    :class:`fp16_optimizer`, and should not be directly manipulated by the user.
+    :class:`Fp16Optimizer`, and should not be directly manipulated by the user.
     Use of :class:`LossScaler` is enabled via the ``static_loss_scale`` argument to
-    :class:`fp16_optimizer`'s constructor.
+    :class:`Fp16Optimizer`'s constructor.
     Args:
         scale (float, optional, default=1.0):  The loss scale.
     """
@@ -70,15 +70,15 @@ class DynamicLossScaler:
     """
     Class that manages dynamic loss scaling.  It is recommended to use :class:`DynamicLossScaler`
     indirectly, by supplying ``dynamic_loss_scale=True`` to the constructor of
-    :class:`fp16_optimizer`.  However, it's important to understand how :class:`DynamicLossScaler`
+    :class:`Fp16Optimizer`.  However, it's important to understand how :class:`DynamicLossScaler`
     operates, because the default options can be changed using the
-    the ``dynamic_loss_args`` argument to :class:`fp16_optimizer`'s constructor.
+    the ``dynamic_loss_args`` argument to :class:`Fp16Optimizer`'s constructor.
     Loss scaling is designed to combat the problem of underflowing gradients encountered at long
     times when training fp16 networks.  Dynamic loss scaling begins by attempting a very high loss
     scale.  Ironically, this may result in OVERflowing gradients.  If overflowing gradients are
-    encountered, :class:`DynamicLossScaler` informs :class:`fp16_optimizer` that an overflow has
+    encountered, :class:`DynamicLossScaler` informs :class:`Fp16Optimizer` that an overflow has
     occurred.
-    :class:`fp16_optimizer` then skips the update step for this particular iteration/minibatch,
+    :class:`Fp16Optimizer` then skips the update step for this particular iteration/minibatch,
     and :class:`DynamicLossScaler` adjusts the loss scale to a lower value.
     If a certain number of iterations occur without overflowing gradients detected,
     :class:`DynamicLossScaler` increases the loss scale once more.

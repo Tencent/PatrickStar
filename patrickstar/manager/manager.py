@@ -20,7 +20,7 @@ from patrickstar.core.const import TrainingStage
 from patrickstar.utils import get_sys_memory_used, get_world_size
 
 
-######### Global Scheduler ###########
+# Global Scheduler
 class SingletonMeta(type):
     """
     The Singleton class can be implemented in different ways in Python. Some

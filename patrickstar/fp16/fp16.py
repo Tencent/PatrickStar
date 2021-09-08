@@ -77,9 +77,9 @@ def fp16_to_fp32(val):
     return conversion_helper(val, float_conversion)
 
 
-class fp16_module(torch.nn.Module):
+class Fp16Module(torch.nn.Module):
     def __init__(self, module):
-        super(fp16_module, self).__init__()
+        super(Fp16Module, self).__init__()
         self.add_module('module', module.half())
 
     def forward(self, *inputs, **kwargs):
@@ -102,32 +102,32 @@ class fp16_module(torch.nn.Module):
 # TODO:  Update overflow check + downscale to use Carl's fused kernel.
 
 
-class fp16_optimizer(object):
+class Fp16Optimizer(object):
     """
-    :class:`fp16_optimizer` is designed to wrap an existing PyTorch optimizer,
+    :class:`Fp16Optimizer` is designed to wrap an existing PyTorch optimizer,
     and manage static or dynamic loss scaling and master weights in a manner transparent to the user.
-    For standard use, only two lines must be changed:  creating the :class:`fp16_optimizer` instance,
+    For standard use, only two lines must be changed:  creating the :class:`Fp16Optimizer` instance,
     and changing the call to ``backward``.
     Example::
         model = torch.nn.Linear(D_in, D_out).cuda().half()
         optimizer = torch.optim.SGD(model.parameters(), lr=1e-3)
-        # Name the fp16_optimizer instance to replace the existing optimizer
+        # Name the Fp16Optimizer instance to replace the existing optimizer
         # (recommended but not required):
-        optimizer = fp16_optimizer(optimizer, static_loss_scale = 128.0)
+        optimizer = Fp16Optimizer(optimizer, static_loss_scale = 128.0)
         ...
         # loss.backward() becomes:
         optimizer.backward(loss)
         ...
     Example with dynamic loss scaling::
         ...
-        optimizer = fp16_optimizer(optimizer, dynamic_loss_scale=True)
+        optimizer = Fp16Optimizer(optimizer, dynamic_loss_scale=True)
                                    # optional arg to control dynamic loss scaling behavior
                                    # dynamic_loss_args={'scale_window' : 500})
                                    # Usually, dynamic_loss_args is not necessary.
     Args:
         init_optimizer (torch.optim.optimizer):  Existing optimizer created with the parameters to optimize.
-        Internally, :class:`fp16_optimizer` replaces the passed optimizer's fp16 parameters,
-        if any, with fp32 master parameters copied from the original ones.  :class:`fp16_optimizer`
+        Internally, :class:`Fp16Optimizer` replaces the passed optimizer's fp16 parameters,
+        if any, with fp32 master parameters copied from the original ones.  :class:`Fp16Optimizer`
         also stores references to the original fp16 parameters,
         and updates these fp16 parameters from the master fp32 copy at the end of each :attr:`step`.
         static_loss_scale (float, optional, default=1.0):  Loss scale used internally
@@ -139,29 +139,29 @@ class fp16_optimizer(object):
         internal :class:`DynamicLossScaler` instance's constructor.
         Keys of this dict must match kwargs accepted by :class:`DynamicLossScaler`'s constructor.
         If ``dynamic_loss_args`` is unspecified, :class:`DynamicLossScaler`'s defaults will be used.
-        verbose (bool, optional, default=True):  By default, fp16_optimizer's constructor prints out
+        verbose (bool, optional, default=True):  By default, Fp16Optimizer's constructor prints out
         the parameters and parameter groups it is ingesting, as a sanity check.
         If this becomes annoying (e.g. for large models),
         it can be disabled by passing ``verbose=False``.
         ``verbose=False`` will not disable printing when the loss scale is readjusted during dynamic loss scaling.
     ``init_optimizer`` is expected to have been constructed in the ordinary way.
-    It is recommended (although not required) that the newly constructed :class:`fp16_optimizer` instance be
+    It is recommended (although not required) that the newly constructed :class:`Fp16Optimizer` instance be
     named to replace ``init_optimizer``, for two reasons:
     First, it means that references to the same name
     later in the file will not have to change.
-    Second, :class:`fp16_optimizer` reserves the right (as an implementation detail) to
+    Second, :class:`Fp16Optimizer` reserves the right (as an implementation detail) to
     modify ``init_optimizer``.  If you do choose a unique name for the new
-    :class:`fp16_optimizer` instance, you should only work with this new instance,
+    :class:`Fp16Optimizer` instance, you should only work with this new instance,
     because the preexisting optimizer might no longer behave as expected.
     ``init_optimizer`` may be any Pytorch optimizer.
     It may contain a mixture of fp16 and fp32 parameters organized into any number of
-    ``param_groups`` with different hyperparameters.  The :class:`fp16_optimizer` constructor will
+    ``param_groups`` with different hyperparameters.  The :class:`Fp16Optimizer` constructor will
     ingest these ``param_groups`` and remember them.
     Calls to ::
         loss.backward()
     must be replaced with ::
         optimizer.backward(loss)
-    because :class:`fp16_optimizer` requires ownership of the backward pass to implement
+    because :class:`Fp16Optimizer` requires ownership of the backward pass to implement
     loss scaling and copies to master gradients.
     .. note::
         Loss scaling, either static or dynamic, is orthogonal to learning rate, because gradients
@@ -169,7 +169,7 @@ class fp16_optimizer(object):
         dynamic loss scaling, should not require retuning the learning rate or any other
         hyperparameters.
     **Advanced options**
-    **Closures**:  :class:`fp16_optimizer` can wrap a Pytorch optimizer that receives a closure.
+    **Closures**:  :class:`Fp16Optimizer` can wrap a Pytorch optimizer that receives a closure.
     See docstring for :attr:`step`.
     **Gradient clipping**:  Use :attr:`clip_master_grads`.
     **Multiple losses**:  If your model accumulates gradients from multiple losses,
@@ -184,7 +184,7 @@ class fp16_optimizer(object):
     scaling is more subtle (see :class:`DynamicLossScaler`) and in this case, manually adjusting
     the loss scale is not recommended.
     **Multi_GPU training**:  If the wrapped ``init_optimizer`` was created from a model wrapped in
-    Pytorch DistributedDataParallel or Apex DistributedDataParallel, :class:`fp16_optimizer`
+    Pytorch DistributedDataParallel or Apex DistributedDataParallel, :class:`Fp16Optimizer`
     should still work as intended.
     """
     def __init__(self,
@@ -209,7 +209,7 @@ class fp16_optimizer(object):
         # 需要和fp16的chunk分割方式一样
         for i, param_group in enumerate(self.optimizer.param_groups):
             self.maybe_print(
-                "fp16_optimizer processing param group {}:".format(i))
+                "Fp16Optimizer processing param group {}:".format(i))
             fp16_params_this_group = []
             fp32_params_this_group = []
             fp32_from_fp16_params_this_group = []
@@ -219,7 +219,7 @@ class fp16_optimizer(object):
                     if param.type() == 'torch.HalfTensor' or param.type(
                     ) == 'torch.cuda.HalfTensor':
                         self.maybe_print(
-                            "fp16_optimizer received torch.cuda.HalfTensor with {}"
+                            "Fp16Optimizer received torch.cuda.HalfTensor with {}"
                             .format(param.size()))
                         fp16_params_this_group.append(param)
 
@@ -239,7 +239,7 @@ class fp16_optimizer(object):
                     ) == 'torch.FloatTensor':
                         raise NotImplementedError
                         # self.maybe_print(
-                        #     "fp16_optimizer received torch.cuda.FloatTensor with {}"
+                        #     "Fp16Optimizer received torch.cuda.FloatTensor with {}"
                         #     .format(param.size()))
                         # fp32_params_this_group.append(param)
                         # param_group['params'][i] = param
@@ -279,11 +279,11 @@ class fp16_optimizer(object):
 
     def __getstate__(self):
         raise RuntimeError(
-            "fp16_optimizer should be serialized using state_dict().")
+            "Fp16Optimizer should be serialized using state_dict().")
 
     def __setstate__(self, state):
         raise RuntimeError(
-            "fp16_optimizer should be deserialized using load_state_dict().")
+            "Fp16Optimizer should be deserialized using load_state_dict().")
 
     def zero_grad(self, set_grads_to_none=False):
         """
@@ -377,8 +377,8 @@ class fp16_optimizer(object):
 
     def state_dict(self):
         """
-        Returns a dict containing the current state of this :class:`fp16_optimizer` instance.
-        This dict contains attributes of :class:`fp16_optimizer`, as well as the state_dict
+        Returns a dict containing the current state of this :class:`Fp16Optimizer` instance.
+        This dict contains attributes of :class:`Fp16Optimizer`, as well as the state_dict
         of the contained Pytorch optimizer.
         Example::
             checkpoint = {}
@@ -399,14 +399,14 @@ class fp16_optimizer(object):
     def load_state_dict(self, state_dict):
         """
         Loads a state_dict created by an earlier call to state_dict().
-        If ``fp16_optimizer_instance`` was constructed from some ``init_optimizer``,
+        If ``Fp16Optimizer_instance`` was constructed from some ``init_optimizer``,
         whose parameters in turn came from ``model``, it is expected that the user
         will call ``model.load_state_dict()`` before
-        ``fp16_optimizer_instance.load_state_dict()`` is called.
+        ``Fp16Optimizer_instance.load_state_dict()`` is called.
         Example::
             model = torch.nn.Linear(D_in, D_out).cuda().half()
             optimizer = torch.optim.SGD(model.parameters(), lr=1e-3)
-            optimizer = fp16_optimizer(optimizer, static_loss_scale = 128.0)
+            optimizer = Fp16Optimizer(optimizer, static_loss_scale = 128.0)
             ...
             checkpoint = torch.load("saved.pth")
             model.load_state_dict(checkpoint['model'])
@@ -430,7 +430,7 @@ class fp16_optimizer(object):
         #
         # Pytorch Optimizer.load_state_dict casts saved buffers (e.g. momentum) to the type and device
         # of their associated parameters, because it's possible those buffers might not exist yet in
-        # the current optimizer instance.  In our case, as long as the current fp16_optimizer has been
+        # the current optimizer instance.  In our case, as long as the current Fp16Optimizer has been
         # constructed in the same way as the one whose state_dict we are loading, the same master params
         # are guaranteed to exist, so we can just copy_() from the saved master params.
         for current_group, saved_group in zip(self.fp32_from_fp16_groups,
@@ -441,22 +441,22 @@ class fp16_optimizer(object):
     def step(self, closure=None):  # could add clip option.
         """
         If no closure is supplied, :attr:`step` should be called after
-        ``fp16_optimizer_obj.backward(loss)``.
+        ``Fp16Optimizer_obj.backward(loss)``.
         :attr:`step` updates the fp32 master copy of parameters using the optimizer supplied to
-        :class:`fp16_optimizer`'s constructor, then copies the updated fp32 params into the fp16 params
-        originally referenced by :class:`fp16_optimizer`'s constructor, so the user may immediately run
+        :class:`Fp16Optimizer`'s constructor, then copies the updated fp32 params into the fp16 params
+        originally referenced by :class:`Fp16Optimizer`'s constructor, so the user may immediately run
         another forward pass using their model.
         If a closure is supplied, :attr:`step` may be called without a prior call to
         :attr:`backward(loss)`.
         This control flow is identical to `ordinary Pytorch optimizer use`_ with closures.
         However, the user should take care that any ``loss.backward()`` call within the closure
-        has been replaced by ``fp16_optimizer_obj.backward(loss)``.
+        has been replaced by ``Fp16Optimizer_obj.backward(loss)``.
         Args:
            closure (optional):  Closure that will be supplied to the underlying optimizer originally passed
-           to :class:`fp16_optimizer`'s constructor.  closure should call :attr:`zero_grad()`
-           on the :class:`fp16_optimizer` object, compute the loss, call :attr:`backward(loss)`, and return the loss.
+           to :class:`Fp16Optimizer`'s constructor.  closure should call :attr:`zero_grad()`
+           on the :class:`Fp16Optimizer` object, compute the loss, call :attr:`backward(loss)`, and return the loss.
         Example with closure::
-            # optimizer is assumed to be an fp16_optimizer object, previously constructed from an
+            # optimizer is assumed to be an Fp16Optimizer object, previously constructed from an
             # existing pytorch optimizer.
             for input, target in dataset:
                 def closure():
@@ -600,7 +600,7 @@ class fp16_optimizer(object):
         Copy the ``.grad`` attribute from stored references to fp16 parameters to
         the ``.grad`` attribute of the fp32 master parameters that are directly
         updated by the optimizer.  :attr:`update_master_grads` only needs to be called if
-        ``fp16_optimizer_obj.backward`` was called with ``update_master_grads=False``.
+        ``Fp16Optimizer_obj.backward`` was called with ``update_master_grads=False``.
         """
         if self.dynamic_loss_scale:
             self._check_overflow()
@@ -611,13 +611,13 @@ class fp16_optimizer(object):
 
     def inspect_master_grad_data(self):
         """
-        When running with :class:`fp16_optimizer`,
+        When running with :class:`Fp16Optimizer`,
         ``.grad`` attributes of a model's fp16 leaves should not be
         regarded as truthful, because they might be scaled.
-        After a call to :attr:`fp16_optimizer_obj.backward(loss)`, if no overflow was encountered,
+        After a call to :attr:`Fp16Optimizer_obj.backward(loss)`, if no overflow was encountered,
         the fp32 master params' ``.grad``
         attributes will contain valid gradients properly divided by the loss scale.  However,
-        because :class:`fp16_optimizer` flattens some parameters, accessing them may be
+        because :class:`Fp16Optimizer` flattens some parameters, accessing them may be
         nonintuitive.  :attr:`inspect_master_grad_data`
         allows those gradients to be viewed with shapes corresponding to their associated model leaves.
         Returns:
@@ -626,7 +626,7 @@ class fp16_optimizer(object):
         """
         if self.overflow:
             print(
-                "Warning:  calling fp16_optimizer.inspect_master_grad_data while in an overflow state.  "
+                "Warning:  calling Fp16Optimizer.inspect_master_grad_data while in an overflow state.  "
                 "Gradients are currently invalid (may be inf, nan, or stale).  Returning None."
             )
             return None
@@ -643,7 +643,7 @@ class fp16_optimizer(object):
                 master_grads_data.append(master_grads_this_group)
             return master_grads_data
 
-    # Promote loss scale so it can be retrieved or set via "fp16_optimizer_instance.loss_scale"
+    # Promote loss scale so it can be retrieved or set via "Fp16Optimizer_instance.loss_scale"
 
     def _get_loss_scale(self):
         return self.loss_scaler.loss_scale
@@ -653,7 +653,7 @@ class fp16_optimizer(object):
 
     loss_scale = property(_get_loss_scale, _set_loss_scale)
 
-    # Promote state so it can be retrieved or set via "fp16_optimizer_instance.state"
+    # Promote state so it can be retrieved or set via "Fp16Optimizer_instance.state"
     def _get_state(self):
         return self.optimizer.state
 
@@ -662,7 +662,7 @@ class fp16_optimizer(object):
 
     state = property(_get_state, _set_state)
 
-    # Promote param_groups so it can be retrieved or set via "fp16_optimizer_instance.param_groups"
+    # Promote param_groups so it can be retrieved or set via "Fp16Optimizer_instance.param_groups"
     # (for example, to adjust the learning rate)
     def _get_param_groups(self):
         return self.optimizer.param_groups

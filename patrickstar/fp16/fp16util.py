@@ -30,20 +30,20 @@ import amp_C
 import torch
 import torch.nn as nn
 from apex.multi_tensor_apply import multi_tensor_applier
-from torch._utils import _flatten_dense_tensors, _unflatten_dense_tensors
+from torch._utils import _flatten_dense_tensors
 from torch.autograd import Variable
 
 # from megatron import mpu
 
 
-class tofp16(nn.Module):
+class ToFp16(nn.Module):
     """
     Utility module that implements::
         def forward(self, input):
             return input.half()
     """
     def __init__(self):
-        super(tofp16, self).__init__()
+        super(ToFp16, self).__init__()
 
     def forward(self, input):
         return input.half()
@@ -68,7 +68,7 @@ def network_to_half(network):
     Convert model to half precision in a batchnorm-safe way.
     Retained for legacy purposes. It is recommended to use FP16Model.
     """
-    return nn.Sequential(tofp16(), bn_convert_float(network.half()))
+    return nn.Sequential(ToFp16(), bn_convert_float(network.half()))
 
 
 def convert_module(module, dtype):
@@ -134,7 +134,7 @@ def prep_param_lists(model, flat_master=False):
         model_params, master_params = prep_param_lists(model)
     .. warning::
         Currently, if ``flat_master=True``, all the model's parameters must be the same type.
-        If the model has parameters of different types, use ``flat_master=False``, or use :class:`fp16_optimizer`.
+        If the model has parameters of different types, use ``flat_master=False``, or use :class:`Fp16Optimizer`.
     .. _`Training Neural Networks with Mixed Precision:  Real Examples`:
         http://on-demand.gputechconf.com/gtc/2018/video/S81012/
     """

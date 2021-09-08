@@ -20,7 +20,6 @@ from patrickstar.utils import logger, get_rank, get_world_size
 from .const import PSTensorStatus, AccessType, TrainingStage
 
 
-############# HOOKS ####################
 # for each tensor in outputs run the forward_funciton and register backward_function as hook
 def _apply_forward_and_backward_to_tensors_only(module, forward_function,
                                                 backward_function, outputs):
@@ -111,7 +110,7 @@ def pre_sub_module_forward_function(sub_module, client, name):
     logger.debug(
         f'rank {rank} FWD pre {name}.{sub_module.__class__.__name__} access data'
     )
-    for sub_name, param in sub_module.named_parameters(recurse=False):
+    for _, param in sub_module.named_parameters(recurse=False):
         if param.ps_attr.param_type == ParamType.TORCH_BASED:
             continue
         param.data = client.access_dist(

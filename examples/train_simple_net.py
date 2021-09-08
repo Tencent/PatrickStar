@@ -12,46 +12,46 @@
 # See the AUTHORS file for names of contributors.
 
 import torch
+import logging
 
 from patrickstar.runtime import initialize_engine
 from patrickstar.utils import logger
-import logging
+
 from simple_net import SimpleModel, get_bert_data_loader
 
 device = torch.device('cuda') if torch.cuda.is_available() else torch.device(
     'cpu')
 
-batch_size = 8
-hidden_dim = 4
-seq_len = 128
-
+BATCH_SIZE = 8
+HIDDEN_DIM = 4
+SEQ_LEN = 128
 
 def model_func():
-    return SimpleModel(hidden_dim=hidden_dim,
-                       seq_len=seq_len,
+    return SimpleModel(hidden_dim=HIDDEN_DIM,
+                       seq_len=SEQ_LEN,
                        is_ckp=True,
                        is_share_param=True)
 
 
-lr = 5e-5
-betas = (0.9, 0.999)
-eps = 1e-6
-weight_decay = 0
+LR = 5e-5
+BETAS = (0.9, 0.999)
+EPS = 1e-6
+WEIGHT_DECAY = 0
 
-# test_case = "torch"
-test_case = "patrickstar"
+# TEST_CASE = "torch"
+TEST_CASE = "patrickstar"
 logger.setLevel(logging.WARNING)
-print(f"test_case {test_case}")
+print(f"TEST_CASE {TEST_CASE}")
 config = {
     # The same format as optimizer config of DeepSpeed
     # https://www.deepspeed.ai/docs/config-json/#optimizer-parameters
     "optimizer": {
         "type": "Adam",
         "params": {
-            "lr": lr,
-            "betas": betas,
-            "eps": eps,
-            "weight_decay": weight_decay,
+            "lr": LR,
+            "betas": BETAS,
+            "eps": EPS,
+            "weight_decay": WEIGHT_DECAY,
             "use_hybrid_adam": True
         }
     },
@@ -69,32 +69,32 @@ config = {
 }
 
 torch.manual_seed(0)
-if test_case == "patrickstar":
+if TEST_CASE == "patrickstar":
     model, optim = initialize_engine(model_func=model_func,
                                      local_rank=0,
                                      config=config)
-elif test_case == "torch":
+elif TEST_CASE == "torch":
     model = model_func()
     optim = torch.optim.Adam(model.parameters(),
-                             lr=lr,
-                             betas=betas,
-                             eps=eps,
-                             weight_decay=weight_decay)
+                             LR=LR,
+                             BETAS=BETAS,
+                             EPS=EPS,
+                             WEIGHT_DECAY=WEIGHT_DECAY)
     model.cuda()
 else:
     raise RuntimeError
 
-train_loader = get_bert_data_loader(batch_size, 10000, 128, device, False)
+train_loader = get_bert_data_loader(BATCH_SIZE, 10000, 128, device, False)
 
 for epoch in range(3):
     for i, batch in enumerate(train_loader):
         optim.zero_grad()
         input_ids, labels = batch
         loss = model(input_ids, labels)
-        if test_case == "patrickstar":
+        if TEST_CASE == "patrickstar":
             model.backward(loss)
             optim.step()
-        elif test_case == "torch":
+        elif TEST_CASE == "torch":
             loss.backward()
             optim.zero_grad()
             optim.step()
