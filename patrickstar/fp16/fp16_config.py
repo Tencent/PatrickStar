@@ -323,7 +323,7 @@ class FP16_UnfusedOptimizer(object):
         ``fp16_optimizer_instance.load_state_dict()`` is called.
         Example::
             model = torch.nn.Linear(D_in, D_out).cuda().half()
-            optimizer = torch.optim.SGD(model.parameters(), LR=1e-3)
+            optimizer = torch.optim.SGD(model.parameters(), lr=1e-3)
             optimizer = fp16_optimizer(optimizer, static_loss_scale = 128.0)
             ...
             checkpoint = torch.load("saved.pth")

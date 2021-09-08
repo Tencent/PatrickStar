@@ -80,10 +80,10 @@ def model_func():
     return BertForSequenceClassification.from_pretrained('bert-base-uncased')
 
 
-LR = 5e-5
-BETAS = (0.9, 0.999)
-EPS = 1e-6
-WEIGHT_DECAY = 0
+lr = 5e-5
+betas = (0.9, 0.999)
+eps = 1e-6
+weight_decay = 0
 
 config = {
     # The same format as optimizer config of DeepSpeed
@@ -91,10 +91,10 @@ config = {
     "optimizer": {
         "type": "Adam",
         "params": {
-            "LR": LR,
-            "BETAS": BETAS,
-            "EPS": EPS,
-            "WEIGHT_DECAY": WEIGHT_DECAY,
+            "lr": lr,
+            "betas": betas,
+            "eps": eps,
+            "weight_decay": weight_decay,
             "use_hybrid_adam": True
         }
     },

@@ -71,10 +71,10 @@ class PatrickStarEngine(Module):
             # default parameter for adam.
             optim_type = "Adam"
             optim_params = {
-                "LR": 0.01,
-                "BETAS": (0.9, 0.999),
-                "EPS": 1e-8,
-                "WEIGHT_DECAY": 0,
+                "lr": 0.01,
+                "betas": (0.9, 0.999),
+                "eps": 1e-8,
+                "weight_decay": 0,
                 "use_hybrid_adam": True
             }
             self.loss_scaler = None
@@ -85,10 +85,10 @@ class PatrickStarEngine(Module):
             self.module.parameters(),
             loss_scaler=self.loss_scaler,
             gradient_clipping=self.gradient_clipping,
-            lr=optim_params["LR"],
-            betas=optim_params["BETAS"],
-            eps=optim_params["EPS"],
-            weight_decay=optim_params["WEIGHT_DECAY"],
+            lr=optim_params["lr"],
+            betas=optim_params["betas"],
+            eps=optim_params["eps"],
+            weight_decay=optim_params["weight_decay"],
             use_adamw=(optim_type == "AdamW"),
             prefer_device=prefer_device,
             use_hybrid_adam=optim_params["use_hybrid_adam"])

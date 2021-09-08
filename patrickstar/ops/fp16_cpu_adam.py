@@ -70,7 +70,7 @@ class FP16Adam(torch.optim.Optimizer):
                 betas[1]))
         if not 0.0 <= weight_decay:
             raise ValueError(
-                "Invalid WEIGHT_DECAY value: {}".format(weight_decay))
+                "Invalid weight_decay value: {}".format(weight_decay))
         defaults = dict(lr=lr,
                         betas=betas,
                         eps=eps,
@@ -91,10 +91,10 @@ class FP16Adam(torch.optim.Optimizer):
             for p in group['params']:
                 state = self.state[p]
                 # 将group参数放置到每个param内部，可以按照参数切分并行计算adam
-                self.state[p]['BETAS'] = group['BETAS']
-                self.state[p]['LR'] = group['LR']
-                self.state[p]['WEIGHT_DECAY'] = group['WEIGHT_DECAY']
-                self.state[p]['EPS'] = group['EPS']
+                self.state[p]['betas'] = group['betas']
+                self.state[p]['lr'] = group['lr']
+                self.state[p]['weight_decay'] = group['weight_decay']
+                self.state[p]['eps'] = group['eps']
 
                 state['step'] = 0
 
@@ -488,13 +488,13 @@ class FP16Adam(torch.optim.Optimizer):
                     exp_avgs.append(state['exp_avg'])
                     exp_avg_sqs.append(state['exp_avg_sq'])
                     fp32_param_list.append(state['fp32_param_data'])
-                    beta1, beta2 = state['BETAS']
+                    beta1, beta2 = state['betas']
 
                     beta1_list.append(beta1)
                     beta2_list.append(beta2)
-                    lr_list.append(state['LR'])
-                    weight_decay_list.append(state['WEIGHT_DECAY'])
-                    eps_list.append(state['EPS'])
+                    lr_list.append(state['lr'])
+                    weight_decay_list.append(state['weight_decay'])
+                    eps_list.append(state['eps'])
 
                     # record the step after step update
                     state_steps.append(state['step'])

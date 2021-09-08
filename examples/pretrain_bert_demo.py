@@ -237,10 +237,10 @@ def test_bert_model_helper(args,
             "optimizer": {
                 "type": "Adam",
                 "params": {
-                    "LR": lr,
-                    "BETAS": betas,
-                    "EPS": eps,
-                    "WEIGHT_DECAY": weight_decay,
+                    "lr": lr,
+                    "betas": betas,
+                    "eps": eps,
+                    "weight_decay": weight_decay,
                     "use_hybrid_adam": args.use_hybrid_adam
                 }
             },
@@ -290,8 +290,7 @@ def test_bert_model_helper(args,
         step_start_time = time.time()
 
         output = model(input_ids=batch[0], labels=batch[1])
-        loss = output.loss
-        # if torch.distributed.get_rank() == 0:
+        loss = output[0]
         logging.info(f"LOSS of step {n}: {loss.item()}")
         loss_res.append(loss.item())
 
