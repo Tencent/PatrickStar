@@ -29,7 +29,7 @@ from patrickstar.utils.model_size_calculator import get_ps_model_size, estimate_
 
 
 def _add_patrick_star_args(parser):
-    group = parser.add_argument_group(title='partickstar')
+    group = parser.add_argument_group(title='patrickstar')
     group.add_argument('--use_fake_dist',
                        dest='use_fake_dist',
                        action='store_true',

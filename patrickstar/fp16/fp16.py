@@ -238,11 +238,11 @@ class fp16_optimizer(object):
                     ) == 'torch.cuda.FloatTensor' or param.type(
                     ) == 'torch.FloatTensor':
                         raise NotImplementedError
-                        self.maybe_print(
-                            "fp16_optimizer received torch.cuda.FloatTensor with {}"
-                            .format(param.size()))
-                        fp32_params_this_group.append(param)
-                        param_group['params'][i] = param
+                        # self.maybe_print(
+                        #     "fp16_optimizer received torch.cuda.FloatTensor with {}"
+                        #     .format(param.size()))
+                        # fp32_params_this_group.append(param)
+                        # param_group['params'][i] = param
                     else:
                         raise TypeError(
                             "Wrapped parameters must be either "
@@ -346,11 +346,11 @@ class fp16_optimizer(object):
     def _downscale_master(self):
         if self.loss_scale != 1.0:
             raise NotImplementedError
-            for group in self.optimizer.param_groups:
-                grads = [p.grad for p in group['params'] if p.grad is not None]
-                _overflow_buf = torch.cuda.IntTensor([0])
-                multi_tensor_applier(amp_C.multi_tensor_scale, _overflow_buf,
-                                     [grads, grads], 1. / self.loss_scale)
+            # for group in self.optimizer.param_groups:
+            #     grads = [p.grad for p in group['params'] if p.grad is not None]
+            #     _overflow_buf = torch.cuda.IntTensor([0])
+            #     multi_tensor_applier(amp_C.multi_tensor_scale, _overflow_buf,
+            #                          [grads, grads], 1. / self.loss_scale)
 
     def clip_master_grads(self, max_norm, norm_type=2):
         """
@@ -367,11 +367,11 @@ class fp16_optimizer(object):
         """
         if not self.overflow:
             raise NotImplementedError
-            fp32_params = []
-            for param_group in self.optimizer.param_groups:
-                for param in param_group['params']:
-                    fp32_params.append(param)
-            return self.clip_grad_norm(fp32_params, max_norm, norm_type)
+            # fp32_params = []
+            # for param_group in self.optimizer.param_groups:
+            #     for param in param_group['params']:
+            #         fp32_params.append(param)
+            # return self.clip_grad_norm(fp32_params, max_norm, norm_type)
         else:
             return -1
 

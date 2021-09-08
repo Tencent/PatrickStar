@@ -185,8 +185,8 @@ def model_grads_to_master_grads(model_params, master_params,
             "not implement flat_master True case in model_grads_to_master_grads"
         )
         # The flattening may incur one more deep copy than is necessary.
-        master_params[0].grad.data.copy_(
-            _flatten_dense_tensors([p.grad.data for p in model_params]))
+        # master_params[0].grad.data.copy_(
+        #     _flatten_dense_tensors([p.grad.data for p in model_params]))
     else:
         for model, master in zip(model_params, master_params):
             if model.grad is not None:
@@ -219,10 +219,10 @@ def master_params_to_model_params(model_params,
         raise NotImplementedError(
             "master_params_to_model_params flatten is not implemented for PatrickStar"
         )
-        for model, master in zip(
-                model_params,
-                _unflatten_dense_tensors(master_params[0].data, model_params)):
-            model.data.copy_(master)
+        # for model, master in zip(
+        #         model_params,
+        #         _unflatten_dense_tensors(master_params[0].data, model_params)):
+        #     model.data.copy_(master)
     else:
         for model, master in zip(model_params, master_params):
             model.data.copy_(master)
