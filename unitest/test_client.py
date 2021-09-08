@@ -29,7 +29,7 @@ class TestClientAccess(unittest.TestCase):
 
     @distributed_test(world_size=[1])
     def test_append_ps_tensor(self):
-        mgr = PatrickStarManager(0)
+        PatrickStarManager(0)
         self.client = PatrickStarClient(
             rank=0, default_chunk_size=self.default_chunk_size)
 

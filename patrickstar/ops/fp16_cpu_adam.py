@@ -278,9 +278,7 @@ class FP16Adam(torch.optim.Optimizer):
             f'local_rank {local_rank} margin_chunk_num_for_gpu_adam {margin_chunk_num_for_gpu_adam}, '
             f'param cnt {len(fp32_params)}')
         for i, fp32_param in enumerate(fp32_params):
-            ##########################
-            ####### 准备ADAM数据 ######
-            ##########################
+            # 1. 准备ADAM数据
             fp16_param = fp16_param_with_grad_list[i]
 
             if time_profile:
@@ -330,9 +328,7 @@ class FP16Adam(torch.optim.Optimizer):
             exp_avg = get_real_data_tensor(exp_avg_param)
             exp_avg_sq = get_real_data_tensor(exp_avg_sq_param)
 
-            ##########################
-            ####### 开始ADAM计算 ######
-            ##########################
+            # 2. 开始ADAM计算
             if time_profile:
                 global_timer.my_timer.finish_profile('ADAM_prepare_data')
                 global_timer.my_timer.start_profile('ADAM_compute')
@@ -364,9 +360,7 @@ class FP16Adam(torch.optim.Optimizer):
                 global_timer.my_timer.finish_profile('ADAM_compute')
                 global_timer.my_timer.start_profile('ADAM_param_fp32_to_fp16')
 
-            ##########################
-            ####### 结束ADAM计算 ######
-            ##########################
+            # 3. 结束ADAM计算
 
             # Note fp16_param对应的Chunk内存 ->fp32_param对应的chunk内存
             if fp32_param.ps_attr.param_type == ParamType.CHUNK_BASED:

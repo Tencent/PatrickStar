@@ -69,7 +69,7 @@ class DataMoveCnter(object):
             self.amount_dict[key_name] = tensor_size
 
     def reset(self):
-        for k, v in self.times_dict.items():
+        for k, _ in self.times_dict.items():
             self.times_dict[k] = 0
             self.amount_dict[k] = 0
 

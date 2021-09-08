@@ -373,7 +373,7 @@ class PatrickStarClient(object):
             self.chunk_list[chunk_id].payload.narrow(0, start_offset, numel),
             access_type)
 
-        ### 改变param's tensor对应chunk的status，chunk状态由它管理的所有tensor状态共同决定。
+        # 改变param's tensor对应chunk的status，chunk状态由它管理的所有tensor状态共同决定。
         old_status = param.ps_attr.get_status(access_type)
 
         # 如果是从free/uninit状态转换的需要清零
