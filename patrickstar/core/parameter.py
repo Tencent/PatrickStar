@@ -25,6 +25,9 @@ class PSTensor(object):
         self.status = PSTensorStatus.FREE
         PSTensor.global_id += 1
 
+    def __str__(self):
+        return (f'id: {self.id}, status: {self.status}, tensor: {self.tensor}')
+
 
 class PSParameter(object):
     def __init__(self,
@@ -60,6 +63,13 @@ class PSParameter(object):
 
         # 参数是否属于进程的本地Chunk
         self._is_local = True
+
+    def __str__(self):
+        return (
+            f'name: {self.name}, numel: {self.numel}, shape: {self.shape}, '
+            f'data_type: {self.data_type}, param_type: {self.param_type}, '
+            f'is_local: {self.is_local()}'
+        )
 
     def is_local(self):
         return self._is_local
