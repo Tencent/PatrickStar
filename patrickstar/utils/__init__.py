@@ -13,6 +13,7 @@
 
 from .distributed import get_world_size, get_rank
 from .global_timer import *
+from .helper import getsizeof
 from .memory_monitor import see_memory_usage, get_sys_memory_used
 from .logging import log_dist, logger, print_rank
 from .singleton_meta import SingletonMeta

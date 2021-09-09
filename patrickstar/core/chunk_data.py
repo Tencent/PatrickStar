@@ -15,9 +15,8 @@ import torch
 
 import patrickstar.utils.global_timer as global_timer
 from patrickstar.manager import PatrickStarManager
-from patrickstar.utils import logger
+from patrickstar.utils import logger, getsizeof
 from .const import PSTensorStatus, PSChunkStatus
-from .helper import getsizeof
 
 
 # chunk是否应该感知param？
