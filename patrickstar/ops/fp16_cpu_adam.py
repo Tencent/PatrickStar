@@ -17,11 +17,12 @@ from typing import List
 import torch
 from torch import Tensor
 
-import patrickstar.utils.global_timer as global_timer
 from patrickstar.core import ChunkListType
 from patrickstar.core.const import PSTensorStatus, AccessType, TrainingStage
 from patrickstar.core.parameter import register_param, ParamType
 from patrickstar.manager import PatrickStarManager
+import patrickstar.profiler as profiler
+import patrickstar.utils.global_timer as global_timer
 from patrickstar.utils import logger, get_rank
 from .chunk_io_buff import FP32ChunkReadBuffer, FP16ChunkWriteBuffer
 from .op_builder import CPUAdamBuilder
@@ -504,7 +505,7 @@ class FP16Adam(torch.optim.Optimizer):
         mgr = PatrickStarManager()
 
         if mgr.is_warmup_training():
-            self.client.chunk_list.display_access_info()
+            profiler.display_access_info(self.client.chunk_list)
         mgr.reset_metronome()
 
         if self.loss_scaler:

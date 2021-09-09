@@ -16,6 +16,7 @@ from typing import List
 
 import torch
 
+import patrickstar.profiler as profiler
 import patrickstar.utils.global_timer as global_timer
 from patrickstar.utils import logger, get_world_size, get_rank
 from .chunk_list import ChunkList, ChunkListType
@@ -75,7 +76,8 @@ class PatrickStarClient(object):
         """
         self.module = model
         self.optimizer = optimizer
-        self.chunk_tensor_index.print_chunk_list_info(self.chunk_list)
+        if get_rank() == 0:
+            profiler.display_chunk_info(self.chunk_tensor_index, self.chunk_list)
         self.register_model_hook(model)
 
     def append_dummy_chunk(self, data_type: torch.dtype,
@@ -648,11 +650,3 @@ class PatrickStarClient(object):
         删除chunk_list和chunk_tensor_index
         """
         raise NotImplementedError
-
-    def visit(self):
-        rank = get_rank()
-        for idx, chunk in self.chunk_list.generate_chunk():
-            logger.info(
-                f"rank {rank} chunk {idx} on device {chunk.get_device()} status {chunk.get_status()}"
-            )
-            # chunk.visit(self.chunk_tensor_index)
