@@ -53,4 +53,3 @@ class TensorInfo(object):
             return None
         else:
             return self.param.ps_attr.get_status(self.access_type)
-

@@ -19,7 +19,6 @@ import time
 import torch
 import numpy as np
 from transformers import BertConfig, BertForSequenceClassification
-from transformers.utils.dummy_tf_objects import WarmUp
 
 import patrickstar.utils.global_timer as global_timer
 from data_loader import get_bert_data_loader

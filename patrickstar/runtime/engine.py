@@ -18,7 +18,6 @@ from patrickstar.fp16 import LossScaler, DynamicLossScaler
 from patrickstar.manager import PatrickStarManager
 from patrickstar.ops import FP16Adam
 from patrickstar.utils import logger, global_timer
-from patrickstar.utils import print_rank as print_rank_0
 
 
 class PatrickStarEngine(Module):
