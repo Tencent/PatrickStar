@@ -222,6 +222,12 @@ def _register_hooks_recursively(module, client, name=""):
         logger.debug(f"{child.__class__.__name__}")
         _register_hooks_recursively(child, client, name + child_name)
 
+    # Early return on modules with no parameters or buffers that
+    # are not in their children.
+    if (len(list(module.named_parameters(recurse=False))) == 0 and
+        len(list(module.named_buffers(recurse=False))) == 0):
+        return
+
     # 如下两个hook和backward的hook是否重复
     def _pre_forward_module_hook(module, *args):
         pre_sub_module_forward_function(module, client, name)
