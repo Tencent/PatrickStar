@@ -395,6 +395,8 @@ class FP16Adam(torch.optim.Optimizer):
             closure (callable, optional): A closure that reevaluates the model
                 and returns the loss.
         """
+        global_timer.my_timer.start_profile('ADAM')
+
         rank = get_rank()
         mgr = PatrickStarManager()
         for name, param in self.client.module.named_parameters():
@@ -422,7 +424,6 @@ class FP16Adam(torch.optim.Optimizer):
         mgr.set_training_stage(TrainingStage.ADAM)
         mgr.tiktac(self.client)
 
-        global_timer.my_timer.start_profile('ADAM')
         loss = None
         if closure is not None:
             with torch.enable_grad():
@@ -500,7 +501,6 @@ class FP16Adam(torch.optim.Optimizer):
             self.prefer_device, self.read_chunk_buff, self.write_chunk_buff,
             True, margin_chunk_num_for_gpu_adam)
 
-        global_timer.my_timer.finish_profile('ADAM')
         mgr = PatrickStarManager()
 
         if mgr.is_warmup_training():
@@ -512,4 +512,5 @@ class FP16Adam(torch.optim.Optimizer):
         if self.loss_scaler:
             self.loss_scaler.update_scale(self.has_overflow)
 
+        global_timer.my_timer.finish_profile('ADAM')
         return loss

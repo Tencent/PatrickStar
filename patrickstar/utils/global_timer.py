@@ -50,15 +50,13 @@ class GlobalTimer(metaclass=SingletonMeta):
         dot_length = 20
         for k in self.elapse_stat:
             dot_length = max(dot_length, len(k) + 2)
-        overall_elapse = 0.
-        for k, v in self.elapse_stat.items():
-            overall_elapse += v
-        # TODO(zilinzhu): The overrall_elapse should be the time of one step
-        # but not sum of the timers as they may overlap.
+        overall_elapse = (
+            self.elapse_stat["FWD"] + self.elapse_stat["BWD"] + self.elapse_stat["ADAM"])
         for k, v in self.elapse_stat.items():
             logger.info(
                 f'{k} {"." * (dot_length - len(k))} {v}, {v / overall_elapse * 100} %')
-
+        logger.info(
+            f'TOTAL {"." * (dot_length - len("TOTAL"))} {overall_elapse}')
 
 my_timer = GlobalTimer()
 
