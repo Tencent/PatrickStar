@@ -350,7 +350,9 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
                 # tensors on CPU. So although the param_fp16 is a fp16 type param,
                 # its pytorch dtype still be float.
                 if self.release_during_init:
-                    param_fp16.data = torch.tensor([],
+                    # Here we use a non-empty tensor for huggingface. Because it
+                    # needs to initialize the weight for padding_idx.
+                    param_fp16.data = torch.tensor([0],
                                                    dtype=torch.float,
                                                    device=param_fp16.device)
             else:
