@@ -34,8 +34,8 @@ class ChunkList(object):
     def __init__(self, local_rank: int):
         self.chunk_id_to_chunk_dict_map: dict[int, Chunk] = {}
         self.chunk_type_to_id_list_map: dict[ChunkListType, int] = {}
-        for ct in ChunkListType:
-            self.chunk_type_to_id_list_map[ct] = []
+        for chunk_type in ChunkListType:
+            self.chunk_type_to_id_list_map[chunk_type] = []
 
         self._time_profile = True
         # TODO(jiaruifang) 单GPU不能启动太多stream

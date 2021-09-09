@@ -92,54 +92,9 @@ class PatrickStarEngine(Module):
             use_adamw=(optim_type == "AdamW"),
             prefer_device=prefer_device,
             use_hybrid_adam=optim_params["use_hybrid_adam"])
-        # 这个hook并没啥意义，为何不能和postbwd hook一起？
-        # self.create_reduce_and_remove_grad_hooks()
 
         self.client.init(self.module, self.optimizer)
         logger.info('init PatrickStarEngine')
-
-    def reduce_ready_partitions_and_remove_grads(self, param, i):
-        pass
-        # print_rank_0(f"reduce_ready_partitions_and_remove_grads param {i}",
-        #              force=True)
-        # # self.reduce_independent_p_g_buckets_and_remove_grads(param, i)
-        # print_rank_0(f'name {param.ps_attr.name} {param.grad}',
-        #              force=True)
-        # reduce grad and release grad，TODO(jiaruifang)确认这个hook和bwd hook的关系
-
-    def create_reduce_and_remove_grad_hooks(self):
-        # print_rank_0(f'[Begin] Create gradient reduction hooks', force=True)
-        self.grad_accs = []
-        for i, param_group in enumerate(self.optimizer.param_groups):
-            for param in param_group['params']:
-                if param.requires_grad:
-                    # print_rank_0(f" Before all gather {param.device}, {param.shape}")
-
-                    # The hook must be created in un-partitioned parameter
-                    # param.all_gather()
-
-                    # print(f"After all gather {param.device}, {param.shape}")
-                    def wrapper(param, i):
-                        param_tmp = param.expand_as(param)
-                        grad_acc = param_tmp.grad_fn.next_functions[0][0]
-
-                        def reduce_partition_and_remove_grads(*notneeded):
-                            self.reduce_ready_partitions_and_remove_grads(
-                                param, i)
-
-                        grad_acc.register_hook(
-                            reduce_partition_and_remove_grads)
-                        self.grad_accs.append(grad_acc)
-
-                    print(
-                        f"param grad fn {param.expand_as(param).grad_fn.next_functions[0][0]}"
-                    )
-                    wrapper(param, i)
-                    # print_rank_0(f"warp param on group {i}", force=True)
-
-                    # Partition the parameter after creating the hook
-                    # param.partition()
-        print_rank_0(f'[End] Create gradient reduction hooks', force=True)
 
     def forward(self, *inputs, **kwargs):
         r"""Execute forward propagation
@@ -162,11 +117,10 @@ class PatrickStarEngine(Module):
         global_timer.my_timer.finish_profile("FWD")
         return loss
 
-    def backward(self, loss, allreduce_gradients=True, release_loss=False):
+    def backward(self, loss):
         r"""Execute backward pass on the loss
         Arguments:
             loss: Torch tensor on which to execute backward propagation
-            allreduce_gradients: is deprecated, ignored, and will soon be removed'
         """
         global_timer.my_timer.start_profile("BWD")
         mgr = PatrickStarManager()

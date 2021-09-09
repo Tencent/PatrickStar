@@ -121,12 +121,12 @@ class PatrickStarManager(metaclass=SingletonMeta):
         self._training_stage = training_stage
         logger.info(f'Enter {self._training_stage}')
 
-    def start_train(self, is_warmup, param_fp16_chunk_size, chunk_size):
-        self.warmup = is_warmup
+    def start_train(self, param_fp16_chunk_size, chunk_size):
+        self.warmup = True
         self._start_training = True
         self._param_fp16_chunk_size = param_fp16_chunk_size
         self._default_chunk_size = chunk_size
-        logger.info(f'Start to train. Manager sets warmup {is_warmup}')
+        logger.info(f'Start to train.')
 
     def update_margin_mem(self):
         """

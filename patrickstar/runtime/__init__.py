@@ -59,7 +59,6 @@ def initialize_engine(model_func, local_rank, config=None):
     # 开启预热优化
     mgr = PatrickStarManager()
     mgr.start_train(
-        is_warmup=True,
         param_fp16_chunk_size=client.param_fp16_chunks_max_mem_usage(),
         chunk_size=client.default_chunk_size)
 
