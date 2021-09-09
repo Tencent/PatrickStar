@@ -11,13 +11,11 @@
 # permissions and limitations under the License.
 # See the AUTHORS file for names of contributors.
 
-import logging as logger
-
 import psutil
 import torch
 
 from patrickstar.core.const import TrainingStage
-from patrickstar.utils import get_sys_memory_used, get_world_size, SingletonMeta
+from patrickstar.utils import get_sys_memory_used, get_world_size, SingletonMeta, logger
 
 
 class Metronome(object):
@@ -119,10 +117,13 @@ class PatrickStarManager(metaclass=SingletonMeta):
     def is_nonwarmup_training(self):
         return self._start_training and not self.warmup
 
+    def set_training_stage(self, training_stage: TrainingStage):
+        self._training_stage = training_stage
+        logger.info(f'Enter {self._training_stage}')
+
     def start_train(self, is_warmup, param_fp16_chunk_size, chunk_size):
         self.warmup = is_warmup
         self._start_training = True
-        self._training_stage = TrainingStage.FWD
         self._param_fp16_chunk_size = param_fp16_chunk_size
         self._default_chunk_size = chunk_size
         logger.info(f'Start to train. Manager sets warmup {is_warmup}')
@@ -137,7 +138,7 @@ class PatrickStarManager(metaclass=SingletonMeta):
         self._margin_chunk_num_for_gpu_adam = (margin_mem_size) / (
             self._default_chunk_size * 12) * self._margin_use_ratio
 
-        logger.info("*********** GPU INFO AFTER BWD ***************")
+        logger.info("--------------- GPU INFO AFTER BWD ----------------")
         logger.info(
             f'Max GPU System Mem (non-chunk) Used {max(self.gpu_sys_used_list) / 1e6} MB'
         )
@@ -156,7 +157,7 @@ class PatrickStarManager(metaclass=SingletonMeta):
         if self.warmup is True:
             self.warmup = False
             logger.info(
-                f'***************** WARMUP PHASE OVER *****************')
+                f'----------------- WARMUP PHASE OVER -----------------')
 
         self.metronome.reset()
         logger.info('Manager Resets Metronome')

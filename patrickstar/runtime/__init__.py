@@ -35,12 +35,12 @@ def initialize_engine(model_func, local_rank, config=None):
         raise ValueError("model_func need to be callable.")
     if config is None:
         default_chunk_size = DEFAULT_CHUNK_SIZE
-        release_during_init = True
+        release_after_init = True
         use_cpu_embedding = True
     else:
         default_chunk_size = config.pop("default_chunk_size",
                                         DEFAULT_CHUNK_SIZE)
-        release_during_init = config.pop("release_during_init", True)
+        release_after_init = config.pop("release_after_init", False)
         use_cpu_embedding = config.pop("use_cpu_embedding", True)
 
     mgr = PatrickStarManager(local_rank=local_rank)
@@ -50,7 +50,7 @@ def initialize_engine(model_func, local_rank, config=None):
 
     with PSPreProcessCtx(client=client,
                          dtype=torch.float,
-                         release_during_init=release_during_init,
+                         release_after_init=release_after_init,
                          use_cpu_embedding=use_cpu_embedding):
         model = model_func()
 

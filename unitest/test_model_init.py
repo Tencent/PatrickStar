@@ -40,7 +40,7 @@ class TestModelInitContext(unittest.TestCase):
         torch.manual_seed(0)
         with PSPreProcessCtx(client,
                              dtype=torch.float,
-                             release_during_init=False):
+                             release_after_init=False):
             ps_model = model_provider()
 
         torch.manual_seed(0)

@@ -149,7 +149,7 @@ class PatrickStarEngine(Module):
         """
         global_timer.my_timer.start_profile("FWD")
         mgr = PatrickStarManager()
-        mgr._training_stage = TrainingStage.FWD
+        mgr.set_training_stage(TrainingStage.FWD)
 
         for param_fp16 in self.client.chunk_based_param_fp16:
             param_fp16.ps_attr.fwd_used_cnt = 0
@@ -170,7 +170,8 @@ class PatrickStarEngine(Module):
         """
         global_timer.my_timer.start_profile("BWD")
         mgr = PatrickStarManager()
-        mgr._training_stage = TrainingStage.BWD
+        mgr.set_training_stage(TrainingStage.BWD)
+
         for param_fp16 in self.client.chunk_based_param_fp16:
             param_fp16.ps_attr.bwd_used_cnt = 0
 

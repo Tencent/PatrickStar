@@ -289,7 +289,7 @@ class ChunkTensorIndex(object):
                 )
                 for info in self.generate_tensor_info_in_order(chunk_id):
                     assert info.chunk_id == chunk_id, f'{info.chunk_id} vs {chunk_id}'
-                    logger.info(
+                    logger.debug(
                         f'** tensor: chunk_id {chunk_id}, start {info.start_offset}, '
                         f'end {info.start_offset + info.numel}, size {info.numel}, '
                         f'tensor_id {info.tensor_id}, status {info.status()}, name {info.tensor_name}'
