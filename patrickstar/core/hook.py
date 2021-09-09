@@ -225,7 +225,7 @@ def _register_hooks_recursively(module, client, name=""):
     # Early return on modules with no parameters or buffers that
     # are not in their children.
     if (len(list(module.named_parameters(recurse=False))) == 0 and
-        len(list(module.named_buffers(recurse=False))) == 0):
+            len(list(module.named_buffers(recurse=False))) == 0):
         return
 
     # 如下两个hook和backward的hook是否重复
