@@ -137,7 +137,7 @@ def _add_test_bert_args(parser):
 def _print_args(args):
     """Print arguments."""
     if args.rank == 0:
-        print('-------------------- arguments --------------------',
+        print('------------------- arguments -------------------',
               flush=True)
         str_list = []
         for arg in vars(args):
@@ -338,7 +338,7 @@ def test_bert_model_helper(args,
                 force=True)
             if dist_plan == "patrickstar":
                 logger.info(
-                    f'{"[WARM UP] " if n == 0 else ""} '
+                    f'{"[WARM UP] " if n == 0 else ""}'
                     f'Step elaspe {step_elapse} s, {total_macs / 1e12 / step_elapse} Tflops')
                 global_timer.my_timer.print()
                 global_timer.data_move_cnter.print()
