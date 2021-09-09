@@ -285,7 +285,7 @@ class ChunkList(object):
                 f"Call last_chunk_id on an empty {chunk_type} chunk list")
         return self.chunk_type_to_id_list_map[chunk_type][-1]
 
-    def generate_chunk(self) -> (int, Chunk):
+    def generate_chunk(self):
         for chunk_id, chunk in self.chunk_id_to_chunk_dict_map.items():
             yield chunk_id, chunk
 
@@ -372,3 +372,13 @@ class ChunkList(object):
                 f'** {chunk_id}, {chunk.get_device()}, {chunk.get_chunk_space()}, '
                 f'{chunk.data_type}, {chunk.get_device()}, {chunk.get_status()}'
             )
+
+    def display_access_info(self):
+        if get_rank() == 0:
+            logger.info('----------- SHOW ACCESS INFO -----------')
+            for chunk_id in self.chunk_type_to_id_list_map[ChunkListType.PARAM_FP16]:
+                chunk = self.chunk_id_to_chunk_dict_map[chunk_id]
+                logger.debug(
+                    f'\t {chunk_id} cpu_access_moments {chunk.cpu_access_moments}')
+                logger.debug(
+                    f'\t {chunk_id} gpu_access_moments {chunk.gpu_access_moments}')

@@ -504,9 +504,7 @@ class FP16Adam(torch.optim.Optimizer):
         mgr = PatrickStarManager()
 
         if mgr.is_warmup_training():
-            logger.info('----------- SHOW ACCESS INFO -----------')
-            for _, chunk in self.client.chunk_list.generate_chunk():
-                chunk.display_access_mom_info()
+            self.client.chunk_list.display_access_info()
         mgr.reset_metronome()
 
         if self.loss_scaler:
