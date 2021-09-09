@@ -284,7 +284,7 @@ class FP16Adam(torch.optim.Optimizer):
             if time_profile:
                 global_timer.my_timer.start_profile('ADAM_prepare_data')
                 global_timer.my_timer.start_profile(
-                    'ADAM_prepare_data_fp16_grad_to_fp32_grad_copy')
+                    'ADAM_prepare_data_grad_copy')
 
             # 以chunk为粒度拷贝grad fp16 (FWD+BWD计算设备GPU, CPU如果被换出了) -> grad fp32 (Adam计算设备CPU or GPU如果margin空间足够)
             if fp16_param.ps_attr.param_type == ParamType.TORCH_BASED:
@@ -311,9 +311,9 @@ class FP16Adam(torch.optim.Optimizer):
 
             if time_profile:
                 global_timer.my_timer.finish_profile(
-                    'ADAM_prepare_data_fp16_grad_to_fp32_grad_copy')
+                    'ADAM_prepare_data_grad_copy')
                 global_timer.data_move_cnter.update(
-                    'ADAM_prepare_data_fp16_grad_to_fp32_grad_copy',
+                    'ADAM_prepare_data_grad_copy',
                     fp16_grad_tensor.numel() * 2)
 
             client.access_data(fp32_param, compute_device)
@@ -419,8 +419,7 @@ class FP16Adam(torch.optim.Optimizer):
                 else:
                     self.client.release_data(param,
                                              PSTensorStatus.HOLD_AFTER_BWD)
-        mgr._training_stage = TrainingStage.ADAM
-        logger.info(f'Entering ADAM Stage')
+        mgr.set_training_stage(TrainingStage.ADAM)
         mgr.tiktac(self.client)
 
         global_timer.my_timer.start_profile('ADAM')
@@ -505,7 +504,7 @@ class FP16Adam(torch.optim.Optimizer):
         mgr = PatrickStarManager()
 
         if mgr.is_warmup_training():
-            logger.info('******** SHOW ACCESS INFO ********')
+            logger.info('----------- SHOW ACCESS INFO -----------')
             for _, chunk in self.client.chunk_list.generate_chunk():
                 chunk.display_access_mom_info()
         mgr.reset_metronome()

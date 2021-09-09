@@ -21,7 +21,9 @@ from .singleton_meta import SingletonMeta
 class GlobalTimer(metaclass=SingletonMeta):
     def __init__(self):
         """
-        存放时间统计，key命名规则 训练阶段_
+        Timer for different function of the program.
+        The naming convention should be {TrainingState}_{function},
+        e.g. ADAM_compute
         """
         self.elapse_stat = {}
         self.start_time = {}
@@ -44,12 +46,18 @@ class GlobalTimer(metaclass=SingletonMeta):
             self.elapse_stat[k] = 0
 
     def print(self):
-        logger.info('*********** PROFILE RESULTS *************')
+        logger.info('------------- PROFILE RESULTS ----------------')
+        dot_length = 20
+        for k in self.elapse_stat:
+            dot_length = max(dot_length, len(k) + 2)
         overall_elapse = 0.
         for k, v in self.elapse_stat.items():
             overall_elapse += v
+        # TODO(zilinzhu): The overrall_elapse should be the time of one step
+        # but not sum of the timers as they may overlap.
         for k, v in self.elapse_stat.items():
-            logger.info(f'{k}, {v}, {v / overall_elapse * 100} %')
+            logger.info(
+                f'{k} {"." * (dot_length - len(k))} {v}, {v / overall_elapse * 100} %')
 
 
 my_timer = GlobalTimer()
@@ -75,7 +83,7 @@ class DataMoveCnter(metaclass=SingletonMeta):
             self.amount_dict[k] = 0
 
     def print(self):
-        logger.info('*********** DATA MOVE RESULTS *************')
+        logger.info('------------- DATA MOVE RESULTS --------------')
         my_timer = GlobalTimer()
         for k, v in self.times_dict.items():
             bwd = 0
@@ -86,7 +94,6 @@ class DataMoveCnter(metaclass=SingletonMeta):
                 )
             else:
                 logger.info(f'{k}: {self.amount_dict[k] / 1024 / 1024} MB')
-        logger.info('\n\n')
 
 
 data_move_cnter = DataMoveCnter()

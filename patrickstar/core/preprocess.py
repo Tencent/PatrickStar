@@ -157,7 +157,7 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
     """
     def __init__(self,
                  client: PatrickStarClient,
-                 release_during_init=False,
+                 release_after_init=False,
                  use_cpu_embedding=False,
                  dtype=None):
         super().__init__(config=None, dtype=dtype)
@@ -167,7 +167,7 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
         self.dummy_param_list = []
         self.param_idx = 0
 
-        self.release_during_init = release_during_init
+        self.release_after_init = release_after_init
         self.use_cpu_embedding = use_cpu_embedding
 
         self.submodule_id = -1
@@ -248,10 +248,10 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
                         param_fp16_chunk_id):
                     assert not self._is_local_param(param_fp16,
                                                     AccessType.DATA)
-                    # When release_during_init is True, this will help cast dtype of
-                    # remote params to torch.half (See the NOTE below).
-                    # When release_during_init is False, we will release the remote
+                    # When release_after_init is True, we will release the remote
                     # param tensor here.
+                    # When release_after_init is False, this will help cast dtype of
+                    # remote params to torch.half (See the NOTE below).
                     param_fp16.data = torch.tensor([],
                                                    dtype=torch.half,
                                                    device=param_fp16.device)
@@ -293,7 +293,7 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
         if self.use_cpu_embedding:
             # cpu_embedding优化把embedding交给Torch管理而非Chunk
             if module.__class__.__name__ == 'Embedding':
-                logger.info(
+                logger.debug(
                     f'** Converting Maintain PyTorch Params in {module.__class__.__name__}'
                 )
                 for name, param in module.named_parameters(recurse=False):
@@ -342,14 +342,14 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
                 param_fp16.ps_attr._is_local = False
                 param_fp32.ps_attr._is_local = False
                 # TODO(jiaruifang) fix distributed init bug.
-                # Check results will fail when release_during_init.
+                # Check results will fail when not release_after_init.
                 # As release tensor here will make the random seed generator
                 # behave differently (less random number generated).
                 # NOTE(why dtype is torch.float rather than torch.half)
                 # PyTorch version lower than 1.5 can not initialize torch.half
                 # tensors on CPU. So although the param_fp16 is a fp16 type param,
                 # its pytorch dtype still be float.
-                if self.release_during_init:
+                if not self.release_after_init:
                     # Here we use a non-empty tensor for huggingface. Because it
                     # needs to initialize the weight for padding_idx.
                     param_fp16.data = torch.tensor([0],

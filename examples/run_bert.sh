@@ -3,6 +3,7 @@ export GPU_NUM=${GPU_NUM:-1}
 export CS=${CS:-64}
 export BS=${BS:-16}
 export CPU_EBD=${CPU_EBD:-1}
+export RELEASE_AFTER_INIT=${RELEASE_AFTER_INIT:-0}
 export MODEL_NAME=${MODEL_NAME:-"GPT2small"}
 
 export margin_use_ratio=${margin_use_ratio:-0.8}
@@ -18,18 +19,18 @@ RES_CHECK_FLAG="--res_check"
 let CHUNK_SIZE=${CS}*1024*1024
 export PYTHONPATH=../:${PYTHONPATH}
 
-if [ ${RES_CHECK_FLAG} ]; then
-export USE_DS_ADAM=""
-else
-export USE_DS_ADAM="--use_deepspeed_cpu_adam"
-fi
-
 export HYBRID_ADAM_FLAG="--use_hybrid_adam"
 
 if [[ ${CPU_EBD} == 1 ]];  then
 export CPU_EMBED="--use_cpu_embedding"
 else
 export CPU_EMBED=""
+fi
+
+if [[ ${RELEASE_AFTER_INIT} == 1 ]];  then
+export RELEASE="--release_after_init"
+else
+export RELEASE=""
 fi
 
 export GPU_BOOST_ADAM=1
@@ -56,5 +57,6 @@ python -m torch.distributed.launch --nproc_per_node=${GPU_NUM} \
                              ${USE_DS_ADAM} \
                              ${CPU_EMBED} \
                              ${HYBRID_ADAM_FLAG} \
+                             ${RELEASE} \
                              --default_chunk_size=${CHUNK_SIZE} \
                              2>&1 | tee ./logs/log.${MODEL_NAME}_gpu_${GPU_NUM}_cs_${CS}_bs_${BS}_cpueb_${CPU_EBD}_margin_${margin_use_ratio}_warmup_${warmup_gpu_chunk_mem_ratio}_gpu_${overall_gpu_mem_ratio}_adamcvt_${GPU_BOOST_ADAM}

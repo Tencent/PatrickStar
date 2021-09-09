@@ -19,6 +19,7 @@ import time
 import torch
 import numpy as np
 from transformers import BertConfig, BertForSequenceClassification
+from transformers.utils.dummy_tf_objects import WarmUp
 
 import patrickstar.utils.global_timer as global_timer
 from data_loader import get_bert_data_loader
@@ -30,92 +31,106 @@ from patrickstar.utils.model_size_calculator import get_ps_model_size, estimate_
 
 def _add_patrick_star_args(parser):
     group = parser.add_argument_group(title='patrickstar')
-    group.add_argument('--use_fake_dist',
-                       dest='use_fake_dist',
-                       action='store_true',
-                       help='using one GPU to stimulate multiple card.')
-    group.add_argument('--batch_size',
-                       type=int,
-                       default=32,
-                       help='Batch size of input.')
-    group.add_argument('--default_chunk_size',
-                       type=int,
-                       default=32 * 1024 * 1024,
-                       help='Default Chunk Size in elements.')
-
+    group.add_argument(
+        '--use_fake_dist',
+        dest='use_fake_dist',
+        action='store_true',
+        help='Using one GPU to stimulate multiple card.')
+    group.add_argument(
+        '--default_chunk_size',
+        type=int,
+        default=32 * 1024 * 1024,
+        help='Default Chunk Size in elements.')
     group.add_argument(
         '--use_cpu_embedding',
         dest='use_cpu_embedding',
         action='store_true',
-        help=
-        'using CPU to perform Embedding and do not assign embedding params to chunks'
-    )
-    group.add_argument('--use_deepspeed_cpu_adam',
-                       action='store_true',
-                       help='Use deepspeed cpu adam')
+        help='Using CPU to perform Embedding and do not assign '
+             'embedding params to chunks')
+    group.add_argument(
+        '--release_after_init',
+        action='store_true',
+        help='Release the remote chunk after the whole initialization.'
+             'This would use more CPU memory during initialization, '
+             'but may fix some errors relate to checkpoint loading or'
+             'weight intialization.')
     group.add_argument(
         '--use_hybrid_adam',
         action='store_true',
-        help=
-        'Use hybrid adam optimization. By default ADAM is on CPU and run ADAM on GPU if possible.'
-    )
-    group.add_argument('--overall_gpu_mem_ratio',
-                       type=float,
-                       default=0.8,
-                       help='Used GPU memory in manager / total gpu memory.')
-    group.add_argument('--overall_cpu_mem_ratio',
-                       type=float,
-                       default=0.8,
-                       help='Used CPU memory in manager / total gpu memory.')
-    group.add_argument('--warmup_gpu_chunk_mem_ratio',
-                       type=float,
-                       default=0.4,
-                       help='warmup used gpu memory ratio.')
-    group.add_argument('--margin_use_ratio',
-                       type=float,
-                       default=0.7,
-                       help='GPu margin use ratio')
+        help='Use hybrid adam optimization. '
+             'By default ADAM is on CPU and run ADAM on GPU if possible.')
+    # Some hyperparams to tune when you failed to run a model.
     group.add_argument(
         '--always_warmup',
         action='store_true',
-        help='always warmup cancel dynamic GPU chunkable memory.')
+        help='Always warmup cancel dynamic GPU chunkable memory.')
+    group.add_argument(
+        '--overall_gpu_mem_ratio',
+        type=float,
+        default=0.8,
+        help='Used GPU memory in manager / total gpu memory.')
+    group.add_argument(
+        '--overall_cpu_mem_ratio',
+        type=float,
+        default=0.8,
+        help='Used CPU memory in manager / total gpu memory.')
+    group.add_argument(
+        '--warmup_gpu_chunk_mem_ratio',
+        type=float,
+        default=0.4,
+        help='warmup used gpu memory ratio.')
+    group.add_argument(
+        '--margin_use_ratio',
+        type=float,
+        default=0.7,
+        help='GPU margin use ratio')
+
     group.add_argument(
         '--use_gpu_fp32_convert_for_adam',
         action='store_true',
-        help='use gpu fp32 convert for adam grad fp16 -> grad fp32.')
+        help='Use gpu fp32 convert for adam grad fp16 -> grad fp32.')
+
     return parser
 
 
 def _add_test_bert_args(parser):
     group = parser.add_argument_group(title='test_bert')
-    group.add_argument('--local_rank',
-                       type=int,
-                       default=None,
-                       help='local rank passed from distributed launcher.')
-    group.add_argument('--use_ckp',
-                       dest='use_ckp',
-                       action='store_true',
-                       help='using checkpointing for memory saveing.')
-    group.add_argument('--res_check',
-                       dest='res_check',
-                       action='store_true',
-                       help='check results correctness of checkpointing.')
-    group.add_argument('--use_fp16',
-                       dest='use_fp16',
-                       action='store_true',
-                       help='using FP16 for training.')
-    group.add_argument('--dist_plan',
-                       type=str,
-                       default='torch',
-                       help='Distributed Plan [torch, patrickstar]')
-    group.add_argument('--use_ds',
-                       dest='use_ds',
-                       action='store_true',
-                       help='using DeepSpeed for training.')
-    group.add_argument('--model_name',
-                       type=str,
-                       default='GPTsmall',
-                       help='The model name.')
+    group.add_argument(
+        '--batch_size',
+        type=int,
+        default=32,
+        help='Batch size of input.')
+    group.add_argument(
+        '--local_rank',
+        type=int,
+        default=None,
+        help='local rank passed from distributed launcher.')
+    group.add_argument(
+        '--use_ckp',
+        dest='use_ckp',
+        action='store_true',
+        help='using gradient checkpointing for memory saveing.')
+    group.add_argument(
+        '--res_check',
+        dest='res_check',
+        action='store_true',
+        help='check results correctness of checkpointing.')
+    group.add_argument(
+        '--use_fp16',
+        dest='use_fp16',
+        action='store_true',
+        help='using FP16 for training.')
+    group.add_argument(
+        '--dist_plan',
+        type=str,
+        default='torch',
+        help='Distributed Plan [torch, patrickstar]')
+    group.add_argument(
+        '--model_name',
+        type=str,
+        default='GPTsmall',
+        help='The model name.')
+
     return parser
 
 
@@ -145,6 +160,25 @@ def parse_args():
     return args
 
 
+def print_model_config(hidden_dim, sequence_len, num_layer, num_head):
+    if args.rank == 0:
+        config_dict = {
+            "hiddne_dim": hidden_dim,
+            "sequence_len": sequence_len,
+            "num_layer": num_layer,
+            "num_head": num_head
+        }
+        print('------------------ model config ------------------',
+              flush=True)
+        str_list = []
+        for key, value in config_dict.items():
+            dots = '.' * (32 - len(key))
+            str_list.append('  {} {} {}'.format(key, dots, value))
+        for arg in sorted(str_list, key=lambda x: x.lower()):
+            print(arg, flush=True)
+        print('-------------- end of model config --------------', flush=True)
+
+
 def test_bert_model_helper(args,
                            is_ckp: bool = False,
                            is_fp16: bool = False,
@@ -154,19 +188,17 @@ def test_bert_model_helper(args,
                            sequence_length=256,
                            num_layer=12,
                            num_head=12,
-                           stop_step=5):
+                           num_steps=5):
     logger.info(
         f'test a bert {"fp16" if is_fp16 else "fp32"} model '
         f'{"with checkpoint" if is_ckp else ""}')
-    logger.info(
-        f'batch_size: {batch_size}, hidden_dim: {hidden_dim}, '
-        f'sequence_length: {sequence_length}, num_layer: {num_layer}'
-    )
-    # 用单卡模拟多卡
+
+    # Use single card to imitate multicard.
     if args.use_fake_dist:
         rank = 0
     else:
         rank = args.local_rank
+
     # Avoid gpu0 use more memory.
     # https://discuss.pytorch.org/t/extra-10gb-memory-on-gpu-0-in-ddp-tutorial/118113
     torch.cuda.set_device(rank)
@@ -174,19 +206,12 @@ def test_bert_model_helper(args,
 
     device = torch.device(f'cuda:{rank}')
 
-    if is_ckp:
-        cfg = BertConfig(gradient_checkpointing=True,
-                         hidden_size=hidden_dim,
-                         intermediate_size=hidden_dim * 4,
-                         num_attention_heads=num_head,
-                         max_position_embeddings=sequence_length,
-                         num_hidden_layers=num_layer)
-    else:
-        cfg = BertConfig(hidden_size=hidden_dim,
-                         intermediate_size=hidden_dim * 4,
-                         max_position_embeddings=sequence_length,
-                         num_attention_heads=num_head,
-                         num_hidden_layers=num_layer)
+    bert_config = BertConfig(gradient_checkpointing=is_ckp,
+                             hidden_size=hidden_dim,
+                             intermediate_size=hidden_dim * 4,
+                             num_attention_heads=num_head,
+                             max_position_embeddings=sequence_length,
+                             num_hidden_layers=num_layer)
 
     lr = 0.001
     betas = (0.9, 0.999)
@@ -198,7 +223,7 @@ def test_bert_model_helper(args,
             logger.warning("PatrickStar will always use mixed precision training.")
 
         def model_func():
-            return BertForSequenceClassification(cfg)
+            return BertForSequenceClassification(bert_config)
 
         config = {
             # The same format as optimizer config of DeepSpeed
@@ -222,6 +247,7 @@ def test_bert_model_helper(args,
                 "min_loss_scale": 1
             },
             "default_chunk_size": args.default_chunk_size,
+            "release_after_init": args.release_after_init,
             "use_fake_dist": args.use_fake_dist,
             "use_cpu_embedding": args.use_cpu_embedding
         }
@@ -230,7 +256,7 @@ def test_bert_model_helper(args,
                                              local_rank=rank,
                                              config=config)
     else:
-        model = BertForSequenceClassification(cfg)
+        model = BertForSequenceClassification(bert_config)
         model.cuda(rank)
         model.train()
         optimizer = torch.optim.Adam(model.parameters(),
@@ -248,12 +274,16 @@ def test_bert_model_helper(args,
         model = torch.nn.parallel.DistributedDataParallel(model,
                                                           device_ids=[rank])
 
-    model_numel = get_ps_model_size(model)
-    total_macs = estimate_bert_mac(cfg, batch_size, sequence_length,
-                                   model_numel)
+    model_numel, model_num_param = get_ps_model_size(model)
+    logger.info(f"Model size {model_numel / 1e9} B, total params: {model_num_param}")
+    total_macs, nvidia_total_macs = estimate_bert_mac(
+        bert_config, batch_size, sequence_length, model_numel)
+    logger.info(f'Total MACs: {total_macs} TFlops')
+    logger.info(f'NVIDIA total MACs: {nvidia_total_macs}')
+    logger.debug(f'Diff csig/nvidia {total_macs / nvidia_total_macs}')
 
     see_memory_usage(
-        f"ckp {is_ckp} fp16 {is_fp16} dist_plan {dist_plan} after model init",
+        f"After model init. using {dist_plan}, gradient checkpoint: {is_ckp}, fp16 {is_fp16}",
         force=True)
 
     data_loader = get_bert_data_loader(
@@ -267,12 +297,13 @@ def test_bert_model_helper(args,
     loss_res = []
 
     logger.info(
-        f"MAC {total_macs / 1e9} GFlop, model numel {model_numel / 1e9} B")
+        f"MAC {total_macs / 1e9} GFlop, model param size: {model_numel / 1e9} B")
 
     for n, batch in enumerate(data_loader):
-        if n == stop_step:
+        if n == num_steps:
             break
 
+        logger.info(f"Start Step {n} with {dist_plan}...")
         step_start_time = time.time()
 
         optimizer.zero_grad()
@@ -299,28 +330,26 @@ def test_bert_model_helper(args,
         logger.info(f"LOSS of step {n}: {loss.item()}")
         loss_res.append(loss.item())
 
-        see_memory_usage(
-            f"ckp {is_ckp} fp16 {is_fp16} dist_plan {dist_plan} after step {n}",
-            force=True)
-
         step_elapse = time.time() - step_start_time
-        if n == 0:
-            logger.info(
-                f"warmup ckp {is_ckp} fp16 {is_fp16} dist_plan {dist_plan}: step elapse "
-                f"{step_elapse} sec/iter, {total_macs / 1e12 / step_elapse} GFlops"
-            )
-        else:
-            logger.info(
-                f"ckp {is_ckp} fp16 {is_fp16} dist_plan {dist_plan}: step elapse {step_elapse} sec/iter, "
-                f"{total_macs / 1e12 / step_elapse} Tflops")
-        logger.info(f'model {model_numel / 1e9}')
 
-        if dist_plan == "ps":
-            global_timer.my_timer.print()
-            global_timer.data_move_cnter.print()
+        if args.rank == 0:
+            see_memory_usage(
+                f"After step {n}. using {dist_plan}, gradient checkpoint: {is_ckp}, fp16 {is_fp16}",
+                force=True)
+            if dist_plan == "patrickstar":
+                logger.info(
+                    f'{"[WARM UP] " if n == 0 else ""} '
+                    f'Step elaspe {step_elapse} s, {total_macs / 1e12 / step_elapse} Tflops')
+                global_timer.my_timer.print()
+                global_timer.data_move_cnter.print()
 
-            global_timer.my_timer.reset()
-            global_timer.data_move_cnter.reset()
+                global_timer.my_timer.reset()
+                global_timer.data_move_cnter.reset()
+            else:
+                logger.info(
+                    f'Step elaspe {step_elapse} s, {total_macs / 1e12 / step_elapse} Tflops')
+
+        logger.info(f"End Step {n} with {dist_plan}.\n")
 
     logging.info("*" * 20)
     return loss_res
@@ -332,10 +361,10 @@ if __name__ == "__main__":
     use_ckp = args.use_ckp
     use_fp16 = args.use_fp16
     dist_plan = args.dist_plan
-    # 检查结果正确性
     res_check = args.res_check
-    # HIDDEN_DIM 1024, batch 16, seqence_leng 1024, ckp True.
-    # PS is able to run the training, while PyTorch failed.
+
+    # HIDDEN_DIM 1024, batch 16, seqence_len 1024, ckp True.
+    # PatrickStar is able to run the training, while PyTorch failed.
 
     logger.setLevel(logging.WARNING)
     if not torch.distributed.is_initialized():
@@ -440,6 +469,11 @@ if __name__ == "__main__":
 
     assert HIDDEN_DIM % NUM_HEAD == 0
     logging.info(f'Benchmarking {MODEL_NAME}')
+
+    print_model_config(
+        hidden_dim=HIDDEN_DIM, sequence_len=SEQ_LEN,
+        num_layer=NUM_LAYER, num_head=NUM_HEAD)
+
     if not res_check:
         # 训练参数，可以自己定义
         torch.manual_seed(0)
@@ -452,14 +486,15 @@ if __name__ == "__main__":
                                            sequence_length=SEQ_LEN,
                                            num_layer=NUM_LAYER,
                                            num_head=NUM_HEAD,
-                                           stop_step=5)
-        print(f"loss: {loss_list}")
+                                           num_steps=5)
+        print("*" * 20 + " LOSS " + "*" * 20)
+        print(f"{loss_list}")
 
     if res_check:
         logging.warning(
             'Running to check result. This will use Bert model and batch size is 2.')
 
-        STOP_STEP = 5
+        NUM_STEPS = 5
 
         torch.manual_seed(0)
         torch_res_list = test_bert_model_helper(args=args,
@@ -471,10 +506,10 @@ if __name__ == "__main__":
                                                 sequence_length=SEQ_LEN,
                                                 num_layer=NUM_LAYER,
                                                 num_head=NUM_HEAD,
-                                                stop_step=STOP_STEP)
+                                                num_steps=NUM_STEPS)
 
         torch.cuda.empty_cache()
-        logging.info("*" * 50)
+        logging.info("-" * 50)
 
         torch.manual_seed(0)
         autocast_res_list = test_bert_model_helper(args=args,
@@ -486,10 +521,10 @@ if __name__ == "__main__":
                                                    sequence_length=SEQ_LEN,
                                                    num_layer=NUM_LAYER,
                                                    num_head=NUM_HEAD,
-                                                   stop_step=STOP_STEP)
+                                                   num_steps=NUM_STEPS)
 
         torch.cuda.empty_cache()
-        logging.info("*" * 50)
+        logging.info("-" * 50)
 
         torch.manual_seed(0)
         ps_res_list = test_bert_model_helper(args=args,
@@ -501,14 +536,15 @@ if __name__ == "__main__":
                                              sequence_length=SEQ_LEN,
                                              num_layer=NUM_LAYER,
                                              num_head=NUM_HEAD,
-                                             stop_step=STOP_STEP)
+                                             num_steps=NUM_STEPS)
 
-        print(f'torch fp32 loss:  {torch_res_list}')
-        print(f'autocast loss:    {autocast_res_list}')
-        print(f'patrickstar loss: {ps_res_list}')
+        print("-" * 20 + " LOSS " + "-" * 20)
+        print(f'torch fp32 : {torch_res_list}')
+        print(f'autocast   : {autocast_res_list}')
+        print(f'patrickstar: {ps_res_list}')
 
         def diff(array):
             return list(np.array(ps_res_list) - np.array(array))
-        print('diff:')
+        print("-" * 20 + " DIFF " + "-" * 20)
         print(f'vs torch fp32: {diff(torch_res_list)}')
-        print(f'vs autocast:   {diff(autocast_res_list)}')
+        print(f'vs autocast  : {diff(autocast_res_list)}')

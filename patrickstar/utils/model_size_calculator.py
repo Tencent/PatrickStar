@@ -23,9 +23,7 @@ def get_ps_model_size(model):
         else:
             numel += param.numel()
         param_cnt += 1
-    # numel *= args.world_size
-    print(f"PS model size {numel / 1e9} B, param cnt {param_cnt}")
-    return numel
+    return numel, param_cnt
 
 
 def estimate_bert_mac(config, batch_size, sequence_length, model_size):
@@ -34,7 +32,4 @@ def estimate_bert_mac(config, batch_size, sequence_length, model_size):
                                                    (16 * config.num_hidden_layers * config.hidden_size))
 
     tera_flops = model_size * batch_size * sequence_length * 2 * 4
-    print(f'tera_flops total MACs {tera_flops}')
-    print(f'nvidia total MACs {nvidia_total_macs}')
-    print(f'diff csig/nvidia {tera_flops / nvidia_total_macs}')
-    return tera_flops
+    return tera_flops, nvidia_total_macs

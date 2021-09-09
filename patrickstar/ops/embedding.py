@@ -24,15 +24,13 @@ class _CopyInputToCPU(torch.autograd.Function):
 
     @staticmethod
     def forward(ctx, input_):
-        logger.info(
-            f'Entrying CPU Emedding FWD, copy input to cpu and {input_.dtype}')
+        logger.debug(f'Copy input to cpu and {input_.dtype}.')
         return input_.to(torch.device('cpu:0'))
 
     @staticmethod
     def backward(ctx, grad_output):
         target_device = torch.device(f'cuda:{torch.cuda.current_device()}')
-        logger.info(
-            'Entrying CPU Emedding BWD, copy grad_output to cuda, fp32->fp16')
+        logger.debug('Copy grad_output to cuda.')
         return grad_output.to(target_device)
 
 
@@ -47,9 +45,7 @@ class _CopyActToGPU(torch.autograd.Function):
     def forward(ctx, input_):
         target_device = torch.device(f'cuda:{torch.cuda.current_device()}')
 
-        logger.info(
-            f'Entrying CPU Emedding BWD, copy grad_output to cuda, input dtype {input_.dtype}'
-        )
+        logger.debug(f'Copy grad_output to cuda, input dtype {input_.dtype}.')
         return input_.to(target_device)
 
     @staticmethod
