@@ -42,7 +42,6 @@ class TestModelInitContext(unittest.TestCase):
             ps_model = model_provider()
 
         FP16Adam(client, ps_model.parameters())
-        # client.chunk_tensor_index.visit_chunks(client.chunk_list)
 
 
 if __name__ == "__main__":

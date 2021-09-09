@@ -61,8 +61,6 @@ class TestModelInitContext(unittest.TestCase):
                     )
                 client.release_data(ps_param)
 
-        # client.chunk_tensor_index.visit_chunks(client.chunk_list)
-
 
 if __name__ == "__main__":
     torch.multiprocessing.set_start_method('spawn')

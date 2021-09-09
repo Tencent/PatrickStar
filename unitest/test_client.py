@@ -55,7 +55,7 @@ class TestClientAccess(unittest.TestCase):
             self.client.release_data(param)
             self.assertTrue(param.data.numel() == 0)
 
-        self.client.chunk_tensor_index.visit_chunks(self.client.chunk_list)
+        self.client.chunk_tensor_index.print_chunk_list_info(self.client.chunk_list)
         for param, payload_ref in zip(param_list, param_payload_ref_list):
             real_payload = self.client.access_data(param,
                                                    torch.device('cpu:0'))
@@ -87,7 +87,7 @@ class TestClientAccess(unittest.TestCase):
             real_payload.copy_(param.data)
             self.client.release_data(param)
 
-        self.client.chunk_tensor_index.visit_chunks(self.client.chunk_list)
+        self.client.chunk_tensor_index.print_chunk_list_info(self.client.chunk_list)
         for param, payload_ref in zip(param_list, param_payload_ref_list):
             real_payload = self.client.access_data(param,
                                                    torch.device('cpu:0'))

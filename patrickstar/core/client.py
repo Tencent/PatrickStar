@@ -75,7 +75,7 @@ class PatrickStarClient(object):
         """
         self.module = model
         self.optimizer = optimizer
-        self.chunk_tensor_index.visit_chunks(self.chunk_list)
+        self.chunk_tensor_index.print_chunk_list_info(self.chunk_list)
         self.register_model_hook(model)
 
     def append_dummy_chunk(self, data_type: torch.dtype,
@@ -500,6 +500,7 @@ class PatrickStarClient(object):
         rank = get_rank()
 
         assert isinstance(reset_to_status, PSTensorStatus)
+        assert training_stage == TrainingStage.FWD or training_stage == TrainingStage.BWD
         assert torch.distributed.is_initialized()
 
         chunk_id = self.chunk_tensor_index.get_chunk_id(param, access_type)
@@ -546,18 +547,12 @@ class PatrickStarClient(object):
                             PSTensorStatus.HOLD_AFTER_BWD
                     ) and not self.chunk_list[i].is_dummy():
                         all_chunks_ready = False
-                    # self.chunk_tensor_index.visit_chunk(self.chunk_list[i])
-                else:
-                    raise RuntimeError(
-                        f"{training_stage} is neither TrainingStage.FWD nor TrainingStage.BWD"
-                    )
 
             if all_chunks_ready:
                 if is_allreduce:
                     if self._time_profile:
                         global_timer.my_timer.start_profile(
                             'CLIENT_release_dist_reduce_scatter')
-                    world_size = get_world_size()
                     assert self.chunk_list[local_chunk_id].payload is not None
                     input_list = []
                     for i in chunk_id_list:
@@ -570,7 +565,6 @@ class PatrickStarClient(object):
                         input_list,
                         op=torch.distributed.ReduceOp.SUM,
                         async_op=False)
-                    input_list = []
 
                     # NOTE把下面行注释了不影响最终结果？loss可能是有softmax算出，所以相对值不影响LOSS比较，但是影响了
                     # 不应该除以world_size,减去dummy chunk个数
@@ -599,12 +593,8 @@ class PatrickStarClient(object):
     def release(self,
                 param: torch.nn.Parameter,
                 access_type: AccessType,
-                reset_to_status: PSTensorStatus = PSTensorStatus.HOLD,
-                allreduce_local_grad: bool = False,
-                remove_remote_data: bool = False):
+                reset_to_status: PSTensorStatus = PSTensorStatus.HOLD):
         """
-        @allreduce_local_grad: 在分布式训练中，对param的tensor进行allreduce
-        @remove_remote_data: 在分布式训练中，删除param tensor的payload
         这个param的data, grad不再需要放在计算设备
         1. 更新状态
         首先更新tensor和chunk的状态
@@ -638,29 +628,6 @@ class PatrickStarClient(object):
                                       device=param.device)
         elif access_type == AccessType.GRAD:
             param.grad = None
-
-        if remove_remote_data:
-            # FWD逻辑，如果chunk计算完毕非本地的chunk被释放
-            if not self.is_local_tensor(
-                    param,
-                    access_type) and self.chunk_list[chunk_id].get_status(
-                    ) == PSChunkStatus.HOLD_AFTER_FWD:
-                logger.debug(
-                    f'rank {rank} fwd remove payload of chunk_id {chunk_id}')
-                self.chunk_list[chunk_id].release_payload()
-                self.set_all_tensors_status_in_chunk(chunk_id,
-                                                     PSTensorStatus.FREE)
-        if allreduce_local_grad:
-            # debug分支，一个DPP等价版本，每个chunk在BWD时候同步
-            # Chunk状态从compute->HOLD_AFTER_BWD被触发
-            if self.chunk_list[chunk_id].get_status(
-            ) == PSChunkStatus.HOLD_AFTER_BWD:
-                world_size = get_world_size()
-                assert self.chunk_list[chunk_id].payload is not None
-                torch.distributed.all_reduce(self.chunk_list[chunk_id].payload,
-                                             op=torch.distributed.ReduceOp.SUM,
-                                             async_op=False)
-                self.chunk_list[chunk_id].payload /= world_size
 
         if self._time_profile:
             global_timer.my_timer.finish_profile('CLIENT_release')
