@@ -279,8 +279,8 @@ class PatrickStarClient(object):
         for chunk_id in chunk_id_list:
             self.chunk_list[chunk_id].unpin()
 
-        assert torch.distributed.is_initialized(
-        ), "torch distributed is not initialized during allgather"
+        assert torch.distributed.is_initialized(), (
+            "torch distributed is not initialized during allgather")
         if self._time_profile:
             global_timer.my_timer.start_profile(
                 'CLIENT_fetch_remote_chunks_allgather')
@@ -331,26 +331,24 @@ class PatrickStarClient(object):
             chunk_id)
         rank = get_rank()
 
-        assert rank < len(
-            chunk_id_list
-        ), f"rank {rank} < {len(chunk_id_list)} {chunk_id_list}"
+        if get_world_size() > 1:
+            local_chunk_id = chunk_id_list[rank]
 
-        local_chunk_id = chunk_id_list[rank]
+            logger.debug(
+                f'rank {rank} access_dist access tensor {param.ps_attr.name} '
+                f'local_chunk_id {local_chunk_id} chunk_id_list {chunk_id_list}')
 
-        logger.debug(
-            f'rank {rank} access_dist access tensor {param.ps_attr.name} '
-            f'local_chunk_id {local_chunk_id} chunk_id_list {chunk_id_list}')
+            # 每个进程把local_chunk_id都弄到本地
+            self.chunk_list.access_chunk(local_chunk_id, compute_device)
 
-        # 每个进程把local_chunk_id都弄到本地
-        self.chunk_list.access_chunk(local_chunk_id, compute_device)
+            # _fetch_remote_chunks不要将local_chunk_id也给换出去了，
+            # 因为它的状态还是HOLD，加上pin。
+            self.chunk_list[local_chunk_id].pin()
 
-        # _fetch_remote_chunks不要将local_chunk_id也给换出去了，因为它的状态还是HOLD，加上pin。
-        self.chunk_list[local_chunk_id].pin()
-
-        self._fetch_remote_chunks(chunk_id_list, local_chunk_id,
-                                  compute_device, param.ps_attr.name,
-                                  training_stage)
-        self.chunk_list[local_chunk_id].unpin()
+            self._fetch_remote_chunks(chunk_id_list, local_chunk_id,
+                                      compute_device, param.ps_attr.name,
+                                      training_stage)
+            self.chunk_list[local_chunk_id].unpin()
 
         # _fetch_remote_chunks可能不执行allgather，此时远端的chunk在本地，需要取到计算设备上。
         self.chunk_list.access_chunk(chunk_id, compute_device)
@@ -362,12 +360,12 @@ class PatrickStarClient(object):
         numel = info.numel
         assert numel == param.ps_attr.numel, f"{numel} vs {param.ps_attr.numel}"
 
-        assert self.chunk_list[
-            chunk_id].payload is not None, f"rank {rank} chunk id {chunk_id}' payload is None'"
-        assert self.chunk_list[
-            chunk_id].payload.device == compute_device, f"rank {rank} chunk id {chunk_id}' payload is not on" \
-                                                        f" {compute_device}, but on" \
-                                                        f" {self.chunk_list[chunk_id].payload.device}"
+        assert self.chunk_list[chunk_id].payload is not None, (
+            f"rank {rank} chunk id {chunk_id}' payload is None'")
+        assert self.chunk_list[chunk_id].payload.device == compute_device, (
+            f"rank {rank} chunk id {chunk_id}' payload is not on "
+            f"{compute_device}, but on "
+            f"{self.chunk_list[chunk_id].payload.device}")
 
         param.ps_attr.set_tensor(
             self.chunk_list[chunk_id].payload.narrow(0, start_offset, numel),

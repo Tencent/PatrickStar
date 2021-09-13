@@ -123,13 +123,13 @@ class ChunkList(object):
         elif chunk.get_device().type != compute_device.type:
             self.prepare_device(compute_device, payload_space)
             chunk.move(compute_device, self.copy_stream)
-            assert chunk.get_device(
-            ).type == compute_device.type, f"chunk device {chunk.get_device()} compute device {compute_device}"
+            assert chunk.get_device().type == compute_device.type, (
+                f"chunk device {chunk.get_device()} compute device {compute_device}")
             return
         else:
             # 目标chunk已经在计算设备上了
             logger.debug(
-                f'access_chunk chunk {chunk_id} directly on {compute_device}')
+                f'access_chunk chunk {chunk_id} already on {compute_device}')
 
     def prepare_device(self, target_device: torch.device, need_bytes: int):
         """
