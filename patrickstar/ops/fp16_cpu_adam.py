@@ -21,7 +21,6 @@ from patrickstar.core import ChunkListType
 from patrickstar.core.const import PSTensorStatus, AccessType, TrainingStage
 from patrickstar.core.parameter import register_param, ParamType
 from patrickstar.manager import PatrickStarManager
-import patrickstar.profiler as profiler
 import patrickstar.utils.global_timer as global_timer
 from patrickstar.utils import logger, get_rank
 from .chunk_io_buff import FP32ChunkReadBuffer, FP16ChunkWriteBuffer
@@ -505,7 +504,7 @@ class FP16Adam(torch.optim.Optimizer):
         mgr = PatrickStarManager()
 
         if mgr.is_warmup_training():
-            profiler.display_access_info(self.client.chunk_list)
+            self.client.chunk_list.display_access_info()
         mgr.reset_metronome()
 
         if self.loss_scaler:

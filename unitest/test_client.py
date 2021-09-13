@@ -20,7 +20,6 @@ from common import distributed_test
 from patrickstar import PatrickStarManager
 from patrickstar.core import PatrickStarClient, AccessType, register_param, ChunkListType
 from patrickstar.core.parameter import ParamType
-import patrickstar.profiler as profiler
 
 
 class TestClientAccess(unittest.TestCase):
@@ -56,7 +55,7 @@ class TestClientAccess(unittest.TestCase):
             self.client.release_data(param)
             self.assertTrue(param.data.numel() == 0)
 
-        profiler.display_chunk_info(self.client.chunk_tensor_index, self.client.chunk_list)
+        self.client.display_chunk_info()
         for param, payload_ref in zip(param_list, param_payload_ref_list):
             real_payload = self.client.access_data(param,
                                                    torch.device('cpu:0'))
@@ -88,7 +87,7 @@ class TestClientAccess(unittest.TestCase):
             real_payload.copy_(param.data)
             self.client.release_data(param)
 
-        profiler.display_chunk_info(self.client.chunk_tensor_index, self.client.chunk_list)
+        self.client.display_chunk_info()
         for param, payload_ref in zip(param_list, param_payload_ref_list):
             real_payload = self.client.access_data(param,
                                                    torch.device('cpu:0'))

@@ -362,3 +362,12 @@ class ChunkList(object):
     def update_status(self, chunk_id, old_status, new_status):
         self.chunk_id_to_chunk_dict_map[chunk_id].update_status(
             old_status, new_status)
+
+    def display_access_info(self):
+        logger.debug('----------- SHOW ACCESS INFO -----------')
+        for chunk_id in self.chunk_type_to_id_list_map[ChunkListType.PARAM_FP16]:
+            chunk = self.chunk_id_to_chunk_dict_map[chunk_id]
+            logger.debug(
+                f'\t {chunk_id} cpu_access_moments {chunk.cpu_access_moments}')
+            logger.debug(
+                f'\t {chunk_id} gpu_access_moments {chunk.gpu_access_moments}')

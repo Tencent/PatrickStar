@@ -14,6 +14,7 @@
 import argparse
 import logging
 import os
+from patrickstar import profiler
 import time
 
 import torch
@@ -22,6 +23,7 @@ from transformers import BertConfig, BertForSequenceClassification
 
 import patrickstar.utils.global_timer as global_timer
 from data_loader import get_bert_data_loader
+from patrickstar.profiler import profiler
 from patrickstar.runtime import initialize_engine
 from patrickstar.utils import see_memory_usage
 from patrickstar.utils.logging import logger
@@ -298,6 +300,9 @@ def test_bert_model_helper(args,
     logger.info(
         f"MAC {total_macs / 1e9} GFlop, model param size: {model_numel / 1e9} B")
 
+
+    if dist_plan == "patrickstar":
+        profiler.start()
     for n, batch in enumerate(data_loader):
         if n == num_steps:
             break
@@ -349,6 +354,10 @@ def test_bert_model_helper(args,
                     f'Step elaspe {step_elapse} s, {total_macs / 1e12 / step_elapse} Tflops')
 
         logger.info(f"End Step {n} with {dist_plan}.\n")
+    if dist_plan == "patrickstar":
+        profiler.end()
+        if rank == 0:
+            profiler.save("profile.pkl")
 
     logging.info("*" * 20)
     return loss_res
