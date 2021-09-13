@@ -136,7 +136,7 @@ def post_sub_module_forward_function(sub_module, client, name):
             continue
         rank = get_rank()
         logger.debug(f'rank {rank} FWD post {name}.{sub_name}')
-        if torch.distributed.is_initialized():
+        if get_world_size() > 1:
             client.release_dist(param,
                                 AccessType.DATA,
                                 PSTensorStatus.HOLD_AFTER_FWD,
@@ -271,7 +271,7 @@ def setup_patrickstar_hooks(module, client):
         def hook(*ignore):
             client.optimizer.check_overflow(param)
             # Here we use gloo backend group for the cpu tensors (embedding).
-            if torch.distributed.is_initialized():
+            if get_world_size() > 1:
                 global_timer.my_timer.start_profile('HOOK_torch_allreduce')
                 world_size = get_world_size()
                 torch.distributed.all_reduce(param.grad,
