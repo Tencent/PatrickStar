@@ -18,25 +18,34 @@ import fire
 import matplotlib.pyplot as plt
 
 
-def visualize_profile(filename):
+def visualize_profile(filename, memory_type="GPU"):
+    memory_type = memory_type.upper()
+    if memory_type not in ["CPU", "GPU"]:
+        raise ValueError(f"memory_type {memory_type} not supported.")
+
     # load profile data
     with open(filename, "rb") as f:
         dict = pickle.load(f)
 
-    raw_gpu_memory_used = dict["gpu_memory_used"]
-    raw_gpu_chunk_memory_used = dict["gpu_chunk_memory_used"]
+    if memory_type == "GPU":
+        raw_memory_used = dict["gpu_memory_used"]
+        raw_chunk_memory_used = dict["gpu_chunk_memory_used"]
+    else:
+        raw_memory_used = dict["cpu_memory_used"]
+        raw_chunk_memory_used = dict["cpu_chunk_memory_used"]
+
     raw_stage_convert_time = dict["stage_convert_time"]
 
-    if len(raw_gpu_memory_used) == 0:
+    if len(raw_memory_used) == 0:
         logging.warning("Empty profile file.")
 
     # process profile data
-    start_time = raw_gpu_memory_used[0][1]
+    start_time = raw_memory_used[0][1]
 
-    # moments = [data[0] for data in raw_gpu_memory_used]
-    time_stamps = [data[1] - start_time for data in raw_gpu_memory_used]
-    gpu_memory = [data[2] for data in raw_gpu_memory_used]
-    gpu_chunk_memory = [data[2] for data in raw_gpu_chunk_memory_used]
+    # moments = [data[0] for data in raw_memory_used]
+    time_stamps = [data[1] - start_time for data in raw_memory_used]
+    gpu_memory = [data[2] for data in raw_memory_used]
+    gpu_chunk_memory = [data[2] for data in raw_chunk_memory_used]
 
     gpu_memory = [mem / 1024 / 1024 for mem in gpu_memory]
     gpu_chunk_memory = [mem / 1024 / 1024 for mem in gpu_chunk_memory]
@@ -63,7 +72,7 @@ def visualize_profile(filename):
             facecolor = 'tab:purple'
         else:
             raise RuntimeError(f"Unexpected stage value: {stage_types[i]}")
-        plt.axvspan(start, end, facecolor=facecolor, alpha=0.2)
+        plt.axvspan(start, end, facecolor=facecolor, alpha=0.3)
     # The last Adam stage
     plt.axvspan(stage_convert_time[-1], time_stamps[-1],
                 facecolor='tab:purple', alpha=0.2)
@@ -74,7 +83,11 @@ def visualize_profile(filename):
 
     plt.xlabel("time/s")
     plt.ylabel("memory/MB")
-    plt.title("GPU memory by time")
+
+    if memory_type == "GPU":
+        plt.title("GPU memory by time")
+    else:
+        plt.title("CPU memory by time")
 
     plt.show()
 

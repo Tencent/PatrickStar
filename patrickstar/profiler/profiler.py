@@ -21,6 +21,8 @@ class Profiler(metaclass=SingletonMeta):
         self._nested_level = 0
         self.gpu_memory_used = []
         self.gpu_chunk_memory_used = []
+        self.cpu_memory_used = []
+        self.cpu_chunk_memory_used = []
         self.stage_convert_time = []
 
     def start(self):
@@ -36,6 +38,8 @@ class Profiler(metaclass=SingletonMeta):
         return {
             "gpu_memory_used": self.gpu_memory_used,
             "gpu_chunk_memory_used": self.gpu_chunk_memory_used,
+            "cpu_memory_used": self.cpu_memory_used,
+            "cpu_chunk_memory_used": self.cpu_chunk_memory_used,
             "stage_convert_time": self.stage_convert_time,
         }
 

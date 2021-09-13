@@ -188,6 +188,11 @@ class PatrickStarManager(metaclass=SingletonMeta):
                 (cur_mom, timestamp, gpu_used))
             profiler.gpu_chunk_memory_used.append(
                 (cur_mom, timestamp, self.gpu_chunk_used_mem))
+            cpu_used = get_sys_memory_used(cpu_device)
+            profiler.cpu_memory_used.append(
+                (cur_mom, timestamp, cpu_used))
+            profiler.cpu_chunk_memory_used.append(
+                (cur_mom, timestamp, self.cpu_chunk_used_mem))
 
         if self.warmup:
             self.gpu_used_list.append(gpu_used)

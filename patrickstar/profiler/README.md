@@ -16,7 +16,7 @@ profiler.save("file-to-save-profile-data.pkl")
 可以用 `tools/profile_visualizer.py` 来可视化保存的 profile data：
 
 ```bash
-python tools/profile_visualizer.py file-to-save-profile-data.pkl
+python tools/profile_visualizer.py file-to-save-profile-data.pkl --memory_type=GPU
 ```
 
 可以得到下图这样的结果：
@@ -24,4 +24,3 @@ python tools/profile_visualizer.py file-to-save-profile-data.pkl
 ![GPT3_8B model memory visualization](../../doc/profiler/GPT3_8B_memory.png)
 
 其中红色曲线为模型实际使用的显存，蓝色为受 chunk 管理使用的显存。背景颜色中的绿、蓝、紫依次代表前向、反向、优化器更新 3 个训练阶段。
-
