@@ -16,7 +16,6 @@ from typing import List
 import torch
 
 from patrickstar.utils import logger, get_rank
-from .chunk_list import ChunkList
 from .const import AccessType, PSTensorStatus, ChunkListType
 from .parameter import is_param_registered
 from .tensor_stub import TensorInfo
