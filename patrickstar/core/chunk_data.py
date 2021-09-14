@@ -11,11 +11,13 @@
 # permissions and limitations under the License.
 # See the AUTHORS file for names of contributors.
 
+import time
 import torch
 
-import patrickstar.utils.global_timer as global_timer
 from patrickstar.manager import PatrickStarManager
+from patrickstar.profiler import profiler
 from patrickstar.utils import logger, getsizeof
+import patrickstar.utils.global_timer as global_timer
 from .const import PSTensorStatus, PSChunkStatus
 
 
@@ -138,6 +140,10 @@ class Chunk(object):
         mgr = PatrickStarManager()
         mgr.add(device.type, self.get_payload_space())
 
+        if profiler.started():
+            profiler.chunk_life_cycle[self.chunk_id]["life_cycle"].append(
+                (time.time(), "allocate", device))
+
         if self._time_profile:
             global_timer.my_timer.finish_profile('CHUNK_allocate_payload')
 
@@ -152,6 +158,10 @@ class Chunk(object):
         # 删除chunk的内存
         del self.payload
         self.payload = None
+
+        if profiler.started():
+            profiler.chunk_life_cycle[self.chunk_id]["life_cycle"].append(
+                (time.time(), "release", None))
 
     def update_status(self, old_status, new_status):
         """
@@ -217,7 +227,6 @@ class Chunk(object):
         )
 
         # TODO(jiaruifang)异步
-        mgr = PatrickStarManager()
         if target_device.type == 'cpu':
             pinned_payload_cpu = torch.empty(self.payload.shape,
                                               dtype=self.payload.dtype,
@@ -240,6 +249,14 @@ class Chunk(object):
                 global_timer.my_timer.finish_profile('chunk_gpu_cpu_move')
                 global_timer.data_move_cnter.update('chunk_gpu_cpu_move',
                                                     self.get_payload_space())
+
+        if profiler.started():
+            if len(profiler.chunk_life_cycle[self.chunk_id]["life_cycle"]) == 0:
+                raise RuntimeError(
+                    f"Chunk {self.chunk_id} allocation time is not recorded. "
+                    f"You may need to put profiler.start() before initialize_engine ")
+            profiler.chunk_life_cycle[self.chunk_id]["life_cycle"].append(
+                (time.time(), "move", target_device))
 
     def get_device(self):
         if self.payload is not None:

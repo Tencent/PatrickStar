@@ -17,11 +17,11 @@ from typing import List
 import torch
 from torch import Tensor
 
-import patrickstar.utils.global_timer as global_timer
 from patrickstar.core import ChunkListType
 from patrickstar.core.const import PSTensorStatus, AccessType, TrainingStage
 from patrickstar.core.parameter import register_param, ParamType
 from patrickstar.manager import PatrickStarManager
+import patrickstar.utils.global_timer as global_timer
 from patrickstar.utils import logger, get_rank
 from .chunk_io_buff import FP32ChunkReadBuffer, FP16ChunkWriteBuffer
 from .op_builder import CPUAdamBuilder

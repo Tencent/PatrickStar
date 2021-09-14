@@ -16,10 +16,11 @@ from typing import List
 
 import torch
 
-import patrickstar.utils.global_timer as global_timer
 from patrickstar.core.const import ChunkListType
 from patrickstar.manager import PatrickStarManager
+from patrickstar.profiler import profiler
 from patrickstar.utils import logger, get_rank, get_world_size
+import patrickstar.utils.global_timer as global_timer
 from .chunk_data import Chunk
 from .const import PSChunkStatus
 
@@ -267,6 +268,9 @@ class ChunkList(object):
         world_size = get_world_size()
         global_rank = get_rank()
         self.chunk_type_to_id_list_map[chunk_type].append(chunk_id)
+        if profiler.started():
+            profiler.chunk_life_cycle[chunk_id] = {
+                "type": chunk_type, "life_cycle": []}
         tmp_chunk_list_len = len(self.chunk_type_to_id_list_map[chunk_type])
         comm_group_offset = (tmp_chunk_list_len - 1) % world_size
         comm_group_idx = (tmp_chunk_list_len - 1) // world_size
@@ -351,7 +355,6 @@ class ChunkList(object):
             f'real moved_list {moved_list}')
         # 无法腾出足够空间，抛出异常
         if moved_bytes < still_need_bytes:
-            # self.visit()
             raise RuntimeError(
                 f'device {target_device} still needs {still_need_bytes / 1e6} MB, '
                 f'but there is not enough space on it, only {moved_bytes / 1e6} MB available. '
@@ -364,21 +367,11 @@ class ChunkList(object):
         self.chunk_id_to_chunk_dict_map[chunk_id].update_status(
             old_status, new_status)
 
-    def visit(self):
-        logger.info('* chunk list visit results:')
-        logger.info('** chunk_id, device, size(B), ' 'type, device, status')
-        for chunk_id, chunk in self.chunk_id_to_chunk_dict_map.items():
-            logger.info(
-                f'** {chunk_id}, {chunk.get_device()}, {chunk.get_chunk_space()}, '
-                f'{chunk.data_type}, {chunk.get_device()}, {chunk.get_status()}'
-            )
-
     def display_access_info(self):
-        if get_rank() == 0:
-            logger.info('----------- SHOW ACCESS INFO -----------')
-            for chunk_id in self.chunk_type_to_id_list_map[ChunkListType.PARAM_FP16]:
-                chunk = self.chunk_id_to_chunk_dict_map[chunk_id]
-                logger.debug(
-                    f'\t {chunk_id} cpu_access_moments {chunk.cpu_access_moments}')
-                logger.debug(
-                    f'\t {chunk_id} gpu_access_moments {chunk.gpu_access_moments}')
+        logger.debug('----------- SHOW ACCESS INFO -----------')
+        for chunk_id in self.chunk_type_to_id_list_map[ChunkListType.PARAM_FP16]:
+            chunk = self.chunk_id_to_chunk_dict_map[chunk_id]
+            logger.debug(
+                f'\t {chunk_id} cpu_access_moments {chunk.cpu_access_moments}')
+            logger.debug(
+                f'\t {chunk_id} gpu_access_moments {chunk.gpu_access_moments}')

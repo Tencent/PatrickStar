@@ -11,10 +11,12 @@
 # permissions and limitations under the License.
 # See the AUTHORS file for names of contributors.
 
+import time
 import psutil
 import torch
 
 from patrickstar.core.const import TrainingStage
+from patrickstar.profiler import profiler
 from patrickstar.utils import get_sys_memory_used, get_world_size, SingletonMeta, logger
 
 
@@ -118,6 +120,8 @@ class PatrickStarManager(metaclass=SingletonMeta):
         return self._start_training and not self.warmup
 
     def set_training_stage(self, training_stage: TrainingStage):
+        if profiler.started():
+            profiler.stage_convert_time.append((time.time(), training_stage))
         self._training_stage = training_stage
         logger.info(f'Enter {self._training_stage}')
 
@@ -176,6 +180,19 @@ class PatrickStarManager(metaclass=SingletonMeta):
         gpu_device = torch.device(f'cuda:{rank}')
         cpu_device = torch.device('cpu:0')
         gpu_used = get_sys_memory_used(gpu_device)
+
+        if profiler.started():
+            timestamp = time.time()
+            cur_mom = self.metronome.moment()
+            profiler.gpu_memory_used.append(
+                (cur_mom, timestamp, gpu_used))
+            profiler.gpu_chunk_memory_used.append(
+                (cur_mom, timestamp, self.gpu_chunk_used_mem))
+            cpu_used = get_sys_memory_used(cpu_device)
+            profiler.cpu_memory_used.append(
+                (cur_mom, timestamp, cpu_used))
+            profiler.cpu_chunk_memory_used.append(
+                (cur_mom, timestamp, self.cpu_chunk_used_mem))
 
         if self.warmup:
             self.gpu_used_list.append(gpu_used)
@@ -307,26 +324,3 @@ class PatrickStarManager(metaclass=SingletonMeta):
                         cur_mom]
                     return min(next_mom_ava_mem, cur_mom_ava_mem
                                ) - world_size * 2 * self._default_chunk_size
-
-    def show_mem_curve(self):
-        with open('gpu_used_curve.txt', 'w') as fh:
-            fh.write(
-                f'gpu_chunk_used_list {len(self.gpu_chunk_used_list)}\n'
-                f' {list(map(lambda x: x / 1e6, self.gpu_chunk_used_list))}\n')
-            fh.write(
-                f'gpu_sys_used_list {list(map(lambda x: x / 1e6, self.gpu_sys_used_list))}\n'
-            )
-            fh.write(
-                f'gpu_used_list \n {list(map(lambda x: x / 1e6, self.gpu_used_list))}\n'
-            )
-
-        with open('cpu_used_curve.txt', 'w') as fh:
-            fh.write(
-                f'cpu_chunk_used_list {len(self.gpu_chunk_used_list)}\n'
-                f' {list(map(lambda x: x / 1e6, self.cpu_chunk_used_list))}\n')
-            # fh.write(
-            #     f'cpu_sys_used_list {list(map(lambda x: x/1e6, self.cpu_sys_used_list))}\n'
-            # )
-            # fh.write(
-            #     f'cpu_used_list \n {list(map(lambda  x: x/1e6, self.cpu_used_list))}\n'
-            # )

@@ -75,7 +75,8 @@ class PatrickStarClient(object):
         """
         self.module = model
         self.optimizer = optimizer
-        self.chunk_tensor_index.print_chunk_list_info(self.chunk_list)
+        if get_rank() == 0:
+            self.display_chunk_info()
         self.register_model_hook(model)
 
     def append_dummy_chunk(self, data_type: torch.dtype,
@@ -649,10 +650,30 @@ class PatrickStarClient(object):
         """
         raise NotImplementedError
 
-    def visit(self):
-        rank = get_rank()
-        for idx, chunk in self.chunk_list.generate_chunk():
-            logger.info(
-                f"rank {rank} chunk {idx} on device {chunk.get_device()} status {chunk.get_status()}"
-            )
-            # chunk.visit(self.chunk_tensor_index)
+    def display_chunk_info(self):
+        logger.info(f'Print chunk list info.')
+
+        overall_size = 0
+        for type, type_chunk_list in self.chunk_tensor_index.chunk_type_to_chunk_id_list_map.items():
+            logger.info(f'Chunk list {type}')
+            for chunk_id in type_chunk_list:
+                chunk = self.chunk_list[chunk_id]
+                comm_group_id, comm_group_offset, _ = self.chunk_tensor_index.chunk_id_to_comm_group_map[chunk_id]
+                assert comm_group_id is not None
+
+                logger.info(
+                    f'Chunk id {chunk.chunk_id}, status {chunk.get_status()}, '
+                    f'comm group {comm_group_id, comm_group_offset}, '
+                    f'capacity {chunk.capacity / 1024 / 1024} M elems, '
+                    f'dtype {chunk.data_type} device {chunk.get_device()}'
+                )
+                for info in self.chunk_tensor_index.generate_tensor_info_in_order(chunk_id):
+                    assert info.chunk_id == chunk_id, f'{info.chunk_id} vs {chunk_id}'
+                    logger.debug(
+                        f'** tensor: chunk_id {chunk_id}, start {info.start_offset}, '
+                        f'end {info.start_offset + info.numel}, size {info.numel}, '
+                        f'tensor_id {info.tensor_id}, status {info.status()}, name {info.tensor_name}'
+                    )
+                overall_size += chunk.get_chunk_space()
+
+        logger.info(f'OVERALL CHUNK SIZE {overall_size / 1024 / 1024 / 1024} GB')
