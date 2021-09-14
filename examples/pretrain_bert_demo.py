@@ -14,7 +14,6 @@
 import argparse
 import logging
 import os
-from patrickstar import profiler
 import time
 
 import torch
@@ -253,6 +252,7 @@ def test_bert_model_helper(args,
             "use_cpu_embedding": args.use_cpu_embedding
         }
 
+        profiler.start()
         model, optimizer = initialize_engine(model_func=model_func,
                                              local_rank=rank,
                                              config=config)
@@ -300,9 +300,6 @@ def test_bert_model_helper(args,
     logger.info(
         f"MAC {total_macs / 1e9} GFlop, model param size: {model_numel / 1e9} B")
 
-
-    if dist_plan == "patrickstar":
-        profiler.start()
     for n, batch in enumerate(data_loader):
         if n == num_steps:
             break

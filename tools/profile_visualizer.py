@@ -13,19 +13,17 @@
 
 import logging
 import pickle
+import sys
 
 import fire
 import matplotlib.pyplot as plt
+import matplotlib.patches as patches
 
 
-def visualize_profile(filename, memory_type="GPU"):
+def visualize_memory(dict, memory_type="GPU"):
     memory_type = memory_type.upper()
     if memory_type not in ["CPU", "GPU"]:
         raise ValueError(f"memory_type {memory_type} not supported.")
-
-    # load profile data
-    with open(filename, "rb") as f:
-        dict = pickle.load(f)
 
     if memory_type == "GPU":
         raw_memory_used = dict["gpu_memory_used"]
@@ -90,6 +88,80 @@ def visualize_profile(filename, memory_type="GPU"):
         plt.title("CPU memory by time")
 
     plt.show()
+
+
+def visualize_access(dict):
+    raw_access_info = dict["chunk_life_cycle"]
+
+    start_time = sys.float_info.max
+    for chunk_id, chunk_access_info in raw_access_info.items():
+        if len(chunk_access_info["life_cycle"]) == 0:
+            continue
+        start_time = min(start_time, chunk_access_info["life_cycle"][0][0])
+
+    # TODO(zilinzhu) Currently the chunk id is not correspond to
+    # the index in acess_info.
+    access_info = {}
+    for chunk_id, chunk_access_info in raw_access_info.items():
+        chunk_access_info = raw_access_info[chunk_id]
+        chunk_type = chunk_access_info["type"]
+        raw_life_cycle = chunk_access_info["life_cycle"]
+        # Do not show the empty chunk of remote optimizer states.
+        if len(raw_life_cycle) == 0:
+            continue
+        if chunk_type not in access_info:
+            access_info[chunk_type] = []
+        life_cycle = [(data[0] - start_time, data[2]) for data in raw_life_cycle]
+        if life_cycle is not None:
+            access_info[chunk_type].append(life_cycle)
+
+    plt.style.use('ggplot')
+    _, axis = plt.subplots()
+
+    end_time = dict["end_time"] - start_time
+    offset = 0
+    for chunk_type, type_access_info in access_info.items():
+        for i in range(len(type_access_info)):
+            chunk_access_info = type_access_info[i]
+            for j in range(len(chunk_access_info)):
+                timestamp, device = chunk_access_info[j]
+                if j + 1 < len(chunk_access_info):
+                    next_timestamp, _ = chunk_access_info[j + 1]
+                else:
+                    next_timestamp = end_time
+                if device is None:
+                    color = "#fff"
+                elif device.type == "cpu":
+                    color = "#e9616c"
+                else:
+                    color = "#3385fe"
+                rect = patches.Rectangle(
+                    (timestamp, i + offset + 1), next_timestamp - timestamp, 1, color=color,
+                    alpha=1 if device is not None else 0)
+                axis.add_patch(rect)
+        offset += len(type_access_info)
+
+    axis.set_xlim([0, end_time])
+    axis.set_ylim([0, offset])
+
+    plt.xlabel("time/s")
+    plt.ylabel("fp16; fp32; momentum; variance")
+    plt.title("Chunk location by time")
+
+    plt.show()
+
+
+def visualize_profile(filename, fig_type="memory", memory_type="GPU"):
+    # load profile data
+    with open(filename, "rb") as f:
+        dict = pickle.load(f)
+
+    if fig_type == "memory":
+        visualize_memory(dict, memory_type=memory_type)
+    elif fig_type == "access":
+        visualize_access(dict)
+    else:
+        raise ValueError(f"fig_type {fig_type} not supported.")
 
 
 if __name__ == "__main__":

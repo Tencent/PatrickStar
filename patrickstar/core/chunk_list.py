@@ -16,10 +16,11 @@ from typing import List
 
 import torch
 
-import patrickstar.utils.global_timer as global_timer
 from patrickstar.core.const import ChunkListType
 from patrickstar.manager import PatrickStarManager
+from patrickstar.profiler import profiler
 from patrickstar.utils import logger, get_rank, get_world_size
+import patrickstar.utils.global_timer as global_timer
 from .chunk_data import Chunk
 from .const import PSChunkStatus
 
@@ -267,6 +268,9 @@ class ChunkList(object):
         world_size = get_world_size()
         global_rank = get_rank()
         self.chunk_type_to_id_list_map[chunk_type].append(chunk_id)
+        if profiler.started():
+            profiler.chunk_life_cycle[chunk_id] = {
+                "type": chunk_type, "life_cycle": []}
         tmp_chunk_list_len = len(self.chunk_type_to_id_list_map[chunk_type])
         comm_group_offset = (tmp_chunk_list_len - 1) % world_size
         comm_group_idx = (tmp_chunk_list_len - 1) // world_size
