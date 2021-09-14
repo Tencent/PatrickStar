@@ -192,9 +192,10 @@ class Chunk(object):
                 tensor_num += v
         return self._status_dict[status] == tensor_num
 
-    def move(self, target_device: torch.device, copy_stream, is_async=False):
+    def move(self, target_device: torch.device, copy_stream):
         """
         将这个chunk移动到target_device上。前提条件，target_device已经腾出足够的空间。
+        异步拷贝的情况下可能会需要 copy_stream
         """
         if self.get_device() is None:
             logger.warning(f"chunk move payload None to {target_device}")
@@ -217,51 +218,17 @@ class Chunk(object):
 
         # TODO(jiaruifang)异步
         mgr = PatrickStarManager()
-        mgr.delete(self.get_device().type, self.get_payload_space())
-        if is_async:
-            if target_device.type == 'cpu':
-                pinned_payload_cpu = torch.empty(self.payload.shape,
-                                                 dtype=self.payload.dtype,
-                                                 device='cpu:0',
-                                                 pin_memory=True)
-                torch.cuda.synchronize()
-                copy_stream.synchronize()
-                with torch.cuda.stream(copy_stream):
-                    pinned_payload_cpu.copy_(self.payload, non_blocking=True)
-                copy_stream.synchronize()
-                torch.cuda.synchronize()
-                self.payload = pinned_payload_cpu
-                # assert self.payload.pin_memory is True
-            elif target_device.type == 'cuda':
-                old_payload = self.payload
-                self.payload = torch.empty(self.payload.shape,
-                                           dtype=self.payload.dtype,
-                                           device=target_device)
-                copy_stream.synchronize()
-                # NOTE(jiaruifang) it is necessary
-                torch.cuda.synchronize()
-                copy_stream.synchronize()
-                with torch.cuda.stream(copy_stream):
-                    self.payload.copy_(old_payload, non_blocking=True)
-                copy_stream.synchronize()
-                torch.cuda.synchronize()
+        if target_device.type == 'cpu':
+            pinned_payload_cpu = torch.empty(self.payload.shape,
+                                              dtype=self.payload.dtype,
+                                              device='cpu:0',
+                                              pin_memory=True)
+            pinned_payload_cpu.copy_(self.payload)
+            self.payload = pinned_payload_cpu
+        elif target_device.type == 'cuda':
+            self.payload = self.payload.to(target_device)
 
-                assert (
-                    torch.sum(old_payload.to(target_device) - self.payload)
-                ) < 1e-3, f'old payload sum {torch.sum(old_payload)}, new payload sum {torch.sum(self.payload)}'
-            else:
-                raise RuntimeError
-        else:
-            if target_device.type == 'cpu':
-                pinned_payload_cpu = torch.empty(self.payload.shape,
-                                                 dtype=self.payload.dtype,
-                                                 device='cpu:0',
-                                                 pin_memory=True)
-                pinned_payload_cpu.copy_(self.payload)
-                self.payload = pinned_payload_cpu
-            elif target_device.type == 'cuda':
-                self.payload = self.payload.to(target_device)
-
+        mgr.delete(src_device.type, self.get_payload_space())
         mgr.add(target_device.type, self.get_payload_space())
 
         if self._time_profile:
