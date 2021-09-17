@@ -144,7 +144,11 @@ class PatrickStarEngine(Module):
 
     def state_dict(self, destination=None, prefix="", keep_vars=False):
         return state_dict(
-            self, self.client, destination=None, prefix="", keep_vars=False
+            self,
+            self.client,
+            destination=destination,
+            prefix=prefix,
+            keep_vars=keep_vars,
         )
 
     def load_state_dict(self, state_dict, strict=False):
