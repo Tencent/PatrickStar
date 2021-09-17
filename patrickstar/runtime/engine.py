@@ -19,10 +19,12 @@ from patrickstar.manager import PatrickStarManager
 from patrickstar.ops import FP16Adam
 from patrickstar.utils import logger, global_timer
 
+from .checkpoint import state_dict, load_state_dict
+
 
 class PatrickStarEngine(Module):
-    r"""DeepSpeed engine for training.
-    """
+    r"""DeepSpeed engine for training."""
+
     def __init__(self, model, client, config):
         super(PatrickStarEngine, self).__init__()
         self.module = model
@@ -30,18 +32,20 @@ class PatrickStarEngine(Module):
 
         self.client = client
 
-        prefer_device = torch.device(f'cpu:0')
+        prefer_device = torch.device("cpu:0")
 
         if client.local_rank == 0:
-            logger.info(f'ADAM on device {prefer_device}')
+            logger.info(f"ADAM on device {prefer_device}")
 
         if config is not None:
             # Optimizer configuration
             optim_config = config["optimizer"]
             optim_type = optim_config["type"]
             if optim_type not in ["Adam", "AdamW"]:
-                raise ValueError(f"Only support Adam and AdamW at the moment. "
-                                 f"Get optimizer type {optim_type}")
+                raise ValueError(
+                    f"Only support Adam and AdamW at the moment. "
+                    f"Get optimizer type {optim_type}"
+                )
             optim_params = optim_config["params"]
 
             # Loss scaler configuration
@@ -49,15 +53,15 @@ class PatrickStarEngine(Module):
                 self.loss_scaler = None
             else:
                 loss_scale_config = config["fp16"]
-                assert loss_scale_config[
-                    "enabled"], "Must enable fp16 training."
+                assert loss_scale_config["enabled"], "Must enable fp16 training."
                 loss_scale = loss_scale_config["loss_scale"]
                 if loss_scale == 0:
                     self.loss_scaler = DynamicLossScaler(
-                        init_scale=2**loss_scale_config["initial_scale_power"],
+                        init_scale=2 ** loss_scale_config["initial_scale_power"],
                         scale_factor=loss_scale_config["hysteresis"],
                         scale_window=loss_scale_config["loss_scale_window"],
-                        min_scale=loss_scale_config["min_loss_scale"])
+                        min_scale=loss_scale_config["min_loss_scale"],
+                    )
                 else:
                     self.loss_scaler = LossScaler(loss_scale)
 
@@ -74,7 +78,7 @@ class PatrickStarEngine(Module):
                 "betas": (0.9, 0.999),
                 "eps": 1e-8,
                 "weight_decay": 0,
-                "use_hybrid_adam": True
+                "use_hybrid_adam": True,
             }
             self.loss_scaler = None
             self.gradient_clipping = -1
@@ -90,10 +94,11 @@ class PatrickStarEngine(Module):
             weight_decay=optim_params["weight_decay"],
             use_adamw=(optim_type == "AdamW"),
             prefer_device=prefer_device,
-            use_hybrid_adam=optim_params["use_hybrid_adam"])
+            use_hybrid_adam=optim_params["use_hybrid_adam"],
+        )
 
         self.client.init(self.module, self.optimizer)
-        logger.info('init PatrickStarEngine')
+        logger.info("init PatrickStarEngine")
 
     def forward(self, *inputs, **kwargs):
         r"""Execute forward propagation
@@ -112,7 +117,8 @@ class PatrickStarEngine(Module):
         for chunk_id, chunk in self.client.chunk_list.generate_chunk():
             if chunk.get_status() == PSChunkStatus.HOLD_AFTER_FWD:
                 self.client.set_all_tensors_status_in_chunk(
-                    chunk_id, PSTensorStatus.HOLD)
+                    chunk_id, PSTensorStatus.HOLD
+                )
         global_timer.my_timer.finish_profile("FWD")
         return loss
 
@@ -135,3 +141,11 @@ class PatrickStarEngine(Module):
             loss.backward()
         mgr.update_margin_mem()
         global_timer.my_timer.finish_profile("BWD")
+
+    def state_dict(self, destination=None, prefix="", keep_vars=False):
+        return state_dict(
+            self, self.client, destination=None, prefix="", keep_vars=False
+        )
+
+    def load_state_dict(self, state_dict, strict=False):
+        return load_state_dict(self, self.client, state_dict=state_dict, strict=strict)

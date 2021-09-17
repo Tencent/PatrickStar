@@ -38,20 +38,21 @@ def initialize_engine(model_func, local_rank, config=None):
         release_after_init = True
         use_cpu_embedding = True
     else:
-        default_chunk_size = config.pop("default_chunk_size",
-                                        DEFAULT_CHUNK_SIZE)
-        release_after_init = config.pop("release_after_init", False)
-        use_cpu_embedding = config.pop("use_cpu_embedding", True)
+        default_chunk_size = config["default_chunk_size"]
+        release_after_init = config["release_after_init"]
+        use_cpu_embedding = config["use_cpu_embedding"]
 
     mgr = PatrickStarManager(local_rank=local_rank)
-    client = PatrickStarClient(rank=local_rank,
-                               default_chunk_size=default_chunk_size,
-                               is_fp16=True)
+    client = PatrickStarClient(
+        rank=local_rank, default_chunk_size=default_chunk_size, is_fp16=True
+    )
 
-    with PSPreProcessCtx(client=client,
-                         dtype=torch.float,
-                         release_after_init=release_after_init,
-                         use_cpu_embedding=use_cpu_embedding):
+    with PSPreProcessCtx(
+        client=client,
+        dtype=torch.float,
+        release_after_init=release_after_init,
+        use_cpu_embedding=use_cpu_embedding,
+    ):
         model = model_func()
 
     engine = PatrickStarEngine(model=model, client=client, config=config)
@@ -60,6 +61,7 @@ def initialize_engine(model_func, local_rank, config=None):
     mgr = PatrickStarManager()
     mgr.start_train(
         param_fp16_chunk_size=client.param_fp16_chunks_max_mem_usage(),
-        chunk_size=client.default_chunk_size)
+        chunk_size=client.default_chunk_size,
+    )
 
     return (engine, engine.optimizer)
