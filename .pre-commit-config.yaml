@@ -12,10 +12,14 @@ repos:
     hooks:
     -   id: clang-format
         files: \.(c|cc|cxx|cpp|frag|glsl|h|hpp|hxx|ih|ispc|ipp|java|js|m|mm|proto|vert|cu)$
--   repo: https://github.com/pre-commit/mirrors-yapf
-    rev: 'v0.28.0'
+-   repo: https://github.com/ambv/black
+    rev: stable
     hooks:
-        -   id: yapf
+    - id: black
+-   repo: https://github.com/pycqa/flake8
+    rev: ''  # pick a git hash / tag to point to
+    hooks:
+    -   id: flake8
 -   repo: https://github.com/Lucas-C/pre-commit-hooks
     rev: "v1.1.7"
     hooks:
