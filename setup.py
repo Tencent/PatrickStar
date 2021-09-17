@@ -11,36 +11,35 @@
 # permissions and limitations under the License.
 # See the AUTHORS file for names of contributors.
 
-from setuptools import setup
+from setuptools import setup, find_packages
 
 
 def fetch_requirements(path):
-    with open(path, 'r') as fd:
+    with open(path, "r") as fd:
         return [r.strip() for r in fd.readlines()]
 
 
-install_requires = fetch_requirements('requirements.txt')
+install_requires = fetch_requirements("requirements.txt")
 
 setup(
-    name='patrickstar',
-    version='0.1',
-    description='PatrickStart library',
-    long_description=
-    'PatrickStar: Parallel Training of Large Language Models via a Chunk-based Parameter Server',
-    long_description_content_type='text/markdown',
-    author='Jiarui Fang',
-    author_email='fangjiarui123@gmail.com',
-    url='https://fangjiarui.github.io/',
+    name="patrickstar",
+    version="0.1",
+    description="PatrickStart library",
+    long_description="PatrickStar: Parallel Training of Large Language Models via a Chunk-based Parameter Server",
+    long_description_content_type="text/markdown",
+    author="Jiarui Fang",
+    author_email="fangjiarui123@gmail.com",
+    url="https://fangjiarui.github.io/",
     install_requires=install_requires,
     # extras_require=extras_require,
-    packages=['patrickstar'],
+    packages=find_packages(),
     include_package_data=True,
     classifiers=[
-        'Programming Language :: Python :: 3.6',
-        'Programming Language :: Python :: 3.7',
-        'Programming Language :: Python :: 3.8'
+        "Programming Language :: Python :: 3.6",
+        "Programming Language :: Python :: 3.7",
+        "Programming Language :: Python :: 3.8",
     ],
-    license='BSD',
+    license="BSD",
     # ext_modules=ext_modules,
     # cmdclass=cmdclass
 )
