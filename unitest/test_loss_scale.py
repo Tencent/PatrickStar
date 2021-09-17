@@ -22,25 +22,29 @@ from examples.data_loader import get_bert_data_loader
 from patrickstar.runtime import initialize_engine
 
 
-def test_bert_model(method,
-                    batch_size=32,
-                    hidden_dim=768,
-                    sequence_length=512,
-                    num_layer=12,
-                    num_head=12,
-                    stop_step=10):
+def test_bert_model(
+    method,
+    batch_size=32,
+    hidden_dim=768,
+    sequence_length=512,
+    num_layer=12,
+    num_head=12,
+    stop_step=10,
+):
     # Avoid gpu0 use more memory.
     # https://discuss.pytorch.org/t/extra-10gb-memory-on-gpu-0-in-ddp-tutorial/118113
     rank = torch.distributed.get_rank()
     torch.cuda.empty_cache()
 
-    device = torch.device(f'cuda:{torch.cuda.current_device()}')
+    device = torch.device(f"cuda:{torch.cuda.current_device()}")
 
-    cfg = BertConfig(hidden_size=hidden_dim,
-                     intermediate_size=hidden_dim * 4,
-                     max_position_embeddings=sequence_length,
-                     num_attention_heads=num_head,
-                     num_hidden_layers=num_layer)
+    cfg = BertConfig(
+        hidden_size=hidden_dim,
+        intermediate_size=hidden_dim * 4,
+        max_position_embeddings=sequence_length,
+        num_attention_heads=num_head,
+        num_hidden_layers=num_layer,
+    )
 
     lr = 0.001
     betas = (0.9, 0.999)
@@ -66,8 +70,8 @@ def test_bert_model(method,
                     "betas": betas,
                     "eps": eps,
                     "weight_decay": weight_decay,
-                    "use_hybrid_adam": True
-                }
+                    "use_hybrid_adam": True,
+                },
             },
             "fp16": {
                 "enabled": True,
@@ -75,25 +79,23 @@ def test_bert_model(method,
                 "initial_scale_power": initial_scale_power,
                 "loss_scale_window": 1000,
                 "hysteresis": 2,
-                "min_loss_scale": 1
+                "min_loss_scale": 1,
             },
             "default_chunk_size": 32 * 1024 * 1024,
-            "use_fake_dist": True,
-            "use_cpu_embedding": True
+            "release_after_init": False,
+            "use_cpu_embedding": True,
         }
 
-        model, optimizer = initialize_engine(model_func=model_func,
-                                             local_rank=rank,
-                                             config=config)
+        model, optimizer = initialize_engine(
+            model_func=model_func, local_rank=rank, config=config
+        )
     else:
         model = BertForSequenceClassification(cfg)
         model.cuda()
         model.train()
-        optimizer = torch.optim.Adam(model.parameters(),
-                                     lr=lr,
-                                     betas=betas,
-                                     eps=eps,
-                                     weight_decay=weight_decay)
+        optimizer = torch.optim.Adam(
+            model.parameters(), lr=lr, betas=betas, eps=eps, weight_decay=weight_decay
+        )
 
         if method == "apex":
             model, optimizer = amp.initialize(
@@ -101,23 +103,26 @@ def test_bert_model(method,
                 optimizer,
                 opt_level="O2",
                 loss_scale="dynamic",
-                max_loss_scale=2**initial_scale_power)
+                max_loss_scale=2 ** initial_scale_power,
+            )
         else:
             scaler = torch.cuda.amp.GradScaler(
-                init_scale=2**initial_scale_power,
+                init_scale=2 ** initial_scale_power,
                 growth_factor=2,
                 backoff_factor=0.5,
-                growth_interval=1000)
+                growth_interval=1000,
+            )
 
         # DDP 不能要求模型部分在cpu部分在gpu
-        model = torch.nn.parallel.DistributedDataParallel(model,
-                                                          device_ids=[rank])
+        model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[rank])
 
-    data_loader = get_bert_data_loader(batch_size=batch_size,
-                                       total_samples=10000,
-                                       sequence_length=sequence_length,
-                                       device=device,
-                                       is_distrbuted=True)
+    data_loader = get_bert_data_loader(
+        batch_size=batch_size,
+        total_samples=10000,
+        sequence_length=sequence_length,
+        device=device,
+        is_distrbuted=True,
+    )
 
     loss_list = []
     scale_list = []
@@ -135,7 +140,7 @@ def test_bert_model(method,
             scale_list.append(optimizer.loss_scaler.loss_scale)
         elif method == "apex":
             output = model(input_ids=batch[0], labels=batch[1])
-            loss = output['loss']
+            loss = output["loss"]
             with amp.scale_loss(loss, optimizer) as scaled_loss:
                 scaled_loss.backward()
             optimizer.step()
@@ -161,7 +166,7 @@ class TestModelInitContext(unittest.TestCase):
     def setUp(self):
         pass
 
-    @distributed_test(world_size=[1], backend='gloo', use_fake_dist=False)
+    @distributed_test(world_size=[1], backend="gloo", use_fake_dist=False)
     def test_loss_scale(self):
         # 0.11B
         hidden_dim = 768
@@ -186,7 +191,8 @@ class TestModelInitContext(unittest.TestCase):
             sequence_length=sequence_length,
             num_layer=num_layer,
             num_head=num_head,
-            stop_step=stop_step)
+            stop_step=stop_step,
+        )
 
         torch.cuda.empty_cache()
         print("*" * 50)
@@ -199,7 +205,8 @@ class TestModelInitContext(unittest.TestCase):
             sequence_length=sequence_length,
             num_layer=num_layer,
             num_head=num_head,
-            stop_step=stop_step)
+            stop_step=stop_step,
+        )
 
         torch.cuda.empty_cache()
         print("*" * 50)
@@ -212,19 +219,20 @@ class TestModelInitContext(unittest.TestCase):
             sequence_length=sequence_length,
             num_layer=num_layer,
             num_head=num_head,
-            stop_step=stop_step)
+            stop_step=stop_step,
+        )
 
-        print('loss:')
-        print('torch amp:\t', torch_res_list)
-        print('apex O2:\t', apex_res_list)
-        print('patrickstar:\t', ps_res_list)
-        print('')
-        print('loss scale:')
-        print('torch scale:\t', torch_scale_list)
-        print('apex scale:\t', apex_scale_list)
-        print('patrickstar:\t', ps_scale_list)
+        print("loss:")
+        print("torch amp:\t", torch_res_list)
+        print("apex O2:\t", apex_res_list)
+        print("patrickstar:\t", ps_res_list)
+        print("")
+        print("loss scale:")
+        print("torch scale:\t", torch_scale_list)
+        print("apex scale:\t", apex_scale_list)
+        print("patrickstar:\t", ps_scale_list)
 
 
 if __name__ == "__main__":
-    torch.multiprocessing.set_start_method('spawn')
+    torch.multiprocessing.set_start_method("spawn")
     unittest.main()
