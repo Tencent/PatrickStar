@@ -26,7 +26,7 @@ from .parameter import register_param, is_param_registered, ParamType
 
 
 class PatrickStarClient(object):
-    def __init__(self, rank: int, default_chunk_size: int, is_fp16=False):
+    def __init__(self, rank: int, default_chunk_size: int):
         """
         管理一个Process的Param, AccGrad, OS数据。
         每个进程可以访问一个GPU的显存，和cpu的内存

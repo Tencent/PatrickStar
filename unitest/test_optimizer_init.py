@@ -35,7 +35,7 @@ class TestModelInitContext(unittest.TestCase):
             return model
 
         default_chunk_size = 32 * 1024 * 1024
-        client = PatrickStarClient(0, default_chunk_size, is_fp16=True)
+        client = PatrickStarClient(0, default_chunk_size)
 
         torch.manual_seed(0)
         with PSPreProcessCtx(client, dtype=torch.float):
@@ -45,5 +45,5 @@ class TestModelInitContext(unittest.TestCase):
 
 
 if __name__ == "__main__":
-    torch.multiprocessing.set_start_method('spawn')
+    torch.multiprocessing.set_start_method("spawn")
     unittest.main()

@@ -43,9 +43,7 @@ def initialize_engine(model_func, local_rank, config=None):
         use_cpu_embedding = config["use_cpu_embedding"]
 
     mgr = PatrickStarManager(local_rank=local_rank)
-    client = PatrickStarClient(
-        rank=local_rank, default_chunk_size=default_chunk_size, is_fp16=True
-    )
+    client = PatrickStarClient(rank=local_rank, default_chunk_size=default_chunk_size)
 
     with PSPreProcessCtx(
         client=client,
