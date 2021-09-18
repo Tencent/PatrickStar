@@ -14,12 +14,13 @@
 import torch
 from patrickstar.core import PSPreProcessCtx, PatrickStarClient
 from patrickstar.manager import PatrickStarManager
+from patrickstar.utils import logger
 from .engine import PatrickStarEngine
 
 DEFAULT_CHUNK_SIZE = 32 * 1024 * 1024
 
 
-def initialize_engine(model_func, local_rank, config=None):
+def initialize_engine(model_func, local_rank, config=None, client=None):
     """Initialize the PatrickStar Engine.
     Arguments:
         model_func: Required: nn.module class before apply any wrappers
@@ -31,32 +32,41 @@ def initialize_engine(model_func, local_rank, config=None):
         * ``optimizer``: Wrapped optimizer if a user defined ``optimizer`` is supplied, or if
           optimizer is specified in json config else ``None``.
     """
-    if not callable(model_func):
-        raise ValueError("model_func need to be callable.")
-    if config is None:
-        default_chunk_size = DEFAULT_CHUNK_SIZE
-        release_after_init = True
-        use_cpu_embedding = True
+    if isinstance(model_func, torch.nn.Module):
+        logger.debug(
+            "Passing nn.Module into initialize_engine. "
+            "Make sure you have intialized the model within PSPreProcessCtx"
+        )
+        assert client is not None, "Must pass the client when passing a nn.Module."
+        model = model_func
     else:
-        default_chunk_size = config["default_chunk_size"]
-        release_after_init = config["release_after_init"]
-        use_cpu_embedding = config["use_cpu_embedding"]
+        assert callable(model_func), "model_func need to be callable."
 
-    mgr = PatrickStarManager(local_rank=local_rank)
-    client = PatrickStarClient(rank=local_rank, default_chunk_size=default_chunk_size)
+        if config is None:
+            default_chunk_size = DEFAULT_CHUNK_SIZE
+            release_after_init = True
+            use_cpu_embedding = True
+        else:
+            default_chunk_size = config["default_chunk_size"]
+            release_after_init = config["release_after_init"]
+            use_cpu_embedding = config["use_cpu_embedding"]
 
-    with PSPreProcessCtx(
-        client=client,
-        dtype=torch.float,
-        release_after_init=release_after_init,
-        use_cpu_embedding=use_cpu_embedding,
-    ):
-        model = model_func()
+        client = PatrickStarClient(
+            rank=local_rank, default_chunk_size=default_chunk_size
+        )
+
+        with PSPreProcessCtx(
+            client=client,
+            dtype=torch.float,
+            release_after_init=release_after_init,
+            use_cpu_embedding=use_cpu_embedding,
+        ):
+            model = model_func()
 
     engine = PatrickStarEngine(model=model, client=client, config=config)
 
     # 开启预热优化
-    mgr = PatrickStarManager()
+    mgr = PatrickStarManager(local_rank=local_rank)
     mgr.start_train(
         param_fp16_chunk_size=client.param_fp16_chunks_max_mem_usage(),
         chunk_size=client.default_chunk_size,
