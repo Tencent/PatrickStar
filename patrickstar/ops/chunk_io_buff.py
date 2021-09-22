@@ -18,21 +18,21 @@ from patrickstar.utils import logger, get_rank
 
 
 class FP16ChunkWriteBuffer(object):
-    def __init__(self,
-                 chunk_list: ChunkList,
-                 chunk_tensor_index: ChunkTensorIndex,
-                 chunk_size: int,
-                 use_gpu_fp32_convert_for_adam: bool = True):
+    def __init__(
+        self,
+        chunk_list: ChunkList,
+        chunk_tensor_index: ChunkTensorIndex,
+        chunk_size: int,
+    ):
         self.chunk_list = chunk_list
         self.chunk_tensor_index = chunk_tensor_index
         self.cached_src_chunk_id = None
         self.cached_target_chunk_id = None
-        self.use_gpu_fp32_convert_for_adam = use_gpu_fp32_convert_for_adam
-        if self.use_gpu_fp32_convert_for_adam:
-            self.gpu_fp16_buff = torch.zeros(
-                chunk_size,
-                dtype=torch.float,
-                device=torch.device(f'cuda:{torch.cuda.current_device()}'))
+        self.gpu_fp16_buff = torch.zeros(
+            chunk_size,
+            dtype=torch.float,
+            device=torch.device(f"cuda:{torch.cuda.current_device()}"),
+        )
 
     def write_from_cache(self, target_param, src_param):
         """
@@ -42,28 +42,33 @@ class FP16ChunkWriteBuffer(object):
         """
         # torch param 只有 fp32 的一份数据，不需要拷贝
         assert src_param.ps_attr.param_type == ParamType.CHUNK_BASED
-        src_info = self.chunk_tensor_index.get_tensor_info(
-            src_param.ps_attr.data_id())
+        src_info = self.chunk_tensor_index.get_tensor_info(src_param.ps_attr.data_id())
         target_info = self.chunk_tensor_index.get_tensor_info(
-            target_param.ps_attr.data_id())
+            target_param.ps_attr.data_id()
+        )
 
-        if self.cached_src_chunk_id is not None and src_info.chunk_id != self.cached_src_chunk_id:
+        if (
+            self.cached_src_chunk_id is not None
+            and src_info.chunk_id != self.cached_src_chunk_id
+        ):
             # TODO CPU->GPU拷贝需要优化
-            target_device = self.chunk_list[
-                self.cached_target_chunk_id].payload.device
-            src_device = self.chunk_list[
-                self.cached_src_chunk_id].payload.device
+            target_device = self.chunk_list[self.cached_target_chunk_id].payload.device
+            src_device = self.chunk_list[self.cached_src_chunk_id].payload.device
             logger.debug(
-                f'Write chunk {self.cached_src_chunk_id} -> {self.cached_target_chunk_id}, '
-                f'{src_device} -> {target_device}')
-            if self.use_gpu_fp32_convert_for_adam and target_device.type == 'cuda' and src_device.type == 'cpu':
+                f"Write chunk {self.cached_src_chunk_id} -> {self.cached_target_chunk_id}, "
+                f"{src_device} -> {target_device}"
+            )
+            if target_device.type == "cuda" and src_device.type == "cpu":
                 self.gpu_fp16_buff.copy_(
-                    self.chunk_list[self.cached_src_chunk_id].payload)
+                    self.chunk_list[self.cached_src_chunk_id].payload
+                )
                 self.chunk_list[self.cached_target_chunk_id].payload.copy_(
-                    self.gpu_fp16_buff)
+                    self.gpu_fp16_buff
+                )
             else:
                 self.chunk_list[self.cached_target_chunk_id].payload.copy_(
-                    self.chunk_list[self.cached_src_chunk_id].payload)
+                    self.chunk_list[self.cached_src_chunk_id].payload
+                )
         self.cached_src_chunk_id = src_info.chunk_id
         self.cached_target_chunk_id = target_info.chunk_id
 
@@ -75,13 +80,14 @@ class FP16ChunkWriteBuffer(object):
             return
         global_rank = get_rank()
         logger.info(
-            f'global_rank {global_rank} finally, write chunk {self.cached_target_chunk_id}'
+            f"global_rank {global_rank} finally, write chunk {self.cached_target_chunk_id}"
         )
         # Note 有可能这一个进程只有一个Chunk，且该Chunk只有一个Embedding Layer，而它是Torch管理的
         # 导致这个Chunk没有分配payload
         if self.chunk_list[self.cached_src_chunk_id] is not None:
             self.chunk_list[self.cached_target_chunk_id].payload.copy_(
-                self.chunk_list[self.cached_src_chunk_id].payload)
+                self.chunk_list[self.cached_src_chunk_id].payload
+            )
         self.cached_src_chunk_id = None
         self.cached_target_chunk_id = None
 
@@ -91,9 +97,14 @@ class FP32ChunkReadBuffer(object):
     FP32 Chunk Buff用于加速ADAM计算时的数据传输。
     可能读入CPU或者GPU之中
     """
-    def __init__(self, chunk_list: ChunkList,
-                 chunk_tensor_index: ChunkTensorIndex, chunk_size: int,
-                 margin_chunk_num_for_gpu_adam: int):
+
+    def __init__(
+        self,
+        chunk_list: ChunkList,
+        chunk_tensor_index: ChunkTensorIndex,
+        chunk_size: int,
+        margin_chunk_num_for_gpu_adam: int,
+    ):
         """
         在compute_device分配一个FP32 Chunk作为缓存
         @params
@@ -101,19 +112,16 @@ class FP32ChunkReadBuffer(object):
         """
         self.chunk_list = chunk_list
         self.chunk_tensor_index = chunk_tensor_index
-        self.cpu_payload = torch.empty(chunk_size,
-                                       dtype=torch.half,
-                                       device=torch.device('cpu:0'),
-                                       pin_memory=True)
-        self.local_rank = chunk_list.local_rank
-        logger.info(
-            f"Allocate fp32 Chunk Buffer of size {chunk_size / 1e6} MB on CPU."
+        self.cpu_payload = torch.empty(
+            chunk_size, dtype=torch.half, device=torch.device("cpu:0"), pin_memory=True
         )
+        self.local_rank = chunk_list.local_rank
+        logger.info(f"Allocate fp32 Chunk Buffer of size {chunk_size / 1e6} MB on CPU.")
         if margin_chunk_num_for_gpu_adam > 0:
-            gpu_device = torch.device(f'cuda:{self.local_rank}')
-            self.gpu_payload = torch.empty(chunk_size,
-                                           dtype=torch.half,
-                                           device=gpu_device)
+            gpu_device = torch.device(f"cuda:{self.local_rank}")
+            self.gpu_payload = torch.empty(
+                chunk_size, dtype=torch.half, device=gpu_device
+            )
             logger.info(
                 f"Allocate fp32 Chunk Buffer of size {chunk_size / 1e6} MB on {gpu_device}."
             )
@@ -132,28 +140,27 @@ class FP32ChunkReadBuffer(object):
             # torch param 的梯度保存在 param.grad 中
             return param.grad
         else:
-            info = self.chunk_tensor_index.get_tensor_info(
-                param.ps_attr.data_id())
+            info = self.chunk_tensor_index.get_tensor_info(param.ps_attr.data_id())
 
             # 触发cached chunk更新，判断条件是param.data Tensor是Chunk的第一个Tensor
             if info.start_offset == 0:
                 # TODO GPU FP16->CPU FP32拷贝需要优化,
                 self.cached_chunk_num += 1
                 if self.cached_chunk_num < self.margin_chunk_num_for_gpu_adam:
-                    target_device = torch.device(f'cuda:{self.local_rank}')
+                    target_device = torch.device(f"cuda:{self.local_rank}")
                 else:
-                    target_device = torch.device('cpu:0')
+                    target_device = torch.device("cpu:0")
 
                 chunk_payload = self.chunk_list[info.chunk_id].payload
-                if target_device.type == 'cuda':
+                if target_device.type == "cuda":
                     self.gpu_payload.copy_(chunk_payload)
                     self.ret_payload = self.gpu_payload
-                elif target_device.type == 'cpu':
+                elif target_device.type == "cpu":
                     self.cpu_payload.copy_(chunk_payload)
                     self.ret_payload = self.cpu_payload
                 logger.debug(
-                    f'Read chunk {self.cached_chunk_id} to cache '
-                    f'{chunk_payload.device} -> {target_device}'
+                    f"Read chunk {self.cached_chunk_id} to cache "
+                    f"{chunk_payload.device} -> {target_device}"
                 )
                 self.cached_chunk_id = info.chunk_id
             else:

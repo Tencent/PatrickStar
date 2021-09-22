@@ -176,30 +176,27 @@ class FP16Adam(torch.optim.Optimizer):
 
         # 用作fp16 grad 存储的buffer
         self.read_chunk_buff = None
-        self.use_ds_adam = True
         self.use_adamw = use_adamw
-        if self.use_ds_adam:
-            self.opt_id = FP16Adam.optimizer_id
-            FP16Adam.optimizer_id = FP16Adam.optimizer_id + 1
-            from .adam import cpu_adam_op
+        self.opt_id = FP16Adam.optimizer_id
+        FP16Adam.optimizer_id = FP16Adam.optimizer_id + 1
+        from .adam import cpu_adam_op
 
-            self.ds_opt_adam = cpu_adam_op
-            self.ds_opt_adam.create_adam(
-                self.opt_id,
-                lr,
-                betas[0],
-                betas[1],
-                eps,
-                weight_decay,
-                self.use_adamw,
-                True,
-            )
+        self.ds_opt_adam = cpu_adam_op
+        self.ds_opt_adam.create_adam(
+            self.opt_id,
+            lr,
+            betas[0],
+            betas[1],
+            eps,
+            weight_decay,
+            self.use_adamw,
+            True,
+        )
 
     def __del__(self):
         # need to destroy the C++ object explicitly to avoid a memory leak when deepspeed.initialize
         # is used multiple times in the same process (notebook or pytest worker)
-        if self.use_ds_adam:
-            self.ds_opt_adam.destroy_adam(self.opt_id)
+        self.ds_opt_adam.destroy_adam(self.opt_id)
 
     def __setstate__(self, state):
         super(FP16Adam, self).__setstate__(state)
@@ -410,11 +407,7 @@ class FP16Adam(torch.optim.Optimizer):
             lr = lr_list[i]
 
             # TODO(jiaruifang) use_ds_adam时，在生成的数据上正确性没有验证
-            if (
-                self.use_ds_adam
-                and compute_device.type == "cpu"
-                and fp16_grad_tensor.device.type == "cpu"
-            ):
+            if compute_device.type == "cpu" and fp16_grad_tensor.device.type == "cpu":
                 self.ds_cpu_adam_update(
                     fp32_data_tensor,
                     fp16_grad_tensor,
