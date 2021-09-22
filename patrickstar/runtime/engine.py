@@ -109,6 +109,7 @@ class PatrickStarEngine(Module):
         global_timer.my_timer.start_profile("FWD")
         mgr = PatrickStarManager()
         mgr.set_training_stage(TrainingStage.FWD)
+        mgr.reset_metronome()
 
         for param_fp16 in self.client.chunk_based_param_fp16:
             param_fp16.ps_attr.fwd_used_cnt = 0
