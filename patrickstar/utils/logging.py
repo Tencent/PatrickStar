@@ -21,7 +21,7 @@ from .distributed import get_rank
 
 class LoggerFactory:
     @staticmethod
-    def create_logger(name=None, level=logging.INFO):
+    def create_logger(name=None, level=logging.WARNING):
         """create a logger
         Args:
             name (str): name of the logger
@@ -37,8 +37,7 @@ class LoggerFactory:
         #     "[%(asctime)s] [%(levelname)s] "
         #     "[%(filename)s:%(lineno)d:%(funcName)s] %(message)s")
 
-        formatter = logging.Formatter(
-            "[%(asctime)s] [%(levelname)s] %(message)s")
+        formatter = logging.Formatter("[%(asctime)s] [%(levelname)s] %(message)s")
 
         logger_ = logging.getLogger(name)
         logger_.setLevel(level)
@@ -50,7 +49,7 @@ class LoggerFactory:
         return logger_
 
 
-logger = LoggerFactory.create_logger(name="PatrickStar", level=logging.INFO)
+logger = LoggerFactory.create_logger(name="PatrickStar", level=logging.WARNING)
 
 
 def log_dist(message, ranks=None, level=logging.INFO):
