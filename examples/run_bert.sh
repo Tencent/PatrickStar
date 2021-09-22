@@ -17,7 +17,6 @@ RES_CHECK_FLAG="--res_check"
 # FAKE_DIST="--use_fake_dist"
 
 let CHUNK_SIZE=${CS}*1024*1024
-export PYTHONPATH=../:${PYTHONPATH}
 
 export HYBRID_ADAM_FLAG="--use_hybrid_adam"
 
