@@ -22,12 +22,13 @@ from patrickstar.utils import get_sys_memory_used, get_world_size, SingletonMeta
 
 class Metronome(object):
     """节拍器"""
+
     def __init__(self):
         self._moment = 0
         self._total_moment = None
 
     def get_total_mom(self):
-        assert self._total_moment is not None, f"Don not use get_total during warmup"
+        assert self._total_moment is not None, "Don not use get_total during warmup"
         return self._total_moment
 
     def tiktac(self):
@@ -51,6 +52,7 @@ class PatrickStarManager(metaclass=SingletonMeta):
     singleton类，被所有进程访问
     拥有所有chunk信息的overview picture
     """
+
     def __init__(self, local_rank: int = 0, config=None):
         self.local_rank = local_rank
         self.gpu_chunk_available_mem = 0
@@ -77,21 +79,32 @@ class PatrickStarManager(metaclass=SingletonMeta):
 
         if self.use_fake_dist:
             # 伪分布式训练是，大家共享一块GPU
-            self._overall_gpu_mem = torch.cuda.get_device_properties(
-                0).total_memory * self._overall_gpu_mem_ratio / get_world_size(
-                )
-            self._overall_cpu_mem = psutil.virtual_memory(
-            ).total * self._overall_cpu_mem_ratio / get_world_size()
+            self._overall_gpu_mem = (
+                torch.cuda.get_device_properties(0).total_memory
+                * self._overall_gpu_mem_ratio
+                / get_world_size()
+            )
+            self._overall_cpu_mem = (
+                psutil.virtual_memory().total
+                * self._overall_cpu_mem_ratio
+                / get_world_size()
+            )
         else:
             # 获得系统的存储信息
-            self._overall_gpu_mem = torch.cuda.get_device_properties(
-                self.local_rank).total_memory * self._overall_gpu_mem_ratio
-            self._overall_cpu_mem = psutil.virtual_memory(
-            ).total * self._overall_cpu_mem_ratio / get_world_size()
+            self._overall_gpu_mem = (
+                torch.cuda.get_device_properties(self.local_rank).total_memory
+                * self._overall_gpu_mem_ratio
+            )
+            self._overall_cpu_mem = (
+                psutil.virtual_memory().total
+                * self._overall_cpu_mem_ratio
+                / get_world_size()
+            )
 
         logger.info(
-            f'Init Manager over all gpu mem {self._overall_gpu_mem / 1e6} MB, '
-            f'cpu mem {self._overall_cpu_mem / 1e6} MB')
+            f"Init Manager over all gpu mem {self._overall_gpu_mem / 1e6} MB, "
+            f"cpu mem {self._overall_cpu_mem / 1e6} MB"
+        )
         # 统计信息
         self.cpu_used_list = []
         self.cpu_chunk_used_list = []
@@ -123,48 +136,45 @@ class PatrickStarManager(metaclass=SingletonMeta):
         if profiler.started():
             profiler.stage_convert_time.append((time.time(), training_stage))
         self._training_stage = training_stage
-        logger.info(f'Enter {self._training_stage}')
+        logger.info(f"Enter {self._training_stage}")
 
     def start_train(self, param_fp16_chunk_size, chunk_size):
         self.warmup = True
         self._start_training = True
         self._param_fp16_chunk_size = param_fp16_chunk_size
         self._default_chunk_size = chunk_size
-        logger.info(f'Start to train.')
+        logger.info("Start to train.")
 
     def update_margin_mem(self):
         """
         更新GPU内剩余的空间可存储的Chunk数目
         """
         max_gpu_sys_used = max(self.gpu_sys_used_list)
-        margin_mem_size = self._overall_gpu_mem - max_gpu_sys_used - self._param_fp16_chunk_size
+        margin_mem_size = (
+            self._overall_gpu_mem - max_gpu_sys_used - self._param_fp16_chunk_size
+        )
         # 12 = 4 + 4 + 4 fp32 + m + v
-        self._margin_chunk_num_for_gpu_adam = (margin_mem_size) / (
-            self._default_chunk_size * 12) * self._margin_use_ratio
+        self._margin_chunk_num_for_gpu_adam = (
+            (margin_mem_size) / (self._default_chunk_size * 12) * self._margin_use_ratio
+        )
 
         logger.info("--------------- GPU INFO AFTER BWD ----------------")
         logger.info(
-            f'Max GPU System Mem (non-chunk) Used {max(self.gpu_sys_used_list) / 1e6} MB'
+            f"Max GPU System Mem (non-chunk) Used {max(self.gpu_sys_used_list) / 1e6} MB"
         )
+        logger.info(f"Param FP16 Chunk Size {self._param_fp16_chunk_size / 1e6} MB")
         logger.info(
-            f'Param FP16 Chunk Size {self._param_fp16_chunk_size / 1e6} MB')
-        logger.info(
-            f'Margin Mem Size {margin_mem_size / 1e6} MB, '
-            f'available chunk num for Optimizer States {self._margin_chunk_num_for_gpu_adam}'
+            f"Margin Mem Size {margin_mem_size / 1e6} MB, "
+            f"available chunk num for Optimizer States {self._margin_chunk_num_for_gpu_adam}"
         )
-        logger.info(f'OVERALL GPU MEM {self._overall_gpu_mem}')
+        logger.info(f"OVERALL GPU MEM {self._overall_gpu_mem}")
 
     def reset_metronome(self):
         """
         重置节拍器
         """
-        if self.warmup is True:
-            self.warmup = False
-            logger.info(
-                f'----------------- WARMUP PHASE OVER -----------------')
-
         self.metronome.reset()
-        logger.info('Manager Resets Metronome')
+        logger.info("Manager Resets Metronome")
 
     def get_margin_chunk_num_for_gpu_adam(self):
         return self._margin_chunk_num_for_gpu_adam
@@ -177,22 +187,22 @@ class PatrickStarManager(metaclass=SingletonMeta):
             rank = client.local_rank
         else:
             rank = 0
-        gpu_device = torch.device(f'cuda:{rank}')
-        cpu_device = torch.device('cpu:0')
+        gpu_device = torch.device(f"cuda:{rank}")
+        cpu_device = torch.device("cpu:0")
         gpu_used = get_sys_memory_used(gpu_device)
 
         if profiler.started():
             timestamp = time.time()
             cur_mom = self.metronome.moment()
-            profiler.gpu_memory_used.append(
-                (cur_mom, timestamp, gpu_used))
+            profiler.gpu_memory_used.append((cur_mom, timestamp, gpu_used))
             profiler.gpu_chunk_memory_used.append(
-                (cur_mom, timestamp, self.gpu_chunk_used_mem))
+                (cur_mom, timestamp, self.gpu_chunk_used_mem)
+            )
             cpu_used = get_sys_memory_used(cpu_device)
-            profiler.cpu_memory_used.append(
-                (cur_mom, timestamp, cpu_used))
+            profiler.cpu_memory_used.append((cur_mom, timestamp, cpu_used))
             profiler.cpu_chunk_memory_used.append(
-                (cur_mom, timestamp, self.cpu_chunk_used_mem))
+                (cur_mom, timestamp, self.cpu_chunk_used_mem)
+            )
 
         if self.warmup:
             self.gpu_used_list.append(gpu_used)
@@ -215,18 +225,19 @@ class PatrickStarManager(metaclass=SingletonMeta):
             # 则需要从设备内存移出Chunk
             next_mom = self.metronome.next_moment()
             cur_mom = self.metronome.moment()
-            gpu_next_mom_ava_chunk_mem = self._overall_gpu_mem - self.gpu_sys_used_list[
-                next_mom]
+            gpu_next_mom_ava_chunk_mem = (
+                self._overall_gpu_mem - self.gpu_sys_used_list[next_mom]
+            )
             gpu_cur_mom_used_chunk_mem = client.chunk_list.get_chunk_memory_used(
-                gpu_device)
+                gpu_device
+            )
             if gpu_next_mom_ava_chunk_mem < gpu_cur_mom_used_chunk_mem:
                 offload_size = gpu_cur_mom_used_chunk_mem - gpu_next_mom_ava_chunk_mem
                 # Note 触发GPU-CPU内存移动
                 client.chunk_list.make_room(offload_size, gpu_device)
 
             # 每个节拍都校准gpu sys used
-            self.gpu_sys_used_list[
-                cur_mom] = gpu_used - self.gpu_chunk_used_mem
+            self.gpu_sys_used_list[cur_mom] = gpu_used - self.gpu_chunk_used_mem
 
         self.metronome.tiktac()
 
@@ -262,10 +273,9 @@ class PatrickStarManager(metaclass=SingletonMeta):
         """
         可以用来分配的Chunk空闲内存，派出已经分配的内存
         """
-        size = self.available_chunk_mem(device_type) - self.used_chunk_mem(
-            device_type)
+        size = self.available_chunk_mem(device_type) - self.used_chunk_mem(device_type)
         logger.debug(
-            f'free_chunk_mem on {device_type} {size / 1e6} MB on mement {self.metronome.moment()}'
+            f"free_chunk_mem on {device_type} {size / 1e6} MB on mement {self.metronome.moment()}"
         )
         return size
 
@@ -296,8 +306,7 @@ class PatrickStarManager(metaclass=SingletonMeta):
                 if self._training_stage == TrainingStage.ADAM:
                     # ADAM时没有activation所以显存可以全部给Chunk，需要两个default chunk size做buffer，这里先预留6个
                     ava_mem = self._overall_gpu_mem - 4 * self._default_chunk_size * 4
-                    logger.debug(
-                        f'GPU available_chunk_mem is {ava_mem / 1e6} MB')
+                    logger.debug(f"GPU available_chunk_mem is {ava_mem / 1e6} MB")
                     return ava_mem
                 else:
                     # TODO(jiaruifang)瞎拍一个数，预热阶段三分之一GPU显存用来存储chunk
@@ -309,18 +318,26 @@ class PatrickStarManager(metaclass=SingletonMeta):
                 elif self._training_stage == TrainingStage.FWD:
                     next_mom = self.metronome.next_moment()
                     cur_mom = self.metronome.moment()
-                    next_mom_ava_mem = self._overall_gpu_mem - 1.5 * self.gpu_sys_used_list[
-                        next_mom]
-                    cur_mom_ava_mem = self._overall_gpu_mem - 1.5 * self.gpu_sys_used_list[
-                        cur_mom]
-                    return min(next_mom_ava_mem, cur_mom_ava_mem
-                               ) - world_size * 2 * self._default_chunk_size
+                    next_mom_ava_mem = (
+                        self._overall_gpu_mem - 1.5 * self.gpu_sys_used_list[next_mom]
+                    )
+                    cur_mom_ava_mem = (
+                        self._overall_gpu_mem - 1.5 * self.gpu_sys_used_list[cur_mom]
+                    )
+                    return (
+                        min(next_mom_ava_mem, cur_mom_ava_mem)
+                        - world_size * 2 * self._default_chunk_size
+                    )
                 elif self._training_stage == TrainingStage.BWD:
                     next_mom = self.metronome.next_moment()
                     cur_mom = self.metronome.moment()
-                    next_mom_ava_mem = self._overall_gpu_mem - 2 * self.gpu_sys_used_list[
-                        next_mom]
-                    cur_mom_ava_mem = self._overall_gpu_mem - 2 * self.gpu_sys_used_list[
-                        cur_mom]
-                    return min(next_mom_ava_mem, cur_mom_ava_mem
-                               ) - world_size * 2 * self._default_chunk_size
+                    next_mom_ava_mem = (
+                        self._overall_gpu_mem - 2 * self.gpu_sys_used_list[next_mom]
+                    )
+                    cur_mom_ava_mem = (
+                        self._overall_gpu_mem - 2 * self.gpu_sys_used_list[cur_mom]
+                    )
+                    return (
+                        min(next_mom_ava_mem, cur_mom_ava_mem)
+                        - world_size * 2 * self._default_chunk_size
+                    )
