@@ -12,6 +12,8 @@
 # See the AUTHORS file for names of contributors.
 
 from setuptools import setup, find_packages
+from torch.utils.cpp_extension import BuildExtension
+from patrickstar.ops.op_builder import CPUAdamBuilder
 
 
 def fetch_requirements(path):
@@ -19,7 +21,7 @@ def fetch_requirements(path):
         return [r.strip() for r in fd.readlines()]
 
 
-install_requires = fetch_requirements("requirements.txt")
+require_list = fetch_requirements("requirements.txt")
 
 setup(
     name="patrickstar",
@@ -30,8 +32,8 @@ setup(
     author="Jiarui Fang",
     author_email="fangjiarui123@gmail.com",
     url="https://fangjiarui.github.io/",
-    install_requires=install_requires,
-    # extras_require=extras_require,
+    install_requires=require_list,
+    setup_requires=require_list,
     packages=find_packages(),
     include_package_data=True,
     classifiers=[
@@ -40,6 +42,6 @@ setup(
         "Programming Language :: Python :: 3.8",
     ],
     license="BSD",
-    # ext_modules=ext_modules,
-    # cmdclass=cmdclass
+    ext_modules=[CPUAdamBuilder().builder()],
+    cmdclass={"build_ext": BuildExtension.with_options(use_ninja=False)},
 )

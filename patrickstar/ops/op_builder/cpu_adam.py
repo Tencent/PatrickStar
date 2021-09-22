@@ -22,6 +22,7 @@ from .builder import CUDAOpBuilder
 class CPUAdamBuilder(CUDAOpBuilder):
     BUILD_VAR = "DS_BUILD_CPU_ADAM"
     NAME = "cpu_adam"
+    BASE_DIR = "patrickstar/ops/csrc"
 
     def __init__(self):
         super().__init__(name=self.NAME)
@@ -31,32 +32,36 @@ class CPUAdamBuilder(CUDAOpBuilder):
         return sys.platform != "win32"
 
     def absolute_name(self):
-        return f'partickstar.ops.adam.{self.NAME}_op'
+        return f"patrickstar.ops.adam.{self.NAME}_op"
 
     def sources(self):
-        return ['csrc/adam/cpu_adam.cpp', 'csrc/adam/custom_cuda_kernel.cu']
+        return [
+            os.path.join(CPUAdamBuilder.BASE_DIR, "adam/cpu_adam.cpp"),
+            os.path.join(CPUAdamBuilder.BASE_DIR, "adam/custom_cuda_kernel.cu"),
+        ]
 
     def include_paths(self):
         import torch
-        cuda_include = os.path.join(torch.utils.cpp_extension.CUDA_HOME,
-                                    "include")
-        return ['csrc/includes', cuda_include]
+
+        cuda_include = os.path.join(torch.utils.cpp_extension.CUDA_HOME, "include")
+        return [os.path.join(CPUAdamBuilder.BASE_DIR, "includes"), cuda_include]
 
     def cxx_args(self):
         import torch
+
         cuda_lib64 = os.path.join(torch.utils.cpp_extension.CUDA_HOME, "lib64")
         cpu_arch = self.cpu_arch()
         simd_width = self.simd_width()
 
         return [
-            '-O3',
-            '-std=c++14',
-            f'-L{cuda_lib64}',
-            '-lcudart',
-            '-lcublas',
-            '-g',
-            '-Wno-reorder',
+            "-O3",
+            "-std=c++14",
+            f"-L{cuda_lib64}",
+            "-lcudart",
+            "-lcublas",
+            "-g",
+            "-Wno-reorder",
             cpu_arch,
-            '-fopenmp',
+            "-fopenmp",
             simd_width,
         ]
