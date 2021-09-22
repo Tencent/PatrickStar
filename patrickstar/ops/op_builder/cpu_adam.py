@@ -37,7 +37,6 @@ class CPUAdamBuilder(CUDAOpBuilder):
     def sources(self):
         return [
             os.path.join(CPUAdamBuilder.BASE_DIR, "adam/cpu_adam.cpp"),
-            os.path.join(CPUAdamBuilder.BASE_DIR, "adam/custom_cuda_kernel.cu"),
         ]
 
     def include_paths(self):

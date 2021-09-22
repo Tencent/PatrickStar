@@ -1,3 +1,16 @@
+// Copyright (C) 2021 THL A29 Limited, a Tencent company.
+// All rights reserved.
+// Licensed under the BSD 3-Clause License (the "License"); you may
+// not use this file except in compliance with the License. You may
+// obtain a copy of the License at
+// https://opensource.org/licenses/BSD-3-Clause
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" basis,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
+// implied. See the License for the specific language governing
+// permissions and limitations under the License.
+// See the AUTHORS file for names of contributors.
+
 #include "cpu_adam.h"
 #include <cuda_runtime_api.h>
 #include <math.h>
@@ -10,7 +23,6 @@
 #include "cublas_v2.h"
 #include "cuda.h"
 #include "curand.h"
-#include "custom_cuda_layers.h"
 
 static std::unordered_map<int, std::shared_ptr<void>> s_optimizers;
 
@@ -23,7 +35,6 @@ void Adam_Optimizer::Step(float* _params,
                           float* _exp_avg,
                           float* _exp_avg_sq,
                           size_t _param_size,
-                          __half* dev_params,
                           bool param_half_precision,
                           bool grad_half_precision,
                           float loss_scale)
@@ -125,21 +136,8 @@ void Adam_Optimizer::Step(float* _params,
                 SIMD_STORE(_params + i, param_4.data);
             }
 
-            if (dev_params)
-                SIMD_STORE2(_doubled_buffer[_buf_index] + (i - t), param_4.data, param_half_precision);
-
             SIMD_STORE(_exp_avg + i, momentum_4.data);
             SIMD_STORE(_exp_avg_sq + i, variance_4.data);
-        }
-        if (dev_params) {
-            if (param_half_precision)
-                launch_param_update_half(
-                    _doubled_buffer[_buf_index], dev_params + t, copy_size, _streams[_buf_index]);
-            else
-                launch_param_update(
-                    _doubled_buffer[_buf_index], dev_params + t, copy_size, _streams[_buf_index]);
-
-            _buf_index = !_buf_index;
         }
     }
 
@@ -174,7 +172,6 @@ void Adam_Optimizer::Step(float* _params,
                 grad = momentum / grad;
                 if (_weight_decay > 0 && _adamw_mode) { param += w_decay * param; }
                 param = grad * step_size + param;
-                if (dev_params) _doubled_buffer[_buf_index][k - t] = param;
 
                 if (param_half_precision)
                     params_cast_h[k] = (__half)param;
@@ -182,12 +179,6 @@ void Adam_Optimizer::Step(float* _params,
                     _params[k] = param;
                 _exp_avg[k] = momentum;
                 _exp_avg_sq[k] = variance;
-            }
-            if (dev_params) {
-                launch_param_update(
-                    _doubled_buffer[_buf_index], dev_params + t, (copy_size), _streams[_buf_index]);
-
-                _buf_index = !_buf_index;
             }
         }
     }
@@ -198,7 +189,6 @@ void Adam_Optimizer::Step_4(float* _params,
                             float* _exp_avg,
                             float* _exp_avg_sq,
                             size_t _param_size,
-                            __half* dev_params,
                             bool param_half_precision,
                             bool grad_half_precision,
                             float loss_scale)
@@ -363,19 +353,6 @@ void Adam_Optimizer::Step_4(float* _params,
                 SIMD_STORE(_params + i + SIMD_WIDTH * 3, param_4[3].data);
             }
 
-            if (dev_params) {
-                SIMD_STORE2(_doubled_buffer[_buf_index] + (i - t), param_4[0].data, param_half_precision);
-                SIMD_STORE2(_doubled_buffer[_buf_index] + (i - t) + SIMD_WIDTH,
-                            param_4[1].data,
-                            param_half_precision);
-                SIMD_STORE2(_doubled_buffer[_buf_index] + (i - t) + (SIMD_WIDTH << 1),
-                            param_4[2].data,
-                            param_half_precision);
-                SIMD_STORE2(_doubled_buffer[_buf_index] + (i - t) + SIMD_WIDTH * 3,
-                            param_4[3].data,
-                            param_half_precision);
-            }
-
             SIMD_STORE(_exp_avg + i, momentum_4[0].data);
             SIMD_STORE(_exp_avg + i + SIMD_WIDTH, momentum_4[1].data);
             SIMD_STORE(_exp_avg + i + (SIMD_WIDTH << 1), momentum_4[2].data);
@@ -386,17 +363,6 @@ void Adam_Optimizer::Step_4(float* _params,
             SIMD_STORE(_exp_avg_sq + i + (SIMD_WIDTH << 1), variance_4[2].data);
             SIMD_STORE(_exp_avg_sq + i + SIMD_WIDTH * 3, variance_4[3].data);
         }
-
-        if (dev_params) {
-            if (param_half_precision)
-                launch_param_update_half(
-                    _doubled_buffer[_buf_index], dev_params + t, copy_size, _streams[_buf_index]);
-            else
-                launch_param_update(
-                    _doubled_buffer[_buf_index], dev_params + t, copy_size, _streams[_buf_index]);
-
-            _buf_index = !_buf_index;
-        }
     }
 #endif
     if (_param_size > rounded_size)
@@ -405,7 +371,6 @@ void Adam_Optimizer::Step_4(float* _params,
              (_exp_avg + rounded_size),
              (_exp_avg_sq + rounded_size),
              (_param_size - rounded_size),
-             (dev_params != nullptr ? (dev_params + rounded_size) : dev_params),
              param_half_precision,
              grad_half_precision,
              loss_scale);
@@ -456,7 +421,6 @@ void Adam_Optimizer::Step_8(float* _params,
                             float* _exp_avg,
                             float* _exp_avg_sq,
                             size_t _param_size,
-                            __half* dev_params,
                             bool param_half_precision,
                             bool grad_half_precision,
                             float loss_scale)
@@ -702,31 +666,6 @@ void Adam_Optimizer::Step_8(float* _params,
                 SIMD_STORE(_params + i + SIMD_WIDTH * 7, param_4[7].data);
             }
 
-            if (dev_params) {
-                SIMD_STORE2(_doubled_buffer[_buf_index] + (i - t), param_4[0].data, param_half_precision);
-                SIMD_STORE2(_doubled_buffer[_buf_index] + (i - t) + SIMD_WIDTH,
-                            param_4[1].data,
-                            param_half_precision);
-                SIMD_STORE2(_doubled_buffer[_buf_index] + (i - t) + (SIMD_WIDTH << 1),
-                            param_4[2].data,
-                            param_half_precision);
-                SIMD_STORE2(_doubled_buffer[_buf_index] + (i - t) + SIMD_WIDTH * 3,
-                            param_4[3].data,
-                            param_half_precision);
-                SIMD_STORE2(_doubled_buffer[_buf_index] + (i - t) + (SIMD_WIDTH << 2),
-                            param_4[4].data,
-                            param_half_precision);
-                SIMD_STORE2(_doubled_buffer[_buf_index] + (i - t) + SIMD_WIDTH * 5,
-                            param_4[5].data,
-                            param_half_precision);
-                SIMD_STORE2(_doubled_buffer[_buf_index] + (i - t) + SIMD_WIDTH * 6,
-                            param_4[6].data,
-                            param_half_precision);
-                SIMD_STORE2(_doubled_buffer[_buf_index] + (i - t) + SIMD_WIDTH * 7,
-                            param_4[7].data,
-                            param_half_precision);
-            }
-
             SIMD_STORE(_exp_avg + i, momentum_4[0].data);
             SIMD_STORE(_exp_avg + i + SIMD_WIDTH, momentum_4[1].data);
             SIMD_STORE(_exp_avg + i + (SIMD_WIDTH << 1), momentum_4[2].data);
@@ -745,15 +684,6 @@ void Adam_Optimizer::Step_8(float* _params,
             SIMD_STORE(_exp_avg_sq + i + SIMD_WIDTH * 6, variance_4[6].data);
             SIMD_STORE(_exp_avg_sq + i + SIMD_WIDTH * 7, variance_4[7].data);
         }
-        if (dev_params) {
-            if (param_half_precision)
-                launch_param_update_half(
-                    _doubled_buffer[_buf_index], dev_params + t, copy_size, _streams[_buf_index]);
-            else
-                launch_param_update(
-                    _doubled_buffer[_buf_index], dev_params + t, copy_size, _streams[_buf_index]);
-            _buf_index = !_buf_index;
-        }
     }
 #endif
     if (_param_size > rounded_size)
@@ -762,7 +692,6 @@ void Adam_Optimizer::Step_8(float* _params,
                (_exp_avg + rounded_size),
                (_exp_avg_sq + rounded_size),
                (_param_size - rounded_size),
-               (dev_params != nullptr ? (dev_params + rounded_size) : dev_params),
                param_half_precision,
                grad_half_precision,
                loss_scale);
@@ -804,52 +733,6 @@ int ds_adam_step(int optimizer_id,
                 exp_avg_ptr,
                 exp_avg_sq_ptr,
                 params_c.size(0),
-                nullptr,
-                (params.options().dtype() == at::kHalf),
-                (grads.options().dtype() == at::kHalf),
-                loss_scale);
-
-    opt->SynchronizeStreams();
-    return 0;
-}
-
-int ds_adam_step_plus_copy(int optimizer_id,
-                           size_t step,
-                           float lr,
-                           float beta1,
-                           float beta2,
-                           float epsilon,
-                           float weight_decay,
-                           bool bias_correction,
-                           torch::Tensor& params,
-                           torch::Tensor& grads,
-                           torch::Tensor& exp_avg,
-                           torch::Tensor& exp_avg_sq,
-                           torch::Tensor& gpu_params,
-                           float loss_scale)
-{
-    auto params_c = params.contiguous();
-    auto gpu_params_c = gpu_params.contiguous();
-    auto exp_avg_c = exp_avg.contiguous();
-    auto exp_avg_sq_c = exp_avg_sq.contiguous();
-    auto grads_c = grads.contiguous();
-
-    float* params_ptr = (float*)params_c.data_ptr();
-    float* grads_ptr = (float*)grads_c.data_ptr();
-    __half* gpu_params_ptr = (__half*)gpu_params_c.data_ptr();
-    float* exp_avg_ptr = (float*)exp_avg_c.data_ptr();
-    float* exp_avg_sq_ptr = (float*)exp_avg_sq_c.data_ptr();
-
-    std::shared_ptr<Adam_Optimizer> opt =
-        std::static_pointer_cast<Adam_Optimizer>(s_optimizers[optimizer_id]);
-    opt->IncrementStep(step, beta1, beta2);
-    opt->update_state(lr, epsilon, weight_decay, bias_correction);
-    opt->Step_8(params_ptr,
-                grads_ptr,
-                exp_avg_ptr,
-                exp_avg_sq_ptr,
-                params_c.size(0),
-                gpu_params_ptr,
                 (params.options().dtype() == at::kHalf),
                 (grads.options().dtype() == at::kHalf),
                 loss_scale);
@@ -868,9 +751,6 @@ int destroy_adam_optimizer(int optimizer_id)
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m)
 {
     m.def("adam_update", &ds_adam_step, "DeepSpeed CPU Adam update (C++)");
-    m.def("adam_update_copy",
-          &ds_adam_step_plus_copy,
-          "DeepSpeed CPU Adam update and param copy (C++)");
     m.def("create_adam", &create_adam_optimizer, "DeepSpeed CPU Adam (C++)");
     m.def("destroy_adam", &destroy_adam_optimizer, "DeepSpeed CPU Adam destroy (C++)");
 }
