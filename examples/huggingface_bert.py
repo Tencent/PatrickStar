@@ -23,7 +23,7 @@ from lmdb_dataset import get_dataset
 # Uncomment this line when doing multiprocess training
 # torch.distributed.init_process_group(backend='nccl')
 
-train_dataset, _, test_dataset = get_dataset("~/aclImdb")
+train_dataset, _, test_dataset = get_dataset("/root/aclImdb")
 
 device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 

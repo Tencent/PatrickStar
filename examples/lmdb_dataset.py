@@ -18,6 +18,8 @@ from sklearn.model_selection import train_test_split
 from transformers import BertTokenizerFast
 
 
+# wget http://ai.stanford.edu/~amaas/data/sentiment/aclImdb_v1.tar.gz
+# tar -xf aclImdb_v1.tar.gz
 def get_dataset(data_path):
     def read_imdb_split(split_dir):
         split_dir = Path(split_dir)
@@ -30,8 +32,6 @@ def get_dataset(data_path):
 
         return texts, labels
 
-    # wget http://ai.stanford.edu/~amaas/data/sentiment/aclImdb_v1.tar.gz
-    # tar -xf aclImdb_v1.tar.gz
     train_texts, train_labels = read_imdb_split(os.path.join(data_path, "train"))
     test_texts, test_labels = read_imdb_split(os.path.join(data_path, "test"))
     train_texts, val_texts, train_labels, val_labels = train_test_split(

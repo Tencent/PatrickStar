@@ -5,14 +5,19 @@ export BS=${BS:-16}
 export CPU_EBD=${CPU_EBD:-1}
 export RELEASE_AFTER_INIT=${RELEASE_AFTER_INIT:-0}
 export MODEL_NAME=${MODEL_NAME:-"GPT2small"}
+export RES_CHECK=${RES_CHECK:-1}
 
 export margin_use_ratio=${margin_use_ratio:-0.8}
 # if warmup fails, lower the ratio
 export warmup_gpu_chunk_mem_ratio=${warmup_gpu_chunk_mem_ratio:-0.2}
 export overall_gpu_mem_ratio=${overall_gpu_mem_ratio:-0.8}
 
+if [[ ${RES_CHECK} == 1 ]];  then
 # Check result correctness
-RES_CHECK_FLAG="--res_check"
+export RES_CHECK_FLAG="--res_check"
+else
+export RES_CHECK_FLAG=""
+fi
 # Use a single GPU card to simulate multiple-GPU training.
 # FAKE_DIST="--use_fake_dist"
 
@@ -32,20 +37,12 @@ else
 export RELEASE=""
 fi
 
-export GPU_BOOST_ADAM=1
-
-if [[ ${GPU_BOOST_ADAM} == 1 ]]; then
-export use_gpu_fp32_convert_for_adam="--use_gpu_fp32_convert_for_adam"
-else
-export use_gpu_fp32_convert_for_adam=""
-fi
 mkdir -p ./logs
 python -m torch.distributed.launch --nproc_per_node=${GPU_NUM} \
                              pretrain_bert_demo.py ${RES_CHECK_FLAG} \
                              --use_ckp \
                              --use_fp16 \
                              --dist_plan="patrickstar" \
-                             ${use_gpu_fp32_convert_for_adam} \
                              --batch_size=${BS} \
                              --model_name=${MODEL_NAME} \
                              --overall_gpu_mem_ratio=${overall_gpu_mem_ratio} \
@@ -58,4 +55,4 @@ python -m torch.distributed.launch --nproc_per_node=${GPU_NUM} \
                              ${HYBRID_ADAM_FLAG} \
                              ${RELEASE} \
                              --default_chunk_size=${CHUNK_SIZE} \
-                             2>&1 | tee ./logs/log.${MODEL_NAME}_gpu_${GPU_NUM}_cs_${CS}_bs_${BS}_cpueb_${CPU_EBD}_margin_${margin_use_ratio}_warmup_${warmup_gpu_chunk_mem_ratio}_gpu_${overall_gpu_mem_ratio}_adamcvt_${GPU_BOOST_ADAM}
+                             2>&1 | tee ./logs/log.${MODEL_NAME}_gpu_${GPU_NUM}_cs_${CS}_bs_${BS}_cpueb_${CPU_EBD}_margin_${margin_use_ratio}_warmup_${warmup_gpu_chunk_mem_ratio}_gpu_${overall_gpu_mem_ratio}
