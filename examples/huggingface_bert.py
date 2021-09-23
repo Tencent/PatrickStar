@@ -17,7 +17,7 @@ from transformers import BertForSequenceClassification
 
 from patrickstar.runtime import initialize_engine
 
-from lmdb_dataset import get_dataset
+from imdb_dataset import get_dataset
 
 
 # Uncomment this line when doing multiprocess training
