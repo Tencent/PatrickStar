@@ -461,10 +461,6 @@ class FP16Adam(torch.optim.Optimizer):
             if time_profile:
                 global_timer.my_timer.finish_profile("ADAM_release_data")
 
-            # 预热时记录内存使用情况
-            mgr = PatrickStarManager()
-            mgr.tiktac(client)
-
         write_chunk_buff.reset()
         read_chunk_buff.reset()
 
