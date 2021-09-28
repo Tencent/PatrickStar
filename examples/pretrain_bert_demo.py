@@ -401,7 +401,6 @@ if __name__ == "__main__":
         NUM_HEAD = 12
     elif MODEL_NAME == "Bertlarge":
         # 0.35B
-        # PatrickStar and Torch都可以
         HIDDEN_DIM = 1024
         SEQ_LEN = 512
         NUM_LAYER = 24
@@ -495,7 +494,6 @@ if __name__ == "__main__":
     )
 
     if not res_check:
-        # 训练参数，可以自己定义
         torch.manual_seed(0)
         loss_list = test_bert_model_helper(
             args=args,

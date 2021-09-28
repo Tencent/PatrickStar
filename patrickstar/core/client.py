@@ -95,8 +95,6 @@ class PatrickStarClient(object):
         )
         self.chunk_tensor_index.add_chunk(
             tmp_chunk_id,
-            self.default_chunk_size,
-            torch.half,
             comm_group_idx,
             comm_group_offset,
             chunk_list_type,
@@ -153,7 +151,7 @@ class PatrickStarClient(object):
         else:
             last_chunk_id = self.chunk_list.last_chunk_id(chunk_list_type)
             is_success = self.chunk_tensor_index.try_insert_tensor_list(
-                last_chunk_id, param_list, data_type, access_type
+                last_chunk_id, param_list, access_type
             )
             if is_success:
                 return
@@ -164,14 +162,12 @@ class PatrickStarClient(object):
         )
         self.chunk_tensor_index.add_chunk(
             chunk_id,
-            self.default_chunk_size,
-            data_type,
             comm_group_idx,
             comm_group_offset,
             chunk_list_type,
         )
         is_success = self.chunk_tensor_index.try_insert_tensor_list(
-            chunk_id, param_list, data_type, access_type
+            chunk_id, param_list, access_type
         )
         if not is_success:
             raise RuntimeError(
@@ -198,15 +194,11 @@ class PatrickStarClient(object):
             )
             self.chunk_tensor_index.add_chunk(
                 chunk_id,
-                self.default_chunk_size,
-                data_type,
                 comm_group_idx,
                 comm_group_offset,
                 chunk_list_type,
             )
-        ret = self.chunk_tensor_index.try_insert_tensor(
-            chunk_id, param, data_type, access_type
-        )
+        ret = self.chunk_tensor_index.try_insert_tensor(chunk_id, param, access_type)
         self.chunk_tensor_index.register_optimizer_state_chunk_id(
             ref_param, access_type, chunk_list_type, chunk_id
         )
@@ -244,12 +236,6 @@ class PatrickStarClient(object):
 
     def chunk_ids_generator(self, chunk_list_type: ChunkListType):
         return self.chunk_list.chunk_ids_generator(chunk_list_type)
-
-    def generate_grad_params(self):
-        """
-        生成当前chunk list中所有grad tensors
-        """
-        return self.chunk_tensor_index.generate_grad_tensor_param()
 
     def is_local_param(self, param, access_type):
         """Check if param is in local chunk"""
