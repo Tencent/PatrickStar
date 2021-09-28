@@ -12,8 +12,14 @@
 ![alt perf](./doc/mgpu_scalability.png "性能测试结果")
 
 ### 安装
-```
+```bash
 pip install .
+```
+
+注意，安装派大星需要 gcc7 或更高版本。您可以使用 NVIDIA 提供的 NGC 镜像进行测试：
+
+```bash
+docker pull nvcr.io/nvidia/pytorch:21.06-py3
 ```
 
 ### 使用方法

@@ -16,7 +16,7 @@ from typing import Any, Iterable, List, Tuple
 
 import torch
 
-# TODO(jiaruifang) 设置这个flag来实现activation checkpoint offload到cpu
+# TODO(jiaruifang) Use this flag to offload activation checkpoint to cpu
 CPU_OFFLOAD_FLAG = False
 
 
@@ -56,12 +56,12 @@ def detach_variable(inputs: Tuple[Any, ...]) -> Tuple[torch.Tensor, ...]:
     else:
         raise RuntimeError(
             "Only tuple of tensors is supported. Got Unsupported input type: ",
-            type(inputs).__name__)
+            type(inputs).__name__,
+        )
 
 
 def check_backward_validity(inputs: Iterable[Any]) -> None:
-    if not any(inp.requires_grad
-               for inp in inputs if isinstance(inp, torch.Tensor)):
+    if not any(inp.requires_grad for inp in inputs if isinstance(inp, torch.Tensor)):
         warnings.warn(
             "None of the inputs have requires_grad=True. Gradients will be None"
         )
@@ -78,8 +78,12 @@ def get_device_states(*args) -> Tuple[List[int], List[torch.Tensor]]:
     # This will not error out if "arg" is a CPU tensor or a non-tensor type because
     # the conditionals short-circuit.
     fwd_gpu_devices = list(
-        set(arg.get_device() for arg in args
-            if isinstance(arg, torch.Tensor) and arg.is_cuda))
+        set(
+            arg.get_device()
+            for arg in args
+            if isinstance(arg, torch.Tensor) and arg.is_cuda
+        )
+    )
 
     fwd_gpu_states = []
     for device in fwd_gpu_devices:
@@ -111,14 +115,13 @@ class CheckpointFunction(torch.autograd.Function):
             ctx.had_cuda_in_fwd = False
             if torch.cuda._initialized:
                 ctx.had_cuda_in_fwd = True
-                ctx.fwd_gpu_devices, ctx.fwd_gpu_states = get_device_states(
-                    *args)
+                ctx.fwd_gpu_devices, ctx.fwd_gpu_states = get_device_states(*args)
 
         if CPU_OFFLOAD_FLAG:
             # Note 改变了run_function和save_for_backward的相对顺序
             if torch.distributed.is_initialized():
                 rank = torch.distributed.get_rank()
-            inputs_cuda = move_to_device(args, torch.device(f'cuda:{rank}'))
+            inputs_cuda = move_to_device(args, torch.device(f"cuda:{rank}"))
             with torch.no_grad():
                 outputs = run_function(*inputs_cuda)
             # logging.info('checkpoint FWD')
@@ -161,19 +164,17 @@ class CheckpointFunction(torch.autograd.Function):
         rng_devices = []
         if ctx.preserve_rng_state and ctx.had_cuda_in_fwd:
             rng_devices = ctx.fwd_gpu_devices
-        with torch.random.fork_rng(devices=rng_devices,
-                                   enabled=ctx.preserve_rng_state):
+        with torch.random.fork_rng(devices=rng_devices, enabled=ctx.preserve_rng_state):
             if ctx.preserve_rng_state:
                 torch.set_rng_state(ctx.fwd_cpu_state)
                 if ctx.had_cuda_in_fwd:
                     set_device_states(ctx.fwd_gpu_devices, ctx.fwd_gpu_states)
             detached_inputs = detach_variable(inputs)
-            with torch.enable_grad(), torch.cuda.amp.autocast(
-                    ctx.had_autocast_in_fwd):
+            with torch.enable_grad(), torch.cuda.amp.autocast(ctx.had_autocast_in_fwd):
                 outputs = ctx.run_function(*detached_inputs)
 
         if isinstance(outputs, torch.Tensor):
-            outputs = (outputs, )
+            outputs = (outputs,)
 
         # run backward() with only tensor that requires grad
         outputs_with_grad = []
@@ -183,11 +184,15 @@ class CheckpointFunction(torch.autograd.Function):
                 outputs_with_grad.append(outputs[i])
                 args_with_grad.append(args[i])
         if len(outputs_with_grad) == 0:
-            raise RuntimeError("none of output has requires_grad=True,"
-                               " this checkpoint() is not necessary")
+            raise RuntimeError(
+                "none of output has requires_grad=True,"
+                " this checkpoint() is not necessary"
+            )
         torch.autograd.backward(outputs_with_grad, args_with_grad)
-        grads = tuple(inp.grad if isinstance(inp, torch.Tensor) else inp
-                      for inp in detached_inputs)
+        grads = tuple(
+            inp.grad if isinstance(inp, torch.Tensor) else inp
+            for inp in detached_inputs
+        )
         # logging.info('checkpoint BWD')
         return (None, None) + grads
 
@@ -247,10 +252,11 @@ def checkpoint(function, *args, **kwargs):
         Output of running :attr:`function` on :attr:`*args`
     """
     # Hack to mix *args with **kwargs in a python 2.7-compliant way
-    preserve = kwargs.pop('preserve_rng_state', True)
+    preserve = kwargs.pop("preserve_rng_state", True)
     if kwargs:
-        raise ValueError("Unexpected keyword arguments: " +
-                         ",".join(arg for arg in kwargs))
+        raise ValueError(
+            "Unexpected keyword arguments: " + ",".join(arg for arg in kwargs)
+        )
 
     return CheckpointFunction.apply(function, preserve, *args)
 
@@ -296,10 +302,11 @@ def checkpoint_sequential(functions, segments, input, **kwargs):
         >>> input_var = checkpoint_sequential(model, chunks, input_var)
     """
     # Hack for keyword-only parameter in a python 2.7-compliant way
-    preserve = kwargs.pop('preserve_rng_state', True)
+    preserve = kwargs.pop("preserve_rng_state", True)
     if kwargs:
-        raise ValueError("Unexpected keyword arguments: " +
-                         ",".join(arg for arg in kwargs))
+        raise ValueError(
+            "Unexpected keyword arguments: " + ",".join(arg for arg in kwargs)
+        )
 
     def run_function(start, end, functions):
         def forward(input):
@@ -317,7 +324,7 @@ def checkpoint_sequential(functions, segments, input, **kwargs):
     end = -1
     for start in range(0, segment_size * (segments - 1), segment_size):
         end = start + segment_size - 1
-        input = checkpoint(run_function(start, end, functions),
-                           input,
-                           preserve_rng_state=preserve)
+        input = checkpoint(
+            run_function(start, end, functions), input, preserve_rng_state=preserve
+        )
     return run_function(end + 1, len(functions) - 1, functions)(input)
