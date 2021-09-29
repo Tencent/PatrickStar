@@ -1,10 +1,10 @@
-
 export GPU_NUM=${GPU_NUM:-1}
 export CS=${CS:-64}
 export BS=${BS:-16}
 export CPU_EBD=${CPU_EBD:-1}
 export RELEASE_AFTER_INIT=${RELEASE_AFTER_INIT:-0}
 export MODEL_NAME=${MODEL_NAME:-"GPT2small"}
+export DIST_PLAN=${DIST_PLAN:-"patrickstar"}
 
 export margin_use_ratio=${margin_use_ratio:-0.8}
 # if warmup fails, lower the ratio
@@ -50,7 +50,7 @@ python -m torch.distributed.launch --nproc_per_node=${GPU_NUM} \
                              pretrain_bert_demo.py ${RES_CHECK_FLAG} \
                              --use_ckp \
                              --use_fp16 \
-                             --dist_plan="torch" \
+                             --dist_plan=${DIST_PLAN} \
                              ${use_gpu_fp32_convert_for_adam} \
                              --batch_size=${BS} \
                              --model_name=${MODEL_NAME} \
