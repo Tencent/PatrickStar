@@ -21,16 +21,16 @@ python huggingface_bert.py
 
 `run_bert.sh` 和 `pretrain_bert_demo.py` 是用派大星训练大规模预训练模型的例子。可以通过配置 `run_bert.sh` 中的参数来设置不同大小的模型。
 
-默认设置为使用 Bert 模型的精度校准。
+使用 Bert 模型检查收敛精度。
 
 ```bash
-bash run_bert.sh
+bash RES_CHECK=1 run_bert.sh
 ```
 
-可以通过下面的设置来调整运行模型的规模：
+可以通过下面的设置来调整运行模型的规模，此时我们关闭精度检查：
 
 ```bash
-MODEL_NAME=GPT2_4B RES_CHECK=0 bash run_bert.sh
+env MODEL_NAME=GPT2_4B RES_CHECK=0 DIST_PLAN="patrickstar" bash run_bert.sh
 ```
 
 即关闭精度校准，并运行大小为 4B 的 GPT2 模型。可选的 `MODEL_NAME` 详见 `pretrain_bert_demo.py`。
