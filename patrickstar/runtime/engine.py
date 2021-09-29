@@ -115,12 +115,11 @@ class PatrickStarEngine(Module):
         released accidentally when using gradient checkpointing.
         """
         for chunk_id, chunk in self.client.chunk_list.generate_chunk():
-            if chunk.get_status() == PSChunkStatus.HOLD:
+            if (
+                chunk.get_status() == PSChunkStatus.HOLD
+                or chunk.get_status() == PSChunkStatus.HOLD_AFTER_FWD
+            ):
                 chunk.set_unused()
-                self.client.set_all_tensors_status_in_chunk(
-                    chunk_id, PSTensorStatus.HOLD
-                )
-            elif chunk.get_status() == PSChunkStatus.HOLD_AFTER_FWD:
                 self.client.set_all_tensors_status_in_chunk(
                     chunk_id, PSTensorStatus.HOLD
                 )
