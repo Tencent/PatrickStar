@@ -17,13 +17,13 @@ from transformers import BertForSequenceClassification
 
 from patrickstar.runtime import initialize_engine
 
-from lmdb_dataset import get_dataset
+from imdb_dataset import get_dataset
 
 
 # Uncomment this line when doing multiprocess training
 # torch.distributed.init_process_group(backend='nccl')
 
-train_dataset, _, _ = get_dataset("aclImdb")
+train_dataset, _, test_dataset = get_dataset("/root/aclImdb")
 
 device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 
@@ -67,19 +67,32 @@ model, optim = initialize_engine(model_func=model_func, local_rank=0, config=con
 
 train_loader = DataLoader(train_dataset, batch_size=16, shuffle=True)
 
-for epoch in range(3):
-    for i, batch in enumerate(train_loader):
-        optim.zero_grad()
-        input_ids = batch["input_ids"].to(device)
-        # print(input_ids)
-        attention_mask = batch["attention_mask"].to(device)
-        labels = batch["labels"].to(device)
-        outputs = model(input_ids, attention_mask=attention_mask, labels=labels)
-        loss = outputs[0]
-        model.backward(loss)
-        optim.step()
-        print(i, loss.item())
-        if i == 10:
-            exit()
+print("train loss:")
+
+for i, batch in enumerate(train_loader):
+    optim.zero_grad()
+    input_ids = batch["input_ids"].to(device)
+    attention_mask = batch["attention_mask"].to(device)
+    labels = batch["labels"].to(device)
+    outputs = model(input_ids, attention_mask=attention_mask, labels=labels)
+    loss = outputs[0]
+    model.backward(loss)
+    optim.step()
+    print(i, loss.item())
+    if i == 10:
+        break
 
 model.eval()
+
+print("test loss:")
+
+test_loader = DataLoader(test_dataset, batch_size=16, shuffle=False)
+for i, batch in enumerate(test_loader):
+    input_ids = batch["input_ids"].to(device)
+    attention_mask = batch["attention_mask"].to(device)
+    labels = batch["labels"].to(device)
+    outputs = model(input_ids, attention_mask=attention_mask, labels=labels)
+    loss = outputs[0]
+    print(i, loss.item())
+    if i == 5:
+        break

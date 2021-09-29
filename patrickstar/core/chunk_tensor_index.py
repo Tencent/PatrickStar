@@ -16,7 +16,7 @@ from typing import List
 import torch
 
 from patrickstar.utils import logger, get_rank
-from .const import AccessType, PSTensorStatus, ChunkListType
+from .const import AccessType, ChunkListType
 from .parameter import is_param_registered
 from .tensor_stub import TensorInfo
 
@@ -24,9 +24,10 @@ from .tensor_stub import TensorInfo
 class ChunkTensorIndex(object):
     def __init__(self, default_chunk_size: int = 0):
         """
-        一个存储tensor和chunk的检索信息的数据库，每个进程维护一个ChunkTensorIndex实例
-        它在预处理阶段根据DNN定义被创建出来
-        只有增查功能，无删改
+        Storing the index information of tensor and chunks.
+        Every process will maintain a `ChunkTensorIndex` instance.
+        It is created during preprocessing with the define of the model.
+        Only add and search supported, no delete or update.
         """
         # 1-1 dict, tensor_id -> TensorInfo
         self.tensor_id_to_info_map: dict[int, TensorInfo] = {}
@@ -38,40 +39,48 @@ class ChunkTensorIndex(object):
         # chunk_id -> (comm_group_idx, comm_group_offset, chunk_list_type)
         self.chunk_id_to_comm_group_map = {}
 
-        # 记录不同chunk_list信息，存放chunk_id信息
+        # Chunk_ids of chunks in different chunk type
         self.chunk_type_to_chunk_id_list_map = {}
         self.default_chunk_size = default_chunk_size
 
         # key is a tuple (torch.nn.Parameter, ParamListType) -> value: int
         self.param_fp16_chunk_id_to_os_chunk_id_map = {}
 
-    def register_optimizer_state_chunk_id(self, ref_param,
-                                          access_type: AccessType,
-                                          chunk_list_type: ChunkListType,
-                                          chunk_id: int):
+    def register_optimizer_state_chunk_id(
+        self,
+        ref_param,
+        access_type: AccessType,
+        chunk_list_type: ChunkListType,
+        chunk_id: int,
+    ):
         ref_chunk_id = self.get_chunk_id(ref_param, access_type)
-        self.param_fp16_chunk_id_to_os_chunk_id_map[(
-            ref_chunk_id, chunk_list_type)] = chunk_id
+        self.param_fp16_chunk_id_to_os_chunk_id_map[
+            (ref_chunk_id, chunk_list_type)
+        ] = chunk_id
 
-    def get_optimizer_state_chunk_id(self, ref_param: torch.nn.Parameter,
-                                     access_type: AccessType,
-                                     chunk_list_type: ChunkListType) -> int:
+    def get_optimizer_state_chunk_id(
+        self,
+        ref_param: torch.nn.Parameter,
+        access_type: AccessType,
+        chunk_list_type: ChunkListType,
+    ) -> int:
         """
-        获取ref_param对应OS tensor所在的chunk_id
+        Get the chunk id storing the optimizer state of `ref_param`.
         args:
-            @ref_param: 一个参考的param，一般是param fp16
-            @access_type: 访问类型
-            @chunk_list_type: os tensor的chunk类型
+            @ref_param: the ref param, usually param fp16
+            @access_type: AccessType
+            @chunk_list_type: type of the optimizer state chunk.
         rets:
-            返回chunk id，如果不存在则返回None
+            chunk id, None if not existed.
         """
         ref_chunk_id = self.get_chunk_id(ref_param, access_type)
         return self.param_fp16_chunk_id_to_os_chunk_id_map.get(
-            (ref_chunk_id, chunk_list_type))
+            (ref_chunk_id, chunk_list_type)
+        )
 
     def is_local_chunk(self, chunk_id):
         """
-        chunk_id是否是local chunk
+        If chunk of `chunk_id` is local.
         """
         rank = get_rank()
         _, grp_offset, _ = self.chunk_id_to_comm_group_map[chunk_id]
@@ -79,61 +88,34 @@ class ChunkTensorIndex(object):
 
     def chunk_num(self, list_type: ChunkListType):
         """
-        返回chunk_list_type类型chunk list的chunk个数
+        The number of chunks of type `list_type`.
         """
         if list_type not in self.chunk_type_to_chunk_id_list_map:
             return 0
         else:
             return len(self.chunk_type_to_chunk_id_list_map[list_type])
 
-    def add_chunk(self, chunk_id, chunk_size, data_type, comm_group_id,
-                  comm_group_offset, list_type: ChunkListType):
-        """
-        注册一个chunk信息
-        @chunk_id: chunk的id
-        @chunk_size: chunk尺寸
-        @data_type: chunk中存储数据类型，由于PyTorch限制，再次说明不能在chunk里混合存储两种类型数据，或者将chunk内存以不同类型转换
-        @comm_group_id: 在当前list_type中当前通信组的id
-        @list_type: chunk做在list的类型
-        """
+    def add_chunk(
+        self, chunk_id, comm_group_id, comm_group_offset, list_type: ChunkListType
+    ):
         comm_group_info = (comm_group_id, list_type)
         if comm_group_info not in self.comm_group_idx_to_chunk_id_list_map:
             self.comm_group_idx_to_chunk_id_list_map[comm_group_info] = list()
-        self.comm_group_idx_to_chunk_id_list_map[comm_group_info].append(
-            chunk_id)
-        self.chunk_id_to_comm_group_map[chunk_id] = (comm_group_id,
-                                                     comm_group_offset,
-                                                     list_type)
+        self.comm_group_idx_to_chunk_id_list_map[comm_group_info].append(chunk_id)
+        self.chunk_id_to_comm_group_map[chunk_id] = (
+            comm_group_id,
+            comm_group_offset,
+            list_type,
+        )
 
         if list_type not in self.chunk_type_to_chunk_id_list_map:
             self.chunk_type_to_chunk_id_list_map[list_type] = []
         self.chunk_type_to_chunk_id_list_map[list_type].append(chunk_id)
 
-    def generate_grad_tensor_param(self):
-        """
-        按chunk内部排列顺序生成所有当前没有被free的grad tensor所在的param
-        """
-        res_list = []
-        for _, tensor_id_list in self.chunk_id_to_tensor_id_list_map.items():
-            for tensor_id in tensor_id_list:
-                info = self.tensor_id_to_info_map[tensor_id]
-                if info.access_type == AccessType.GRAD and info.status(
-                ) != PSTensorStatus.FREE:
-                    res_list.append(info.param)
-        return res_list
-
-    def generate_all_tensor_info(self):
-        """
-        展示每个chunk中tensor的状态
-        """
-        for _, tensor_info_list in self.tensor_id_to_info_map.items():
-            for tensor_id in tensor_info_list:
-                yield self.tensor_id_to_info_map[tensor_id]
-
     def generate_tensor_info_in_order(self, chunk_id):
         """
-        产生在chunk id的所有tensor，以start_offset位置从小到大排序
-        O(N)
+        Return the tensors of chunk by `chunk_id`.
+        The chunks are ordered by start_offsets.
         """
         for tensor_id in self.chunk_id_to_tensor_id_list_map.get(chunk_id, []):
             yield self.tensor_id_to_info_map[tensor_id]
@@ -147,8 +129,10 @@ class ChunkTensorIndex(object):
         # imagine [0] is the last step of the binary search
         # and we need to decide where to insert -1
         if start == end:
-            if self.tensor_id_to_info_map[
-                    tensor_id_list[start]].start_offset > start_offset:
+            if (
+                self.tensor_id_to_info_map[tensor_id_list[start]].start_offset
+                > start_offset
+            ):
                 return start
             else:
                 return start + 1
@@ -160,32 +144,28 @@ class ChunkTensorIndex(object):
             return start
 
         mid = (start + end) // 2
-        mid_start_offset = self.tensor_id_to_info_map[
-            tensor_id_list[mid]].start_offset
+        mid_start_offset = self.tensor_id_to_info_map[tensor_id_list[mid]].start_offset
         if mid_start_offset < start_offset:
-            return self._binary_search(tensor_id_list, start_offset, mid + 1,
-                                       end)
+            return self._binary_search(tensor_id_list, start_offset, mid + 1, end)
         elif mid_start_offset > start_offset:
-            return self._binary_search(tensor_id_list, start_offset, start,
-                                       mid - 1)
+            return self._binary_search(tensor_id_list, start_offset, start, mid - 1)
         else:
             return mid
 
-    def add_tensor(self, chunk_id, tensor_id, start_offset, numel, param,
-                   access_type):
+    def add_tensor(self, chunk_id, tensor_id, start_offset, numel, param, access_type):
         """
-        添加一个tensor，注册它所属的chunk_id和start_offset信息
-        需要将chunk_id内的tensor按照start_offset排序
-        二分查找时间复杂度O(logN)
-        考虑chunk内排布的tensor可能不连续的情况
+        Add a tensor.
+        Register the chunk_id of the chunk it belongs and its start_offset in the chunk.
+        Support insert tensor between other tensors with binary search.
         """
         if chunk_id not in self.chunk_id_to_tensor_id_list_map:
             self.chunk_id_to_tensor_id_list_map[chunk_id] = list()
 
         tensor_id_list = self.chunk_id_to_tensor_id_list_map[chunk_id]
         # 二分查找按照start_offset顺序从小到大插入
-        pos = self._binary_search(tensor_id_list, start_offset, 0,
-                                  len(tensor_id_list) - 1)
+        pos = self._binary_search(
+            tensor_id_list, start_offset, 0, len(tensor_id_list) - 1
+        )
         tensor_id_list.insert(pos, tensor_id)
         if not is_param_registered(param):
             param_name = None
@@ -193,21 +173,14 @@ class ChunkTensorIndex(object):
             param_name = param.ps_attr.name
 
         self.tensor_id_to_info_map[tensor_id] = TensorInfo(
-            chunk_id, tensor_id, start_offset, numel, param, access_type,
-            param_name)
+            chunk_id, tensor_id, start_offset, numel, param, access_type, param_name
+        )
 
         if is_param_registered(param):
             if access_type == AccessType.DATA:
                 param.ps_attr.data_chunk_id = chunk_id
             elif access_type == AccessType.GRAD:
                 param.ps_attr.grad_chunk_id = chunk_id
-
-    def delete_chunk_id(self, chunk_id):
-        """
-        @depracated，在静态chunk_schema中不应该被调用
-        删除chunk_id对应chunk的索引信息
-        """
-        raise NotImplementedError
 
     def tensor_id_to_chunk_id(self, tensor_id) -> int:
         """
@@ -220,8 +193,7 @@ class ChunkTensorIndex(object):
         else:
             return info.chunk_id
 
-    def get_chunk_id(self, param: torch.nn.Parameter,
-                     access_type: AccessType) -> int:
+    def get_chunk_id(self, param: torch.nn.Parameter, access_type: AccessType) -> int:
         tensor_id = param.ps_attr.get_tensor_id(access_type)
         info = self.tensor_id_to_info_map.get(tensor_id)
         if info is None:
@@ -230,8 +202,7 @@ class ChunkTensorIndex(object):
 
     def chunk_ids_of_comm_group(self, chunk_id: int) -> List[int]:
         comm_group_id, _, list_type = self.chunk_id_to_comm_group_map[chunk_id]
-        return self.comm_group_idx_to_chunk_id_list_map[(comm_group_id,
-                                                         list_type)]
+        return self.comm_group_idx_to_chunk_id_list_map[(comm_group_id, list_type)]
 
     def generate_all_chunks(self, chunk_list):
         for chunk_id, _ in self.chunk_id_to_tensor_id_list_map.items():
@@ -257,17 +228,14 @@ class ChunkTensorIndex(object):
         tensor_id_list = self._get_tensor_id_list(chunk_id)
         tensor_id_list.remove(target_tensor_id)
 
-    def try_insert_tensor_list(self, chunk_id, param_list, data_type,
-                               access_type):
+    def try_insert_tensor_list(self, chunk_id, param_list, access_type):
         """
-        向chunk_id所在的chunk插入param_list
-        先污染后治理，先插入每一个param，如果发现这个chunk无法满足，则删除之前插入
+        Insert a list of param to chunk.
         """
         visited_params = []
         success = True
         for param in param_list:
-            success = self.try_insert_tensor(chunk_id, param, data_type,
-                                             access_type)
+            success = self.try_insert_tensor(chunk_id, param, access_type)
             visited_params.append(param)
             if not success:
                 break
@@ -277,16 +245,10 @@ class ChunkTensorIndex(object):
 
         return success
 
-    def try_insert_tensor(self, chunk_id, param, data_type,
-                          access_type) -> bool:
+    def try_insert_tensor(self, chunk_id, param, access_type) -> bool:
         """
-        尝试向chunk内插入tensor，返回值表示是否成功
-        如果param已经插入过了则不予处理
-        args:
-            @chunk_id: 插入目标chunk_id
-            @param: 待插入的参数
-            @data_type: param的数据类型
-            @access_type: param参数的访问方式
+        Try inserting tensor to chunk, return successful or not.
+        If `param` was inserted, return True.
         """
         tensor_id_list = self._get_tensor_id_list(chunk_id)
         prev_end_pos = 0
@@ -303,19 +265,31 @@ class ChunkTensorIndex(object):
             gap = start_pos - prev_end_pos
             if gap >= numel:
                 self.tensor_id_to_info_map[target_tensor_id] = TensorInfo(
-                    chunk_id, target_tensor_id, prev_end_pos, numel, param,
-                    access_type, tensor_name)
+                    chunk_id,
+                    target_tensor_id,
+                    prev_end_pos,
+                    numel,
+                    param,
+                    access_type,
+                    tensor_name,
+                )
                 tensor_id_list.insert(idx + 1, target_tensor_id)
                 return True
             prev_end_pos = start_pos + tensor_info.numel
 
         logger.debug(
-            f'default_chunk_size {self.default_chunk_size}, prev_end_pos {prev_end_pos}, numel {numel}'
+            f"default_chunk_size {self.default_chunk_size}, prev_end_pos {prev_end_pos}, numel {numel}"
         )
         if self.default_chunk_size - prev_end_pos >= numel:
             self.tensor_id_to_info_map[target_tensor_id] = TensorInfo(
-                chunk_id, target_tensor_id, prev_end_pos, numel, param,
-                access_type, tensor_name)
+                chunk_id,
+                target_tensor_id,
+                prev_end_pos,
+                numel,
+                param,
+                access_type,
+                tensor_name,
+            )
             tensor_id_list.insert(len(tensor_id_list), target_tensor_id)
             return True
         return False
