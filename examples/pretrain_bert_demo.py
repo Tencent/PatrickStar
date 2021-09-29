@@ -137,6 +137,12 @@ def _add_test_bert_args(parser):
     return parser
 
 
+def _add_lightseq_args(parser):
+    group = parser.add_argument_group(title="test_light_seq")
+    group.add_argument("--with_lightseq", action="store_true", help="use lightseq")
+    return parser
+
+
 def _print_args(args):
     """Print arguments."""
     if args.rank == 0:
@@ -155,6 +161,7 @@ def parse_args():
     parser = argparse.ArgumentParser(description="PatrickStar Arguments")
     parser = _add_patrick_star_args(parser)
     parser = _add_test_bert_args(parser)
+    parser = _add_lightseq_args(parser)
     args = parser.parse_args()
     args.rank = int(os.getenv("RANK", "0"))
     args.world_size = int(os.getenv("WORLD_SIZE", "1"))
@@ -266,9 +273,27 @@ def test_bert_model_helper(
         model = BertForSequenceClassification(bert_config)
         model.cuda(rank)
         model.train()
+
+        if args.with_lightseq:
+            from ls_hf_transformer_encoder_layer import inject_ls_enc_layer
+
+            inject_ls_enc_layer(model, args, bert_config)
+            print("Using Lightseq Kernels, all submodules includes:")
+
+            def visit_and_register_hooks(module):
+                is_child_node = True
+                for name, submodule in module.named_children():
+                    visit_and_register_hooks(submodule)
+                    is_child_node = False
+                if is_child_node:
+                    print(f"module name {module.__class__.__name__}")
+
+            visit_and_register_hooks(model)
+
         optimizer = torch.optim.Adam(
             model.parameters(), lr=lr, betas=betas, eps=eps, weight_decay=weight_decay
         )
+
         if is_fp16:
             scaler = torch.cuda.amp.GradScaler(
                 init_scale=2 ** 10,
@@ -304,9 +329,7 @@ def test_bert_model_helper(
 
     loss_res = []
 
-    logger.info(
-        f"MAC {total_macs / 1e9} GFlop, model param size: {model_numel / 1e9} B"
-    )
+    print(f"MAC {total_macs / 1e9} GFlop, model param size: {model_numel / 1e9} B")
 
     for n, batch in enumerate(data_loader):
         if n == num_steps:
@@ -347,7 +370,7 @@ def test_bert_model_helper(
                 force=True,
             )
             if dist_plan == "patrickstar":
-                logger.info(
+                print(
                     f'{"[WARM UP] " if n == 0 else ""}'
                     f"Step elaspe {step_elapse} s, {total_macs / 1e12 / step_elapse} Tflops"
                 )
@@ -357,7 +380,7 @@ def test_bert_model_helper(
                 global_timer.my_timer.reset()
                 global_timer.data_move_cnter.reset()
             else:
-                logger.info(
+                print(
                     f"Step elaspe {step_elapse} s, {total_macs / 1e12 / step_elapse} Tflops"
                 )
 
@@ -372,7 +395,7 @@ def test_bert_model_helper(
 
 
 if __name__ == "__main__":
-    os.environ["NCCL_DEBUG"] = "INFO"
+    # os.environ["NCCL_DEBUG"] = "INFO"
     args = parse_args()
     use_ckp = args.use_ckp
     use_fp16 = args.use_fp16
