@@ -100,6 +100,31 @@ class PatrickStarEngine(Module):
         self.client.init(self.module, self.optimizer)
         logger.info("init PatrickStarEngine")
 
+    def _reset_before_forward(self):
+        mgr = PatrickStarManager()
+        mgr.reset_metronome()
+        for param_fp16 in self.client.chunk_based_param_fp16:
+            param_fp16.ps_attr.fwd_used_cnt = 0
+        for _, chunk in self.client.chunk_list.generate_chunk():
+            chunk.unused = 0
+
+    def _set_status_after_forward(self):
+        """
+        After forward calculation, we need to reset the status of
+        tensors from HOLD_AFTER_FWD to HOLD. Otherwise, chunks may be
+        released accidentally when using gradient checkpointing.
+        """
+        for chunk_id, chunk in self.client.chunk_list.generate_chunk():
+            if chunk.get_status() == PSChunkStatus.HOLD:
+                chunk.set_unused()
+                self.client.set_all_tensors_status_in_chunk(
+                    chunk_id, PSTensorStatus.HOLD
+                )
+            elif chunk.get_status() == PSChunkStatus.HOLD_AFTER_FWD:
+                self.client.set_all_tensors_status_in_chunk(
+                    chunk_id, PSTensorStatus.HOLD
+                )
+
     def forward(self, *inputs, **kwargs):
         r"""Execute forward propagation
         Arguments:
@@ -109,17 +134,10 @@ class PatrickStarEngine(Module):
         global_timer.my_timer.start_profile("FWD")
         mgr = PatrickStarManager()
         mgr.set_training_stage(TrainingStage.FWD)
-        mgr.reset_metronome()
-
-        for param_fp16 in self.client.chunk_based_param_fp16:
-            param_fp16.ps_attr.fwd_used_cnt = 0
+        self._reset_before_forward()
 
         loss = self.module(*inputs, **kwargs)
-        for chunk_id, chunk in self.client.chunk_list.generate_chunk():
-            if chunk.get_status() == PSChunkStatus.HOLD_AFTER_FWD:
-                self.client.set_all_tensors_status_in_chunk(
-                    chunk_id, PSTensorStatus.HOLD
-                )
+        self._set_status_after_forward()
         global_timer.my_timer.finish_profile("FWD")
         return loss
 

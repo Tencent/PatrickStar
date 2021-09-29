@@ -361,6 +361,9 @@ class ChunkList(object):
 
         return moved_list
 
+    def add_status(self, chunk_id, status):
+        self.chunk_id_to_chunk_dict_map[chunk_id].add_status(status)
+
     def update_status(self, chunk_id, old_status, new_status):
         self.chunk_id_to_chunk_dict_map[chunk_id].update_status(old_status, new_status)
 
