@@ -16,7 +16,7 @@ from typing import List
 import torch
 
 from patrickstar.utils import logger, get_rank
-from .const import AccessType, ChunkListType
+from .const import AccessType, ChunkType
 from .parameter import is_param_registered
 from .tensor_stub import TensorInfo
 
@@ -34,9 +34,9 @@ class ChunkTensorIndex(object):
         # 1-N dict, chunk_id -> List(tensor_id) in order of start_offset
         self.chunk_id_to_tensor_id_list_map: dict[int, List[int]] = {}
 
-        # (comm_group_idx, chunk_list_type) -> chunk_id_list
+        # (comm_group_idx, chunk_type) -> chunk_id_list
         self.comm_group_idx_to_chunk_id_list_map = {}
-        # chunk_id -> (comm_group_idx, comm_group_offset, chunk_list_type)
+        # chunk_id -> (comm_group_idx, comm_group_offset, chunk_type)
         self.chunk_id_to_comm_group_map = {}
 
         # Chunk_ids of chunks in different chunk type
@@ -50,32 +50,32 @@ class ChunkTensorIndex(object):
         self,
         ref_param,
         access_type: AccessType,
-        chunk_list_type: ChunkListType,
+        chunk_type: ChunkType,
         chunk_id: int,
     ):
         ref_chunk_id = self.get_chunk_id(ref_param, access_type)
         self.param_fp16_chunk_id_to_os_chunk_id_map[
-            (ref_chunk_id, chunk_list_type)
+            (ref_chunk_id, chunk_type)
         ] = chunk_id
 
     def get_optimizer_state_chunk_id(
         self,
         ref_param: torch.nn.Parameter,
         access_type: AccessType,
-        chunk_list_type: ChunkListType,
+        chunk_type: ChunkType,
     ) -> int:
         """
         Get the chunk id storing the optimizer state of `ref_param`.
         args:
             @ref_param: the ref param, usually param fp16
             @access_type: AccessType
-            @chunk_list_type: type of the optimizer state chunk.
+            @chunk_type: type of the optimizer state chunk.
         rets:
             chunk id, None if not existed.
         """
         ref_chunk_id = self.get_chunk_id(ref_param, access_type)
         return self.param_fp16_chunk_id_to_os_chunk_id_map.get(
-            (ref_chunk_id, chunk_list_type)
+            (ref_chunk_id, chunk_type)
         )
 
     def is_local_chunk(self, chunk_id):
@@ -86,7 +86,7 @@ class ChunkTensorIndex(object):
         _, grp_offset, _ = self.chunk_id_to_comm_group_map[chunk_id]
         return rank == grp_offset
 
-    def chunk_num(self, list_type: ChunkListType):
+    def chunk_num(self, list_type: ChunkType):
         """
         The number of chunks of type `list_type`.
         """
@@ -96,7 +96,7 @@ class ChunkTensorIndex(object):
             return len(self.chunk_type_to_chunk_id_list_map[list_type])
 
     def add_chunk(
-        self, chunk_id, comm_group_id, comm_group_offset, list_type: ChunkListType
+        self, chunk_id, comm_group_id, comm_group_offset, list_type: ChunkType
     ):
         comm_group_info = (comm_group_id, list_type)
         if comm_group_info not in self.comm_group_idx_to_chunk_id_list_map:

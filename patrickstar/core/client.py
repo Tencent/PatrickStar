@@ -18,7 +18,7 @@ import torch
 
 import patrickstar.utils.global_timer as global_timer
 from patrickstar.utils import logger, get_world_size, get_rank
-from .chunk_list import ChunkList, ChunkListType
+from .chunk_list import ChunkList, ChunkType
 from .chunk_tensor_index import ChunkTensorIndex
 from .const import AccessType, PSChunkStatus, PSTensorStatus, TrainingStage
 from .hook import setup_patrickstar_hooks
@@ -79,11 +79,9 @@ class PatrickStarClient(object):
             self.display_chunk_info()
         self.register_model_hook(model)
 
-    def append_dummy_chunk(
-        self, data_type: torch.dtype, chunk_list_type: ChunkListType
-    ):
+    def append_dummy_chunk(self, data_type: torch.dtype, chunk_type: ChunkType):
         """
-        向chunk_list_type list中添加一个dummy chunk
+        向chunk_type list中添加一个dummy chunk
         """
         tmp_chunk_id = self.chunk_list.generate_chunk_id()
         comm_group_idx, comm_group_offset = self.chunk_list.new_chunk(
@@ -91,13 +89,13 @@ class PatrickStarClient(object):
             self.default_chunk_size,
             torch.half,
             is_dummy=True,
-            chunk_type=chunk_list_type,
+            chunk_type=chunk_type,
         )
         self.chunk_tensor_index.add_chunk(
             tmp_chunk_id,
             comm_group_idx,
             comm_group_offset,
-            chunk_list_type,
+            chunk_type,
         )
         dummy = torch.nn.Parameter(
             torch.tensor([], dtype=data_type), requires_grad=False
@@ -117,7 +115,7 @@ class PatrickStarClient(object):
         )
 
         logger.info(
-            f"Append a dummy chunk to the Chunk List {chunk_list_type} "
+            f"Append a dummy chunk to the Chunk List {chunk_type} "
             f"comm group ({comm_group_idx} {comm_group_offset})"
         )
 
@@ -133,23 +131,23 @@ class PatrickStarClient(object):
         param_list: List[torch.nn.Parameter],
         data_type: torch.dtype,
         access_type: AccessType,
-        chunk_list_type: ChunkListType,
+        chunk_type: ChunkType,
     ):
         """
         将一个tensor交给client管理，这个tensor必须是某个parameter的data或者grad成员变量
-        具体过程，如果这个param之前没有被client管理过，则在对应的chunk_list_type后append这个tensor
+        具体过程，如果这个param之前没有被client管理过，则在对应的chunk_type后append这个tensor
         args:
             @param_list: tensor list所在的Parameter list，client管理的tensor必须属于parameter的data或者grad
             @data_type: tensor的数据类型，可以和param的类型不一致，因为param后面会被改变类型
             @access_type: 访问data或者grad
-            @chunk_list_type: tensor插入队列的类型
+            @chunk_type: tensor插入队列的类型
         """
         assert type(data_type) == torch.dtype, f"data_type is {type(data_type)}"
         assert type(access_type) == AccessType
-        if self.chunk_list.is_empty(chunk_list_type):
+        if self.chunk_list.is_empty(chunk_type):
             chunk_id = self.chunk_list.generate_chunk_id()
         else:
-            last_chunk_id = self.chunk_list.last_chunk_id(chunk_list_type)
+            last_chunk_id = self.chunk_list.last_chunk_id(chunk_type)
             is_success = self.chunk_tensor_index.try_insert_tensor_list(
                 last_chunk_id, param_list, access_type
             )
@@ -158,13 +156,13 @@ class PatrickStarClient(object):
             chunk_id = self.chunk_list.generate_chunk_id()
 
         comm_group_idx, comm_group_offset = self.chunk_list.new_chunk(
-            chunk_id, self.default_chunk_size, data_type, False, chunk_list_type
+            chunk_id, self.default_chunk_size, data_type, False, chunk_type
         )
         self.chunk_tensor_index.add_chunk(
             chunk_id,
             comm_group_idx,
             comm_group_offset,
-            chunk_list_type,
+            chunk_type,
         )
         is_success = self.chunk_tensor_index.try_insert_tensor_list(
             chunk_id, param_list, access_type
@@ -177,30 +175,30 @@ class PatrickStarClient(object):
         return
 
     def append_tensor_as_ref(
-        self, param, data_type, access_type, chunk_list_type, ref_param
+        self, param, data_type, access_type, chunk_type, ref_param
     ):
         """
         按照ref_param的排布方式排布param
         ref_param和param所在的chunk id不同
         """
         chunk_id = self.chunk_tensor_index.get_optimizer_state_chunk_id(
-            ref_param, access_type, chunk_list_type
+            ref_param, access_type, chunk_type
         )
         if chunk_id is None:
             # new a chunk
             chunk_id = self.chunk_list.generate_chunk_id()
             comm_group_idx, comm_group_offset = self.chunk_list.new_chunk(
-                chunk_id, self.default_chunk_size, data_type, False, chunk_list_type
+                chunk_id, self.default_chunk_size, data_type, False, chunk_type
             )
             self.chunk_tensor_index.add_chunk(
                 chunk_id,
                 comm_group_idx,
                 comm_group_offset,
-                chunk_list_type,
+                chunk_type,
             )
         ret = self.chunk_tensor_index.try_insert_tensor(chunk_id, param, access_type)
         self.chunk_tensor_index.register_optimizer_state_chunk_id(
-            ref_param, access_type, chunk_list_type, chunk_id
+            ref_param, access_type, chunk_type, chunk_id
         )
         assert ret is True
 
@@ -212,7 +210,7 @@ class PatrickStarClient(object):
         world_size = get_world_size()
         # 本进程自己管理的Chunk，和Group Chunk Buff会分配的Chunk
         return (
-            self.chunk_tensor_index.chunk_num(ChunkListType.PARAM_FP16)
+            self.chunk_tensor_index.chunk_num(ChunkType.PARAM_FP16)
             * self.default_chunk_size
             * 2
             / world_size
@@ -234,8 +232,8 @@ class PatrickStarClient(object):
     def register_model_hook(self, model):
         setup_patrickstar_hooks(model, self)
 
-    def chunk_ids_generator(self, chunk_list_type: ChunkListType):
-        return self.chunk_list.chunk_ids_generator(chunk_list_type)
+    def chunk_ids_generator(self, chunk_type: ChunkType):
+        return self.chunk_list.chunk_ids_generator(chunk_type)
 
     def is_local_param(self, param, access_type):
         """Check if param is in local chunk"""

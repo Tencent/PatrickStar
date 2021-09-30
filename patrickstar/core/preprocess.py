@@ -15,7 +15,7 @@ import functools
 
 import torch
 
-from patrickstar.core import PatrickStarClient, AccessType, ChunkListType
+from patrickstar.core import PatrickStarClient, AccessType, ChunkType
 from patrickstar.core import register_param, is_param_registered, ParamType
 from patrickstar.ops import Embedding
 from patrickstar.utils import logger, print_rank, get_rank, get_world_size
@@ -232,8 +232,8 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
 
         chunk_num = 0
         for param_fp16_chunk_id, param_fp32_chunk_id in zip(
-            self.client.chunk_ids_generator(ChunkListType.PARAM_FP16),
-            self.client.chunk_ids_generator(ChunkListType.PARAM_FP32),
+            self.client.chunk_ids_generator(ChunkType.PARAM_FP16),
+            self.client.chunk_ids_generator(ChunkType.PARAM_FP32),
         ):
             if self.client.chunk_tensor_index.is_local_chunk(param_fp16_chunk_id):
                 for param_fp16, param_fp32 in zip(
@@ -279,7 +279,7 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
         world_size = get_world_size()
         logger.info(f"param fp16 chunk num {chunk_num}")
         while chunk_num % world_size != 0:
-            self.client.append_dummy_chunk(torch.half, ChunkListType.PARAM_FP16)
+            self.client.append_dummy_chunk(torch.half, ChunkType.PARAM_FP16)
             chunk_num += 1
 
     def _post_init_method(self, module):
@@ -336,10 +336,10 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
             self.client.chunk_based_param_fp16.append(param)
 
         self.client.append_tensor(
-            param_fp16_list, torch.half, AccessType.DATA, ChunkListType.PARAM_FP16
+            param_fp16_list, torch.half, AccessType.DATA, ChunkType.PARAM_FP16
         )
         self.client.append_tensor(
-            param_fp32_list, torch.float, AccessType.DATA, ChunkListType.PARAM_FP32
+            param_fp32_list, torch.float, AccessType.DATA, ChunkType.PARAM_FP32
         )
 
         for param_fp16, param_fp32 in zip(param_fp16_list, param_fp32_list):

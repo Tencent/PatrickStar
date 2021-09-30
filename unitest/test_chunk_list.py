@@ -16,7 +16,7 @@ import unittest
 import torch
 
 from common import distributed_test
-from patrickstar.core import ChunkList, PSChunkStatus, ChunkListType
+from patrickstar.core import ChunkList, PSChunkStatus, ChunkType
 
 
 class TestChunkData(unittest.TestCase):
@@ -28,47 +28,59 @@ class TestChunkData(unittest.TestCase):
         chunk_list = ChunkList(0)
         assert chunk_list.size() == 0
 
-        chunk_list.new_chunk(chunk_id=0,
-                             chunk_size=20,
-                             data_type=torch.float,
-                             is_dummy=False,
-                             chunk_type=ChunkListType.PARAM_FP32)
+        chunk_list.new_chunk(
+            chunk_id=0,
+            chunk_size=20,
+            data_type=torch.float,
+            is_dummy=False,
+            chunk_type=ChunkType.PARAM_FP32,
+        )
 
         assert chunk_list.size() == 1
-        assert (chunk_list[0].get_status() == PSChunkStatus.RELEASED)
+        assert chunk_list[0].get_status() == PSChunkStatus.RELEASED
 
     @distributed_test(world_size=[1], use_fake_dist=True)
     def test_new_chunk(self):
-        compute_device = torch.device(
-            f'cuda:{torch.cuda.current_device()}') if torch.cuda.is_available(
-            ) else torch.device('cpu:0')
+        compute_device = (
+            torch.device(f"cuda:{torch.cuda.current_device()}")
+            if torch.cuda.is_available()
+            else torch.device("cpu:0")
+        )
         chunk_list = ChunkList(0)
 
         new_chunk_id = 123
-        chunk_list.new_chunk(chunk_id=new_chunk_id,
-                             chunk_size=20,
-                             data_type=torch.float,
-                             is_dummy=False,
-                             chunk_type=ChunkListType.PARAM_FP32)
+        chunk_list.new_chunk(
+            chunk_id=new_chunk_id,
+            chunk_size=20,
+            data_type=torch.float,
+            is_dummy=False,
+            chunk_type=ChunkType.PARAM_FP32,
+        )
         chunk_list.access_chunk(new_chunk_id, compute_device)
 
-        assert (chunk_list[new_chunk_id].get_status() == PSChunkStatus.FREE)
+        assert chunk_list[new_chunk_id].get_status() == PSChunkStatus.FREE
 
-        self.assertEqual(chunk_list.last_chunk_id(ChunkListType.PARAM_FP32),
-                         new_chunk_id, "check last_chunk_id")
+        self.assertEqual(
+            chunk_list.last_chunk_id(ChunkType.PARAM_FP32),
+            new_chunk_id,
+            "check last_chunk_id",
+        )
 
-        chunk_list.new_chunk(chunk_id=1,
-                             chunk_size=20,
-                             data_type=torch.float,
-                             is_dummy=False,
-                             chunk_type=ChunkListType.PARAM_FP32)
+        chunk_list.new_chunk(
+            chunk_id=1,
+            chunk_size=20,
+            data_type=torch.float,
+            is_dummy=False,
+            chunk_type=ChunkType.PARAM_FP32,
+        )
 
         self.assertEqual(chunk_list.size(), 2)
 
-        self.assertEqual(chunk_list.last_chunk_id(ChunkListType.PARAM_FP32), 1,
-                         "check last_chunk_id")
+        self.assertEqual(
+            chunk_list.last_chunk_id(ChunkType.PARAM_FP32), 1, "check last_chunk_id"
+        )
 
 
 if __name__ == "__main__":
-    torch.multiprocessing.set_start_method('spawn')
+    torch.multiprocessing.set_start_method("spawn")
     unittest.main()

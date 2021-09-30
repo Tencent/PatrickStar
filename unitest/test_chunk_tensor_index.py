@@ -17,7 +17,7 @@ import torch
 
 from patrickstar.core import (
     ChunkTensorIndex,
-    ChunkListType,
+    ChunkType,
     AccessType,
     register_param,
     ParamType,
@@ -45,7 +45,7 @@ class TestAccess(unittest.TestCase):
             data_type=torch.float,
             comm_group_id=0,
             comm_group_offset=0,
-            list_type=ChunkListType.PARAM_FP32,
+            list_type=ChunkType.PARAM_FP32,
         )
 
         param_numel_list = [10, 20, 30, 20, 7, 2]
@@ -184,15 +184,15 @@ class TestAccess(unittest.TestCase):
             param_momentum, ParamType.CHUNK_BASED, torch.float, f"param_{numel}"
         )
         chunk_id = chunk_tensor_index.get_optimizer_state_chunk_id(
-            param_list[0], AccessType.DATA, ChunkListType.MOMENTUM
+            param_list[0], AccessType.DATA, ChunkType.MOMENTUM
         )
         self.assertTrue(chunk_id is None)
 
         chunk_tensor_index.register_optimizer_state_chunk_id(
-            param_list[0], AccessType.DATA, ChunkListType.MOMENTUM, 3
+            param_list[0], AccessType.DATA, ChunkType.MOMENTUM, 3
         )
         chunk_id = chunk_tensor_index.get_optimizer_state_chunk_id(
-            param_list[0], AccessType.DATA, ChunkListType.MOMENTUM
+            param_list[0], AccessType.DATA, ChunkType.MOMENTUM
         )
         self.assertTrue(chunk_id == 3, f"chunk_id is {chunk_id} should be 3")
 

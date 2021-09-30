@@ -17,7 +17,7 @@ from typing import List
 import torch
 from torch import Tensor
 
-from patrickstar.core import ChunkListType
+from patrickstar.core import ChunkType
 from patrickstar.core.const import PSTensorStatus, AccessType, TrainingStage
 from patrickstar.core.parameter import register_param, ParamType
 from patrickstar.manager import PatrickStarManager
@@ -162,7 +162,7 @@ class FP16Adam(torch.optim.Optimizer):
                         state["exp_avg"],
                         torch.float,
                         AccessType.DATA,
-                        ChunkListType.MOMENTUM,
+                        ChunkType.MOMENTUM,
                         p,
                     )
 
@@ -170,7 +170,7 @@ class FP16Adam(torch.optim.Optimizer):
                         state["exp_avg_sq"],
                         torch.float,
                         AccessType.DATA,
-                        ChunkListType.VARIANCE,
+                        ChunkType.VARIANCE,
                         p,
                     )
 

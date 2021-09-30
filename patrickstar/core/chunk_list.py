@@ -16,7 +16,7 @@ from typing import List
 
 import torch
 
-from patrickstar.core.const import ChunkListType
+from patrickstar.core.const import ChunkType
 from patrickstar.manager import PatrickStarManager
 from patrickstar.profiler import profiler
 from patrickstar.utils import logger, get_rank, get_world_size
@@ -36,19 +36,19 @@ class ChunkList(object):
 
     def __init__(self, local_rank: int):
         self.chunk_id_to_chunk_dict_map: dict[int, Chunk] = {}
-        self.chunk_type_to_id_list_map: dict[ChunkListType, int] = {}
-        for chunk_type in ChunkListType:
+        self.chunk_type_to_id_list_map: dict[ChunkType, int] = {}
+        for chunk_type in ChunkType:
             self.chunk_type_to_id_list_map[chunk_type] = []
 
         self._time_profile = True
         self.moments_cnt_of_iteration = None
         self.local_rank = local_rank
 
-    def chunk_ids_generator(self, chunk_list_type: ChunkListType):
+    def chunk_ids_generator(self, chunk_type: ChunkType):
         """
-        Return the chunk_id of all chunks with type `chunk_list_type`
+        Return the chunk_id of all chunks with type `chunk_type`
         """
-        for chunk_id in self.chunk_type_to_id_list_map[chunk_list_type]:
+        for chunk_id in self.chunk_type_to_id_list_map[chunk_type]:
             yield chunk_id
 
     def generate_chunk_id(self) -> int:
@@ -259,7 +259,7 @@ class ChunkList(object):
         chunk_size: int,
         data_type: torch.dtype,
         is_dummy: bool = False,
-        chunk_type: ChunkListType = ChunkListType.UNDEF,
+        chunk_type: ChunkType = ChunkType.UNDEF,
     ):
         """
         Create a chunk without initializing its memory.
@@ -291,10 +291,10 @@ class ChunkList(object):
         )
         return comm_group_idx, comm_group_offset
 
-    def is_empty(self, chunk_type: ChunkListType):
+    def is_empty(self, chunk_type: ChunkType):
         return len(self.chunk_type_to_id_list_map[chunk_type]) == 0
 
-    def last_chunk_id(self, chunk_type: ChunkListType):
+    def last_chunk_id(self, chunk_type: ChunkType):
         if self.is_empty(chunk_type):
             raise RuntimeError(
                 f"Call last_chunk_id on an empty {chunk_type} chunk list"
@@ -369,7 +369,7 @@ class ChunkList(object):
 
     def display_access_info(self):
         logger.debug("----------- SHOW ACCESS INFO -----------")
-        for chunk_id in self.chunk_type_to_id_list_map[ChunkListType.PARAM_FP16]:
+        for chunk_id in self.chunk_type_to_id_list_map[ChunkType.PARAM_FP16]:
             chunk = self.chunk_id_to_chunk_dict_map[chunk_id]
             logger.debug(f"\t {chunk_id} cpu_access_moments {chunk.cpu_access_moments}")
             logger.debug(f"\t {chunk_id} gpu_access_moments {chunk.gpu_access_moments}")
