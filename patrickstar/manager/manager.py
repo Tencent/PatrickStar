@@ -119,7 +119,7 @@ class PatrickStarManager(metaclass=SingletonMeta):
         self.metronome = Metronome()
 
         # 预热标志
-        self.warmup = False
+        self.is_warmup = False
         self._start_training = False
         self._training_stage = TrainingStage.UNSTART
         # 总gpu可用内存 减去 峰值系统内存占用 减去 paramfp16峰值
@@ -127,10 +127,10 @@ class PatrickStarManager(metaclass=SingletonMeta):
         self._default_chunk_size = 0
 
     def is_warmup_training(self):
-        return self._start_training and self.warmup
+        return self._start_training and self.is_warmup
 
     def is_nonwarmup_training(self):
-        return self._start_training and not self.warmup
+        return self._start_training and not self.is_warmup
 
     def set_training_stage(self, training_stage: TrainingStage):
         if profiler.started():
@@ -139,7 +139,7 @@ class PatrickStarManager(metaclass=SingletonMeta):
         logger.info(f"Enter {self._training_stage}")
 
     def start_train(self, param_fp16_chunk_size, chunk_size):
-        self.warmup = True
+        self.is_warmup = True
         self._start_training = True
         self._param_fp16_chunk_size = param_fp16_chunk_size
         self._default_chunk_size = chunk_size
@@ -170,10 +170,19 @@ class PatrickStarManager(metaclass=SingletonMeta):
         logger.info(f"OVERALL GPU MEM {self._overall_gpu_mem}")
 
     def reset_metronome(self):
-        """
-        重置节拍器
-        """
         self.metronome.reset()
+        # As the reset happens right before forward, if the manager
+        # is still doing warmup, it means the previous run didn't
+        # cover the full procedure (forward -> backward -> optimizer).
+        # Therefore clean the stats collected.
+        if self.is_warmup:
+            self.cpu_used_list = []
+            self.cpu_chunk_used_list = []
+            self.cpu_sys_used_list = []
+
+            self.gpu_used_list = []
+            self.gpu_chunk_used_list = []
+            self.gpu_sys_used_list = []
         logger.info("Manager Resets Metronome")
 
     def get_margin_chunk_num_for_gpu_adam(self):
@@ -204,7 +213,7 @@ class PatrickStarManager(metaclass=SingletonMeta):
                 (cur_mom, timestamp, self.cpu_chunk_used_mem)
             )
 
-        if self.warmup:
+        if self.is_warmup:
             self.gpu_used_list.append(gpu_used)
             # 精确地统计chunk used memory
             self.gpu_chunk_used_list.append(self.gpu_chunk_used_mem)
@@ -296,13 +305,13 @@ class PatrickStarManager(metaclass=SingletonMeta):
         非预热阶段，是当前moment和下一moment可用内存的最小值。
         """
         if device_type == "cpu":
-            if self.warmup or not self._start_training:
+            if self.is_warmup or not self._start_training:
                 # TODO(jiaruifang)瞎拍一个数，预热阶段三分之一GPU显存用来存储chunk
                 return self._overall_cpu_mem
             else:
                 return self._overall_cpu_mem
         elif device_type == "cuda":
-            if self.always_warmup or self.warmup or not self._start_training:
+            if self.always_warmup or self.is_warmup or not self._start_training:
                 if self._training_stage == TrainingStage.ADAM:
                     # ADAM时没有activation所以显存可以全部给Chunk，需要两个default chunk size做buffer，这里先预留6个
                     ava_mem = self._overall_gpu_mem - 4 * self._default_chunk_size * 4
