@@ -18,22 +18,23 @@ import torch
 
 from common import distributed_test
 from patrickstar import PatrickStarManager
-from patrickstar.core import PatrickStarClient, AccessType, register_param, ChunkListType
+from patrickstar.core import PatrickStarClient, AccessType, register_param, ChunkType
 from patrickstar.core.parameter import ParamType
 
 
 class TestClientAccess(unittest.TestCase):
     def setUp(self):
         self.default_chunk_size = 40
-        logging.info('SetUp finished')
+        logging.info("SetUp finished")
 
     @distributed_test(world_size=[1])
     def test_append_ps_tensor(self):
         PatrickStarManager(0)
         self.client = PatrickStarClient(
-            rank=0, default_chunk_size=self.default_chunk_size)
+            rank=0, default_chunk_size=self.default_chunk_size
+        )
 
-        self.compute_device = torch.device('cpu:0')
+        self.compute_device = torch.device("cpu:0")
 
         param_size_list = [10, 11, 12, 13]
 
@@ -44,30 +45,29 @@ class TestClientAccess(unittest.TestCase):
             param_list.append(param)
             param_payload_ref_list.append(param.data.clone())
 
-            register_param(param, ParamType.CHUNK_BASED, torch.float,
-                           f"param_{idx}")
-            self.client.append_tensor([param], torch.float, AccessType.DATA,
-                                      ChunkListType.PARAM_FP32)
+            register_param(param, ParamType.CHUNK_BASED, torch.float, f"param_{idx}")
+            self.client.append_tensor(
+                [param], torch.float, AccessType.DATA, ChunkType.PARAM_FP32
+            )
 
-            real_payload = self.client.access_data(param,
-                                                   torch.device('cpu:0'))
+            real_payload = self.client.access_data(param, torch.device("cpu:0"))
             real_payload.copy_(param.data)
             self.client.release_data(param)
             self.assertTrue(param.data.numel() == 0)
 
         self.client.display_chunk_info()
         for param, payload_ref in zip(param_list, param_payload_ref_list):
-            real_payload = self.client.access_data(param,
-                                                   torch.device('cpu:0'))
+            real_payload = self.client.access_data(param, torch.device("cpu:0"))
             self.assertEqual(torch.max(real_payload - payload_ref), 0)
             self.client.release_data(param)
 
     @distributed_test(world_size=[1])
     def test_append_torch_tensor(self):
         self.client = PatrickStarClient(
-            rank=0, default_chunk_size=self.default_chunk_size)
+            rank=0, default_chunk_size=self.default_chunk_size
+        )
 
-        self.compute_device = torch.device('cpu:0')
+        self.compute_device = torch.device("cpu:0")
 
         param_size_list = [10, 11, 12, 13]
 
@@ -76,25 +76,23 @@ class TestClientAccess(unittest.TestCase):
         for idx, psize in enumerate(param_size_list):
             param = torch.nn.Parameter(torch.rand(psize))
             param_list.append(param)
-            register_param(param, ParamType.TORCH_BASED, torch.float,
-                           f"param_{idx}")
+            register_param(param, ParamType.TORCH_BASED, torch.float, f"param_{idx}")
             param_payload_ref_list.append(param.data.clone())
-            self.client.append_tensor([param], torch.float, AccessType.DATA,
-                                      ChunkListType.PARAM_FP32)
+            self.client.append_tensor(
+                [param], torch.float, AccessType.DATA, ChunkType.PARAM_FP32
+            )
 
-            real_payload = self.client.access_data(param,
-                                                   torch.device('cpu:0'))
+            real_payload = self.client.access_data(param, torch.device("cpu:0"))
             real_payload.copy_(param.data)
             self.client.release_data(param)
 
         self.client.display_chunk_info()
         for param, payload_ref in zip(param_list, param_payload_ref_list):
-            real_payload = self.client.access_data(param,
-                                                   torch.device('cpu:0'))
+            real_payload = self.client.access_data(param, torch.device("cpu:0"))
             self.assertEqual(torch.max(real_payload - payload_ref), 0)
             self.client.release_data(param)
 
 
 if __name__ == "__main__":
-    torch.multiprocessing.set_start_method('spawn')
+    torch.multiprocessing.set_start_method("spawn")
     unittest.main()

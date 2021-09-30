@@ -52,7 +52,7 @@ class TrainingStage(Enum):
     ADAM = 3
 
 
-class ChunkListType(Enum):
+class ChunkType(Enum):
     PARAM_FP16 = 0
     PARAM_FP32 = 1
     MOMENTUM = 2
