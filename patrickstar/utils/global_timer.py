@@ -11,7 +11,6 @@
 # permissions and limitations under the License.
 # See the AUTHORS file for names of contributors.
 
-# 统计chunk的lifecycle开关
 import time
 
 from .logging import logger
@@ -30,8 +29,7 @@ class GlobalTimer(metaclass=SingletonMeta):
 
     def start_profile(self, key):
         if key in self.start_time:
-            assert self.start_time[
-                key] == 0, f"Please Check {key} profiling function"
+            assert self.start_time[key] == 0, f"Please Check {key} profiling function"
         self.start_time[key] = time.time()
 
     def finish_profile(self, key):
@@ -46,22 +44,23 @@ class GlobalTimer(metaclass=SingletonMeta):
             self.elapse_stat[k] = 0
 
     def print(self):
-        logger.info('------------- PROFILE RESULTS ----------------')
+        logger.info("------------- PROFILE RESULTS ----------------")
         dot_length = 20
         for k in self.elapse_stat:
             dot_length = max(dot_length, len(k) + 2)
         overall_elapse = (
-            self.elapse_stat["FWD"] + self.elapse_stat["BWD"] + self.elapse_stat["ADAM"])
+            self.elapse_stat["FWD"] + self.elapse_stat["BWD"] + self.elapse_stat["ADAM"]
+        )
         for k, v in self.elapse_stat.items():
             logger.info(
-                f'{k} {"." * (dot_length - len(k))} {v}, {v / overall_elapse * 100} %')
-        logger.info(
-            f'TOTAL {"." * (dot_length - len("TOTAL"))} {overall_elapse}')
+                f'{k} {"." * (dot_length - len(k))} {v}, {v / overall_elapse * 100} %'
+            )
+        logger.info(f'TOTAL {"." * (dot_length - len("TOTAL"))} {overall_elapse}')
+
 
 my_timer = GlobalTimer()
 
 
-# 数据移动
 class DataMoveCnter(metaclass=SingletonMeta):
     def __init__(self):
         self.amount_dict = {}
@@ -81,17 +80,17 @@ class DataMoveCnter(metaclass=SingletonMeta):
             self.amount_dict[k] = 0
 
     def print(self):
-        logger.info('------------- DATA MOVE RESULTS --------------')
+        logger.info("------------- DATA MOVE RESULTS --------------")
         my_timer = GlobalTimer()
         for k, v in self.times_dict.items():
             bwd = 0
             if k in my_timer.elapse_stat and self.amount_dict[k] != 0:
                 bwd = self.amount_dict[k] / my_timer.elapse_stat[k]
                 logger.info(
-                    f'{k}: {self.amount_dict[k] / 1024 / 1024} MB, {v} times, {bwd / 1024 / 1024} MB/s'
+                    f"{k}: {self.amount_dict[k] / 1024 / 1024} MB, {v} times, {bwd / 1024 / 1024} MB/s"
                 )
             else:
-                logger.info(f'{k}: {self.amount_dict[k] / 1024 / 1024} MB')
+                logger.info(f"{k}: {self.amount_dict[k] / 1024 / 1024} MB")
 
 
 data_move_cnter = DataMoveCnter()

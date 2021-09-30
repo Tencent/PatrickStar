@@ -15,7 +15,6 @@ import gc
 
 import psutil
 import torch
-from pynvml import *
 
 from .distributed import get_rank, get_world_size
 from .logging import logger
@@ -23,14 +22,13 @@ from .logging import logger
 
 def get_sys_memory_used(device):
     """
-    获得系统当前内存，对于CPU每个进程只拥有1/N内存
+    Get the free memory info of device.
+    Notice that for CPU, this function will return 1/N of the total free memory,
+    where N is the world size.
     """
-    if device.type == 'cuda':
-        # nvmlInit()
-        # h = nvmlDeviceGetHandleByIndex(device.index)
-        # info = nvmlDeviceGetMemoryInfo(h)
+    if device.type == "cuda":
         return torch.cuda.memory_allocated()
-    elif device.type == 'cpu':
+    elif device.type == "cpu":
         vm_stats = psutil.virtual_memory()
         return vm_stats.used / get_world_size()
 
@@ -58,9 +56,9 @@ def see_memory_usage(message, force=False, scale_name="MB"):
     )
 
     vm_stats = psutil.virtual_memory()
-    used_gb = round(((vm_stats.total - vm_stats.available) / (1024**3)), 2)
+    used_gb = round(((vm_stats.total - vm_stats.available) / (1024 ** 3)), 2)
     logger.info(
-        f'CPU Virtual Memory: used = {used_gb} GB, percent = {vm_stats.percent}%'
+        f"CPU Virtual Memory: used = {used_gb} GB, percent = {vm_stats.percent}%"
     )
 
     # get the peak memory to report correct data, so reset the counter for the next call
