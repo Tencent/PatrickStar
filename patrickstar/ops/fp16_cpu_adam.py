@@ -304,7 +304,6 @@ class FP16Adam(torch.optim.Optimizer):
                     continue
                 fp32_param = self.state[p]["fp32_param_data"]
                 write_chunk_buff.write_from_cache(p, fp32_param)
-            self.loss_scaler.update_scale(self.has_overflow)
             self.has_overflow = False
             write_chunk_buff.reset()
             return True
@@ -536,7 +535,13 @@ class FP16Adam(torch.optim.Optimizer):
 
         if self.has_overflow_and_reset_param(write_chunk_buff=self.write_chunk_buff):
             global_timer.my_timer.finish_profile("ADAM")
-            logger.warning("gradient overflow!")
+            old_loss_scale = self.loss_scaler.loss_scale
+            self.loss_scaler.update_scale(True)
+            new_loss_scale = self.loss_scaler.loss_scale
+            logger.warning(
+                f"Gradient overflow! Update loss scale from {old_loss_scale} to {new_loss_scale}."
+            )
+
             return loss
 
         max_param_size = 0
@@ -603,7 +608,7 @@ class FP16Adam(torch.optim.Optimizer):
             logger.info("----------------- WARMUP PHASE OVER -----------------")
 
         if self.loss_scaler:
-            self.loss_scaler.update_scale(self.has_overflow)
+            self.loss_scaler.update_scale(False)
 
         global_timer.my_timer.finish_profile("ADAM")
         return loss

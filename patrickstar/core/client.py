@@ -248,7 +248,6 @@ class PatrickStarClient(object):
         local_chunk_id,
         compute_device,
         param_name,
-        training_stage: TrainingStage,
     ):
         """
         将chunk_id_list中远端的chunk取到本地
@@ -275,13 +274,9 @@ class PatrickStarClient(object):
         )
         allgather_payload_buff = []
 
-        local_chunk_payload = None
         comm_data_amount = 0
         for chunk_id in chunk_id_list:
-            if chunk_id == local_chunk_id:
-                local_chunk_payload = self.chunk_list[chunk_id].payload
-                allgather_payload_buff.append(local_chunk_payload)
-            else:
+            if chunk_id != local_chunk_id:
                 self.chunk_list.prepare_device(
                     compute_device, self.chunk_list[chunk_id].get_chunk_space()
                 )
@@ -289,8 +284,8 @@ class PatrickStarClient(object):
                 self.chunk_list[chunk_id].allocate_payload(compute_device)
                 # 刚分配的chunk，以备allgather使用，allgather之前不要被换出。
                 self.chunk_list[chunk_id].pin()
-                self.set_all_tensors_status_in_chunk(chunk_id, PSTensorStatus.HOLD)
-                allgather_payload_buff.append(self.chunk_list[chunk_id].payload)
+            self.set_all_tensors_status_in_chunk(chunk_id, PSTensorStatus.HOLD)
+            allgather_payload_buff.append(self.chunk_list[chunk_id].payload)
         comm_data_amount = (
             len(allgather_payload_buff) * allgather_payload_buff[0].numel() * 2
         )  # half = 2 bytes
@@ -305,7 +300,9 @@ class PatrickStarClient(object):
 
         logger.info(f"rank {rank} allgather {chunk_id_list}")
         torch.distributed.all_gather(
-            allgather_payload_buff, local_chunk_payload, async_op=False
+            allgather_payload_buff,
+            self.chunk_list[local_chunk_id].payload,
+            async_op=False,
         )
 
         allgather_payload_buff = []
@@ -372,7 +369,6 @@ class PatrickStarClient(object):
                 local_chunk_id,
                 compute_device,
                 param.ps_attr.name,
-                training_stage,
             )
             self.chunk_list[local_chunk_id].unpin()
 

@@ -54,6 +54,8 @@ class Chunk(object):
             PSTensorStatus.HOLD_AFTER_BWD: 0,
             PSTensorStatus.FREE: 0,
         }
+        # the number of tensors that are not used in the forward calculation
+        self.unused = 0
 
         self.payload = None
         self._time_profile = True
@@ -176,9 +178,6 @@ class Chunk(object):
             )
 
     def update_status(self, old_status, new_status):
-        """
-        Update the status dict of tensors.
-        """
         self._status_dict[old_status] -= 1
         self._status_dict[new_status] += 1
 
@@ -209,8 +208,20 @@ class Chunk(object):
         for k, v in self._status_dict.items():
             if k != PSTensorStatus.FREE and k != status:
                 if v != 0:
+                    # Ignore the unused tensors.
+                    if k == PSTensorStatus.HOLD and v == self.unused:
+                        continue
                     return False
         return True
+
+    def set_unused(self):
+        """
+        After forward calculation, the tensors in `HOLD` status are the ones
+        that are not used. Remember them for the release.
+        NOTE() This function can only be called at the end of forward calculation.
+        """
+        # TODO(zilinzhu) Find a better way to represent the unused tensors
+        self.unused = self._status_dict[PSTensorStatus.HOLD]
 
     def move(self, target_device: torch.device):
         """
