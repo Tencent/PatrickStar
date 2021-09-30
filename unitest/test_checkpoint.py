@@ -118,8 +118,9 @@ def test_bert_model(
     print("loss after the first 5 steps:", loss0)
 
     # Save checkpoints.
-    torch.save(model.state_dict(), "model.pt")
-    torch.save(optimizer.state_dict(), "optimizer.pt")
+    rank = torch.distributed.get_rank()
+    torch.save(model.state_dict(), f"model-{rank}.pt")
+    torch.save(optimizer.state_dict(), f"optimizer-{rank}.pt")
 
     # Train 5 more steps and keep the data.
     batch_list = []
@@ -137,8 +138,8 @@ def test_bert_model(
     print("loss after 10 steps:", loss1)
 
     # Load checkpoint.
-    model_state_dict = torch.load("model.pt")
-    opt_state_dict = torch.load("optimizer.pt")
+    model_state_dict = torch.load(f"model-{rank}.pt")
+    opt_state_dict = torch.load(f"optimizer-{rank}.pt")
     model.load_state_dict(model_state_dict)
     optimizer.load_state_dict(opt_state_dict)
 
