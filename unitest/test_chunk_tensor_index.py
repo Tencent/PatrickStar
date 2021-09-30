@@ -41,7 +41,6 @@ class TestAccess(unittest.TestCase):
 
         chunk_tensor_index.add_chunk(
             chunk_id=0,
-            chunk_size=1024,
             data_type=torch.float,
             comm_group_id=0,
             comm_group_offset=0,
