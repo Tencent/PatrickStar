@@ -15,7 +15,6 @@ import math
 from typing import List
 
 import torch
-from torch import Tensor
 
 from patrickstar.core import ChunkType
 from patrickstar.core.const import PSTensorStatus, AccessType, TrainingStage
@@ -44,11 +43,7 @@ def zero_cpu_param(p):
 
 def empty_cpu_param():
     return torch.nn.Parameter(
-        torch.tensor(
-            [],
-            dtype=torch.float,
-            device=torch.device("cpu:0"),
-        ),
+        torch.tensor([], dtype=torch.float, device=torch.device("cpu:0")),
         requires_grad=False,
     )
 
@@ -68,13 +63,11 @@ class FP16Adam(torch.optim.Optimizer):
         weight_decay=0,
         use_adamw=False,
         amsgrad=False,
-        prefer_device=torch.device("cpu:0"),
         use_hybrid_adam=True,
     ):
         """
         The implementation was based on
         https://github.com/pytorch/pytorch/blob/c371542efc/torch/optim/optimizer.py
-        TODO(jiaruifang) prefer_device should be self adaptive.
         """
         if not 0.0 <= lr:
             raise ValueError("Invalid learning rate: {}".format(lr))
@@ -97,8 +90,11 @@ class FP16Adam(torch.optim.Optimizer):
 
         self.gradient_clipping = gradient_clipping
 
-        self.prefer_device = prefer_device
         self.use_hybrid_adam = use_hybrid_adam
+
+        assert (
+            len(self.param_groups) == 1
+        ), "Only support one param group at the moment."
         # Eager state initialization, different from Pytorch
         for group in self.param_groups:
             for p in group["params"]:
@@ -301,17 +297,11 @@ class FP16Adam(torch.optim.Optimizer):
         client,
         fp32_param_list: List[torch.nn.Parameter],
         fp16_param_with_grad_list,
-        exp_avgs: List[torch.nn.Parameter],
-        exp_avg_sqs: List[torch.nn.Parameter],
-        max_exp_avg_sqs: List[Tensor],
+        exp_avg_list: List[torch.nn.Parameter],
+        exp_avg_sq_list: List[torch.nn.Parameter],
         state_steps: List[int],
         amsgrad: bool,
-        beta1_list: List[float],
-        beta2_list: List[float],
-        lr_list: List[float],
-        weight_decay_list: List[float],
-        eps_list: List[float],
-        prefer_device,
+        hyperparam_list: List[dict],
         read_chunk_buff,
         write_chunk_buff,
         time_profile=True,
@@ -373,8 +363,8 @@ class FP16Adam(torch.optim.Optimizer):
             client.access_data(fp32_param, compute_device)
             fp32_data_tensor = get_real_data_tensor(fp32_param)
 
-            exp_avg_param = exp_avgs[i]
-            exp_avg_sq_param = exp_avg_sqs[i]
+            exp_avg_param = exp_avg_list[i]
+            exp_avg_sq_param = exp_avg_sq_list[i]
 
             client.access_data(exp_avg_param, compute_device)
             client.access_data(exp_avg_sq_param, compute_device)
@@ -388,15 +378,13 @@ class FP16Adam(torch.optim.Optimizer):
                 global_timer.my_timer.start_profile("ADAM_compute")
 
             step = state_steps[i]
-            beta1 = beta1_list[i]
-            beta2 = beta2_list[i]
-            eps = eps_list[i]
+            beta1, beta2 = hyperparam_list[i]["betas"]
+            eps = hyperparam_list[i]["eps"]
+            weight_decay = hyperparam_list[i]["weight_decay"]
+            lr = hyperparam_list[i]["lr"]
 
             bias_correction1 = 1 - beta1 ** step
             bias_correction2 = 1 - beta2 ** step
-
-            weight_decay = weight_decay_list[i]
-            lr = lr_list[i]
 
             if compute_device.type == "cpu" and fp16_grad_tensor.device.type == "cpu":
                 self.ds_cpu_adam_update(
@@ -497,18 +485,6 @@ class FP16Adam(torch.optim.Optimizer):
             with torch.enable_grad():
                 loss = closure()
 
-        fp16_param_with_grad_list = []
-        fp32_param_list = []
-        exp_avgs = []
-        exp_avg_sqs = []
-        max_exp_avg_sqs = []
-        state_steps = []
-        beta1_list = []
-        beta2_list = []
-        weight_decay_list = []
-        eps_list = []
-        lr_list = []
-
         if self.use_hybrid_adam:
             margin_chunk_num_for_gpu_adam = mgr.get_margin_chunk_num_for_gpu_adam()
         else:
@@ -536,6 +512,14 @@ class FP16Adam(torch.optim.Optimizer):
 
             return loss
 
+        fp16_param_with_grad_list = []
+        fp32_param_list = []
+        exp_avg_list = []
+        exp_avg_sq_list = []
+
+        hyperparam_list = []
+        state_steps = []
+
         max_param_size = 0
         for _, group in enumerate(self.param_groups):
             for _, p in enumerate(group["params"]):
@@ -556,21 +540,22 @@ class FP16Adam(torch.optim.Optimizer):
 
                     fp16_param_with_grad_list.append(p)
 
-                    exp_avgs.append(state["exp_avg"])
-                    exp_avg_sqs.append(state["exp_avg_sq"])
+                    exp_avg_list.append(state["exp_avg"])
+                    exp_avg_sq_list.append(state["exp_avg_sq"])
                     if p in self.client.param_fp16_to_param_fp32_map:
                         fp32_param_list.append(
                             self.client.param_fp16_to_param_fp32_map[p]
                         )
                     else:
                         fp32_param_list.append(None)
-                    beta1, beta2 = state["betas"]
+                    hyperparam = {
+                        "betas": state["betas"],
+                        "lr": state["lr"],
+                        "weight_decay": state["weight_decay"],
+                        "eps": state["eps"],
+                    }
 
-                    beta1_list.append(beta1)
-                    beta2_list.append(beta2)
-                    lr_list.append(state["lr"])
-                    weight_decay_list.append(state["weight_decay"])
-                    eps_list.append(state["eps"])
+                    hyperparam_list.append(hyperparam)
 
                     # record the step after step update
                     state_steps.append(state["step"])
@@ -580,17 +565,11 @@ class FP16Adam(torch.optim.Optimizer):
             self.client,
             fp32_param_list,
             fp16_param_with_grad_list,
-            exp_avgs,
-            exp_avg_sqs,
-            max_exp_avg_sqs,
+            exp_avg_list,
+            exp_avg_sq_list,
             state_steps,
             False,
-            beta1_list,
-            beta2_list,
-            lr_list,
-            weight_decay_list,
-            eps_list,
-            self.prefer_device,
+            hyperparam_list,
             self.read_chunk_buff,
             self.write_chunk_buff,
             True,

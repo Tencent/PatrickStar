@@ -11,7 +11,6 @@
 # permissions and limitations under the License.
 # See the AUTHORS file for names of contributors.
 import torch
-from torch.nn.modules import Module
 
 from patrickstar.core import PSChunkStatus, PSTensorStatus, TrainingStage
 from patrickstar.fp16 import LossScaler, DynamicLossScaler
@@ -22,7 +21,7 @@ from patrickstar.utils import logger, global_timer
 from .checkpoint import state_dict, load_state_dict
 
 
-class PatrickStarEngine(Module):
+class PatrickStarEngine(torch.nn.Module):
     r"""DeepSpeed engine for training."""
 
     def __init__(self, model, client, config):
@@ -31,11 +30,6 @@ class PatrickStarEngine(Module):
         self.module.train()
 
         self.client = client
-
-        prefer_device = torch.device("cpu:0")
-
-        if client.local_rank == 0:
-            logger.info(f"ADAM on device {prefer_device}")
 
         if config is not None:
             # Optimizer configuration
@@ -93,7 +87,6 @@ class PatrickStarEngine(Module):
             eps=optim_params["eps"],
             weight_decay=optim_params["weight_decay"],
             use_adamw=(optim_type == "AdamW"),
-            prefer_device=prefer_device,
             use_hybrid_adam=optim_params["use_hybrid_adam"],
         )
 
