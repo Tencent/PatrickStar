@@ -580,7 +580,7 @@ class FP16Adam(torch.optim.Optimizer):
 
         if mgr.is_warmup_training():
             self.client.chunk_list.display_access_info()
-            mgr.warmup = False
+            mgr.is_warmup = False
             logger.info("----------------- WARMUP PHASE OVER -----------------")
 
         if self.loss_scaler:
