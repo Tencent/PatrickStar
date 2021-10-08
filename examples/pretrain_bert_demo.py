@@ -14,10 +14,12 @@
 import argparse
 import logging
 import os
+from packaging import version
 import time
 
 import torch
 import numpy as np
+import transformers
 from transformers import BertConfig, BertForSequenceClassification
 
 import patrickstar.utils.global_timer as global_timer
@@ -172,7 +174,7 @@ def parse_args():
 def print_model_config(hidden_dim, sequence_len, num_layer, num_head):
     if args.rank == 0:
         config_dict = {
-            "hiddne_dim": hidden_dim,
+            "hidden_dim": hidden_dim,
             "sequence_len": sequence_len,
             "num_layer": num_layer,
             "num_head": num_head,
@@ -236,7 +238,12 @@ def test_bert_model_helper(
             logger.warning("PatrickStar will always use mixed precision training.")
 
         def model_func():
-            return BertForSequenceClassification(bert_config)
+            model = BertForSequenceClassification(bert_config)
+            if is_ckp and version.parse(transformers.__version__) >= version.parse(
+                "4.11.0"
+            ):
+                model.gradient_checkpointing_enable()
+            return model
 
         config = {
             # The same format as optimizer config of DeepSpeed
@@ -271,6 +278,10 @@ def test_bert_model_helper(
         )
     else:
         model = BertForSequenceClassification(bert_config)
+        if is_ckp and version.parse(transformers.__version__) >= version.parse(
+            "4.11.0"
+        ):
+            model.gradient_checkpointing_enable()
         model.cuda(rank)
         model.train()
 
