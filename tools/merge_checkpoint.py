@@ -23,9 +23,6 @@ def merge_checkpoint(pattern, num):
         filename = pattern.replace("*", f"{i}")
         merged_state_dict.update(torch.load(filename))
 
-    for k, v in merged_state_dict.items():
-        print(k, v)
-
     merged_filename = pattern.replace("*", "merged")
     logger.warning(f"Merged checkpoint will be saved to {merged_filename}")
     torch.save(merged_state_dict, merged_filename)
