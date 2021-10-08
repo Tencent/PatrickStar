@@ -11,6 +11,7 @@
 # permissions and limitations under the License.
 # See the AUTHORS file for names of contributors.
 
+from copy import deepcopy
 import math
 from typing import List
 
@@ -588,3 +589,69 @@ class FP16Adam(torch.optim.Optimizer):
 
         global_timer.my_timer.finish_profile("ADAM")
         return loss
+
+    def state_dict(self):
+        r"""Returns the state of the optimizer as a :class:`dict`.
+
+        It contains two entries:
+
+        * state - a dict holding current optimization state. Its content
+            differs between optimizer classes.
+        * param_groups - a dict containing all parameter self.param_groups
+        """
+        raw_state_dict = super().state_dict()
+        old_packed_state = raw_state_dict["state"]
+        param_groups = raw_state_dict["param_groups"]
+        assert len(param_groups) == 1
+        packed_state = {}
+        for idx in old_packed_state:
+            packed_state[idx] = {}
+            for k, v in old_packed_state[idx].items():
+                if isinstance(v, torch.nn.Parameter):
+                    packed_state[idx][k] = (
+                        self.client.access_data(v, torch.device("cpu:0"))
+                        .clone()
+                        .detach()
+                    )
+                else:
+                    packed_state[idx][k] = v
+        return {
+            "state": packed_state,
+            "param_groups": param_groups,
+        }
+
+    def load_state_dict(self, state_dict):
+        r"""Loads the optimizer state.
+
+        Args:
+            state_dict (dict): optimizer state. Should be an object returned
+                from a call to :meth:`state_dict`.
+        """
+        # deepcopy, to be consistent with module API
+        state_dict = deepcopy(state_dict)
+
+        saved_groups = state_dict["param_groups"]
+        saved_state = state_dict["state"]
+
+        assert len(saved_groups) == 1
+        assert len(saved_groups[0]["params"]) == len(self.param_groups[0]["params"])
+        assert len(saved_state) == len(self.state)
+
+        # Update the state
+        id_map = {
+            old_id: p
+            for old_id, p in zip(
+                saved_groups[0]["params"], self.param_groups[0]["params"]
+            )
+        }
+
+        for idx, p in id_map.items():
+            saved_single_state = saved_state[idx]
+            single_state = self.state[p]
+            assert len(saved_single_state) == len(single_state)
+            for k, v in single_state.items():
+                if isinstance(v, torch.nn.Parameter):
+                    tensor = self.client.access_data(v, torch.device("cpu:0"))
+                    tensor.copy_(saved_single_state[k])
+                else:
+                    single_state[k] = saved_single_state[k]

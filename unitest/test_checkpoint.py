@@ -45,6 +45,9 @@ def test_bert_model(
         max_position_embeddings=sequence_length,
         num_attention_heads=num_head,
         num_hidden_layers=num_layer,
+        # Set dropout rate to 0 to prevent randomness in training.
+        hidden_dropout_prob=0.0,
+        attention_probs_dropout_prob=0.0,
     )
 
     lr = 0.001
@@ -85,9 +88,6 @@ def test_bert_model(
         model_func=model_func, local_rank=rank, config=config
     )
 
-    model.eval()
-    torch.save(model.state_dict(), "test_checkpoint.pt")
-
     data_loader = get_bert_data_loader(
         batch_size=batch_size,
         total_samples=10000,
@@ -95,38 +95,73 @@ def test_bert_model(
         device=device,
         is_distrbuted=True,
     )
-
     batch0 = next(iter(data_loader))
 
-    output = model(input_ids=batch0[0], labels=batch0[1])
-    loss_before = output[0].item()
-    print("loss:", loss_before)
-
-    model.train()
-    for n, batch in enumerate(data_loader):
-        if n == 5:
-            break
+    def train_one_step(batch):
         optimizer.zero_grad()
 
         output = model(input_ids=batch[0], labels=batch[1])
         loss = output[0]
         model.backward(loss)
         optimizer.step()
+
+    # Train 5 steps first.
+    for n, batch in enumerate(data_loader):
+        if n == 5:
+            break
+        train_one_step(batch)
+
+    # The loss after 5 steps.
     model.eval()
-
     output = model(input_ids=batch0[0], labels=batch0[1])
-    loss_trained = output[0].item()
-    print("loss after several training steps:", loss_trained)
+    loss0 = output[0].item()
+    print("loss after the first 5 steps:", loss0)
 
-    state_dict = torch.load("test_checkpoint.pt")
-    model.load_state_dict(state_dict)
+    # Save checkpoints.
+    rank = torch.distributed.get_rank()
+    torch.save(model.state_dict(), f"model-{rank}.pt")
+    torch.save(optimizer.state_dict(), f"optimizer-{rank}.pt")
 
+    # Train 5 more steps and keep the data.
+    batch_list = []
+    model.train()
+    for n, batch in enumerate(data_loader):
+        if n == 5:
+            break
+        batch_list.append(batch)
+        train_one_step(batch)
+
+    # The loss after 10 steps.
+    model.eval()
     output = model(input_ids=batch0[0], labels=batch0[1])
-    loss_after = output[0].item()
-    print("loss after load checkpoint:", loss_after)
+    loss1 = output[0].item()
+    print("loss after 10 steps:", loss1)
 
-    assert loss_trained != loss_before
-    assert loss_before == loss_after
+    # Load checkpoint.
+    model_state_dict = torch.load(f"model-{rank}.pt")
+    opt_state_dict = torch.load(f"optimizer-{rank}.pt")
+    model.load_state_dict(model_state_dict)
+    optimizer.load_state_dict(opt_state_dict)
+
+    # The loss after checkpoint loading.
+    model.eval()
+    output = model(input_ids=batch0[0], labels=batch0[1])
+    loss2 = output[0].item()
+    print("loss after checkpoint loading:", loss2)
+
+    assert loss0 == loss2, f"Model checkpoint error. {loss0} vs {loss2}"
+
+    # Use the same data to train 5 steps.
+    model.train()
+    for batch in batch_list:
+        train_one_step(batch)
+
+    model.eval()
+    output = model(input_ids=batch0[0], labels=batch0[1])
+    loss3 = output[0].item()
+    print("loss after checkpoint loading and 5 more training steps:", loss3)
+
+    assert loss1 == loss3, "Optimizer checkpoint error. {loss1} vs {loss3}"
 
 
 class TestModelInitContext(unittest.TestCase):
@@ -145,7 +180,6 @@ class TestModelInitContext(unittest.TestCase):
 
         assert hidden_dim % num_head == 0
 
-        torch.manual_seed(0)
         test_bert_model(
             method="patrickstar",
             hidden_dim=hidden_dim,
