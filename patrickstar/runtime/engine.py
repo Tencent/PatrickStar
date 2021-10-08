@@ -31,16 +31,31 @@ class PatrickStarEngine(torch.nn.Module):
 
         self.client = client
 
+        # default parameter for adam.
+        default_optim_config = {
+            "type": "Adam",
+            "params": {
+                "lr": 0.01,
+                "betas": (0.9, 0.999),
+                "eps": 1e-8,
+                "weight_decay": 0,
+                "use_hybrid_adam": True,
+            },
+        }
+
         if config is not None:
             # Optimizer configuration
-            optim_config = config["optimizer"]
-            optim_type = optim_config["type"]
+            optim_config = config.get("optimizer", default_optim_config)
+            optim_type = optim_config.get("type", default_optim_config["type"])
             if optim_type not in ["Adam", "AdamW"]:
                 raise ValueError(
                     f"Only support Adam and AdamW at the moment. "
                     f"Get optimizer type {optim_type}"
                 )
-            optim_params = optim_config["params"]
+            optim_params = optim_config.get("params", default_optim_config["params"])
+            for key, val in default_optim_config["params"].items():
+                if key not in optim_params:
+                    optim_params[key] = val
 
             # Loss scaler configuration
             if "fp16" not in config:
@@ -48,13 +63,19 @@ class PatrickStarEngine(torch.nn.Module):
             else:
                 loss_scale_config = config["fp16"]
                 assert loss_scale_config["enabled"], "Must enable fp16 training."
+                assert (
+                    "loss_scale" in loss_scale_config
+                ), "Must have `loss_scale` field set."
                 loss_scale = loss_scale_config["loss_scale"]
                 if loss_scale == 0:
+                    logger.info("Use DynamicLossScaler")
                     self.loss_scaler = DynamicLossScaler(
-                        init_scale=2 ** loss_scale_config["initial_scale_power"],
-                        scale_factor=loss_scale_config["hysteresis"],
-                        scale_window=loss_scale_config["loss_scale_window"],
-                        min_scale=loss_scale_config["min_loss_scale"],
+                        init_scale=(
+                            2 ** loss_scale_config.get("initial_scale_power", 16)
+                        ),
+                        scale_factor=loss_scale_config.get("hysteresis", 2),
+                        scale_window=loss_scale_config.get("loss_scale_window", 2000),
+                        min_scale=loss_scale_config.get("min_loss_scale", 1),
                     )
                 else:
                     self.loss_scaler = LossScaler(loss_scale)
@@ -65,15 +86,8 @@ class PatrickStarEngine(torch.nn.Module):
             else:
                 self.gradient_clipping = config["gradient_clipping"]
         else:
-            # default parameter for adam.
-            optim_type = "Adam"
-            optim_params = {
-                "lr": 0.01,
-                "betas": (0.9, 0.999),
-                "eps": 1e-8,
-                "weight_decay": 0,
-                "use_hybrid_adam": True,
-            }
+            optim_type = default_optim_config["type"]
+            optim_params = default_optim_config["params"]
             self.loss_scaler = None
             self.gradient_clipping = -1
 
@@ -91,7 +105,7 @@ class PatrickStarEngine(torch.nn.Module):
         )
 
         self.client.init(self.module, self.optimizer)
-        logger.info("init PatrickStarEngine")
+        logger.info("PatrickStarEngine initialized.")
 
     def _reset_before_forward(self):
         mgr = PatrickStarManager()
