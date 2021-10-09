@@ -18,7 +18,7 @@ from patrickstar.manager import PatrickStarManager
 from patrickstar.profiler import profiler
 from patrickstar.utils import logger, getsizeof
 import patrickstar.utils.global_timer as global_timer
-from .const import PSTensorStatus, PSChunkStatus
+from .const import TensorStatus, ChunkStatus
 
 
 # Should chunk know anything about param？
@@ -48,11 +48,11 @@ class Chunk(object):
 
         # the number of tensors of the chunk in each status
         self._status_dict = {
-            PSTensorStatus.COMPUTE: 0,
-            PSTensorStatus.HOLD: 0,
-            PSTensorStatus.HOLD_AFTER_FWD: 0,
-            PSTensorStatus.HOLD_AFTER_BWD: 0,
-            PSTensorStatus.FREE: 0,
+            TensorStatus.COMPUTE: 0,
+            TensorStatus.HOLD: 0,
+            TensorStatus.HOLD_AFTER_FWD: 0,
+            TensorStatus.HOLD_AFTER_BWD: 0,
+            TensorStatus.FREE: 0,
         }
         # the number of tensors that are not used in the forward calculation
         self.unused = 0
@@ -187,29 +187,29 @@ class Chunk(object):
         otherwise, status of the chunk is decided by its tensors.
         """
         if self.payload is None:
-            return PSChunkStatus.RELEASED
+            return ChunkStatus.RELEASED
 
         # Distributed training need to fix the chunk on the compute device.
-        if self._status_dict[PSTensorStatus.COMPUTE] > 0:
-            return PSChunkStatus.COMPUTE
-        elif self._status_dict[PSTensorStatus.HOLD] > 0:
-            return PSChunkStatus.HOLD
-        elif self._status_dict[PSTensorStatus.HOLD_AFTER_FWD] > 0:
-            return PSChunkStatus.HOLD_AFTER_FWD
-        elif self._status_dict[PSTensorStatus.HOLD_AFTER_BWD] > 0:
-            return PSChunkStatus.HOLD_AFTER_BWD
+        if self._status_dict[TensorStatus.COMPUTE] > 0:
+            return ChunkStatus.COMPUTE
+        elif self._status_dict[TensorStatus.HOLD] > 0:
+            return ChunkStatus.HOLD
+        elif self._status_dict[TensorStatus.HOLD_AFTER_FWD] > 0:
+            return ChunkStatus.HOLD_AFTER_FWD
+        elif self._status_dict[TensorStatus.HOLD_AFTER_BWD] > 0:
+            return ChunkStatus.HOLD_AFTER_BWD
         else:
-            return PSChunkStatus.FREE
+            return ChunkStatus.FREE
 
     def all_tensor_status(self, status):
         """
         If all tensors are in the status or `FREE`.
         """
         for k, v in self._status_dict.items():
-            if k != PSTensorStatus.FREE and k != status:
+            if k != TensorStatus.FREE and k != status:
                 if v != 0:
                     # Ignore the unused tensors.
-                    if k == PSTensorStatus.HOLD and v == self.unused:
+                    if k == TensorStatus.HOLD and v == self.unused:
                         continue
                     return False
         return True
@@ -221,7 +221,7 @@ class Chunk(object):
         NOTE() This function can only be called at the end of forward calculation.
         """
         # TODO(zilinzhu) Find a better way to represent the unused tensors
-        self.unused = self._status_dict[PSTensorStatus.HOLD]
+        self.unused = self._status_dict[TensorStatus.HOLD]
 
     def move(self, target_device: torch.device):
         """

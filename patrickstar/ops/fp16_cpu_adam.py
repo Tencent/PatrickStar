@@ -18,7 +18,7 @@ from typing import List
 import torch
 
 from patrickstar.core import ChunkType
-from patrickstar.core.const import PSTensorStatus, AccessType, TrainingStage
+from patrickstar.core.const import TensorStatus, AccessType, TrainingStage
 from patrickstar.core.parameter import register_param, ParamType
 from patrickstar.manager import PatrickStarManager
 import patrickstar.utils.global_timer as global_timer
@@ -460,7 +460,7 @@ class FP16Adam(torch.optim.Optimizer):
         for name, param in self.client.module.named_parameters():
             if param.ps_attr.param_type == ParamType.TORCH_BASED:
                 continue
-            if param.ps_attr.get_status(AccessType.DATA) == PSTensorStatus.COMPUTE:
+            if param.ps_attr.get_status(AccessType.DATA) == TensorStatus.COMPUTE:
                 self.client.optimizer.check_overflow(param)
                 logger.debug(
                     f"adam forces rank {rank} to"
@@ -473,12 +473,12 @@ class FP16Adam(torch.optim.Optimizer):
                     self.client.release_dist(
                         param,
                         AccessType.DATA,
-                        PSTensorStatus.HOLD_AFTER_BWD,
+                        TensorStatus.HOLD_AFTER_BWD,
                         training_stage=TrainingStage.BWD,
                         is_allreduce=True,
                     )
                 else:
-                    self.client.release_data(param, PSTensorStatus.HOLD_AFTER_BWD)
+                    self.client.release_data(param, TensorStatus.HOLD_AFTER_BWD)
         mgr.set_training_stage(TrainingStage.ADAM)
         mgr.tiktac(self.client)
 

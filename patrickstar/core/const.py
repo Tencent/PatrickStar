@@ -19,30 +19,36 @@ class AccessType(Enum):
     GRAD = 2
 
 
-class PSChunkStatus(Enum):
-    # Chunk内存被分配出来，在计算中
-    COMPUTE = 0
-    # Chunk内存被分配出来，持有有意义的数据
-    HOLD = 1
-    # Chunk内存被分配出来，持有无意义数据
-    HOLD_AFTER_FWD = 2
-    HOLD_AFTER_BWD = 3
-    FREE = 4
-    # Chunk内存没有被分配出来
+class ChunkStatus(Enum):
+    r"""Chunk status during training."""
+    FREE = 0
+    # Chunk memory is allocated.
+    # Tensors are used for computing.
+    COMPUTE = 1
+    # Holding meaningful data.
+    HOLD = 2
+    # Holding meaningless data.
+    HOLD_AFTER_FWD = 3
+    HOLD_AFTER_BWD = 4
+
+    # Chunk memory is not allocated.
     RELEASED = 5
-    # dist使用，虽然所有tensor都是hold，但被pin在计算设备上
 
 
-# 数据在计算逻辑中的状态
-class PSTensorStatus(Enum):
-    # 正在被用于计算，不能随意迁移
-    COMPUTE = 0
-    # 可以迁移，不能释放
-    HOLD = 1
-    HOLD_AFTER_FWD = 2
-    HOLD_AFTER_BWD = 3
-    # 可以释放
-    FREE = 4
+class TensorStatus(Enum):
+    r"""Tensor status during training
+
+    Notice that this is the status of the tensor in the chunk,
+    while `ChunkStatus` is the status of the whole status.
+    """
+    # Can be released.
+    FREE = 0
+    # In computation, cannot be moved.
+    COMPUTE = 1
+    # Can be moved, cannot be released.
+    HOLD = 2
+    HOLD_AFTER_FWD = 3
+    HOLD_AFTER_BWD = 4
 
 
 class TrainingStage(Enum):
