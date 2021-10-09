@@ -14,8 +14,8 @@
 import argparse
 import logging
 import os
-from packaging import version
 import time
+from packaging import version
 
 import torch
 import numpy as np
@@ -293,7 +293,7 @@ def test_bert_model_helper(
 
             def visit_and_register_hooks(module):
                 is_child_node = True
-                for name, submodule in module.named_children():
+                for _, submodule in module.named_children():
                     visit_and_register_hooks(submodule)
                     is_child_node = False
                 if is_child_node:
