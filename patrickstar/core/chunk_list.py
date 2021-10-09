@@ -26,7 +26,8 @@ from .const import ChunkStatus
 
 
 class ChunkList(object):
-    """
+    r"""Manage the entities of all chunks.
+
     There are 4 kinds of chunk list:
         param fp16, param fp32, momentum, variance
     All of them are managed by one instance of this class.
@@ -45,9 +46,7 @@ class ChunkList(object):
         self.local_rank = local_rank
 
     def chunk_ids_generator(self, chunk_type: ChunkType):
-        """
-        Return the chunk_id of all chunks with type `chunk_type`
-        """
+        r"""Return the chunk_id of all chunks with type `chunk_type`å"""
         for chunk_id in self.chunk_type_to_id_list_map[chunk_type]:
             yield chunk_id
 
@@ -56,21 +55,15 @@ class ChunkList(object):
         return ChunkList.generated_chunk_id
 
     def __getitem__(self, chunk_id: int):
-        """
-        Search a chunk by id.
-        """
+        r"""Search a chunk by id."""
         return self.chunk_id_to_chunk_dict_map.get(chunk_id)
 
     def size(self) -> int:
-        """
-        Total number of chunks.
-        """
+        r"""Total number of chunks."""
         return len(self.chunk_id_to_chunk_dict_map)
 
     def get_chunk_memory_used(self, device):
-        """
-        The total memory of payload of all chunks on `device`.
-        """
+        r"""The total memory of payload of all chunks on `device`."""
         mem_used = 0
         for _, chunk in self.chunk_id_to_chunk_dict_map.items():
             if (
@@ -87,10 +80,10 @@ class ChunkList(object):
         return max_size
 
     def access_chunk(self, chunk_id: int, compute_device: torch.device):
-        """
-        Prepare the memory of chunk to `compute_device` with `chunk_id`.
-        1. local mode
-        In local mode, we need to move the chunk when it is on other devices.
+        r"""Prepare the memory of chunk to `compute_device` with `chunk_id`.
+
+        1. standalone mode
+        In standalone mode, we need to move the chunk when it is on other devices.
             TODO(jiaruifang) Add async copy and record the lifecycle of chunks during
             the first iteration, so that we can prefetch the next chunk after sync
             the memcopy of the first chunk.
@@ -203,8 +196,8 @@ class ChunkList(object):
             global_timer.my_timer.finish_profile("CHUNK_LIST_prepare_device")
 
     def make_room(self, offload_size_in_bytes, target_device):
-        """
-        Move `offload_size_in_bytes` size of chunks away from `target_device`.
+        r"""Move `offload_size_in_bytes` size of chunks away from `target_device`.
+
         Can not move chunk of status `COMPUTE`.
         """
         if self._time_profile:
@@ -227,8 +220,8 @@ class ChunkList(object):
             global_timer.my_timer.finish_profile("CHUNK_LIST_make_room")
 
     def chunk_move(self, chunk_id: int, device: torch.device):
-        """
-        Move chunk of id `chunk_id` to `device`.
+        r"""Move chunk of id `chunk_id` to `device`.
+
         NOTE(): Please make sure `device` has enough free_chunk_mem before.
         """
         if self._time_profile:
@@ -315,9 +308,10 @@ class ChunkList(object):
     def _chunk_to_move_out_for_room_making(
         self, size_in_bytes: int, target_device: torch.device
     ) -> List:
-        """
-        Find the chunks to move for making `size_in_bytes` of room on `target_device`.
-        Return a list of chunk_ids.
+        r"""Find the chunks to move for making `size_in_bytes` of room on `target_device`.
+
+        Returns:
+            A list of chunk_ids.
         """
         still_need_bytes = size_in_bytes
         moved_bytes = 0
@@ -334,7 +328,7 @@ class ChunkList(object):
                 chunk.get_device() is not None
                 and chunk.get_device().type == target_device.type
                 and chunk.get_status() != ChunkStatus.COMPUTE
-                and chunk.is_pin() is False
+                and not chunk.is_pin()
             ):
                 # The next moment when this chunk was accessed.
                 next_mom = chunk.next_accessed_mom(target_device)

@@ -69,7 +69,7 @@ class PreBackwardFunction(torch.autograd.Function):
         ctx.pre_backward_function = pre_backward_function
         module.applied_pre_backward = False
         logger.debug(f"**After Forward: {ctx.module.__class__.__name__}")
-        # why detach?detach后给下一层作为输入，似乎没有用，fwd输出都会用backward作为反向
+        # TODO(jiaruifang) Why detach?
         outputs = outputs.detach()
         return outputs
 
@@ -89,9 +89,14 @@ class PostBackwardFunction(torch.autograd.Function):
         ctx.pre_backward_function = pre_backward_function
         return output
 
-    # arguments: 下一层的activation_grad, rets: 输入activation的grad
     @staticmethod
     def backward(ctx, *args):
+        """
+        Args:
+            activation_grad of the next layer.
+        Returns:
+            grad of the input activation.
+        """
         logger.debug(
             f"**PostBackwardFunction backward: {ctx.module.__class__.__name__}"
         )
@@ -99,7 +104,7 @@ class PostBackwardFunction(torch.autograd.Function):
         return (None, None) + args
 
 
-# 必须具备重复调用，第二次无效的能力 fetch submodule
+# Need to be idempotent.
 def pre_sub_module_forward_function(sub_module, client, name):
     flag = False
     rank = get_rank()
@@ -208,9 +213,8 @@ def post_sub_module_backward_function(sub_module, client, name):
 
 
 def _register_hooks_recursively(module, client, name=""):
-    """
-    DFS方式递归注册hook，father module会在children module访问后被访问一次
-    """
+    r"""Register hook in post order traverse."""
+
     for child_name, child in module.named_children():
         logger.debug(f"{child.__class__.__name__}")
         _register_hooks_recursively(child, client, name + child_name)
@@ -223,33 +227,25 @@ def _register_hooks_recursively(module, client, name=""):
     ):
         return
 
-    # 如下两个hook和backward的hook是否重复
     def _pre_forward_module_hook(module, *args):
         pre_sub_module_forward_function(module, client, name)
 
     def _post_forward_module_hook(module, *args):
         post_sub_module_forward_function(module, client, name)
 
-    # pre_bwd_hook_times = 0
-    # post_bwd_hook_times = 0
     # The hook can modify the output
     def _pre_backward_module_hook(module, inputs, output):
         def _run_before_backward_function(sub_module):
-            # if sub_module.applied_pre_backward is False:
             pre_sub_module_backward_function(sub_module, client, name)
-            # sub_module.applied_pre_backward = True
 
-        # self.pre_bwd_hook_times += len(output)
         return _apply_to_tensors_only(
             module, PreBackwardFunction, _run_before_backward_function, output
         )
 
     def _post_backward_module_hook(module, inputs):
         def _run_after_backward_function(sub_module):
-            # if sub_module.ds_grads_remaining == 0:
             post_sub_module_backward_function(sub_module, client, name)
 
-        # self.post_bwd_hook_times += len(inputs)
         return _apply_to_tensors_only(
             module, PostBackwardFunction, _run_after_backward_function, inputs
         )

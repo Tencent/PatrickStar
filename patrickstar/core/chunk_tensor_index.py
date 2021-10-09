@@ -23,7 +23,7 @@ from .tensor_stub import TensorInfo
 
 class ChunkTensorIndex(object):
     def __init__(self, default_chunk_size: int = 0):
-        """
+        r"""
         Storing the index information of tensor and chunks.
         Every process will maintain a `ChunkTensorIndex` instance.
         It is created during preprocessing with the define of the model.
@@ -64,13 +64,13 @@ class ChunkTensorIndex(object):
         access_type: AccessType,
         chunk_type: ChunkType,
     ) -> int:
-        """
-        Get the chunk id storing the optimizer state of `ref_param`.
-        args:
-            @ref_param: the ref param, usually param fp16
-            @access_type: AccessType
-            @chunk_type: type of the optimizer state chunk.
-        rets:
+        r"""Get the chunk id storing the optimizer state of `ref_param`.
+
+        Args:
+            ref_param: the ref param, usually param fp16
+            access_type: :class:`AccessType`.
+            chunk_type: type of the optimizer state chunk.
+        Returns:
             chunk id, None if not existed.
         """
         ref_chunk_id = self.get_chunk_id(ref_param, access_type)
@@ -79,17 +79,13 @@ class ChunkTensorIndex(object):
         )
 
     def is_local_chunk(self, chunk_id):
-        """
-        If chunk of `chunk_id` is local.
-        """
+        r"""If chunk of `chunk_id` is local."""
         rank = get_rank()
         _, grp_offset, _ = self.chunk_id_to_comm_group_map[chunk_id]
         return rank == grp_offset
 
     def chunk_num(self, list_type: ChunkType):
-        """
-        The number of chunks of type `list_type`.
-        """
+        r"""The number of chunks of type `list_type`."""
         if list_type not in self.chunk_type_to_chunk_id_list_map:
             return 0
         else:
@@ -113,8 +109,8 @@ class ChunkTensorIndex(object):
         self.chunk_type_to_chunk_id_list_map[list_type].append(chunk_id)
 
     def generate_tensor_info_in_order(self, chunk_id):
-        """
-        Return the tensors of chunk by `chunk_id`.
+        r"""Return the tensors of chunk by `chunk_id`.
+
         The chunks are ordered by start_offsets.
         """
         for tensor_id in self.chunk_id_to_tensor_id_list_map.get(chunk_id, []):
@@ -153,8 +149,8 @@ class ChunkTensorIndex(object):
             return mid
 
     def add_tensor(self, chunk_id, tensor_id, start_offset, numel, param, access_type):
-        """
-        Add a tensor.
+        r"""Add a tensor.
+
         Register the chunk_id of the chunk it belongs and its start_offset in the chunk.
         Support insert tensor between other tensors with binary search.
         """
@@ -162,7 +158,7 @@ class ChunkTensorIndex(object):
             self.chunk_id_to_tensor_id_list_map[chunk_id] = list()
 
         tensor_id_list = self.chunk_id_to_tensor_id_list_map[chunk_id]
-        # 二分查找按照start_offset顺序从小到大插入
+        # Insert by binary searching start_offset.
         pos = self._binary_search(
             tensor_id_list, start_offset, 0, len(tensor_id_list) - 1
         )
@@ -183,10 +179,7 @@ class ChunkTensorIndex(object):
                 param.ps_attr.grad_chunk_id = chunk_id
 
     def tensor_id_to_chunk_id(self, tensor_id) -> int:
-        """
-        tensor_id -> chunk_id
-        """
-        # info =
+        r"""tensor_id -> chunk_id"""
         info = self.tensor_id_to_info_map.get(tensor_id)
         if info is None:
             return None
@@ -229,9 +222,7 @@ class ChunkTensorIndex(object):
         tensor_id_list.remove(target_tensor_id)
 
     def try_insert_tensor_list(self, chunk_id, param_list, access_type):
-        """
-        Insert a list of param to chunk.
-        """
+        r"""Insert a list of param to chunk."""
         visited_params = []
         success = True
         for param in param_list:
@@ -246,7 +237,7 @@ class ChunkTensorIndex(object):
         return success
 
     def try_insert_tensor(self, chunk_id, param, access_type) -> bool:
-        """
+        r"""
         Try inserting tensor to chunk, return successful or not.
         If `param` was inserted, return True.
         """

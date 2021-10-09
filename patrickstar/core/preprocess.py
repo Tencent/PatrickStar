@@ -191,10 +191,12 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
         torch.nn.Embedding.__new__ = _new
 
     def _post_context_exec(self):
-        """
-        初始化context退出时执行本函数
-        1. 拷贝param的data，到param fp32和param fp16中去
-        2. append dummy chunk，使chunk num是进程数的整数倍 TODO(jiaruifang)
+        """The callback function when the context exits.
+
+        1. Copy param.data to fp16 and fp32 chunk based params.
+        2. Append dummy chunk so that the number of chunks is an integer multiple of
+            number of processes.
+        3. Add a dummy param at the start of CPU Embedding for huggingface.
         """
         logger.info("Post Model Init Context")
 
@@ -255,7 +257,7 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
                             param_fp32, torch.device("cpu:0")
                         )
 
-                        # param_fp16目前还是fp32
+                        # Here the dtype of param_fp16 is actually fp32.
                         ps_data_fp16.copy_(param_fp16.data)
                         ps_data_fp32.copy_(param_fp16.data)
 
@@ -283,17 +285,18 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
             chunk_num += 1
 
     def _post_init_method(self, module):
-        """
-        在model的param被PyTorch初始化完毕后完成
-        1. 保留local的tensor，通过删除remote tensor的方式
-        2. 将model param拷贝到chunk对应的内存中
+        r"""The function to call at the end of the constructor of each nn.Module.
+
+        The main functionality is registering the params to chunks and
+        remove the remote tensor if `release_after_init` is False.
         """
         self.submodule_id += 1
         see_memory_usage(
             f"Before converting parmas in {module.__class__.__name__}", force=False
         )
         if self.use_cpu_embedding:
-            # cpu_embedding优化把embedding交给Torch管理而非Chunk
+            # In CPU embedding optimization,
+            # the embedding is managed by torch instead of chunk.
             if module.__class__.__name__ == "Embedding":
                 logger.debug(
                     f"** Converting Maintain PyTorch Params in {module.__class__.__name__}"
@@ -308,9 +311,10 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
 
         print_rank(f"Converting Params in {module.__class__.__name__}", force=False)
 
-        # 在模型初始化的过程构造模型，post_init_method调用粒度是一个SubModule，比如BertAttention模块。
-        # 对于每个进程，将所有参数初始化出来。
-        # (NOTE)模型初始化顺序和optimizer parameter group遍历顺序虽不一致，但很相似
+        # The granularity of `post_init_method` is nn.Module, e.g. BertAttention.
+        # For every process, we will initialize the params.
+        # NOTE() The order of params in model initialization is a bit different from the
+        # the one in optimizer parameter group.
         param_fp16_list = []
         param_fp32_list = []
         for name, param in module.named_parameters(recurse=False):
