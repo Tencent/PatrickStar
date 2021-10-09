@@ -16,7 +16,7 @@ import unittest
 import torch
 
 from common import distributed_test
-from patrickstar.core import ChunkList, PSChunkStatus, ChunkType
+from patrickstar.core import ChunkList, ChunkStatus, ChunkType
 
 
 class TestChunkData(unittest.TestCase):
@@ -37,7 +37,7 @@ class TestChunkData(unittest.TestCase):
         )
 
         assert chunk_list.size() == 1
-        assert chunk_list[0].get_status() == PSChunkStatus.RELEASED
+        assert chunk_list[0].get_status() == ChunkStatus.RELEASED
 
     @distributed_test(world_size=[1], use_fake_dist=True)
     def test_new_chunk(self):
@@ -58,7 +58,7 @@ class TestChunkData(unittest.TestCase):
         )
         chunk_list.access_chunk(new_chunk_id, compute_device)
 
-        assert chunk_list[new_chunk_id].get_status() == PSChunkStatus.FREE
+        assert chunk_list[new_chunk_id].get_status() == ChunkStatus.FREE
 
         self.assertEqual(
             chunk_list.last_chunk_id(ChunkType.PARAM_FP32),

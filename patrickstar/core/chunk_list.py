@@ -22,7 +22,7 @@ from patrickstar.profiler import profiler
 from patrickstar.utils import logger, get_rank, get_world_size
 import patrickstar.utils.global_timer as global_timer
 from .chunk_data import Chunk
-from .const import PSChunkStatus
+from .const import ChunkStatus
 
 
 class ChunkList(object):
@@ -112,7 +112,7 @@ class ChunkList(object):
 
         # If chunk was released, we need to reallocate it.
         # In distributed mode, we need a global payload.
-        if chunk_status == PSChunkStatus.RELEASED:
+        if chunk_status == ChunkStatus.RELEASED:
             logger.debug(
                 f"rank {get_rank()} access_chunk chunk {chunk_id}, "
                 f"need to allocate {payload_space} B memory on {compute_device}"
@@ -333,7 +333,7 @@ class ChunkList(object):
             if (
                 chunk.get_device() is not None
                 and chunk.get_device().type == target_device.type
-                and chunk.get_status() != PSChunkStatus.COMPUTE
+                and chunk.get_status() != ChunkStatus.COMPUTE
                 and chunk.is_pin() is False
             ):
                 # The next moment when this chunk was accessed.
@@ -343,7 +343,7 @@ class ChunkList(object):
                 q.put((-next_mom, chunk_id))
                 movable_chunk_info.append(f"{next_mom}_{chunk_id}")
             # TODO(jiaruifang) Do not release `FREE` chunks immediately for reuse.
-            # assert chunk.get_status() != PSChunkStatus.FREE
+            # assert chunk.get_status() != ChunkStatus.FREE
         while not q.empty():
             next_mom, chunk_id = q.get()
             moved_bytes += self.chunk_id_to_chunk_dict_map[chunk_id].get_payload_space()

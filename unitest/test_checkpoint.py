@@ -160,7 +160,7 @@ def bert_model(
     loss3 = output[0].item()
     print("loss after checkpoint loading and 5 more training steps:", loss3)
 
-    assert loss1 == loss3, "Optimizer checkpoint error. {loss1} vs {loss3}"
+    assert loss1 == loss3, f"Optimizer checkpoint error. {loss1} vs {loss3}"
 
 
 class TestModelInitContext(unittest.TestCase):
