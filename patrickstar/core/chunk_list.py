@@ -261,9 +261,16 @@ class ChunkList(object):
         is_dummy: bool = False,
         chunk_type: ChunkType = ChunkType.UNDEF,
     ):
-        """
-        Create a chunk without initializing its memory.
-        Return the index of the chunk in the comm group:
+        r"""Create a chunk without initializing its memory.
+
+        Args:
+            chunk_id: int.
+            chunk_size: int.
+            data_type: :class:`torch.dtype`.
+            is_dummy: bool.
+            chunk_type: :class:ChunkType.
+        Returns:
+            The index of the chunk in the comm group:
             (comm_group_idx, comm_group_offset)
         """
         if chunk_id in self.chunk_id_to_chunk_dict_map:

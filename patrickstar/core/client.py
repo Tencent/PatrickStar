@@ -26,29 +26,20 @@ from .parameter import register_param, is_param_registered, ParamType
 
 
 class PatrickStarClient(object):
+    r"""The client for managing chunks."""
+
     def __init__(self, rank: int, default_chunk_size: int):
-        """
-        管理一个Process的Param, AccGrad, OS数据。
-        每个进程可以访问一个GPU的显存，和cpu的内存
-        功能:
-          1. 充分利用cpu和gpu内存
-          2. 细粒度调度，PatrickStarClient包含若干chunk
-        """
         self.pid = os.getpid()
 
-        # index of gpu
         self.local_rank = rank
 
         self.module = None
 
-        # 解耦chunk和param的tensors
         self.default_chunk_size = default_chunk_size
-
         self.chunk_tensor_index = ChunkTensorIndex(self.default_chunk_size)
         self.chunk_list = ChunkList(self.local_rank)
 
         self._time_profile = True
-
         self._chunk_id = -1
 
         if torch.distributed.is_initialized():
@@ -69,34 +60,48 @@ class PatrickStarClient(object):
         return self._chunk_id
 
     def init(self, model, optimizer):
-        """
-        初始化client管理的model和optimizer
-        并完成model的参数的分配和拷贝
-        """
+        r"""Initialize and store model and optimizer"""
+
         self.module = model
         self.optimizer = optimizer
         if get_rank() == 0:
             self.display_chunk_info()
+        # Here we register the forward and backward hooks.
         self.register_model_hook(model)
 
-    def append_dummy_chunk(self, data_type: torch.dtype, chunk_type: ChunkType):
+    def append_chunk(self, data_type, chunk_type, is_dummy=False):
+        r"""Append a new chunk to chunk_list and chunk_tensor_index.
+
+        Args:
+            data_type: :class:`torch.dtype`.
+            chunk_type: :class:`ChunkType`.
+            is_dummy: bool.
+        Returns:
+            chunk_id of the newly created chunk and
+            (comm_group_idx, comm_group_offset)
         """
-        向chunk_type list中添加一个dummy chunk
-        """
-        tmp_chunk_id = self.chunk_list.generate_chunk_id()
+        chunk_id = self.chunk_list.generate_chunk_id()
         comm_group_idx, comm_group_offset = self.chunk_list.new_chunk(
-            tmp_chunk_id,
+            chunk_id,
             self.default_chunk_size,
-            torch.half,
-            is_dummy=True,
+            data_type,
+            is_dummy=is_dummy,
             chunk_type=chunk_type,
         )
         self.chunk_tensor_index.add_chunk(
-            tmp_chunk_id,
+            chunk_id,
             comm_group_idx,
             comm_group_offset,
             chunk_type,
         )
+        return chunk_id, (comm_group_idx, comm_group_offset)
+
+    def append_dummy_chunk(self, data_type: torch.dtype, chunk_type: ChunkType):
+        r"""Append a dummy chunk to the corresponding chunk_list"""
+        chunk_id, (comm_group_idx, comm_group_offset) = self.append_chunk(
+            torch.half, chunk_type, is_dummy=True
+        )
+
         dummy = torch.nn.Parameter(
             torch.tensor([], dtype=data_type), requires_grad=False
         )
@@ -106,7 +111,7 @@ class PatrickStarClient(object):
         )
         self.dummy_param_list.append(dummy)
         self.chunk_tensor_index.add_tensor(
-            tmp_chunk_id,
+            chunk_id,
             self.dummy_param_list[-1].ps_attr.data_id(),
             0,
             dummy.numel(),
@@ -133,43 +138,31 @@ class PatrickStarClient(object):
         access_type: AccessType,
         chunk_type: ChunkType,
     ):
-        """
-        将一个tensor交给client管理，这个tensor必须是某个parameter的data或者grad成员变量
-        具体过程，如果这个param之前没有被client管理过，则在对应的chunk_type后append这个tensor
-        args:
-            @param_list: tensor list所在的Parameter list，client管理的tensor必须属于parameter的data或者grad
-            @data_type: tensor的数据类型，可以和param的类型不一致，因为param后面会被改变类型
-            @access_type: 访问data或者grad
-            @chunk_type: tensor插入队列的类型
-        """
-        assert type(data_type) == torch.dtype, f"data_type is {type(data_type)}"
-        assert type(access_type) == AccessType
-        if self.chunk_list.is_empty(chunk_type):
-            chunk_id = self.chunk_list.generate_chunk_id()
-        else:
-            last_chunk_id = self.chunk_list.last_chunk_id(chunk_type)
-            is_success = self.chunk_tensor_index.try_insert_tensor_list(
-                last_chunk_id, param_list, access_type
-            )
-            if is_success:
-                return
-            chunk_id = self.chunk_list.generate_chunk_id()
+        r"""Append params to the last chunk of type `chunk_type`.
 
-        comm_group_idx, comm_group_offset = self.chunk_list.new_chunk(
-            chunk_id, self.default_chunk_size, data_type, False, chunk_type
-        )
-        self.chunk_tensor_index.add_chunk(
-            chunk_id,
-            comm_group_idx,
-            comm_group_offset,
-            chunk_type,
-        )
-        is_success = self.chunk_tensor_index.try_insert_tensor_list(
+        Append the whole list of param into the same chunk. If the last
+        chunk doesn't fit, append a new chunk and try to insert params in it.
+
+        Args:
+            param_list: list of `torch.nn.Parameter`.
+            data_type: :class:`torch.dtype`. Can be different from param.
+            access_type: :class:`AccessType`.
+            chunk_type: :class:`ChunkType`.
+        """
+        assert isinstance(data_type, torch.dtype)
+        assert isinstance(access_type, AccessType)
+        if not self.chunk_list.is_empty(chunk_type):
+            last_chunk_id = self.chunk_list.last_chunk_id(chunk_type)
+            if self.chunk_tensor_index.try_insert_tensor_list(
+                last_chunk_id, param_list, access_type
+            ):
+                return
+        chunk_id, _ = self.append_chunk(data_type, chunk_type)
+        if not self.chunk_tensor_index.try_insert_tensor_list(
             chunk_id, param_list, access_type
-        )
-        if not is_success:
+        ):
             raise RuntimeError(
-                f"can not append a tensor to chunk_tensor_index."
+                f"Can not append a tensor to chunk_tensor_index."
                 f"Overall size of param list is larger than the default chunk size {self.default_chunk_size}."
             )
         return
@@ -177,30 +170,31 @@ class PatrickStarClient(object):
     def append_tensor_as_ref(
         self, param, data_type, access_type, chunk_type, ref_param
     ):
-        """
-        按照ref_param的排布方式排布param
-        ref_param和param所在的chunk id不同
+        r"""Append param to the last chunk with regard to the ref_param's location.
+
+        When adding optimizer params, e.g. the variance and momentum of adam to
+        chunk list, we hope they are of the same order as their corresponding
+        fp16 params. Here the `param` is the optimizer params and `ref_param` is
+        the fp16 param.
+        Notice that the chunk_id of param and ref_param are different.
+
+        Args:
+            param: :class:`torch.nn.Parameter`.
+            data_type: :class:`torch.dtype`. Can be different from param.
+            access_type: :class:`AccessType`.
+            chunk_type: :class:`ChunkType`.
+            ref_param: :class:`torch.nn.Parameter`.
         """
         chunk_id = self.chunk_tensor_index.get_optimizer_state_chunk_id(
             ref_param, access_type, chunk_type
         )
         if chunk_id is None:
-            # new a chunk
-            chunk_id = self.chunk_list.generate_chunk_id()
-            comm_group_idx, comm_group_offset = self.chunk_list.new_chunk(
-                chunk_id, self.default_chunk_size, data_type, False, chunk_type
-            )
-            self.chunk_tensor_index.add_chunk(
-                chunk_id,
-                comm_group_idx,
-                comm_group_offset,
-                chunk_type,
-            )
-        ret = self.chunk_tensor_index.try_insert_tensor(chunk_id, param, access_type)
+            chunk_id = self.append_chunk(data_type, chunk_type)
+        if not self.chunk_tensor_index.try_insert_tensor(chunk_id, param, access_type):
+            raise RuntimeError("Failed to insert optimizer param w.r.t its ref_param.")
         self.chunk_tensor_index.register_optimizer_state_chunk_id(
             ref_param, access_type, chunk_type, chunk_id
         )
-        assert ret is True
 
     def param_fp16_chunks_max_mem_usage(self):
         """
@@ -316,7 +310,6 @@ class PatrickStarClient(object):
         param: torch.nn.Parameter,
         access_type: AccessType,
         compute_device: torch.device,
-        training_stage: TrainingStage,
     ) -> torch.Tensor:
         """
         在分布式训练场景下，访问param的tensor，串行也可以使用
