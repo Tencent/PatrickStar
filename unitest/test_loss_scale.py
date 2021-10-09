@@ -22,7 +22,7 @@ from examples.data_loader import get_bert_data_loader
 from patrickstar.runtime import initialize_engine
 
 
-def test_bert_model(
+def bert_model(
     method,
     batch_size=32,
     hidden_dim=768,
@@ -184,7 +184,7 @@ class TestModelInitContext(unittest.TestCase):
         # apex O2 和 patrickstar 的策略基本相同。
         stop_step = 10
         torch.manual_seed(0)
-        torch_res_list, torch_scale_list = test_bert_model(
+        torch_res_list, torch_scale_list = bert_model(
             method="torch",
             hidden_dim=hidden_dim,
             batch_size=batch_size,
@@ -198,7 +198,7 @@ class TestModelInitContext(unittest.TestCase):
         print("*" * 50)
 
         torch.manual_seed(0)
-        apex_res_list, apex_scale_list = test_bert_model(
+        apex_res_list, apex_scale_list = bert_model(
             method="apex",
             hidden_dim=hidden_dim,
             batch_size=batch_size,
@@ -212,7 +212,7 @@ class TestModelInitContext(unittest.TestCase):
         print("*" * 50)
 
         torch.manual_seed(0)
-        ps_res_list, ps_scale_list = test_bert_model(
+        ps_res_list, ps_scale_list = bert_model(
             method="patrickstar",
             hidden_dim=hidden_dim,
             batch_size=batch_size,

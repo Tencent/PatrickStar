@@ -24,8 +24,7 @@ from patrickstar.utils import logger
 logger.setLevel(logging.WARNING)
 
 
-def test_bert_model(
-    method,
+def bert_model(
     batch_size=32,
     hidden_dim=768,
     sequence_length=512,
@@ -180,8 +179,7 @@ class TestModelInitContext(unittest.TestCase):
 
         assert hidden_dim % num_head == 0
 
-        test_bert_model(
-            method="patrickstar",
+        bert_model(
             hidden_dim=hidden_dim,
             batch_size=batch_size,
             sequence_length=sequence_length,

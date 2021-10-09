@@ -20,37 +20,37 @@ from patrickstar.utils import logger
 class _CopyInputToCPU(torch.autograd.Function):
     @staticmethod
     def symbolic(graph, input_):
-        return input_.to(torch.device('cpu:0'))
+        return input_.to(torch.device("cpu:0"))
 
     @staticmethod
     def forward(ctx, input_):
-        logger.debug(f'Copy input to cpu and {input_.dtype}.')
-        return input_.to(torch.device('cpu:0'))
+        logger.debug(f"Copy input to cpu and {input_.dtype}.")
+        return input_.to(torch.device("cpu:0"))
 
     @staticmethod
     def backward(ctx, grad_output):
-        target_device = torch.device(f'cuda:{torch.cuda.current_device()}')
-        logger.debug('Copy grad_output to cuda.')
+        target_device = torch.device(f"cuda:{torch.cuda.current_device()}")
+        logger.debug("Copy grad_output to cuda.")
         return grad_output.to(target_device)
 
 
 class _CopyActToGPU(torch.autograd.Function):
     @staticmethod
     def symbolic(graph, input_):
-        target_device = torch.device(f'cuda:{torch.cuda.current_device()}')
+        target_device = torch.device(f"cuda:{torch.cuda.current_device()}")
 
         return input_.to(target_device)
 
     @staticmethod
     def forward(ctx, input_):
-        target_device = torch.device(f'cuda:{torch.cuda.current_device()}')
+        target_device = torch.device(f"cuda:{torch.cuda.current_device()}")
 
-        logger.debug(f'Copy grad_output to cuda, input dtype {input_.dtype}.')
+        logger.debug(f"Copy grad_output to cuda, input dtype {input_.dtype}.")
         return input_.to(target_device)
 
     @staticmethod
     def backward(ctx, grad_output):
-        return grad_output.to(torch.device('cpu:0')).float()
+        return grad_output.to(torch.device("cpu:0")).float()
 
 
 def copy_to_cpu(input_):
@@ -62,7 +62,14 @@ def copy_to_gpu(input_):
 
 
 class Embedding(nn.Embedding):
+    r"""CPU Embedding.
+
+    If `use_cpu` is set, the embedding operations will
+    be performed on CPU.
+    """
     use_cpu = False
+    # `instances` is a helper class static member for
+    # preprocess context. For detail, see comments there.
     instances = []
 
     def __init__(self, *args, **kwargs):
