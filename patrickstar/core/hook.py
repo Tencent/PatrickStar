@@ -17,10 +17,10 @@ import patrickstar.utils.global_timer as global_timer
 from patrickstar.core.parameter import ParamType
 from patrickstar.manager import PatrickStarManager
 from patrickstar.utils import logger, get_rank, get_world_size
-from .const import PSTensorStatus, AccessType, TrainingStage
+from .const import TensorStatus, AccessType, TrainingStage
 
 
-# for each tensor in outputs run the forward_funciton and register backward_function as hook
+# For each tensor in outputs run the forward_funciton and register backward_function as hook
 def _apply_forward_and_backward_to_tensors_only(
     module, forward_function, backward_function, outputs
 ):
@@ -62,7 +62,6 @@ def _apply_to_tensors_only(module, functional, backward_function, outputs):
         return outputs
 
 
-# 可以修改outputs
 class PreBackwardFunction(torch.autograd.Function):
     @staticmethod
     def forward(ctx, module, pre_backward_function, outputs):
@@ -85,9 +84,7 @@ class PostBackwardFunction(torch.autograd.Function):
     @staticmethod
     def forward(ctx, module, pre_backward_function, output):
         ctx.module = module
-        # if output.requires_grad:ç
         output = output.detach()
-        # output = output * 1∂
         logger.debug(f"**PostBackwardFunction forward: {ctx.module.__class__.__name__}")
         ctx.pre_backward_function = pre_backward_function
         return output
@@ -95,9 +92,6 @@ class PostBackwardFunction(torch.autograd.Function):
     # arguments: 下一层的activation_grad, rets: 输入activation的grad
     @staticmethod
     def backward(ctx, *args):
-        # ctx.module.ds_grads_remaining = ctx.module.ds_grads_remaining - 1
-        # if ctx.module.ds_grads_remaining == 0:
-        # 没有执行embedding
         logger.debug(
             f"**PostBackwardFunction backward: {ctx.module.__class__.__name__}"
         )
@@ -140,12 +134,12 @@ def post_sub_module_forward_function(sub_module, client, name):
             client.release_dist(
                 param,
                 AccessType.DATA,
-                PSTensorStatus.HOLD_AFTER_FWD,
+                TensorStatus.HOLD_AFTER_FWD,
                 training_stage=TrainingStage.FWD,
                 is_allreduce=False,
             )
         else:
-            client.release_data(param, PSTensorStatus.HOLD_AFTER_FWD)
+            client.release_data(param, TensorStatus.HOLD_AFTER_FWD)
 
         if mgr._training_stage == TrainingStage.FWD:
             param.ps_attr.fwd_used_cnt += 1
@@ -200,12 +194,12 @@ def post_sub_module_backward_function(sub_module, client, name):
                 client.release_dist(
                     param,
                     AccessType.DATA,
-                    PSTensorStatus.HOLD_AFTER_BWD,
+                    TensorStatus.HOLD_AFTER_BWD,
                     training_stage=TrainingStage.BWD,
                     is_allreduce=True,
                 )
             else:
-                client.release_data(param, PSTensorStatus.HOLD_AFTER_BWD)
+                client.release_data(param, TensorStatus.HOLD_AFTER_BWD)
             rank = get_rank()
             logger.debug(f"rank {rank} BWD post before release_dist {name}.{sub_name}")
             param.grad = None

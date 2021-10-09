@@ -20,7 +20,7 @@ import patrickstar.utils.global_timer as global_timer
 from patrickstar.utils import logger, get_world_size, get_rank
 from .chunk_list import ChunkList, ChunkType
 from .chunk_tensor_index import ChunkTensorIndex
-from .const import AccessType, PSChunkStatus, PSTensorStatus, TrainingStage
+from .const import AccessType, ChunkStatus, TensorStatus, TrainingStage
 from .hook import setup_patrickstar_hooks
 from .parameter import register_param, is_param_registered, ParamType
 
@@ -189,7 +189,7 @@ class PatrickStarClient(object):
             ref_param, access_type, chunk_type
         )
         if chunk_id is None:
-            chunk_id = self.append_chunk(data_type, chunk_type)
+            chunk_id, _ = self.append_chunk(data_type, chunk_type)
         if not self.chunk_tensor_index.try_insert_tensor(chunk_id, param, access_type):
             raise RuntimeError("Failed to insert optimizer param w.r.t its ref_param.")
         self.chunk_tensor_index.register_optimizer_state_chunk_id(
@@ -252,7 +252,7 @@ class PatrickStarClient(object):
         # 因此，当每个chunk由HOLD_AFTER_FWD(HOLD_ADFTER_BWD)->RELEASED时
         has_released_chunk = False
         for i in chunk_id_list:
-            if self.chunk_list[i].get_status() == PSChunkStatus.RELEASED:
+            if self.chunk_list[i].get_status() == ChunkStatus.RELEASED:
                 has_released_chunk = True
                 break
         if not has_released_chunk:
@@ -276,7 +276,7 @@ class PatrickStarClient(object):
                 self.chunk_list[chunk_id].allocate_payload(compute_device)
                 # 刚分配的chunk，以备allgather使用，allgather之前不要被换出。
                 self.chunk_list[chunk_id].pin()
-            self.set_all_tensors_status_in_chunk(chunk_id, PSTensorStatus.HOLD)
+            self.set_all_tensors_status_in_chunk(chunk_id, TensorStatus.HOLD)
             allgather_payload_buff.append(self.chunk_list[chunk_id].payload)
         comm_data_amount = (
             len(allgather_payload_buff) * allgather_payload_buff[0].numel() * 2
@@ -391,14 +391,14 @@ class PatrickStarClient(object):
         old_status = param.ps_attr.get_status(access_type)
 
         # 如果是从free/uninit状态转换的需要清零
-        if old_status == PSTensorStatus.FREE:
+        if old_status == TensorStatus.FREE:
             param.ps_attr.access_tensor(access_type).zero_()
 
         # 访问之后应该更新Tensor的状态，鉴于chunk状态是由它管理tensor共同决定
         # 因此tensor对应的chunk的状态随之改变
         # dist情况
-        self.chunk_list.update_status(chunk_id, old_status, PSTensorStatus.COMPUTE)
-        param.ps_attr.set_status(PSTensorStatus.COMPUTE, access_type)
+        self.chunk_list.update_status(chunk_id, old_status, TensorStatus.COMPUTE)
+        param.ps_attr.set_status(TensorStatus.COMPUTE, access_type)
 
         if self._time_profile:
             global_timer.my_timer.finish_profile("CLIENT_access_dist")
@@ -470,12 +470,12 @@ class PatrickStarClient(object):
         old_status = param.ps_attr.get_status(access_type)
 
         # 如果是从free状态转换的需要清零，或者从
-        if old_status == PSTensorStatus.FREE:
+        if old_status == TensorStatus.FREE:
             param.ps_attr.access_tensor(access_type).zero_()
 
         # 访问之后应该更新Tensor的状态，chunk的状态随之改变
-        self.chunk_list.update_status(chunk_id, old_status, PSTensorStatus.COMPUTE)
-        param.ps_attr.set_status(PSTensorStatus.COMPUTE, access_type)
+        self.chunk_list.update_status(chunk_id, old_status, TensorStatus.COMPUTE)
+        param.ps_attr.set_status(TensorStatus.COMPUTE, access_type)
 
         # Note并不设置parameter对应的tensor，因为adam可能直接访问pstensor
         if self._time_profile:
@@ -501,7 +501,7 @@ class PatrickStarClient(object):
         self,
         param: torch.nn.Parameter,
         access_type: AccessType,
-        reset_to_status: PSTensorStatus,
+        reset_to_status: TensorStatus,
         training_stage: TrainingStage,
         is_allreduce: bool,
     ):
@@ -520,7 +520,7 @@ class PatrickStarClient(object):
             global_timer.my_timer.start_profile("CLIENT_release_dist")
         rank = get_rank()
 
-        assert isinstance(reset_to_status, PSTensorStatus)
+        assert isinstance(reset_to_status, TensorStatus)
         assert (
             training_stage == TrainingStage.FWD or training_stage == TrainingStage.BWD
         )
@@ -562,7 +562,7 @@ class PatrickStarClient(object):
                 if training_stage == TrainingStage.FWD:
                     if (
                         not self.chunk_list[i].all_tensor_status(
-                            PSTensorStatus.HOLD_AFTER_FWD
+                            TensorStatus.HOLD_AFTER_FWD
                         )
                         and not self.chunk_list[i].is_dummy()
                     ):
@@ -570,7 +570,7 @@ class PatrickStarClient(object):
                 elif training_stage == TrainingStage.BWD:
                     if (
                         not self.chunk_list[i].all_tensor_status(
-                            PSTensorStatus.HOLD_AFTER_BWD
+                            TensorStatus.HOLD_AFTER_BWD
                         )
                         and not self.chunk_list[i].is_dummy()
                     ):
@@ -617,7 +617,7 @@ class PatrickStarClient(object):
                     if i != local_chunk_id:
                         logger.debug(f"rank {rank} remove payload of chunk_id {i}")
                         self.chunk_list[i].release_payload()
-                        self.set_all_tensors_status_in_chunk(i, PSTensorStatus.FREE)
+                        self.set_all_tensors_status_in_chunk(i, TensorStatus.FREE)
 
         if self._time_profile:
             global_timer.my_timer.finish_profile("CLIENT_release_dist")
@@ -626,7 +626,7 @@ class PatrickStarClient(object):
         self,
         param: torch.nn.Parameter,
         access_type: AccessType,
-        reset_to_status: PSTensorStatus = PSTensorStatus.HOLD,
+        reset_to_status: TensorStatus = TensorStatus.HOLD,
     ):
         """
         这个param的data, grad不再需要放在计算设备
@@ -641,7 +641,7 @@ class PatrickStarClient(object):
         if self._time_profile:
             global_timer.my_timer.start_profile("CLIENT_release")
         rank = self.local_rank
-        assert isinstance(reset_to_status, PSTensorStatus)
+        assert isinstance(reset_to_status, TensorStatus)
 
         chunk_id = self.chunk_tensor_index.get_chunk_id(param, access_type)
         logger.debug(
@@ -669,7 +669,7 @@ class PatrickStarClient(object):
     def release_data(
         self,
         param: torch.nn.Parameter,
-        reset_to_status: PSTensorStatus = PSTensorStatus.HOLD,
+        reset_to_status: TensorStatus = TensorStatus.HOLD,
     ):
         """
         可以把一个tensor释放成FREE，也可以成HOLD
@@ -679,7 +679,7 @@ class PatrickStarClient(object):
     def release_grad(
         self,
         param: torch.nn.Parameter,
-        reset_to_status: PSTensorStatus = PSTensorStatus.HOLD,
+        reset_to_status: TensorStatus = TensorStatus.HOLD,
     ):
         self.release(param, AccessType.GRAD, reset_to_status)
 

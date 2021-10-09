@@ -12,7 +12,7 @@
 # See the AUTHORS file for names of contributors.
 import torch
 
-from patrickstar.core import PSChunkStatus, PSTensorStatus, TrainingStage
+from patrickstar.core import ChunkStatus, TensorStatus, TrainingStage
 from patrickstar.fp16 import LossScaler, DynamicLossScaler
 from patrickstar.manager import PatrickStarManager
 from patrickstar.ops import FP16Adam
@@ -123,13 +123,11 @@ class PatrickStarEngine(torch.nn.Module):
         """
         for chunk_id, chunk in self.client.chunk_list.generate_chunk():
             if (
-                chunk.get_status() == PSChunkStatus.HOLD
-                or chunk.get_status() == PSChunkStatus.HOLD_AFTER_FWD
+                chunk.get_status() == ChunkStatus.HOLD
+                or chunk.get_status() == ChunkStatus.HOLD_AFTER_FWD
             ):
                 chunk.set_unused()
-                self.client.set_all_tensors_status_in_chunk(
-                    chunk_id, PSTensorStatus.HOLD
-                )
+                self.client.set_all_tensors_status_in_chunk(chunk_id, TensorStatus.HOLD)
 
     def forward(self, *inputs, **kwargs):
         r"""Execute forward propagation

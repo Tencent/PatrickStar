@@ -13,7 +13,7 @@
 
 import torch
 
-from .const import PSTensorStatus, AccessType, ParamType
+from .const import TensorStatus, AccessType, ParamType
 
 
 class PSTensor(object):
@@ -22,26 +22,33 @@ class PSTensor(object):
     def __init__(self):
         self.tensor = None
         self.id = PSTensor.global_id
-        self.status = PSTensorStatus.FREE
+        self.status = TensorStatus.FREE
         PSTensor.global_id += 1
 
     def __str__(self):
-        return (f'id: {self.id}, status: {self.status}, tensor: {self.tensor}')
+        return f"id: {self.id}, status: {self.status}, tensor: {self.tensor}"
 
 
 class PSParameter(object):
-    def __init__(self,
-                 param: torch.nn.Parameter,
-                 param_type: ParamType,
-                 data_type: torch.dtype,
-                 name: str = None):
+    r""""""
+
+    def __init__(
+        self,
+        param: torch.nn.Parameter,
+        param_type: ParamType,
+        data_type: torch.dtype,
+        name: str = None,
+    ):
         """
-        初始化PSParameter，PSParameter的类型可以和param不一致
-        args
-            @param: torch param，PSParameter管理的是它的data和grad
-            @param_type: 类型，torch_based由pytorch管理，chunk_based由chunk管理
-            @data_type: PSParameter的类型，可以和当前param不一致
-            @name: 名字
+        PSParameter can have different dtype compare to param.
+
+        Args
+            param: :class:`torch.nn.Parameter`. PSParameter will manage its data and grad.
+            param_type: :class:`ParamType`. The torch based param is managed by pytorch,
+                while chunk_based is managed by patrickstar chunks.
+            data_type: :class:`torch.dtype`. Dtype of PSParameter, can be different from
+                `param`.
+            name: str
         """
         self.name = name
 
@@ -61,14 +68,14 @@ class PSParameter(object):
             else:
                 self.grad_tensor = None
 
-        # 参数是否属于进程的本地Chunk
+        # Whether the param belongs to local chunk.
         self._is_local = True
 
     def __str__(self):
         return (
-            f'name: {self.name}, numel: {self.numel}, shape: {self.shape}, '
-            f'data_type: {self.data_type}, param_type: {self.param_type}, '
-            f'is_local: {self.is_local()}'
+            f"name: {self.name}, numel: {self.numel}, shape: {self.shape}, "
+            f"data_type: {self.data_type}, param_type: {self.param_type}, "
+            f"is_local: {self.is_local()}"
         )
 
     def is_local(self):
@@ -84,83 +91,54 @@ class PSParameter(object):
     def grad_id(self):
         return self.get_tensor_id(AccessType.GRAD)
 
+    def _access_ps_tensor(self, access_type: AccessType):
+        if self.param_type != ParamType.CHUNK_BASED:
+            raise ValueError
+        if not isinstance(access_type, AccessType):
+            raise ValueError
+        if access_type == AccessType.DATA:
+            return self.data_tensor
+        elif access_type == AccessType.GRAD:
+            return self.grad_tensor
+
     def get_tensor_id(self, access_type: AccessType):
         """
-        只有chunk based tensor有id，torch返回-1
+        Get the tensor id of chunk based tensor.
+        For torch based tensor, return -1.
         """
         if self.param_type == ParamType.TORCH_BASED:
             return -1
         else:
-            if access_type == AccessType.DATA:
-                return self.data_tensor.id
-            elif access_type == AccessType.GRAD:
-                return self.grad_tensor.id
-            else:
-                raise ValueError
+            return self._access_ps_tensor(access_type).id
 
     def set_tensor(self, tensor: torch.Tensor, access_type: AccessType):
-        if self.param_type == ParamType.TORCH_BASED:
-            raise ValueError
-        else:
-            if access_type == AccessType.DATA:
-                self.data_tensor.tensor = tensor.view(self.shape)
-            elif access_type == AccessType.GRAD:
-                self.grad_tensor.tensor = tensor.view(self.shape)
-            else:
-                raise ValueError
+        ps_tensor = self._access_ps_tensor(access_type)
+        ps_tensor.tensor = tensor.view(self.shape)
 
     def access_tensor(self, access_type: AccessType):
-        if self.param_type == ParamType.TORCH_BASED:
-            raise ValueError
-        else:
-            if access_type == AccessType.DATA:
-                return self.data_tensor.tensor
-            elif access_type == AccessType.GRAD:
-                if self._is_torch:
-                    raise RuntimeError
-                return self.grad_tensor.tensor
-            else:
-                raise ValueError
+        return self._access_ps_tensor(access_type).tensor
 
     def get_status(self, access_type: AccessType):
-        if self.param_type == ParamType.TORCH_BASED:
-            raise ValueError
-        else:
-            if access_type == AccessType.DATA:
-                return self.data_tensor.status
-            elif access_type == AccessType.GRAD:
-                return self.grad_tensor.status
-            else:
-                raise ValueError
+        return self._access_ps_tensor(access_type).status
 
-    def set_status(self, status: PSTensorStatus, access_type: AccessType):
+    def set_status(self, status: TensorStatus, access_type: AccessType):
         """
-        只有COMPUTE状态tensor指向chunk payload
-        HOLD和FREE状态都悬空
-        TODO(jiaruifang)还需要param reset data和grad
+        Only in COMPUTE status when tensor will point to chunk payload.
+        Otherwise, the tensor should be None to prevent unnecessary copy.
+        TODO(jiaruifang) Need to param reset data和grad
         """
-        if self.param_type == ParamType.TORCH_BASED:
-            raise ValueError
-        else:
-            if access_type == AccessType.DATA:
-                self.data_tensor.status = status
-                if status != PSTensorStatus.COMPUTE:
-                    self.data_tensor.tensor = None
-            elif access_type == AccessType.GRAD:
-                self.grad_tensor.status = status
-                if status != PSTensorStatus.COMPUTE:
-                    self.grad_tensor.tensor = None
-            else:
-                raise ValueError(
-                    f'set status {status} when access type is {access_type}')
+        ps_tensor = self._access_ps_tensor(access_type)
+        ps_tensor.status = status
+        if status != TensorStatus.COMPUTE:
+            ps_tensor.tensor = None
 
 
 def register_param(param, param_type, data_type, name=None):
     assert isinstance(param, torch.nn.Parameter)
-    if not hasattr(param, 'ps_attr'):
+    if not hasattr(param, "ps_attr"):
         param.ps_attr = PSParameter(param, param_type, data_type, name)
 
 
 def is_param_registered(param) -> bool:
     assert isinstance(param, torch.nn.Parameter)
-    return hasattr(param, 'ps_attr')
+    return hasattr(param, "ps_attr")
