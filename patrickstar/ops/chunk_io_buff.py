@@ -18,29 +18,54 @@ from patrickstar.utils import logger, get_rank
 
 
 class FP16ChunkWriteBuffer(object):
+    r"""A buffer for copy the param.
+
+    At the end of the CPU Adam, we need to copy the updated fp32 params
+    back to the fp16 params for the next iteration of training.
+    And because the params are organized in chunks, we can optimize the copy and cast
+    by doing it at the granularity of chunk.
+    This class is for doing the above copy and cast optimization.
+    """
+
     def __init__(
         self,
         chunk_list: ChunkList,
         chunk_tensor_index: ChunkTensorIndex,
         chunk_size: int,
     ):
+        """
+        Args:
+            chunk_list: :class:`ChunkList`.
+            chunk_tensor_index: :class:`ChunkTensorIndex`.
+            chunk_size: `int`.
+        """
         self.chunk_list = chunk_list
         self.chunk_tensor_index = chunk_tensor_index
         self.cached_src_chunk_id = None
         self.cached_target_chunk_id = None
-        self.gpu_fp16_buff = torch.zeros(
+        # NOTE() We found that doing a two stage copy, 1) CPU fp32 -> GPU fp32,
+        # 2) GPU fp32 -> GPU fp16 is faster than one single copy_. And the
+        # gpu_fp32_buff member is the itermediate buffer.
+        self.gpu_fp32_buff = torch.zeros(
             chunk_size,
             dtype=torch.float,
             device=torch.device(f"cuda:{torch.cuda.current_device()}"),
         )
 
     def write_from_cache(self, target_param, src_param):
+        r"""Write the value of `target_param` to `src_param` with casting.
+
+        We assume the order of the `src_param` and `target_param` coming in
+        are the same as the order they reside in chunks. Therefore, we
+        will copy the chunk of them only if `src_param` is the last param
+        in its chunk.
+        Note that the last chunk will be copied in `reset`.
+
+        Args:
+            target_param: A :class:`torch.nn.Parameter`. The fp16 param to copy to.
+            src_param: A :class:`torch.nn.Parameter`. The fp32 param to copy from.
         """
-        如果src_param是chunk中的最后一个tensor，
-        则把src_param的chunk写到target_param所在的chunk中
-        可能是cpu向gpu移动
-        """
-        # torch param 只有 fp32 的一份数据，不需要拷贝
+        # Torch params are of fp32 all the time, so we don't need to copy them.
         assert src_param.ps_attr.param_type == ParamType.CHUNK_BASED
         src_info = self.chunk_tensor_index.get_tensor_info(src_param.ps_attr.data_id())
         target_info = self.chunk_tensor_index.get_tensor_info(
@@ -51,7 +76,7 @@ class FP16ChunkWriteBuffer(object):
             self.cached_src_chunk_id is not None
             and src_info.chunk_id != self.cached_src_chunk_id
         ):
-            # TODO CPU->GPU拷贝需要优化
+            # TODO(jiaruifang) Optimize CPU -> GPU copy.
             target_device = self.chunk_list[self.cached_target_chunk_id].payload.device
             src_device = self.chunk_list[self.cached_src_chunk_id].payload.device
             logger.debug(
@@ -59,11 +84,11 @@ class FP16ChunkWriteBuffer(object):
                 f"{src_device} -> {target_device}"
             )
             if target_device.type == "cuda" and src_device.type == "cpu":
-                self.gpu_fp16_buff.copy_(
+                self.gpu_fp32_buff.copy_(
                     self.chunk_list[self.cached_src_chunk_id].payload
                 )
                 self.chunk_list[self.cached_target_chunk_id].payload.copy_(
-                    self.gpu_fp16_buff
+                    self.gpu_fp32_buff
                 )
             else:
                 self.chunk_list[self.cached_target_chunk_id].payload.copy_(
@@ -73,8 +98,9 @@ class FP16ChunkWriteBuffer(object):
         self.cached_target_chunk_id = target_info.chunk_id
 
     def reset(self):
-        """
-        reset时，将cache住的payload写到chunk里
+        r"""Reset the chunk buffer.
+
+        During reset, we will copy the last chunk from fp32 to fp16.
         """
         if self.cached_src_chunk_id is None:
             return
@@ -82,8 +108,8 @@ class FP16ChunkWriteBuffer(object):
         logger.info(
             f"global_rank {global_rank} finally, write chunk {self.cached_target_chunk_id}"
         )
-        # Note 有可能这一个进程只有一个Chunk，且该Chunk只有一个Embedding Layer，而它是Torch管理的
-        # 导致这个Chunk没有分配payload
+        # It's possible that the chunk is empty (no payload), e.g. the process only possesses
+        # a large torch based embedding layer.
         if self.chunk_list[self.cached_src_chunk_id] is not None:
             self.chunk_list[self.cached_target_chunk_id].payload.copy_(
                 self.chunk_list[self.cached_src_chunk_id].payload
@@ -93,9 +119,12 @@ class FP16ChunkWriteBuffer(object):
 
 
 class FP32ChunkReadBuffer(object):
-    """
-    FP32 Chunk Buff用于加速ADAM计算时的数据传输。
-    可能读入CPU或者GPU之中
+    r"""Read param from chunk.
+
+    During Adam, we will need to access the fp16 chunks for the
+    gradients and sometimes copy them to GPU.
+    As they are organized in chunks, we will move them by chunks.
+    This class is for such optimization.
     """
 
     def __init__(
@@ -106,9 +135,11 @@ class FP32ChunkReadBuffer(object):
         margin_chunk_num_for_gpu_adam: int,
     ):
         """
-        在compute_device分配一个FP32 Chunk作为缓存
-        @params
-        margin_chunk_num_for_gpu_adam: 训练过程GPU可以额外分配给adam的chunk个数
+        Args:
+            chunk_list: :class:`ChunkList`.
+            chunk_tensor_index: :class:`ChunkTensorIndex`.
+            chunk_size: `int`.
+            margin_chunk_num_for_gpu_adam: `int`. the number of GPU chunks for Adam state.
         """
         self.chunk_list = chunk_list
         self.chunk_tensor_index = chunk_tensor_index
@@ -118,6 +149,8 @@ class FP32ChunkReadBuffer(object):
         self.local_rank = chunk_list.local_rank
         logger.info(f"Allocate fp32 Chunk Buffer of size {chunk_size / 1e6} MB on CPU.")
         if margin_chunk_num_for_gpu_adam > 0:
+            # When `margin_chunk_num_for_gpu_adam` > 0, it means there will be optimizer
+            # state resides on GPU. So we need to allocate a GPU buffer for those.
             gpu_device = torch.device(f"cuda:{self.local_rank}")
             self.gpu_payload = torch.empty(
                 chunk_size, dtype=torch.half, device=gpu_device
@@ -131,20 +164,26 @@ class FP32ChunkReadBuffer(object):
         self.ret_payload = None
 
     def access_from_cache(self, param) -> torch.Tensor:
-        """
-        访问param，如果param是chunk的第一个tensor则触发chunk拷贝
-        target_device可能是cpu或者gpu，因此需要两种不同的payload来缓存
-        返回一个tensor内存
+        r"""Access the underlying data of the param.
+
+        We assume the order of the `param` coming in in the same as the order
+        they reside in chunks. Therefore, we will copy the chunk when `param`
+        is the first one in the chunk.
+        As target device may be CPU or GPU, we will need 2 kinds of payload to
+        store the buffer.
+
+        Args:
+            param: :class:`torch.nn.Parameter`. The param of dtype fp16 to access.
         """
         if param.ps_attr.param_type == ParamType.TORCH_BASED:
-            # torch param 的梯度保存在 param.grad 中
+            # grad of torch params are stored in param.grad.
             return param.grad
         else:
             info = self.chunk_tensor_index.get_tensor_info(param.ps_attr.data_id())
 
-            # 触发cached chunk更新，判断条件是param.data Tensor是Chunk的第一个Tensor
+            # Trigger updation of cached chunk when param is the first tensor of
+            # its chunk.
             if info.start_offset == 0:
-                # TODO GPU FP16->CPU FP32拷贝需要优化,
                 self.cached_chunk_num += 1
                 if self.cached_chunk_num < self.margin_chunk_num_for_gpu_adam:
                     target_device = torch.device(f"cuda:{self.local_rank}")
