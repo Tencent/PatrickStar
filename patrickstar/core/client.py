@@ -105,7 +105,7 @@ class PatrickStarClient(object):
         dummy = torch.nn.Parameter(
             torch.tensor([], dtype=data_type), requires_grad=False
         )
-        # 加入一个dummy param可以让dummy chunk状态被设置为hold
+        # Add a dummy param to dummy chunk, so that the chunk can be set in HOLD status.
         register_param(
             dummy, ParamType.CHUNK_BASED, torch.half, f"dummy_{comm_group_idx}"
         )
@@ -128,8 +128,8 @@ class PatrickStarClient(object):
         """
         TODO(jiaruifang) Remove tensor of the param
         """
-        chunk_id = self.chunk_tensor_index.get_chunk_id(param, AccessType.DATA)
-        self.chunk_tensor_index.delete_tensor(chunk_id, param, AccessType.DATA)
+        chunk_id = self.chunk_tensor_index.get_chunk_id(param, access_type)
+        self.chunk_tensor_index.delete_tensor(chunk_id, param, access_type)
 
     def append_tensor(
         self,
@@ -197,9 +197,10 @@ class PatrickStarClient(object):
         )
 
     def param_fp16_chunks_max_mem_usage(self):
-        """
-        获得param fp16使用Chunk所占的内存大小 (in Bytes)
-        在多机环境，需要包括allgather获得remote chunks
+        r"""Return the total memory used by param fp16 chunks in bytes.
+
+        In distributed environment, the return value includes remote chunks
+        from allgather.
         """
         world_size = get_world_size()
         # 本进程自己管理的Chunk，和Group Chunk Buff会分配的Chunk
@@ -212,9 +213,11 @@ class PatrickStarClient(object):
         )
 
     def set_all_tensors_status_in_chunk(self, chunk_id, new_status):
-        """
-        把一个chunk所有的tensor状态设置为status，chunk的状态也随之改变
-        不管payload是否被分配
+        r"""Set the status of all tensors in a chunk.
+
+        Notice that the status of the chunk will change as well.
+        And this method has nothing to do with whether the payload of
+        the chunk is allocated or not.
         """
         for info in self.chunk_tensor_index.generate_tensor_info_in_order(chunk_id):
             param = info.param
@@ -230,7 +233,7 @@ class PatrickStarClient(object):
         return self.chunk_list.chunk_ids_generator(chunk_type)
 
     def is_local_param(self, param, access_type):
-        """Check if param is in local chunk"""
+        r"""Check if param is in local chunk"""
         chunk_id = self.chunk_tensor_index.get_chunk_id(param, access_type)
         return self.chunk_tensor_index.is_local_chunk(chunk_id)
 
@@ -241,15 +244,23 @@ class PatrickStarClient(object):
         compute_device,
         param_name,
     ):
-        """
-        将chunk_id_list中远端的chunk取到本地
+        r"""Fetch the remote chunks to local.
+
+        Args:
+            chunk_id_list: list of int. The id of the chunks in a same comm group.
+            local_chunk_id: int. The id of the local chunk in the comm group.
+            compute_device: :class:`torch.device`.
+            param_name: str.
         """
         rank = get_rank()
 
-        # FWD过程，当global chunk中有param第一次被访问时，需要将global chunk收集到本地。
-        # 如何判断global chunk中有param第一次被访问的时刻，从而正确触发allgather操作。
-        # 第一个param被访问时的必要条件是remote chunk状态为RELEASED。
-        # 因此，当每个chunk由HOLD_AFTER_FWD(HOLD_ADFTER_BWD)->RELEASED时
+        # During FWS, when there are param in the chunk group being visited for
+        # the first time, collect the chunk group to local.
+        # How can we determine if a chunk group is being visited for the first time,
+        # so that we can trigger the correct allgather?
+        # When the first param is visited, the remote chunk should be of status
+        # RELEASED, therefore, we do the allgather when the status of chunks are
+        # changing form HOLD_AFTER_FWD(HOLD_ADFTER_BWD) to RELEASED.
         has_released_chunk = False
         for i in chunk_id_list:
             if self.chunk_list[i].get_status() == ChunkStatus.RELEASED:
@@ -272,9 +283,10 @@ class PatrickStarClient(object):
                 self.chunk_list.prepare_device(
                     compute_device, self.chunk_list[chunk_id].get_chunk_space()
                 )
-                # TODO(jiaruifang) 此处可以不分配空间，用一个复用的comm_buffer
+                # TODO(jiaruifang) We may reuse a comm_buffer here.
                 self.chunk_list[chunk_id].allocate_payload(compute_device)
-                # 刚分配的chunk，以备allgather使用，allgather之前不要被换出。
+                # Make sure the newly allocated chunk is not moved to other deviced
+                # before allgather.
                 self.chunk_list[chunk_id].pin()
             self.set_all_tensors_status_in_chunk(chunk_id, TensorStatus.HOLD)
             allgather_payload_buff.append(self.chunk_list[chunk_id].payload)
@@ -311,13 +323,17 @@ class PatrickStarClient(object):
         access_type: AccessType,
         compute_device: torch.device,
     ) -> torch.Tensor:
-        """
-        在分布式训练场景下，访问param的tensor，串行也可以使用
-        @args
-            param: 待访问的参数
-            access_type: 访问方式
-            compute_device: 目标设备
-            training_stage: 训练解阶段
+        r"""Visit tensor of param in distributed environment.
+
+        Notice that this method also works at standalone circumstances.
+
+        Args:
+            param: :class:`torch.nn.Parameter`. The param to visit.
+            access_type: :class:`AccessType`.
+            compute_device: :class:`torch.device`.
+            training_stage: :class:`TrainingStage`.
+        Returns:
+            The tensor of the params.
         """
 
         assert is_param_registered(
@@ -334,7 +350,8 @@ class PatrickStarClient(object):
         if self._time_profile:
             global_timer.my_timer.start_profile("CLIENT_access_dist")
 
-        # 准备param所在chunk的内存，如果内存不在计算设备上需要分配或者移动
+        # 1. Prepare the memory of the chunks. If the chunk is not one the
+        #   compute device, then we need to move or allocate.
         chunk_id = self.chunk_tensor_index.get_chunk_id(param, access_type)
 
         chunk_id_list = self.chunk_tensor_index.chunk_ids_of_comm_group(chunk_id)
@@ -348,13 +365,14 @@ class PatrickStarClient(object):
                 f"local_chunk_id {local_chunk_id} chunk_id_list {chunk_id_list}"
             )
 
-            # 每个进程把local_chunk_id都弄到本地
+            # 1.1 Move the local chunk to compute device.
             self.chunk_list.access_chunk(local_chunk_id, compute_device)
 
-            # _fetch_remote_chunks不要将local_chunk_id也给换出去了，
-            # 因为它的状态还是HOLD，加上pin。
+            # Prevent the local chunk being moved to other devices during _fetch_remote_chunks.
+            # Because its status is HOLD, pin.
             self.chunk_list[local_chunk_id].pin()
 
+            # 1.2 Fetch the remote chunks to local.
             self._fetch_remote_chunks(
                 chunk_id_list,
                 local_chunk_id,
@@ -363,10 +381,12 @@ class PatrickStarClient(object):
             )
             self.chunk_list[local_chunk_id].unpin()
 
-        # _fetch_remote_chunks可能不执行allgather，此时远端的chunk在本地，需要取到计算设备上。
+        # If the chunk is remote chunk and has been fetched before this `access_dist`,
+        # The _fetch_remote_chunks will not do allgather. We need to move the chunk to
+        # compute_device manually.
         self.chunk_list.access_chunk(chunk_id, compute_device)
 
-        # 将param内存定位到chunk上
+        # 2. Locate the param on the chunk.
         tensor_id = param.ps_attr.get_tensor_id(access_type)
         info = self.chunk_tensor_index.get_tensor_info(tensor_id)
         start_offset = info.start_offset
@@ -387,16 +407,15 @@ class PatrickStarClient(object):
             access_type,
         )
 
-        # 改变param's tensor对应chunk的status，chunk状态由它管理的所有tensor状态共同决定。
+        # 3. Change the status of param tensor.
+        # The status of chunk should be determined by the status of its tensors.
         old_status = param.ps_attr.get_status(access_type)
 
-        # 如果是从free/uninit状态转换的需要清零
+        # If the old status was FREE, we need to fill the param to zero.
         if old_status == TensorStatus.FREE:
             param.ps_attr.access_tensor(access_type).zero_()
 
-        # 访问之后应该更新Tensor的状态，鉴于chunk状态是由它管理tensor共同决定
-        # 因此tensor对应的chunk的状态随之改变
-        # dist情况
+        # Change the status of param to COMPUTE.
         self.chunk_list.update_status(chunk_id, old_status, TensorStatus.COMPUTE)
         param.ps_attr.set_status(TensorStatus.COMPUTE, access_type)
 
@@ -411,22 +430,29 @@ class PatrickStarClient(object):
         access_type: AccessType,
         compute_device: torch.device,
     ):
-        """
-        访问`nn.Parameter`的data或者grad，让它们参与计算。
-        具体步骤
-        找到param的tensor对应的chunk。
-        1. 如果chunk的payload存在
-        然后决定是否移动chunk到计算设备，移动之前要给计算设备腾出足够空间。
-        2. 如果chunkd的payload不存在
-        比如grad FP16，在step过程所在的chunk已经被标记为FREE，并被释放掉。
-        将payload分配到计算设备的内存上，分配前需要给计算设备腾出足够空间。
+        r"""Visit the data or grad of the local `param`.
 
-        异常：一个chunk中两个tensor的计算设备不一致。
-        两种access，
-        1. FWD+BWD过程的access_data and access_grad?
-        如果访问的是本地chunk_id，也需要allgather配合其他process
-        2. adam过程access_data
-        只能访问本地chunk不需要通信
+        Steps:
+            1. Find the chunk of the `param`.
+            2.1 If the payload of the chunk exists,
+                decide whether to move the chunk to `compute_device`.
+            2.2 If the payload of the chunk does not exist,
+                allocate the payload of on `compute_device`.
+        Before moving or allocating, make sure there is enough space
+        on the `compute_device`.
+
+        Exceptions:
+            The compute devices of 2 tensors in the same chunk is different.
+
+        Notice that different from access_dist, this method will not do cross
+        process communication.
+
+        Args:
+            param: :class:`torch.nn.Parameter`.
+            access_type: :class:`AccessType`.
+            compute_device: :class:`torch.device`.
+        Returns:
+            The tensor to access.
         """
         assert is_param_registered(
             param
@@ -442,10 +468,10 @@ class PatrickStarClient(object):
         if self._time_profile:
             global_timer.my_timer.start_profile("CLIENT_access")
 
-        # 准备param所在chunk的内存，如果内存不在计算设备上需要分配或者移动
+        # 1. Prepare the memory of the chunks. If the chunk is not one the
+        #   compute device, then we need to move or allocate.
         chunk_id = self.chunk_tensor_index.get_chunk_id(param, access_type)
 
-        # 这个tensor还没在chunk schema中
         if chunk_id is None:
             raise RuntimeError(
                 "FP16 training shall not meet tensors with no chunk assigned. "
@@ -455,7 +481,7 @@ class PatrickStarClient(object):
 
         self.chunk_list.access_chunk(chunk_id, compute_device)
 
-        # 将param内存定位到chunk上
+        # 2. Locate the param on the chunk.
         tensor_id = param.ps_attr.get_tensor_id(access_type)
         info = self.chunk_tensor_index.get_tensor_info(tensor_id)
         start_offset = info.start_offset
@@ -467,33 +493,29 @@ class PatrickStarClient(object):
             access_type,
         )
 
+        # 3. Change the status of param tensor.
+        # The status of chunk should be determined by the status of its tensors.
         old_status = param.ps_attr.get_status(access_type)
 
-        # 如果是从free状态转换的需要清零，或者从
+        # If the old status was FREE, we need to fill the param to zero.
         if old_status == TensorStatus.FREE:
             param.ps_attr.access_tensor(access_type).zero_()
 
-        # 访问之后应该更新Tensor的状态，chunk的状态随之改变
         self.chunk_list.update_status(chunk_id, old_status, TensorStatus.COMPUTE)
         param.ps_attr.set_status(TensorStatus.COMPUTE, access_type)
 
-        # Note并不设置parameter对应的tensor，因为adam可能直接访问pstensor
         if self._time_profile:
             global_timer.my_timer.finish_profile("CLIENT_access")
         return param.ps_attr.access_tensor(access_type)
 
     def access_data(self, param: torch.nn.Parameter, compute_device: torch.device):
-        """
-        将param的ps_data_tensor的数据放置到compute_device上
-        """
+        r"""move the PSTensor of param.data to `compute_device`."""
         return self.access(param, AccessType.DATA, compute_device)
 
     def access_grad(self, param: torch.nn.Parameter, compute_device: torch.device):
-        """
-        将param的ps_grad_tensor的数据放置到compute_device上
-        NOTE，并没有正确设置param的grad，此时grad的数据无效。因为grad的设备属性并不自由，
-        需要看data的脸色行事。我们使用grad时候，需要显式设置
-        `param.grad = param.ps_grad_tensore`
+        r"""move the PSTensor of param.data to `compute_device`.
+
+        NOTE() The device of grad should be determined by the device of param.data.
         """
         return self.access(param, AccessType.GRAD, compute_device)
 
@@ -505,13 +527,25 @@ class PatrickStarClient(object):
         training_stage: TrainingStage,
         is_allreduce: bool,
     ):
-        """
-        这个param的data, grad不再需要放在计算设备
-        1. 更新状态
-        首先更新tensor和chunk的状态
-        2. 释放内存
-        在释放Parameter中tensor的内存，释放PSTensor中的内存
-        看看是否有chunk的状态为free，释放chunk内存
+        r"""Release the param in distributed environment.
+
+        This means the data and grad of the param no longer need to
+        stay in the current compute device.
+
+        Steps:
+            1. Update the status of tensor and chunk.
+            2. If the chunk can be released,
+                if `is_allreduce` is True, do reduce scatter to average the gradients.
+                then released the payload.
+
+        Args:
+            param: :class:`torch.nn.Parameter`.
+            access_type: :class:`AccessType`.
+            reset_to_status: :class:`TensorStatus`. The status to reset tensor to.
+            training_stage: :class:`TrainingStage`.
+            is_allreduce: bool. Whether to do allreduce(reduce scatter).
+                Notice that because user may use gradient checkpointing, the is_allreduce
+                in TrainingStage.BWD doesn't equal to True.
         """
         if param.ps_attr.param_type == ParamType.TORCH_BASED:
             return
@@ -527,7 +561,6 @@ class PatrickStarClient(object):
         assert torch.distributed.is_initialized()
 
         chunk_id = self.chunk_tensor_index.get_chunk_id(param, access_type)
-        # 可以在tensor-chunk schema构造过程中获得local_chunk_id
         chunk_id_list = self.chunk_tensor_index.chunk_ids_of_comm_group(chunk_id)
 
         local_chunk_id = chunk_id_list[rank]
@@ -536,25 +569,26 @@ class PatrickStarClient(object):
             f"rank {rank} release tensor {param.ps_attr.name} of chunk_id {chunk_id} to {reset_to_status}"
         )
 
-        # 更新tensor和chunk状态， tensor被设置为free，需要删除内存
-        # 释放tensor的内存，再释放chunk内存
+        # Update the status of tensor and chunk.
         self.chunk_list.update_status(
             chunk_id, param.ps_attr.get_status(access_type), reset_to_status
         )
         param.ps_attr.set_status(reset_to_status, access_type)
 
-        # 找到需要删除的chunk，先删除chunk关联的tensors
         if access_type == AccessType.DATA:
-            # NOTE(jiaruifang) 必须device和原来param一致，影响hook of param.grad_fn.next_functions[0][0]
+            # NOTE(jiaruifang) device must be the same as the origin param.
+            # Or it will affect hook of param.grad_fn.next_functions[0][0].
             param.data = torch.tensor(
                 [], dtype=param.ps_attr.data_type, device=param.device
             )
         elif access_type == AccessType.GRAD:
             param.grad = None
 
-        # 判断chunk group中所有的chunk都被使用完毕，可以释放remote chunk
-        # FWD: 当所有非dummy的chunk都是HOLD_AFTER_FWD
-        # BWD: 当所有非dummy的chunk都是HOLD_AFTER_BWD
+        # Check if we finished using all tensors in all chunks of the chunk group,
+        # then we can release the remote chunks.
+        # The condition for releasing chunks are:
+        #     FWD: All non-dummy chunks are of status HOLD_AFTER_FWD;
+        #     BWD: All non-dummy chunks are of status HOLD_AFTER_BWD.
         world_size = get_world_size()
         if world_size > 1:
             all_chunks_ready = True
@@ -597,8 +631,6 @@ class PatrickStarClient(object):
                         async_op=False,
                     )
 
-                    # NOTE把下面行注释了不影响最终结果？loss可能是有softmax算出，所以相对值不影响LOSS比较，但是影响了
-                    # 不应该除以world_size,减去dummy chunk个数
                     self.chunk_list[local_chunk_id].payload /= world_size
                     if self._time_profile:
                         global_timer.data_move_cnter.update(
@@ -611,7 +643,7 @@ class PatrickStarClient(object):
                             "CLIENT_release_dist_reduce_scatter"
                         )
 
-                # 删除remote chunk的payload
+                # Remove the payload of remote chunks.
                 for i in chunk_id_list:
                     self.chunk_list[i].unpin()
                     if i != local_chunk_id:
@@ -628,13 +660,19 @@ class PatrickStarClient(object):
         access_type: AccessType,
         reset_to_status: TensorStatus = TensorStatus.HOLD,
     ):
-        """
-        这个param的data, grad不再需要放在计算设备
-        1. 更新状态
-        首先更新tensor和chunk的状态
-        2. 释放内存
-        在释放Parameter中tensor的内存，释放PSTensor中的内存
-        看看是否有chunk的状态为free，释放chunk内存
+        r"""Release the param in standalone environment.
+
+        This means the data and grad of the param no longer need to
+        stay in the current compute device.
+
+        Steps:
+            1. Update the status of tensor and chunk.
+            2. If the chunk can be released released the payload.
+
+        Args:
+            param: :class:`torch.nn.Parameter`.
+            access_type: :class:`AccessType`.
+            reset_to_status: :class:`TensorStatus`. The status to reset tensor to.
         """
         if param.ps_attr.param_type == ParamType.TORCH_BASED:
             return
@@ -648,15 +686,15 @@ class PatrickStarClient(object):
             f"rank {rank} release a tensor of {access_type} chunk_id {chunk_id} to {reset_to_status}"
         )
 
-        # 更新tensor和chunk状态，如果tensor被设置为free，需要删除ps_tensor的内存
+        # Update the status of tensor and chunk.
         self.chunk_list.update_status(
             chunk_id, param.ps_attr.get_status(access_type), reset_to_status
         )
         param.ps_attr.set_status(reset_to_status, access_type)
 
-        # 找到需要删除的chunk，先删除chunk关联的tensors
         if access_type == AccessType.DATA:
-            # NOTE() 必须to device它和param.grad_fn.next_functions[0][0]
+            # NOTE(jiaruifang) device must be the same as the origin param.
+            # Or it will affect hook of param.grad_fn.next_functions[0][0].
             param.data = torch.tensor(
                 [], dtype=param.ps_attr.data_type, device=param.device
             )
@@ -671,9 +709,7 @@ class PatrickStarClient(object):
         param: torch.nn.Parameter,
         reset_to_status: TensorStatus = TensorStatus.HOLD,
     ):
-        """
-        可以把一个tensor释放成FREE，也可以成HOLD
-        """
+        r"""release the param tensor to FREE or HOLD"""
         self.release(param, AccessType.DATA, reset_to_status)
 
     def release_grad(
@@ -684,9 +720,6 @@ class PatrickStarClient(object):
         self.release(param, AccessType.GRAD, reset_to_status)
 
     def reset(self):
-        """
-        删除chunk_list和chunk_tensor_index
-        """
         raise NotImplementedError
 
     def display_chunk_info(self):
