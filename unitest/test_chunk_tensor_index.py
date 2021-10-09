@@ -155,8 +155,9 @@ class TestAccess(unittest.TestCase):
         self.assertTrue(is_success)
 
     def test_chunk_layout_consistency(self):
-        """
-        检查OS的chunk layout是否和param fp16对齐
+        r"""
+        Check if the chunk layout of optimizer status are aligned to
+        param fp16.
         """
         chunk_tensor_index = ChunkTensorIndex(20)
 
