@@ -117,7 +117,8 @@ class FP16Adam(torch.optim.Optimizer):
                         register_param(
                             state["exp_avg_sq"], ParamType.TORCH_BASED, torch.float
                         )
-                else:
+                elif p.ps_attr.is_local():
+                    # Only create the local optimizer state params.
                     name = p.ps_attr.name
                     state["exp_avg"] = empty_cpu_param()
                     register_param(
