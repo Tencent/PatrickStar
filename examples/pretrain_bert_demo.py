@@ -225,6 +225,7 @@ def test_bert_model_helper(
         from transformers import BertForSequenceClassification
     else:
         from ps_modeling_bert import BertForSequenceClassification
+
     # Avoid gpu0 use more memory.
     # https://discuss.pytorch.org/t/extra-10gb-memory-on-gpu-0-in-ddp-tutorial/118113
     torch.cuda.set_device(rank)
