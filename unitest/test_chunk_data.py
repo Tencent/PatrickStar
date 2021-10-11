@@ -29,7 +29,7 @@ class TestChunkData(unittest.TestCase):
         self.compute_device = (
             torch.device("cuda:0") if torch.cuda.is_available() else torch.device("cpu")
         )
-        # 构建静态chunk layout -> chunk_tensor_index
+        # Statically construct chunk layout -> chunk_tensor_index
         chunk_tensor_index = ChunkTensorIndex(self.default_chunk_size)
 
         param1 = torch.nn.Parameter(torch.zeros(10))

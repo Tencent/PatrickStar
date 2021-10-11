@@ -31,7 +31,7 @@ class Chunk(object):
         local_rank: int = 0,
         is_dummy: bool = False,
     ):
-        """
+        r"""
         Chunk is the minimal unit of the data transfer.
         It is a contiguous memory for saving tensors.
         To remove a tensor, we only need to set the status of the tensor to `FREE`.
@@ -79,8 +79,9 @@ class Chunk(object):
             access_moments.append(mom)
 
     def next_accessed_mom(self, compute_device):
-        """
-        Get the next accessed moment after the warmup step. During warmup, return 0.
+        r"""Get the next accessed moment after the warmup step.
+
+        During warmup, return 0.
         """
         mgr = PatrickStarManager()
         access_moments = (
@@ -108,15 +109,11 @@ class Chunk(object):
         return self._is_dummy
 
     def get_chunk_space(self):
-        """
-        Size of the chunk (Bytes).
-        """
+        r"""Size of the chunk (Bytes)."""
         return getsizeof(self.data_type) * self.capacity
 
     def get_payload_space(self):
-        """
-        Size of the payload (Bytes).
-        """
+        r"""Size of the payload (Bytes)."""
         if self.payload is None:
             return 0
         else:
@@ -132,8 +129,8 @@ class Chunk(object):
         return self._pin_flag
 
     def allocate_payload(self, device):
-        """
-        Allocate payload on device for the chunk.
+        r"""Allocate payload on device for the chunk.
+
         NOTE() This method does not check availability. Please check if
         there is enough room for the chunk.
         """
@@ -161,8 +158,8 @@ class Chunk(object):
             global_timer.my_timer.finish_profile("CHUNK_allocate_payload")
 
     def release_payload(self):
-        """
-        Release the payload.
+        r"""Release the payload.
+
         NOTE() Please make sure all tensors are in the `FREE` status.
         """
         mgr = PatrickStarManager()
@@ -202,9 +199,7 @@ class Chunk(object):
             return ChunkStatus.FREE
 
     def all_tensor_status(self, status):
-        """
-        If all tensors are in the status or `FREE`.
-        """
+        r"""If all tensors are in the status or `FREE`."""
         for k, v in self._status_dict.items():
             if k != TensorStatus.FREE and k != status:
                 if v != 0:
@@ -215,7 +210,7 @@ class Chunk(object):
         return True
 
     def set_unused(self):
-        """
+        r"""
         After forward calculation, the tensors in `HOLD` status are the ones
         that are not used. Remember them for the release.
         NOTE() This function can only be called at the end of forward calculation.
@@ -224,7 +219,7 @@ class Chunk(object):
         self.unused = self._status_dict[TensorStatus.HOLD]
 
     def move(self, target_device: torch.device):
-        """
+        r"""
         Move the chunk to `target_device`.
         NOTE() Please check if the `target_device` has enough room before.
         """
