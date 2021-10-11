@@ -28,23 +28,26 @@ class ChunkTensorIndex(object):
         Every process will maintain a `ChunkTensorIndex` instance.
         It is created during preprocessing with the define of the model.
         Only add and search supported, no delete or update.
+
+        Args:
+            default_chunk_size: int.
         """
         # 1-1 dict, tensor_id -> TensorInfo
         self.tensor_id_to_info_map: dict[int, TensorInfo] = {}
         # 1-N dict, chunk_id -> List(tensor_id) in order of start_offset
         self.chunk_id_to_tensor_id_list_map: dict[int, List[int]] = {}
 
-        # (comm_group_idx, chunk_type) -> chunk_id_list
-        self.comm_group_idx_to_chunk_id_list_map = {}
-        # chunk_id -> (comm_group_idx, comm_group_offset, chunk_type)
+        # (comm_group_id, chunk_type) -> chunk_id_list
+        self.comm_group_id_to_chunk_id_list_map = {}
+        # chunk_id -> (comm_group_id, comm_group_offset, chunk_type)
         self.chunk_id_to_comm_group_map = {}
 
         # Chunk_ids of chunks in different chunk type
         self.chunk_type_to_chunk_id_list_map = {}
         self.default_chunk_size = default_chunk_size
 
-        # key is a tuple (torch.nn.Parameter, ParamListType) -> value: int
-        self.param_fp16_chunk_id_to_os_chunk_id_map = {}
+        # ref_chunk_id -> {chunk_type -> chunk_id}
+        self.param_chunk_id_to_os_chunk_id_map = {}
 
     def register_optimizer_state_chunk_id(
         self,
@@ -53,10 +56,21 @@ class ChunkTensorIndex(object):
         chunk_type: ChunkType,
         chunk_id: int,
     ):
+        r"""Register the optimizer chunk of type `chunk_type` to `ref_param`.
+
+        Args:
+            ref_param: :class:`torch.nn.Parameter`.
+            access_type: :class:`AccessType`.
+            chunk_type: :class:`ChunkType`.
+            chunk_id: int.
+        """
         ref_chunk_id = self.get_chunk_id(ref_param, access_type)
-        self.param_fp16_chunk_id_to_os_chunk_id_map[
-            (ref_chunk_id, chunk_type)
-        ] = chunk_id
+        if ref_chunk_id not in self.param_chunk_id_to_os_chunk_id_map:
+            self.param_chunk_id_to_os_chunk_id_map[ref_chunk_id] = {
+                chunk_type: chunk_id
+            }
+        else:
+            self.param_chunk_id_to_os_chunk_id_map[ref_chunk_id][chunk_type] = chunk_id
 
     def get_optimizer_state_chunk_id(
         self,
@@ -74,18 +88,33 @@ class ChunkTensorIndex(object):
             chunk id, None if not existed.
         """
         ref_chunk_id = self.get_chunk_id(ref_param, access_type)
-        return self.param_fp16_chunk_id_to_os_chunk_id_map.get(
-            (ref_chunk_id, chunk_type)
-        )
+        if (
+            ref_chunk_id not in self.param_chunk_id_to_os_chunk_id_map
+            or chunk_type not in self.param_chunk_id_to_os_chunk_id_map[ref_chunk_id]
+        ):
+            return None
+        return self.param_chunk_id_to_os_chunk_id_map[ref_chunk_id][chunk_type]
 
     def is_local_chunk(self, chunk_id):
-        r"""If chunk of `chunk_id` is local."""
+        r"""If chunk of `chunk_id` is local.
+
+        Args:
+            chunk_id: int.
+        Returns:
+            bool.
+        """
         rank = get_rank()
         _, grp_offset, _ = self.chunk_id_to_comm_group_map[chunk_id]
         return rank == grp_offset
 
     def chunk_num(self, list_type: ChunkType):
-        r"""The number of chunks of type `list_type`."""
+        r"""The number of chunks of type `list_type`.
+
+        Args:
+            chunk_type: :class:`ChunkType`.
+        Returns:
+            int.
+        """
         if list_type not in self.chunk_type_to_chunk_id_list_map:
             return 0
         else:
@@ -94,10 +123,16 @@ class ChunkTensorIndex(object):
     def add_chunk(
         self, chunk_id, comm_group_id, comm_group_offset, list_type: ChunkType
     ):
+        r"""Add a chunk to ChunkTensorIndex.
+
+        Args:
+            chunk_id: int.
+            comm_group_id
+        """
         comm_group_info = (comm_group_id, list_type)
-        if comm_group_info not in self.comm_group_idx_to_chunk_id_list_map:
-            self.comm_group_idx_to_chunk_id_list_map[comm_group_info] = list()
-        self.comm_group_idx_to_chunk_id_list_map[comm_group_info].append(chunk_id)
+        if comm_group_info not in self.comm_group_id_to_chunk_id_list_map:
+            self.comm_group_id_to_chunk_id_list_map[comm_group_info] = list()
+        self.comm_group_id_to_chunk_id_list_map[comm_group_info].append(chunk_id)
         self.chunk_id_to_comm_group_map[chunk_id] = (
             comm_group_id,
             comm_group_offset,
@@ -119,50 +154,20 @@ class ChunkTensorIndex(object):
     def get_tensor_info(self, tensor_id):
         return self.tensor_id_to_info_map[tensor_id]
 
-    def _binary_search(self, tensor_id_list, start_offset, start, end):
-        # we need to distinugish whether we should insert
-        # before or after the left boundary.
-        # imagine [0] is the last step of the binary search
-        # and we need to decide where to insert -1
-        if start == end:
-            if (
-                self.tensor_id_to_info_map[tensor_id_list[start]].start_offset
-                > start_offset
-            ):
-                return start
-            else:
-                return start + 1
-
-        # this occurs if we are moving beyond left\'s boundary
-        # meaning the left boundary is the least position to
-        # find a number greater than val
-        if start > end:
-            return start
-
-        mid = (start + end) // 2
-        mid_start_offset = self.tensor_id_to_info_map[tensor_id_list[mid]].start_offset
-        if mid_start_offset < start_offset:
-            return self._binary_search(tensor_id_list, start_offset, mid + 1, end)
-        elif mid_start_offset > start_offset:
-            return self._binary_search(tensor_id_list, start_offset, start, mid - 1)
-        else:
-            return mid
-
     def add_tensor(self, chunk_id, tensor_id, start_offset, numel, param, access_type):
         r"""Add a tensor.
 
         Register the chunk_id of the chunk it belongs and its start_offset in the chunk.
         Support insert tensor between other tensors with binary search.
+
+        TODO(zilinzhu) This method is only called by `append_dummy_chunk`.
+        Remove it in the future?
         """
         if chunk_id not in self.chunk_id_to_tensor_id_list_map:
             self.chunk_id_to_tensor_id_list_map[chunk_id] = list()
 
         tensor_id_list = self.chunk_id_to_tensor_id_list_map[chunk_id]
-        # Insert by binary searching start_offset.
-        pos = self._binary_search(
-            tensor_id_list, start_offset, 0, len(tensor_id_list) - 1
-        )
-        tensor_id_list.insert(pos, tensor_id)
+        tensor_id_list.append(tensor_id)
         if not is_param_registered(param):
             param_name = None
         else:
@@ -179,23 +184,20 @@ class ChunkTensorIndex(object):
                 param.ps_attr.grad_chunk_id = chunk_id
 
     def tensor_id_to_chunk_id(self, tensor_id) -> int:
-        r"""tensor_id -> chunk_id"""
-        info = self.tensor_id_to_info_map.get(tensor_id)
-        if info is None:
-            return None
-        else:
-            return info.chunk_id
-
-    def get_chunk_id(self, param: torch.nn.Parameter, access_type: AccessType) -> int:
-        tensor_id = param.ps_attr.get_tensor_id(access_type)
+        r"""Get the chunk id from the tensor id."""
         info = self.tensor_id_to_info_map.get(tensor_id)
         if info is None:
             return None
         return info.chunk_id
 
+    def get_chunk_id(self, param: torch.nn.Parameter, access_type: AccessType) -> int:
+        r"""Get the chunk id of the param."""
+        tensor_id = param.ps_attr.get_tensor_id(access_type)
+        return self.tensor_id_to_chunk_id(tensor_id)
+
     def chunk_ids_of_comm_group(self, chunk_id: int) -> List[int]:
         comm_group_id, _, list_type = self.chunk_id_to_comm_group_map[chunk_id]
-        return self.comm_group_idx_to_chunk_id_list_map[(comm_group_id, list_type)]
+        return self.comm_group_id_to_chunk_id_list_map[(comm_group_id, list_type)]
 
     def generate_all_chunks(self, chunk_list):
         for chunk_id, _ in self.chunk_id_to_tensor_id_list_map.items():
@@ -213,6 +215,13 @@ class ChunkTensorIndex(object):
             yield self.tensor_id_to_info_map[tensor_id].param
 
     def delete_tensor(self, chunk_id, param, access_type):
+        r"""Delete the tensor from the chunk.
+
+        Args:
+            chunk_id: int.
+            param: :class:`nn.Parameter`.
+            access_type: :class:`AccessType`.
+        """
         assert is_param_registered(param)
         target_tensor_id = param.ps_attr.get_tensor_id(access_type)
         if target_tensor_id not in self.tensor_id_to_info_map:
@@ -222,7 +231,19 @@ class ChunkTensorIndex(object):
         tensor_id_list.remove(target_tensor_id)
 
     def try_insert_tensor_list(self, chunk_id, param_list, access_type):
-        r"""Insert a list of param to chunk."""
+        r"""Insert a list of param to chunk.
+
+        Notice that this method is an atomic method: if we failed to insert
+        any param of the list, we will delete all the params in the list that
+        are already inserted.
+
+        Args:
+            chunk_id: int.
+            param_list: list of :class:`nn.Parameter`.
+            access_type: :class:`AccessType`.
+        Returns:
+            Whether the insertion was successful.
+        """
         visited_params = []
         success = True
         for param in param_list:
@@ -240,6 +261,13 @@ class ChunkTensorIndex(object):
         r"""
         Try inserting tensor to chunk, return successful or not.
         If `param` was inserted, return True.
+
+        Args:
+            chunk_id: int.
+            param: :class:`nn.Parameter`.
+            access_type: :class:`AccessType`.
+        Returns:
+            Whether the insertion was successful.
         """
         tensor_id_list = self._get_tensor_id_list(chunk_id)
         prev_end_pos = 0
