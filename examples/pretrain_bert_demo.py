@@ -20,7 +20,11 @@ import time
 import torch
 import numpy as np
 import transformers
-from transformers import BertConfig, BertForSequenceClassification
+from transformers import BertConfig
+
+# from transformers BertForSequenceClassification
+# from ps_modeling_bert import BertForSequenceClassification
+
 
 import patrickstar.utils.global_timer as global_timer
 from data_loader import get_bert_data_loader
@@ -135,7 +139,12 @@ def _add_test_bert_args(parser):
     group.add_argument(
         "--model_name", type=str, default="GPTsmall", help="The model name."
     )
-
+    group.add_argument(
+        "--with_activation_offload",
+        dest="with_activation_offload",
+        action="store_true",
+        help="Use activation offloading.",
+    )
     return parser
 
 
@@ -212,6 +221,10 @@ def test_bert_model_helper(
     else:
         rank = args.local_rank
 
+    if not args.with_activation_offload:
+        from transformers import BertForSequenceClassification
+    else:
+        from ps_modeling_bert import BertForSequenceClassification
     # Avoid gpu0 use more memory.
     # https://discuss.pytorch.org/t/extra-10gb-memory-on-gpu-0-in-ddp-tutorial/118113
     torch.cuda.set_device(rank)
@@ -284,7 +297,6 @@ def test_bert_model_helper(
             model.gradient_checkpointing_enable()
         model.cuda(rank)
         model.train()
-
         if args.with_lightseq:
             from ls_hf_transformer_encoder_layer import inject_ls_enc_layer
 

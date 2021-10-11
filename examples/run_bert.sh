@@ -6,11 +6,19 @@ export RELEASE_AFTER_INIT=${RELEASE_AFTER_INIT:-0}
 export MODEL_NAME=${MODEL_NAME:-"GPT2small"}
 export DIST_PLAN=${DIST_PLAN:-"patrickstar"}
 export RES_CHECK=${RES_CHECK:-0}
+export ACT_OFFLOAD=${ACT_OFFLOAD:-0}
 
 export margin_use_ratio=${margin_use_ratio:-0.8}
 # if warmup fails, lower the ratio
 export warmup_gpu_chunk_mem_ratio=${warmup_gpu_chunk_mem_ratio:-0.2}
 export overall_gpu_mem_ratio=${overall_gpu_mem_ratio:-0.8}
+
+if [[ ${ACT_OFFLOAD} == 1 ]];  then
+# Check result correctness
+ACT_OFFLOAD_FLAG="--with_activation_offload"
+else
+export ACT_OFFLOAD_FLAG=""
+fi
 
 if [[ ${RES_CHECK} == 1 ]];  then
 # Check result correctness
@@ -64,4 +72,5 @@ python -m torch.distributed.launch --nproc_per_node=${GPU_NUM} \
                              ${RELEASE} \
                              --default_chunk_size=${CHUNK_SIZE} \
                              ${lightseq_flag} \
+                             ${ACT_OFFLOAD_FLAG} \
                              2>&1 | tee ./logs/log.${MODEL_NAME}_gpu_${GPU_NUM}_cs_${CS}_bs_${BS}_cpueb_${CPU_EBD}_margin_${margin_use_ratio}_warmup_${warmup_gpu_chunk_mem_ratio}_gpu_${overall_gpu_mem_ratio}_lightseq_${LIGHTSEQ}
