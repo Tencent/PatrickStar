@@ -56,6 +56,7 @@ fi
 
 mkdir -p ./logs
 python -m torch.distributed.launch --nproc_per_node=${GPU_NUM} \
+			     --max_restarts=0 \
                              pretrain_bert_demo.py ${RES_CHECK_FLAG} \
                              --use_ckp \
                              --use_fp16 \
