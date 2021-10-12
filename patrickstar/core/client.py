@@ -40,7 +40,6 @@ class PatrickStarClient(object):
         self.chunk_list = ChunkList(self.local_rank)
 
         self._time_profile = True
-        self._chunk_id = -1
 
         if torch.distributed.is_initialized():
             self.cpu_comm_group = torch.distributed.new_group(backend="gloo")
@@ -54,10 +53,6 @@ class PatrickStarClient(object):
 
         # for post backward hook
         self.grad_accs = []
-
-    def _generate_chunk_id(self):
-        self._chunk_id += 1
-        return self._chunk_id
 
     def init(self, model, optimizer):
         r"""Initialize and store model and optimizer"""
@@ -77,37 +72,29 @@ class PatrickStarClient(object):
             chunk_type: :class:`ChunkType`.
             is_dummy: bool.
         Returns:
-            chunk_id of the newly created chunk and
-            (comm_group_idx, comm_group_offset)
+            chunk_id of the newly created chunk and comm_info.
         """
         chunk_id = self.chunk_list.generate_chunk_id()
-        comm_group_idx, comm_group_offset = self.chunk_list.new_chunk(
+        comm_info = self.chunk_list.new_chunk(
             chunk_id,
             self.default_chunk_size,
             data_type,
             is_dummy=is_dummy,
             chunk_type=chunk_type,
         )
-        self.chunk_tensor_index.add_chunk(
-            chunk_id,
-            comm_group_idx,
-            comm_group_offset,
-            chunk_type,
-        )
-        return chunk_id, (comm_group_idx, comm_group_offset)
+        self.chunk_tensor_index.add_chunk(chunk_id, comm_info)
+        return chunk_id, comm_info
 
     def append_dummy_chunk(self, data_type: torch.dtype, chunk_type: ChunkType):
         r"""Append a dummy chunk to the corresponding chunk_list"""
-        chunk_id, (comm_group_idx, comm_group_offset) = self.append_chunk(
-            torch.half, chunk_type, is_dummy=True
-        )
+        chunk_id, comm_info = self.append_chunk(torch.half, chunk_type, is_dummy=True)
 
         dummy = torch.nn.Parameter(
             torch.tensor([], dtype=data_type), requires_grad=False
         )
         # Add a dummy param to dummy chunk, so that the chunk can be set in HOLD status.
         register_param(
-            dummy, ParamType.CHUNK_BASED, torch.half, f"dummy_{comm_group_idx}"
+            dummy, ParamType.CHUNK_BASED, torch.half, f"dummy_{comm_info.group_id}"
         )
         self.dummy_param_list.append(dummy)
         self.chunk_tensor_index.add_tensor(
@@ -121,7 +108,7 @@ class PatrickStarClient(object):
 
         logger.info(
             f"Append a dummy chunk to the Chunk List {chunk_type} "
-            f"comm group ({comm_group_idx} {comm_group_offset})"
+            f"comm info {comm_info}"
         )
 
     def delete_param(self, param, access_type):
@@ -254,7 +241,7 @@ class PatrickStarClient(object):
         """
         rank = get_rank()
 
-        # During FWS, when there are param in the chunk group being visited for
+        # During FWD, when there are param in the chunk group being visited for
         # the first time, collect the chunk group to local.
         # How can we determine if a chunk group is being visited for the first time,
         # so that we can trigger the correct allgather?
@@ -354,10 +341,10 @@ class PatrickStarClient(object):
         #   compute device, then we need to move or allocate.
         chunk_id = self.chunk_tensor_index.get_chunk_id(param, access_type)
 
-        chunk_id_list = self.chunk_tensor_index.chunk_ids_of_comm_group(chunk_id)
         rank = get_rank()
 
         if get_world_size() > 1:
+            chunk_id_list = self.chunk_tensor_index.chunk_ids_of_comm_group(chunk_id)
             local_chunk_id = chunk_id_list[rank]
 
             logger.debug(
@@ -386,13 +373,6 @@ class PatrickStarClient(object):
         # compute_device manually.
         self.chunk_list.access_chunk(chunk_id, compute_device)
 
-        # 2. Locate the param on the chunk.
-        tensor_id = param.ps_attr.get_tensor_id(access_type)
-        info = self.chunk_tensor_index.get_tensor_info(tensor_id)
-        start_offset = info.start_offset
-        numel = info.numel
-        assert numel == param.ps_attr.numel, f"{numel} vs {param.ps_attr.numel}"
-
         assert (
             self.chunk_list[chunk_id].payload is not None
         ), f"rank {rank} chunk id {chunk_id}' payload is None'"
@@ -401,6 +381,13 @@ class PatrickStarClient(object):
             f"{compute_device}, but on "
             f"{self.chunk_list[chunk_id].payload.device}"
         )
+
+        # 2. Locate the param on the chunk.
+        tensor_id = param.ps_attr.get_tensor_id(access_type)
+        info = self.chunk_tensor_index.get_tensor_info(tensor_id)
+        start_offset = info.start_offset
+        numel = info.numel
+        assert numel == param.ps_attr.numel, f"{numel} vs {param.ps_attr.numel}"
 
         param.ps_attr.set_tensor(
             self.chunk_list[chunk_id].payload.narrow(0, start_offset, numel),
@@ -733,16 +720,12 @@ class PatrickStarClient(object):
             logger.info(f"Chunk list {type}")
             for chunk_id in type_chunk_list:
                 chunk = self.chunk_list[chunk_id]
-                (
-                    comm_group_id,
-                    comm_group_offset,
-                    _,
-                ) = self.chunk_tensor_index.chunk_id_to_comm_group_map[chunk_id]
-                assert comm_group_id is not None
+                comm_info = self.chunk_tensor_index.chunk_id_to_comm_info_map[chunk_id]
+                assert comm_info is not None
 
                 logger.info(
                     f"Chunk id {chunk.chunk_id}, status {chunk.get_status()}, "
-                    f"comm group {comm_group_id, comm_group_offset}, "
+                    f"comm info {comm_info}, "
                     f"capacity {chunk.capacity / 1024 / 1024} M elems, "
                     f"dtype {chunk.data_type} device {chunk.get_device()}"
                 )
