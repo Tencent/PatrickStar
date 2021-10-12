@@ -21,7 +21,6 @@ import patrickstar.utils.global_timer as global_timer
 from .const import TensorStatus, ChunkStatus
 
 
-# Should chunk know anything about param？
 class Chunk(object):
     def __init__(
         self,
