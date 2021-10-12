@@ -12,6 +12,7 @@
 # See the AUTHORS file for names of contributors.
 
 from typing import List
+from patrickstar.core.comm import CommInfo
 
 import torch
 
@@ -37,10 +38,10 @@ class ChunkTensorIndex(object):
         # 1-N dict, chunk_id -> List(tensor_id) in order of start_offset
         self.chunk_id_to_tensor_id_list_map: dict[int, List[int]] = {}
 
-        # (comm_group_id, chunk_type) -> chunk_id_list
-        self.comm_group_id_to_chunk_id_list_map = {}
-        # chunk_id -> (comm_group_id, comm_group_offset, chunk_type)
-        self.chunk_id_to_comm_group_map = {}
+        # comm_group -> chunk_id_list
+        self.comm_group_to_chunk_id_list_map = {}
+        # chunk_id -> comm_info
+        self.chunk_id_to_comm_info_map = {}
 
         # Chunk_ids of chunks in different chunk type
         self.chunk_type_to_chunk_id_list_map = {}
@@ -104,8 +105,8 @@ class ChunkTensorIndex(object):
             bool.
         """
         rank = get_rank()
-        _, grp_offset, _ = self.chunk_id_to_comm_group_map[chunk_id]
-        return rank == grp_offset
+        comm_info = self.chunk_id_to_comm_info_map[chunk_id]
+        return rank == comm_info.offset
 
     def chunk_num(self, list_type: ChunkType):
         r"""The number of chunks of type `list_type`.
@@ -120,28 +121,23 @@ class ChunkTensorIndex(object):
         else:
             return len(self.chunk_type_to_chunk_id_list_map[list_type])
 
-    def add_chunk(
-        self, chunk_id, comm_group_id, comm_group_offset, list_type: ChunkType
-    ):
+    def add_chunk(self, chunk_id, comm_info: CommInfo):
         r"""Add a chunk to ChunkTensorIndex.
 
         Args:
             chunk_id: int.
-            comm_group_id
+            comm_info: :class:`CommInfo`.
         """
-        comm_group_info = (comm_group_id, list_type)
-        if comm_group_info not in self.comm_group_id_to_chunk_id_list_map:
-            self.comm_group_id_to_chunk_id_list_map[comm_group_info] = list()
-        self.comm_group_id_to_chunk_id_list_map[comm_group_info].append(chunk_id)
-        self.chunk_id_to_comm_group_map[chunk_id] = (
-            comm_group_id,
-            comm_group_offset,
-            list_type,
-        )
+        comm_group_info = comm_info.group
+        if comm_group_info not in self.comm_group_to_chunk_id_list_map:
+            self.comm_group_to_chunk_id_list_map[comm_group_info] = list()
+        self.comm_group_to_chunk_id_list_map[comm_group_info].append(chunk_id)
+        self.chunk_id_to_comm_info_map[chunk_id] = comm_info
 
-        if list_type not in self.chunk_type_to_chunk_id_list_map:
-            self.chunk_type_to_chunk_id_list_map[list_type] = []
-        self.chunk_type_to_chunk_id_list_map[list_type].append(chunk_id)
+        chunk_type = comm_info.chunk_type
+        if chunk_type not in self.chunk_type_to_chunk_id_list_map:
+            self.chunk_type_to_chunk_id_list_map[chunk_type] = []
+        self.chunk_type_to_chunk_id_list_map[chunk_type].append(chunk_id)
 
     def generate_tensor_info_in_order(self, chunk_id):
         r"""Return the tensors of chunk by `chunk_id`.
@@ -196,14 +192,8 @@ class ChunkTensorIndex(object):
         return self.tensor_id_to_chunk_id(tensor_id)
 
     def chunk_ids_of_comm_group(self, chunk_id: int) -> List[int]:
-        comm_group_id, _, list_type = self.chunk_id_to_comm_group_map[chunk_id]
-        return self.comm_group_id_to_chunk_id_list_map[(comm_group_id, list_type)]
-
-    def generate_all_chunks(self, chunk_list):
-        for chunk_id, _ in self.chunk_id_to_tensor_id_list_map.items():
-            chunk = chunk_list[chunk_id]
-            comm_group_id, _, _ = self.chunk_id_to_comm_group_map[chunk_id]
-            yield chunk_id, comm_group_id, chunk
+        comm_info = self.chunk_id_to_comm_info_map[chunk_id]
+        return self.comm_group_to_chunk_id_list_map[comm_info.group]
 
     def _get_tensor_id_list(self, chunk_id):
         if chunk_id not in self.chunk_id_to_tensor_id_list_map:
