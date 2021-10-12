@@ -12,6 +12,7 @@
 # See the AUTHORS file for names of contributors.
 
 import unittest
+from patrickstar.core.comm import CommInfo
 
 import torch
 
@@ -41,9 +42,7 @@ class TestAccess(unittest.TestCase):
 
         chunk_tensor_index.add_chunk(
             chunk_id=0,
-            comm_group_id=0,
-            comm_group_offset=0,
-            list_type=ChunkType.PARAM_FP32,
+            comm_info=CommInfo(chunk_type=ChunkType.PARAM_FP32, group_id=0, offset=0),
         )
 
         param_numel_list = [10, 20, 30, 20, 7, 2]

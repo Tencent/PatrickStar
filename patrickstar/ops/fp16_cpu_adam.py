@@ -90,6 +90,9 @@ class FP16Adam(torch.optim.Optimizer):
         self.has_overflow = False
 
         self.gradient_clipping = gradient_clipping
+        # clamp_scalar_cpu does not support fp16. Turn the gradient_clipping
+        # to tensor to use clamp_cpu instead.
+        self.cpu_gradient_clipping = torch.Tensor([gradient_clipping])
 
         self.use_hybrid_adam = use_hybrid_adam
 
@@ -347,11 +350,21 @@ class FP16Adam(torch.optim.Optimizer):
                     fp16_param.ps_attr.shape
                 )
 
-            # gradient clipping
+            # Gradient clipping
             if self.gradient_clipping > 0:
-                gradient_clipping = self.gradient_clipping
-                if self.loss_scaler is not None:
-                    gradient_clipping *= self.loss_scaler.loss_scale
+                # The gradient clipping may be larger than the max fp16 value
+                # after being amplified by loss scale.
+                max_fp16 = torch.finfo(torch.half).max
+                if fp16_grad_tensor.device.type == "cpu":
+                    gradient_clipping = self.cpu_gradient_clipping
+                    if self.loss_scaler is not None:
+                        gradient_clipping *= self.loss_scaler.loss_scale
+                    gradient_clipping = min(torch.Tensor([max_fp16]), gradient_clipping)
+                else:
+                    gradient_clipping = self.gradient_clipping
+                    if self.loss_scaler is not None:
+                        gradient_clipping *= self.loss_scaler.loss_scale
+                    gradient_clipping = min(max_fp16, gradient_clipping)
                 fp16_grad_tensor.clamp_(-gradient_clipping, gradient_clipping)
 
             compute_device = fp16_grad_tensor.device
