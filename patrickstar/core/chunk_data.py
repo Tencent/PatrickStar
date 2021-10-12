@@ -37,6 +37,13 @@ class Chunk(object):
 
         Chunk does no know if we are doing distributed training or not.
         Every process will observe its own chunk instances.
+
+        Args:
+            capacity: int. The maximum number of elements in the chunk.
+            data_type: :class:`torch.dtype`.
+            chunk_id: int.
+            local_rank: int.
+            is_dummy: bool.
         """
         self.chunk_id = chunk_id
         # payload numel does not equal to capacity. payload can be None.
@@ -80,7 +87,11 @@ class Chunk(object):
     def next_accessed_mom(self, compute_device):
         r"""Get the next accessed moment after the warmup step.
 
-        During warmup, return 0.
+        Args:
+            compute_device: :class:`torch.device`.
+        Returns:
+            An int. The next access moment of the chunk. During warmup,
+            return 0.
         """
         mgr = PatrickStarManager()
         access_moments = (
@@ -132,6 +143,9 @@ class Chunk(object):
 
         NOTE() This method does not check availability. Please check if
         there is enough room for the chunk.
+
+        Args:
+            device: :class:`torch.device`.
         """
         if self._time_profile:
             global_timer.my_timer.start_profile("CHUNK_allocate_payload")
@@ -174,13 +188,22 @@ class Chunk(object):
             )
 
     def update_status(self, old_status, new_status):
+        r"""Update the status counter of tensors of the chunk.
+
+        Args:
+            old_status: :class:`TensorStatus`.
+            new_status: :class:`TensorStatus`.
+        """
         self._status_dict[old_status] -= 1
         self._status_dict[new_status] += 1
 
     def get_status(self):
         """
-        When payload is None, `RELEASED`,
+        When payload is None, the status is `RELEASED`,
         otherwise, status of the chunk is decided by its tensors.
+
+        Returns:
+            :class:`ChunkStatus`.
         """
         if self.payload is None:
             return ChunkStatus.RELEASED
@@ -198,7 +221,13 @@ class Chunk(object):
             return ChunkStatus.FREE
 
     def all_tensor_status(self, status):
-        r"""If all tensors are in the status or `FREE`."""
+        r"""If all tensors are in the status or `FREE`.
+
+        Args:
+            status: :class:`TensorStatus`.
+        Return:
+            bool.
+        """
         for k, v in self._status_dict.items():
             if k != TensorStatus.FREE and k != status:
                 if v != 0:
@@ -221,6 +250,9 @@ class Chunk(object):
         r"""
         Move the chunk to `target_device`.
         NOTE() Please check if the `target_device` has enough room before.
+
+        Args:
+            target_device: :class:`torch.device`.
         """
         if self.get_device() is None:
             logger.warning(f"chunk move payload None to {target_device}")
@@ -280,6 +312,7 @@ class Chunk(object):
             )
 
     def get_device(self):
+        r"""Get device of the payload of chunk, return None if not allocated."""
         if self.payload is not None:
             return self.payload.device
         else:

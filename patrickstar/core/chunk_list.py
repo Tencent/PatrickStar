@@ -22,6 +22,7 @@ from patrickstar.profiler import profiler
 from patrickstar.utils import logger, get_rank, get_world_size
 import patrickstar.utils.global_timer as global_timer
 from .chunk_data import Chunk
+from .comm import CommInfo
 from .const import ChunkStatus
 
 
@@ -36,7 +37,11 @@ class ChunkList(object):
     generated_chunk_id = -1
 
     def __init__(self, local_rank: int):
-        self.chunk_id_to_chunk_dict_map: dict[int, Chunk] = {}
+        """
+        Args:
+            local_rank: int.
+        """
+        self.id_to_chunk_map: dict[int, Chunk] = {}
         self.chunk_type_to_id_list_map: dict[ChunkType, int] = {}
         for chunk_type in ChunkType:
             self.chunk_type_to_id_list_map[chunk_type] = []
@@ -46,26 +51,40 @@ class ChunkList(object):
         self.local_rank = local_rank
 
     def chunk_ids_generator(self, chunk_type: ChunkType):
-        r"""Return the chunk_id of all chunks with type `chunk_type`å"""
+        r"""Return the chunk_id of all chunks with type `chunk_type`
+
+        Args:
+            chunk_type: :class:`ChunkType`.
+        """
         for chunk_id in self.chunk_type_to_id_list_map[chunk_type]:
             yield chunk_id
 
     def generate_chunk_id(self) -> int:
+        r"""Get the chunk id of next chunk."""
         ChunkList.generated_chunk_id += 1
         return ChunkList.generated_chunk_id
 
     def __getitem__(self, chunk_id: int):
         r"""Search a chunk by id."""
-        return self.chunk_id_to_chunk_dict_map.get(chunk_id)
+        return self.id_to_chunk_map.get(chunk_id)
 
     def size(self) -> int:
         r"""Total number of chunks."""
-        return len(self.chunk_id_to_chunk_dict_map)
+        return len(self.id_to_chunk_map)
+
+    def __len__(self) -> int:
+        return self.size()
 
     def get_chunk_memory_used(self, device):
-        r"""The total memory of payload of all chunks on `device`."""
+        r"""The total memory of payload of all chunks on `device`.
+
+        Args:
+            device: :class:`torch.device`.
+        Returns:
+            float.
+        """
         mem_used = 0
-        for _, chunk in self.chunk_id_to_chunk_dict_map.items():
+        for _, chunk in self.id_to_chunk_map.items():
             if (
                 chunk.get_device() is not None
                 and chunk.get_device().type == device.type
@@ -75,7 +94,7 @@ class ChunkList(object):
 
     def max_chunk_size(self):
         max_size = 0
-        for _, chunk in self.chunk_id_to_chunk_dict_map.items():
+        for _, chunk in self.id_to_chunk_map.items():
             max_size = max(chunk.capacity, max_size)
         return max_size
 
@@ -89,9 +108,13 @@ class ChunkList(object):
             the memcopy of the first chunk.
         2. distributed mode
         Use allgather to fetch chunks from other processes.
+
+        Args:
+            chunk_id: int.
+            compute_device: :class:`torch.device`.
         """
 
-        chunk = self.chunk_id_to_chunk_dict_map[chunk_id]
+        chunk = self.id_to_chunk_map[chunk_id]
 
         # The moment of chunk accessing during warmup.
         mgr = PatrickStarManager()
@@ -129,6 +152,10 @@ class ChunkList(object):
         """
         Make `need_byes` room on `target_device`. If there are not enough empty
         space, we need to release or move away some chunks.
+
+        Args:
+            target_device: :class:`torch.device`.
+            need_bytes: int.
         """
         if self._time_profile:
             global_timer.my_timer.start_profile("CHUNK_LIST_prepare_device")
@@ -199,6 +226,10 @@ class ChunkList(object):
         r"""Move `offload_size_in_bytes` size of chunks away from `target_device`.
 
         Can not move chunk of status `COMPUTE`.
+
+        Args:
+            offload_size_in_bytes: int.
+            target_device: :class:`torch.device`.
         """
         if self._time_profile:
             global_timer.my_timer.start_profile("CHUNK_LIST_make_room")
@@ -223,11 +254,15 @@ class ChunkList(object):
         r"""Move chunk of id `chunk_id` to `device`.
 
         NOTE(): Please make sure `device` has enough free_chunk_mem before.
+
+        Args:
+            chunk_id: int.
+            device: :class:`torch.device`.
         """
         if self._time_profile:
             global_timer.my_timer.start_profile("CHUNK_LIST_chunk_move")
 
-        chunk = self.chunk_id_to_chunk_dict_map[chunk_id]
+        chunk = self.id_to_chunk_map[chunk_id]
 
         mgr = PatrickStarManager()
         free_chunk_mem_size = mgr.free_chunk_mem(device.type)
@@ -263,14 +298,13 @@ class ChunkList(object):
             is_dummy: bool.
             chunk_type: :class:ChunkType.
         Returns:
-            The index of the chunk in the comm group:
-            (comm_group_idx, comm_group_offset)
+            :class:`CommInfo`
         """
-        if chunk_id in self.chunk_id_to_chunk_dict_map:
+        if chunk_id in self.id_to_chunk_map:
             raise RuntimeError(
                 f"chunk list new chunk with chunk_id {chunk_id} already existed"
             )
-        self.chunk_id_to_chunk_dict_map[chunk_id] = Chunk(
+        self.id_to_chunk_map[chunk_id] = Chunk(
             capacity=chunk_size,
             data_type=data_type,
             chunk_id=chunk_id,
@@ -282,19 +316,24 @@ class ChunkList(object):
         self.chunk_type_to_id_list_map[chunk_type].append(chunk_id)
         if profiler.started():
             profiler.chunk_life_cycle[chunk_id] = {"type": chunk_type, "life_cycle": []}
-        tmp_chunk_list_len = len(self.chunk_type_to_id_list_map[chunk_type])
-        comm_group_offset = (tmp_chunk_list_len - 1) % world_size
-        comm_group_idx = (tmp_chunk_list_len - 1) // world_size
+        num_type_chunk = len(self.chunk_type_to_id_list_map[chunk_type])
+        comm_info = CommInfo(
+            chunk_type=chunk_type,
+            group_id=(num_type_chunk - 1) // world_size,
+            offset=(num_type_chunk - 1) % world_size,
+        )
         logger.debug(
             f"global_rank {global_rank}, allocate with new chunk chunk_id {chunk_id} size {chunk_size} "
-            f"data_type {data_type} comm group ({comm_group_idx}, {comm_group_offset}, {chunk_type})"
+            f"data_type {data_type} comm group {comm_info}"
         )
-        return comm_group_idx, comm_group_offset
+        return comm_info
 
     def is_empty(self, chunk_type: ChunkType):
+        r"""Whether chunk list of type `chunk_type` is empty."""
         return len(self.chunk_type_to_id_list_map[chunk_type]) == 0
 
     def last_chunk_id(self, chunk_type: ChunkType):
+        r"""Get the last id of type `chunk_type`."""
         if self.is_empty(chunk_type):
             raise RuntimeError(
                 f"Call last_chunk_id on an empty {chunk_type} chunk list"
@@ -302,7 +341,8 @@ class ChunkList(object):
         return self.chunk_type_to_id_list_map[chunk_type][-1]
 
     def generate_chunk(self):
-        for chunk_id, chunk in self.chunk_id_to_chunk_dict_map.items():
+        r"""Return all the chunks along with its id."""
+        for chunk_id, chunk in self.id_to_chunk_map.items():
             yield chunk_id, chunk
 
     def _chunk_to_move_out_for_room_making(
@@ -310,6 +350,9 @@ class ChunkList(object):
     ) -> List:
         r"""Find the chunks to move for making `size_in_bytes` of room on `target_device`.
 
+        Args:
+            size_in_bytes: int.
+            target_device: :class:`torch.device`.
         Returns:
             A list of chunk_ids.
         """
@@ -323,7 +366,7 @@ class ChunkList(object):
         movable_chunk_info = []
 
         q = PriorityQueue()
-        for chunk_id, chunk in self.chunk_id_to_chunk_dict_map.items():
+        for chunk_id, chunk in self.id_to_chunk_map.items():
             if (
                 chunk.get_device() is not None
                 and chunk.get_device().type == target_device.type
@@ -340,7 +383,7 @@ class ChunkList(object):
             # assert chunk.get_status() != ChunkStatus.FREE
         while not q.empty():
             next_mom, chunk_id = q.get()
-            moved_bytes += self.chunk_id_to_chunk_dict_map[chunk_id].get_payload_space()
+            moved_bytes += self.id_to_chunk_map[chunk_id].get_payload_space()
             moved_list.append(chunk_id)
             if moved_bytes >= still_need_bytes:
                 break
@@ -362,15 +405,13 @@ class ChunkList(object):
 
         return moved_list
 
-    def add_status(self, chunk_id, status):
-        self.chunk_id_to_chunk_dict_map[chunk_id].add_status(status)
-
     def update_status(self, chunk_id, old_status, new_status):
-        self.chunk_id_to_chunk_dict_map[chunk_id].update_status(old_status, new_status)
+        r"""Update the status of chunk of id `chunk_id`."""
+        self.id_to_chunk_map[chunk_id].update_status(old_status, new_status)
 
     def display_access_info(self):
         logger.debug("----------- SHOW ACCESS INFO -----------")
         for chunk_id in self.chunk_type_to_id_list_map[ChunkType.PARAM_FP16]:
-            chunk = self.chunk_id_to_chunk_dict_map[chunk_id]
+            chunk = self.id_to_chunk_map[chunk_id]
             logger.debug(f"\t {chunk_id} cpu_access_moments {chunk.cpu_access_moments}")
             logger.debug(f"\t {chunk_id} gpu_access_moments {chunk.gpu_access_moments}")
