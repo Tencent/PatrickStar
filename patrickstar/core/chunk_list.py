@@ -22,6 +22,7 @@ from patrickstar.profiler import profiler
 from patrickstar.utils import logger, get_rank, get_world_size
 import patrickstar.utils.global_timer as global_timer
 from .chunk_data import Chunk
+from .comm import CommInfo
 from .const import ChunkStatus
 
 
@@ -297,8 +298,7 @@ class ChunkList(object):
             is_dummy: bool.
             chunk_type: :class:ChunkType.
         Returns:
-            The index of the chunk in the comm group:
-            (comm_group_id, comm_group_offset)
+            :class:`CommInfo`
         """
         if chunk_id in self.id_to_chunk_map:
             raise RuntimeError(
@@ -316,14 +316,17 @@ class ChunkList(object):
         self.chunk_type_to_id_list_map[chunk_type].append(chunk_id)
         if profiler.started():
             profiler.chunk_life_cycle[chunk_id] = {"type": chunk_type, "life_cycle": []}
-        tmp_chunk_list_len = len(self.chunk_type_to_id_list_map[chunk_type])
-        comm_group_offset = (tmp_chunk_list_len - 1) % world_size
-        comm_group_id = (tmp_chunk_list_len - 1) // world_size
+        num_type_chunk = len(self.chunk_type_to_id_list_map[chunk_type])
+        comm_info = CommInfo(
+            chunk_type=chunk_type,
+            group_id=(num_type_chunk - 1) // world_size,
+            offset=(num_type_chunk - 1) % world_size,
+        )
         logger.debug(
             f"global_rank {global_rank}, allocate with new chunk chunk_id {chunk_id} size {chunk_size} "
-            f"data_type {data_type} comm group ({comm_group_id}, {comm_group_offset}, {chunk_type})"
+            f"data_type {data_type} comm group {comm_info}"
         )
-        return comm_group_id, comm_group_offset
+        return comm_info
 
     def is_empty(self, chunk_type: ChunkType):
         r"""Whether chunk list of type `chunk_type` is empty."""

@@ -72,37 +72,29 @@ class PatrickStarClient(object):
             chunk_type: :class:`ChunkType`.
             is_dummy: bool.
         Returns:
-            chunk_id of the newly created chunk and
-            (comm_group_id, comm_group_offset)
+            chunk_id of the newly created chunk and comm_info.
         """
         chunk_id = self.chunk_list.generate_chunk_id()
-        comm_group_id, comm_group_offset = self.chunk_list.new_chunk(
+        comm_info = self.chunk_list.new_chunk(
             chunk_id,
             self.default_chunk_size,
             data_type,
             is_dummy=is_dummy,
             chunk_type=chunk_type,
         )
-        self.chunk_tensor_index.add_chunk(
-            chunk_id,
-            comm_group_id,
-            comm_group_offset,
-            chunk_type,
-        )
-        return chunk_id, (comm_group_id, comm_group_offset)
+        self.chunk_tensor_index.add_chunk(chunk_id, comm_info)
+        return chunk_id, comm_info
 
     def append_dummy_chunk(self, data_type: torch.dtype, chunk_type: ChunkType):
         r"""Append a dummy chunk to the corresponding chunk_list"""
-        chunk_id, (comm_group_id, comm_group_offset) = self.append_chunk(
-            torch.half, chunk_type, is_dummy=True
-        )
+        chunk_id, comm_info = self.append_chunk(torch.half, chunk_type, is_dummy=True)
 
         dummy = torch.nn.Parameter(
             torch.tensor([], dtype=data_type), requires_grad=False
         )
         # Add a dummy param to dummy chunk, so that the chunk can be set in HOLD status.
         register_param(
-            dummy, ParamType.CHUNK_BASED, torch.half, f"dummy_{comm_group_id}"
+            dummy, ParamType.CHUNK_BASED, torch.half, f"dummy_{comm_info.group_id}"
         )
         self.dummy_param_list.append(dummy)
         self.chunk_tensor_index.add_tensor(
@@ -116,7 +108,7 @@ class PatrickStarClient(object):
 
         logger.info(
             f"Append a dummy chunk to the Chunk List {chunk_type} "
-            f"comm group ({comm_group_id} {comm_group_offset})"
+            f"comm info {comm_info}"
         )
 
     def delete_param(self, param, access_type):
@@ -728,16 +720,12 @@ class PatrickStarClient(object):
             logger.info(f"Chunk list {type}")
             for chunk_id in type_chunk_list:
                 chunk = self.chunk_list[chunk_id]
-                (
-                    comm_group_id,
-                    comm_group_offset,
-                    _,
-                ) = self.chunk_tensor_index.chunk_id_to_comm_group_map[chunk_id]
-                assert comm_group_id is not None
+                comm_info = self.chunk_tensor_index.chunk_id_to_comm_info_map[chunk_id]
+                assert comm_info is not None
 
                 logger.info(
                     f"Chunk id {chunk.chunk_id}, status {chunk.get_status()}, "
-                    f"comm group {comm_group_id, comm_group_offset}, "
+                    f"comm info {comm_info}, "
                     f"capacity {chunk.capacity / 1024 / 1024} M elems, "
                     f"dtype {chunk.data_type} device {chunk.get_device()}"
                 )
