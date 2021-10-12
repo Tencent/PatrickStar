@@ -19,6 +19,12 @@ class CommGroupInfo(object):
         self.chunk_type = chunk_type
         self.id = id
 
+    def __hash__(self):
+        return hash((self.chunk_type, self.id))
+
+    def __eq__(self, other):
+        return (self.chunk_type, self.id) == (other.chunk_type, other.id)
+
     def __str__(self):
         return f"({self.chunk_type}, {self.id})"
 
