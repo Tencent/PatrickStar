@@ -291,7 +291,10 @@ def test_bert_model_helper(
             model_func=model_func, local_rank=rank, config=config
         )
     else:
+        from hook_act_stat import setup_act_stats_hook
+
         model = BertForSequenceClassification(bert_config)
+        setup_act_stats_hook(model)
         if is_ckp and version.parse(transformers.__version__) >= version.parse(
             "4.11.0"
         ):
@@ -407,13 +410,17 @@ def test_bert_model_helper(
                 print(
                     f"Step elaspe {step_elapse} s, {total_macs / 1e12 / step_elapse} Tflops"
                 )
+            if dist_plan == "torch":
+                from hook_act_stat import ActStats
 
+                act_stats = ActStats()
+                print(act_stats.gpu_mem_used_list)
+                act_stats.gpu_mem_used_list = []
         logger.info(f"End Step {n} with {dist_plan}.\n")
     if dist_plan == "patrickstar":
         profiler.end()
         if rank == 0:
             profiler.save("profile.pkl")
-
     logging.info("*" * 20)
     return loss_res
 
