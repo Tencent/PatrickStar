@@ -6,7 +6,7 @@ export CS=64
 export CPU_EBD=1
 export AW=0
 export ACT_OFFLOAD=0
-export NO_RETRY=0
+export NO_RETRY=1
 export SKIP_LOG_EXSIT=1
 
 for MODEL_NAME in "GPT2small"
