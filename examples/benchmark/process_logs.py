@@ -12,6 +12,7 @@
 # See the AUTHORS file for names of contributors.
 
 import os
+import sys
 
 
 def is_run_this_file(path, file, res_dict, file_dict):
@@ -63,10 +64,21 @@ def is_run_this_file(path, file, res_dict, file_dict):
 if __name__ == "__main__":
     res_dict = {}
     file_dict = {}
-    path = "./logs"
+    if len(sys.argv) > 1:
+        path = str(sys.argv[1])
+    else:
+        path = "./logs_GPT2small"
     # path = "./yard_logs"
     files = os.listdir(path)
     for file in files:
         is_run_this_file(path, file, res_dict, file_dict)
-    print(res_dict)
-    print(file_dict)
+    # print(res_dict)
+    # print(file_dict)
+
+    new_res_list = []
+    for k, v in res_dict.items():
+        plan = k.split("_")
+        new_res_list.append((plan[0], plan[1], plan[2], v, file_dict[k]))
+
+    new_res_list.sort()
+    print(new_res_list)
