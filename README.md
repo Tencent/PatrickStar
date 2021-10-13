@@ -1,29 +1,29 @@
-## PatrickStar(派大星): Parallel Training of Large Language Models via a Chunk-based Memory Management
+## PatrickStar: Parallel Training of Large Language Models via a Chunk-based Memory Management
 
-### 认识派大星
-预训练模型（Pre-Trained Model，PTM）正成为NLP研究的主流技术路线。它在大量文本上 Pretrain 具有通用语言特征的模型，然后使用特定于任务的数据集对模型进行 fine-tuning。然而，PTM 训练往往需要巨大的计算资源，仍然是 AI 社区小部分人的游戏。现在，**派大星让 PTM 可以普惠到每一个算法工程师**。
+### Meeting PatrickStar
+Pre-Trained Models (PTM) are becoming the hotspot of both NLP research and industry application. They are models that are trained with massive data and have learned generic features of the language. In pactice, they are fine-tuned for downstream tasks with task-specific datasets. In this way, PTMs have achieved great performances in almost every tasks. However, the training of PTMs requires enormous hardware resources, which makes it only accessible to small portion of people in the AI community. Now, **PatrickStar will make PTM training available to everyone!**
 
-使用预训练模型时，OOM 是算法工程师的噩梦。为此，必须使用更多的 GPU 卡来存储模型参数。派大星解决了这个问题，让你使用少量 GPU 的普通的硬件尽可能运行超大模型。
-派大星采用异构训练方式（它也被 DeepSpeed Zero Stage3 采用），利用 CPU 内存和 GPU 显存存储训练过程的模型数据。
-我们观察到可用于模型数据的GPU内存有规律地变化，以类似潮汐的模式，迭代地减少和增加。
-然而，现有的异构训练工作并没有利用这种模式。相反，它们在 CPU 和 GPU 之间静态划分模型数据，从而导致内存浪费和内存滥用。相比之下，PatrickStar 以 Chunk 的形式管理模型数据，这些数据动态分布在异构内存空间中，因此可以获得更高的内存利用效率和计算效率。
-实验结果表明，PatrickStar 在 8xV100 和 240GB CPU 内存节点上训练了一个 120亿(12 Billion)参数的 GPT-2 模型，比 SOTA 工作大 2 倍，并且在相同的模型大小上也更高效。
+Out of memory error (OOM) is the nightmare of every engineer training PTMs. To prevent such error, we often have to introduce more GPUs to store the model params. PatrickStar brings a better solution for such problem. With the heterogeneous training (DeepSpeed Zero Stage 3 also uses it), PatrickStar could make full use of both the CPU and GPU memory, so that you could use fewer GPUs to train larger models.
 
-![alt perf](./doc/mgpu_scalability.png "性能测试结果")
+We noticed that the GPU memory usage varies during training, but the current heterogenous training solutions are all statically spliting the model and optimizer states to CPU and GPU. To make better use of the GPU, PatrickStar proposes a dynamic memory scheduling with the help of a chunk-based memory management module. The memory management of PatrickStar supports offloading everything but the current computing part of the model to CPU. This results in training a much larger model within the same hardware environment. In terms of performance, the chunk-based memory management takes advantage of the linear structure of the transformer-based PTMs, so that it will inherently prefetch the upcoming layers to GPUs, resulting in a great performance.
 
-### 安装
+In experiment, Patrickstar is able to train a 12B param model with 8 Tesla V100 GPU and 240GB GPU memory, which is twice as large as the state of art. And the performance of PatrickStar is better for models of the same size as well.
+
+![alt perf](./doc/mgpu_scalability.png "performance testing result")
+
+### Installation
 ```bash
 pip install .
 ```
 
-注意，安装派大星需要 gcc7 或更高版本。您可以使用 NVIDIA 提供的 NGC 镜像进行测试：
+Note that PatrickStar requires gcc of version 7 or higher. You could also use NVIDIA NGC images, the following image is tested:
 
 ```bash
 docker pull nvcr.io/nvidia/pytorch:21.06-py3
 ```
 
-### 使用方法
-派大星核心逻辑使用PyTorch编写，具有很好的可移植性，下面是一个使用派大星的例子：
+### Usage
+PatrickStar is based on PyTorch, which makes it easy to migrate a pytorch project. Here is a example of PatrickStar:
 
 ```python
 from patrickstar.runtime import initialize_engine
@@ -39,7 +39,7 @@ config = {
             "use_hybrid_adam": True,
         },
     },
-    "fp16": {  # loss scale 参数
+    "fp16": {  # loss scaler params
         "enabled": True,
         "loss_scale": 0,
         "initial_scale_power": 2 ** 3,
@@ -53,6 +53,7 @@ config = {
 }
 
 def model_func():
+    # MyModel is a derived class for torch.nn.Module
     return MyModel(...)
 
 model, optimizer = initialize_engine(model_func=model_func, local_rank=0, config=config)
@@ -67,13 +68,14 @@ for data in dataloader:
     optimizer.step()
 ```
 
-其中的 `config` 采用的是 [DeepSpeed 的配置格式](https://www.deepspeed.ai/docs/config-json/#optimizer-parameters)，其中主要包含 optimizer 和 loss scale 相关参数，以及部分派大星特有的配置。
+We use the same `config` format as [DeepSpeed configuration JSON](https://www.deepspeed.ai/docs/config-json/#optimizer-parameters), which mainly includes params of optimizer, loss scaler and some PatrickStar specific configuration.
 
-更详细的使用例子请见 [examples](./examples)。
+For more examples, please check [here](./examples).
 
-派大星正在被集成到[TencentPretrain](https://git.woa.com/TencentNLP/TencentPretrain)之中，参考我们的[MR](https://git.woa.com/TencentNLP/TencentPretrain/merge_requests/61)。
+### License
+BSD 3-Clause License
 
-### 引用派大星
+### Cite Us
 ```
 @article{fang2021patrickstar,
   title={PatrickStar: Parallel Training of Pre-trained Models via a Chunk-based Memory Management},
@@ -83,6 +85,5 @@ for data in dataloader:
 }
 ```
 
-### 联系我们
-企业微信
-jiaruifang, zilinzhu, josephyu
+### Contact Us
+{jiaruifang, zilinzhu, josephyu}@tencent.com
