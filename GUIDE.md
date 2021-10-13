@@ -1,13 +1,13 @@
 ## How to use PatrickStar
 
-Here are some instructions to help to make better use of PatrickStar.
+Here are some instructions for making better use of PatrickStar.
 
 ### Create model with `intialize_engine`
 
-To create model and optimizer of PatrickStar, you will use the `initialize_engine` api:
+To create model and optimizer of PatrickStar, you will use the `initialize_engine` API:
 
 ```python
-from patrickstar.runtime import intialize_engine
+from patrickstar.runtime import initialize_engine
 
 ...
 
@@ -18,7 +18,7 @@ model, optimizer = initialize_engine(
 )
 ```
 
-This function will return a `PatrickStarEngine` and a `FP16Adam`. You could take `PatrickStarEngine` as a wrapped model (it is also a derived class of `nn.Module`), and the memory management of PatrickStar relies on it. `FP16Adam` is a float16 version of Adam (also support AdamW) as the name indicates. It is capable of doing both the CPU and the GPU param update fast.
+This function will return a `PatrickStarEngine` and a `FP16Adam`. You could take `PatrickStarEngine` as a wrapped model (it is also a derived class of `nn.Module`). The memory management of PatrickStar relies on it. `FP16Adam` is a float16 version of Adam (also supports AdamW) as the name indicates. It is capable of doing both the CPU and the GPU param update fast.
 
 - `model_func`
 
@@ -31,7 +31,7 @@ def model_func():
     return BertForSequenceClassification.from_pretrained("bert-base-uncased")
 ```
 
-Note that **all the intializaiton of the `nn.Module`s need to happen in `model_func`**, becase PatrickStar needs to detect all the `__init__` of `nn.Modules` in `model_func` to insert the chunk based memory management. Therefore, the following `model_func` will cause error:
+Note that **all the intializaiton of the `nn.Module`s need to happen in `model_func`**, because PatrickStar needs to detect all the `__init__` of `nn.Modules` in `model_func` to insert the chunk based memory management. Therefore, the following `model_func` will cause error:
 
 ```python
 # Bad model_func
@@ -55,7 +55,7 @@ There is a fourth argument of `intialize_engine` - `client`. This is only used w
 
 ### Train
 
-When you have initialize the model, the training process is basically the same as native pytorch:
+When you have initialized the model, the training process is basically the same as native pytorch:
 
 ```python
 for data in dataloader:
@@ -88,7 +88,7 @@ optimizer.load_state_dict(opt_state_dict)
 
 to load the training state.
 
-Note that when using distributed training with PatrickStar, each process will hold only 1/N (N is the number of processes) of the model, therefore we recommend to attach the rank number to the checkpoint filename:
+Note that when using distributed training with PatrickStar, each process will hold only 1/N (N is the number of processes) of the model. Therefore we recommend to attach the rank number to the checkpoint filename:
 
 ```python
 torch.save(model.state_dict(), f"model-{rank}.pt")
@@ -129,7 +129,7 @@ if rank == 0:
     profiler.save("profile.pkl")
 ```
 
-You could visualize the saved `profile.pkl` with the profiler visualizer tool we provide. For detail, check the Profile Visualizer Section below.
+You could visualize the saved `profile.pkl` with the profiler visualizer tool we provide. For detail, check the Profile Visualizer section below.
 
 ### Configuration
 
@@ -150,7 +150,7 @@ config = {
             "use_hybrid_adam": True,
         },
     },
-    # If there is not "fp16" field in the config,
+    # If there is no "fp16" field in the config,
     # then the model will be trained without loss scaler.
     # Note that there are no loss scaler on default.
     "fp16": {
