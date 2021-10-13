@@ -29,7 +29,7 @@ from transformers import BertConfig
 import patrickstar.utils.global_timer as global_timer
 from data_loader import get_bert_data_loader
 from patrickstar.profiler import profiler
-from profiler import profiler as example_profiler
+from profiler import profiler as torch_act_profiler
 from patrickstar.runtime import initialize_engine
 from patrickstar.utils import see_memory_usage
 from patrickstar.utils.logging import logger
@@ -248,7 +248,7 @@ def test_bert_model_helper(
     eps = 1e-6
     weight_decay = 0
 
-    example_profiler.start()
+    torch_act_profiler.start()
     profiler.start()
     if dist_plan == "patrickstar":
         if not is_fp16:
@@ -366,7 +366,7 @@ def test_bert_model_helper(
 
         logger.info(f"Start Step {n} with {dist_plan}...")
         step_start_time = time.time()
-        example_profiler.step_start.append(time.time())
+        torch_act_profiler.step_start.append(time.time())
 
         optimizer.zero_grad()
 
@@ -393,7 +393,7 @@ def test_bert_model_helper(
         loss_res.append(loss.item())
 
         step_elapse = time.time() - step_start_time
-        example_profiler.step_end.append(time.time())
+        torch_act_profiler.step_end.append(time.time())
 
         if args.rank == 0:
             see_memory_usage(
@@ -420,9 +420,11 @@ def test_bert_model_helper(
     profiler.end()
     if rank == 0:
         profiler.save("profile.pkl")
-    example_profiler.end()
+    torch_act_profiler.end()
     if rank == 0:
-        example_profiler.save("example_profile.pkl")
+        torch_act_profiler.save(
+            f"torch_act_profiler_${batch_size}_ckp_${is_ckp}_actoffload_${args.with_activation_offload}.pkl"
+        )
     logging.info("*" * 20)
     return loss_res
 
