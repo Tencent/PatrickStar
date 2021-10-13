@@ -1,4 +1,4 @@
-## How to use PatrckStar
+## How to use PatrickStar
 
 Here are some instructions to help to make better use of PatrickStar.
 
