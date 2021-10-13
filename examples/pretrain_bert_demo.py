@@ -422,8 +422,9 @@ def test_bert_model_helper(
         profiler.save("profile.pkl")
     torch_act_profiler.end()
     if rank == 0:
+        world_size = torch.distributed.get_world_size()
         torch_act_profiler.save(
-            f"torch_act_profiler_bs_{batch_size}_ckp_{is_ckp}_actoffload_{args.with_activation_offload}.pkl"
+            f"torch_bs_{batch_size}_ckp_{is_ckp}_actoffload_{args.with_activation_offload}_gpu_{world_size}.pkl"
         )
     logging.info("*" * 20)
     return loss_res
