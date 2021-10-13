@@ -421,11 +421,15 @@ def test_bert_model_helper(
     if rank == 0:
         profiler.save("profile.pkl")
     torch_act_profiler.end()
-    if rank == 0:
+    if rank == 0 and dist_plan == "torch":
         world_size = torch.distributed.get_world_size()
         torch_act_profiler.save(
             f"torch_bs_{batch_size}_ckp_{is_ckp}_actoffload_{args.with_activation_offload}_gpu_{world_size}.pkl"
         )
+        # see activation stats with
+        # env GPU_NUM=1 DIST_PLAN="torch" ACT_OFFLOAD=0 CKP=1 BS=32 bash run_bert.sh
+        # env GPU_NUM=1 DIST_PLAN="torch" ACT_OFFLOAD=1 CKP=0 BS=32 bash run_bert.sh
+        # env GPU_NUM=1 DIST_PLAN="torch" ACT_OFFLOAD=0 CKP=0 BS=32 bash run_bert.sh
     logging.info("*" * 20)
     return loss_res
 
