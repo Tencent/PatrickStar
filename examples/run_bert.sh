@@ -1,13 +1,27 @@
+cd $(dirname $0)
+
 export GPU_NUM=${GPU_NUM:-1}
+# Chunk Size in MB
 export CS=${CS:-64}
+# Batch Size
 export BS=${BS:-16}
+# Embedding on CPU
 export CPU_EBD=${CPU_EBD:-1}
+# Release remote chunks after init
 export RELEASE_AFTER_INIT=${RELEASE_AFTER_INIT:-0}
 export MODEL_NAME=${MODEL_NAME:-"GPT2small"}
+# distributed plan patrickstar or torch
 export DIST_PLAN=${DIST_PLAN:-"patrickstar"}
+# check results of patrickstar and torch, which disable
+# DIST_PLAN setting
 export RES_CHECK=${RES_CHECK:-0}
+# offload activation checkpoints to CPU
 export ACT_OFFLOAD=${ACT_OFFLOAD:-0}
-export CKP=${CKP:1}
+# activation rematerization, aka. gradient checkpointing
+export CKP=${CKP:-1}
+# no retry after failed, used for torch 1.9.0
+export NO_RETRY=${NO_RETRY:-0}
+export SKIP_LOG_EXSIT=${SKIP_LOG_EXSIT:-0}
 
 export margin_use_ratio=${margin_use_ratio:-0.8}
 # if warmup fails, lower the ratio
@@ -15,67 +29,83 @@ export warmup_gpu_chunk_mem_ratio=${warmup_gpu_chunk_mem_ratio:-0.2}
 export overall_gpu_mem_ratio=${overall_gpu_mem_ratio:-0.8}
 
 if [[ ${ACT_OFFLOAD} == 1 ]];  then
-# Check result correctness
 ACT_OFFLOAD_FLAG="--with_activation_offload"
 else
 export ACT_OFFLOAD_FLAG=""
 fi
 
 if [[ ${RES_CHECK} == 1 ]];  then
-# Check result correctness
 RES_CHECK_FLAG="--res_check"
 else
 export RES_CHECK_FLAG=""
 fi
-# Use a single GPU card to simulate multiple-GPU training.
-# FAKE_DIST="--use_fake_dist"
 
-let CHUNK_SIZE=${CS}*1024*1024
-
-export HYBRID_ADAM_FLAG="--use_hybrid_adam"
 
 if [[ ${CPU_EBD} == 1 ]];  then
-export CPU_EMBED="--use_cpu_embedding"
+export CPU_EBD_FLAG="--use_cpu_embedding"
 else
-export CPU_EMBED=""
+export CPU_EBD_FLAG=""
 fi
 
 if [[ ${RELEASE_AFTER_INIT} == 1 ]];  then
-export RELEASE="--release_after_init"
+export RELEASE_AFTER_INIT_FLAG="--release_after_init"
 else
-export RELEASE=""
+export RELEASE_AFTER_INIT_FLAG=""
 fi
 
 export LIGHTSEQ=0
 if [[ ${LIGHTSEQ} == 1 ]]; then
-export lightseq_flag="--with_lightseq"
+export LIGHTSEQ_FLAG="--with_lightseq"
 else
-export lightseq_flag=""
+export LIGHTSEQ_FLAG=""
 fi
 
 
 if [[ ${CKP} == 1 ]]; then
-    export ckp_flag="--use_ckp"
+    export CKP_FLAG="--use_ckp"
 else
-    export ckp_flag=""
+    export CKP_FLAG=""
 fi
 
-mkdir -p ./logs
+let CHUNK_SIZE=${CS}*1024*1024
+export HYBRID_ADAM_FLAG="--use_hybrid_adam"
+
+LOG_DIR="./logs_${MODEL_NAME}"
+mkdir -p ${LOG_DIR}
+
+LOG_FILE="log.${MODEL_NAME}_gpu_${GPU_NUM}_cs_${CS}_bs_${BS}_cpueb_${CPU_EBD}_margin_${margin_use_ratio}_warmup_${warmup_gpu_chunk_mem_ratio}_gpu_${overall_gpu_mem_ratio}_lightseq_${LIGHTSEQ}_offload_${ACT_OFFLOAD}"
+
+is_run_flag=`python ./benchmark/is_run_this_file.py --path "${LOG_DIR}" --file "${LOG_FILE}"`
+echo is_run_flag $is_run_flag
+if [[ ${is_run_flag} == "0" && ${SKIP_LOG_EXSIT} == 1 ]];
+then
+echo "it has been logged"
+exit
+fi
+echo "runing ${LOG_DIR} ${LOG_FILE}"
+
+if [[ ${NO_RETRY} == "1" ]];
+then
+NO_RETRY_FLAG="--max_restarts=0"
+fi
+
 python -m torch.distributed.launch --nproc_per_node=${GPU_NUM} \
-                             pretrain_bert_demo.py ${RES_CHECK_FLAG} \
-                             ${ckp_flag} \
-                             --use_fp16 \
-                             --dist_plan=${DIST_PLAN} \
-                             --batch_size=${BS} \
-                             --model_name=${MODEL_NAME} \
-                             --overall_gpu_mem_ratio=${overall_gpu_mem_ratio} \
-                             --batch_size=${BS} \
-                             --margin_use_ratio=${margin_use_ratio} \
-                             --warmup_gpu_chunk_mem_ratio=${warmup_gpu_chunk_mem_ratio} \
-                             ${CPU_EMBED} \
-                             ${HYBRID_ADAM_FLAG} \
-                             ${RELEASE} \
-                             --default_chunk_size=${CHUNK_SIZE} \
-                             ${lightseq_flag} \
-                             ${ACT_OFFLOAD_FLAG} \
-                             2>&1 | tee ./logs/log.${MODEL_NAME}_gpu_${GPU_NUM}_cs_${CS}_bs_${BS}_cpueb_${CPU_EBD}_margin_${margin_use_ratio}_warmup_${warmup_gpu_chunk_mem_ratio}_gpu_${overall_gpu_mem_ratio}_lightseq_${LIGHTSEQ}_offload_${ACT_OFFLOAD}
+    pretrain_bert_demo.py \
+    ${RES_CHECK_FLAG} \
+    ${NO_RETRY_FLAG} \
+    ${CKP_FLAG} \
+    --use_fp16 \
+    --dist_plan=${DIST_PLAN} \
+    --batch_size=${BS} \
+    --model_name=${MODEL_NAME} \
+    --overall_gpu_mem_ratio=${overall_gpu_mem_ratio} \
+    --batch_size=${BS} \
+    --margin_use_ratio=${margin_use_ratio} \
+    --warmup_gpu_chunk_mem_ratio=${warmup_gpu_chunk_mem_ratio} \
+    ${CPU_EBD_FLAG} \
+    ${HYBRID_ADAM_FLAG} \
+    ${RELEASE_AFTER_INIT_FLAG} \
+    --default_chunk_size=${CHUNK_SIZE} \
+    ${LIGHTSEQ_FLAG} \
+    ${ACT_OFFLOAD_FLAG} \
+    2>&1 | tee ${LOG_DIR}/${LOG_FILE}
