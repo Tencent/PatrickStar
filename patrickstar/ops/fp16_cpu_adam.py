@@ -24,6 +24,7 @@ from patrickstar.manager import PatrickStarManager
 import patrickstar.utils.global_timer as global_timer
 from patrickstar.utils import logger, get_rank
 from .chunk_io_buff import FP32ChunkReadBuffer, FP16ChunkWriteBuffer
+from .op_builder.cpu_adam import CPUAdamBuilder
 
 
 def get_real_data_tensor(param):
@@ -165,8 +166,11 @@ class FP16Adam(torch.optim.Optimizer):
         self.use_adamw = use_adamw
         self.opt_id = FP16Adam.optimizer_id
         FP16Adam.optimizer_id = FP16Adam.optimizer_id + 1
-        # The compiled cpu adam extension.
-        from .adam import cpu_adam_op
+        try:
+            # The pre-compiled cpu adam extension.
+            from .adam import cpu_adam_op
+        except ImportError:
+            cpu_adam_op = CPUAdamBuilder().load()
 
         self.ds_opt_adam = cpu_adam_op
         self.ds_opt_adam.create_adam(
