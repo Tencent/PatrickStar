@@ -70,6 +70,8 @@ for data in dataloader:
 
 We use the same `config` format as [DeepSpeed configuration JSON](https://www.deepspeed.ai/docs/config-json/#optimizer-parameters), which mainly includes params of optimizer, loss scaler and some PatrickStar specific configuration.
 
+For some detail explanation of the above example, please check the guide [here](./GUIDE.md)
+
 For more examples, please check [here](./examples).
 
 ### License
