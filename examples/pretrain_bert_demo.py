@@ -423,7 +423,7 @@ def test_bert_model_helper(
     torch_act_profiler.end()
     if rank == 0:
         torch_act_profiler.save(
-            f"torch_act_profiler_${batch_size}_ckp_${is_ckp}_actoffload_${args.with_activation_offload}.pkl"
+            f"torch_act_profiler_bs_{batch_size}_ckp_{is_ckp}_actoffload_{args.with_activation_offload}.pkl"
         )
     logging.info("*" * 20)
     return loss_res
