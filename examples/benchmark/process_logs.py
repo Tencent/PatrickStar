@@ -68,7 +68,7 @@ if __name__ == "__main__":
         path = str(sys.argv[1])
     else:
         path = "./logs_GPT2small"
-    # path = "./yard_logs"
+    print(f"see path ${path}")
     files = os.listdir(path)
     for file in files:
         is_run_this_file(path, file, res_dict, file_dict)
@@ -81,4 +81,5 @@ if __name__ == "__main__":
         new_res_list.append((plan[0], plan[1], plan[2], v, file_dict[k]))
 
     new_res_list.sort()
-    print(new_res_list)
+    for elem in new_res_list:
+        print(elem)
