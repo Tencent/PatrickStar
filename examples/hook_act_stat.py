@@ -10,19 +10,20 @@
 # implied. See the License for the specific language governing
 # permissions and limitations under the License.
 # See the AUTHORS file for names of contributors.
-
+import time
 import torch
 
 from patrickstar.utils import get_sys_memory_used, logger
-from patrickstar.manager import PatrickStarManager
+
+from profiler import profiler
 
 
 def _update_global_var():
-    act_stats = PatrickStarManager()
     gpu_mem_used = get_sys_memory_used(
         torch.device(f"cuda:{torch.cuda.current_device()}")
     )
-    act_stats.gpu_sys_used_list.append(gpu_mem_used)
+    profiler.timestamp.append(time.time())
+    profiler.gpu_memory.append(gpu_mem_used)
 
 
 # apply torch.autograd.Function that calls a backward_function to tensors in output
