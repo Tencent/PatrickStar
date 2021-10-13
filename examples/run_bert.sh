@@ -7,6 +7,7 @@ export MODEL_NAME=${MODEL_NAME:-"GPT2small"}
 export DIST_PLAN=${DIST_PLAN:-"patrickstar"}
 export RES_CHECK=${RES_CHECK:-0}
 export ACT_OFFLOAD=${ACT_OFFLOAD:-0}
+export CKP=${CKP:1}
 
 export margin_use_ratio=${margin_use_ratio:-0.8}
 # if warmup fails, lower the ratio
@@ -53,12 +54,16 @@ export lightseq_flag=""
 fi
 
 
+if [[ ${CKP} == 1 ]]; then
+    export ckp_flag="--use_ckp"
+else
+    export ckp_flag=""
+fi
 
 mkdir -p ./logs
 python -m torch.distributed.launch --nproc_per_node=${GPU_NUM} \
-			     --max_restarts=0 \
                              pretrain_bert_demo.py ${RES_CHECK_FLAG} \
-                             --use_ckp \
+                             ${ckp_flag} \
                              --use_fp16 \
                              --dist_plan=${DIST_PLAN} \
                              --batch_size=${BS} \
