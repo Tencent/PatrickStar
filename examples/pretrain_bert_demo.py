@@ -248,7 +248,6 @@ def test_bert_model_helper(
     eps = 1e-6
     weight_decay = 0
 
-    torch_act_profiler.start()
     profiler.start()
     if dist_plan == "patrickstar":
         if not is_fp16:
@@ -360,6 +359,7 @@ def test_bert_model_helper(
 
     print(f"MAC {total_macs / 1e9} GFlop, model param size: {model_numel / 1e9} B")
 
+    torch_act_profiler.start()
     for n, batch in enumerate(data_loader):
         if n == num_steps:
             break
