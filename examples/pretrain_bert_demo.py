@@ -359,14 +359,16 @@ def test_bert_model_helper(
 
     print(f"MAC {total_macs / 1e9} GFlop, model param size: {model_numel / 1e9} B")
 
-    torch_act_profiler.start()
     for n, batch in enumerate(data_loader):
         if n == num_steps:
             break
-
         logger.info(f"Start Step {n} with {dist_plan}...")
-        step_start_time = time.time()
-        torch_act_profiler.step_start.append(time.time())
+
+        if n == 1:
+            torch_act_profiler.start()
+        if n >= 1:
+            step_start_time = time.time()
+            torch_act_profiler.step_start.append(time.time())
 
         optimizer.zero_grad()
 
