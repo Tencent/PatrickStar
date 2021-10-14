@@ -282,10 +282,13 @@ class Chunk(object):
                 device="cpu:0",
                 pin_memory=True,
             )
-            pinned_payload_cpu.copy_(self.payload)
+            with torch.cuda.stream(mgr.copy_stream):
+                pinned_payload_cpu.copy_(self.payload)
             self.payload = pinned_payload_cpu
         elif target_device.type == "cuda":
-            self.payload = self.payload.to(target_device)
+            self.payload = self.payload.pin_memory()
+            with torch.cuda.stream(mgr.copy_stream):
+                self.payload = self.payload.to(target_device)
 
         mgr.delete(src_device.type, self.get_payload_space())
         mgr.add(target_device.type, self.get_payload_space())
