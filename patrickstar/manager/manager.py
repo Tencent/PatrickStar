@@ -61,6 +61,8 @@ class PatrickStarManager(metaclass=SingletonMeta):
         self.gpu_chunk_used_mem = 0
         self.cpu_chunk_used_mem = 0
 
+        self.copy_stream = torch.cuda.Stream()
+
         if config is not None:
             # 需要设置的超参数
             self._overall_gpu_mem_ratio = config.overall_gpu_mem_ratio
