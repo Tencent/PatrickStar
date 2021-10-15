@@ -12,3 +12,4 @@
 # See the AUTHORS file for names of contributors.
 
 from .profiler import profiler
+from .torch_profiler import torch_profiler

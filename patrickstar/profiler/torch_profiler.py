@@ -55,4 +55,4 @@ class Profiler(metaclass=SingletonMeta):
             pickle.dump(self.state_dict(), f)
 
 
-profiler = Profiler()
+torch_profiler = Profiler()
