@@ -11,5 +11,32 @@
 # permissions and limitations under the License.
 # See the AUTHORS file for names of contributors.
 
-from .profiler import profiler
-from .torch_profiler import torch_profiler
+from process_logs import is_run_this_file
+import argparse
+
+
+def add_args(parser):
+    group = parser.add_argument_group(title="patrickstar")
+    group.add_argument(
+        "--file",
+        type=str,
+        help="file name.",
+    )
+    group.add_argument(
+        "--path",
+        type=str,
+        help="path name.",
+    )
+    return parser
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="PatrickStar Arguments")
+    parser = add_args(parser)
+    args = parser.parse_args()
+    is_run = is_run_this_file(args.path, args.file, {}, {})
+
+    if is_run:
+        print(1)
+    else:
+        print(0)

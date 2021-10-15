@@ -19,3 +19,4 @@ from .const import AccessType, ChunkStatus, TensorStatus, TrainingStage, ChunkTy
 from .hook import setup_patrickstar_hooks
 from .parameter import PSParameter, register_param, is_param_registered, ParamType
 from .preprocess import PSPreProcessCtx
+from .checkpoint import checkpoint
