@@ -22,6 +22,7 @@ export CKP=${CKP:-1}
 # no retry after failed, used for torch 1.9.0
 export NO_RETRY=${NO_RETRY:-0}
 export SKIP_LOG_EXSIT=${SKIP_LOG_EXSIT:-0}
+export AW=${AW:-0}
 
 export margin_use_ratio=${margin_use_ratio:-0.8}
 # if warmup fails, lower the ratio
@@ -73,7 +74,7 @@ export HYBRID_ADAM_FLAG="--use_hybrid_adam"
 LOG_DIR="./logs_${MODEL_NAME}"
 mkdir -p ${LOG_DIR}
 
-LOG_FILE="log.${MODEL_NAME}_gpu_${GPU_NUM}_cs_${CS}_bs_${BS}_cpueb_${CPU_EBD}_margin_${margin_use_ratio}_warmup_${warmup_gpu_chunk_mem_ratio}_gpu_${overall_gpu_mem_ratio}_lightseq_${LIGHTSEQ}_offload_${ACT_OFFLOAD}"
+LOG_FILE="log.${MODEL_NAME}_gpu_${GPU_NUM}_cs_${CS}_bs_${BS}_cpueb_${CPU_EBD}_margin_${margin_use_ratio}_warmup_${warmup_gpu_chunk_mem_ratio}_gpu_${overall_gpu_mem_ratio}_lightseq_${LIGHTSEQ}_offload_${ACT_OFFLOAD}_AW_${AW}"
 
 is_run_flag=`python ./benchmark/is_run_this_file.py --path "${LOG_DIR}" --file "${LOG_FILE}"`
 echo is_run_flag $is_run_flag
@@ -89,12 +90,19 @@ then
 NO_RETRY_FLAG="--max_restarts=0"
 fi
 
+
+if [[ ${AW} == 1 ]];
+then
+AW_FLAG="--always_warmup"
+fi
+
+
 python -m torch.distributed.launch --nproc_per_node=${GPU_NUM} \
     pretrain_bert_demo.py \
+    --use_fp16 \
     ${RES_CHECK_FLAG} \
     ${NO_RETRY_FLAG} \
     ${CKP_FLAG} \
-    --use_fp16 \
     --dist_plan=${DIST_PLAN} \
     --batch_size=${BS} \
     --model_name=${MODEL_NAME} \
@@ -108,4 +116,6 @@ python -m torch.distributed.launch --nproc_per_node=${GPU_NUM} \
     --default_chunk_size=${CHUNK_SIZE} \
     ${LIGHTSEQ_FLAG} \
     ${ACT_OFFLOAD_FLAG} \
+    ${AW_FLAG} \
     2>&1 | tee ${LOG_DIR}/${LOG_FILE}
+
