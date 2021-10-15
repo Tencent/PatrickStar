@@ -74,6 +74,10 @@ For some detail explanation of the above example, please check the guide [here](
 
 For more examples, please check [here](./examples).
 
+### Inside PatrickStar
+
+See [this doc](./INSIDE.md) for the idea behind PatrickStar.
+
 ### License
 BSD 3-Clause License
 
