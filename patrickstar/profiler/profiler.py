@@ -21,6 +21,7 @@ class Profiler(metaclass=SingletonMeta):
     def __init__(self):
         self._nested_level = 0
         self.start_time = None
+        self.warmup_finish_time = None
         self.end_time = None
         # memory info
         # [(moment, time, memory)]
@@ -49,12 +50,16 @@ class Profiler(metaclass=SingletonMeta):
 
     def started(self):
         return self._nested_level > 0
+    
+    def warmup_finish(self):
+        if self.warmup_finish_time is None:
+             self.warmup_finish_time = time.time()
 
     def state_dict(self):
         return {
             "start_time": self.start_time,
             "end_time": self.end_time if self.end_time is not None else time.time(),
-
+	    "warmup_finish_time" : self.warmup_finish_time,
             "gpu_memory_used": self.gpu_memory_used,
             "gpu_chunk_memory_used": self.gpu_chunk_memory_used,
             "cpu_memory_used": self.cpu_memory_used,

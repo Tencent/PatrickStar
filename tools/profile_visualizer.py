@@ -20,7 +20,7 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 
 
-def visualize_memory(dict, memory_type="GPU"):
+def visualize_memory(dict, memory_type="GPU",rm_warmup=False):
     memory_type = memory_type.upper()
     if memory_type not in ["CPU", "GPU"]:
         raise ValueError(f"memory_type {memory_type} not supported.")
@@ -32,13 +32,18 @@ def visualize_memory(dict, memory_type="GPU"):
         raw_memory_used = dict["cpu_memory_used"]
         raw_chunk_memory_used = dict["cpu_chunk_memory_used"]
 
+    warmup_finish_time = dict["warmup_finish_time"]
+
     raw_stage_convert_time = dict["stage_convert_time"]
 
     if len(raw_memory_used) == 0:
         logging.warning("Empty profile file.")
 
     # process profile data
-    start_time = raw_memory_used[0][1]
+    if rm_warmup:
+        start_time = warmup_finish_time
+    else:
+        start_time = raw_memory_used[0][1]
 
     # moments = [data[0] for data in raw_memory_used]
     time_stamps = [data[1] - start_time for data in raw_memory_used]
@@ -47,6 +52,14 @@ def visualize_memory(dict, memory_type="GPU"):
 
     gpu_memory = [mem / 1024 / 1024 for mem in gpu_memory]
     gpu_chunk_memory = [mem / 1024 / 1024 for mem in gpu_chunk_memory]
+
+    gpu_non_model_memory = [ o - c for o, c in zip(gpu_memory, gpu_chunk_memory) ]
+    postive_time_stamp = []
+    postive_gpu_non_model_memory = []
+    for t, m in zip(time_stamps, gpu_non_model_memory):
+        if t >= 0.:
+            postive_time_stamp.append(t)
+            postive_gpu_non_model_memory.append(m)
 
     stage_convert_time = [data[0] - start_time for data in raw_stage_convert_time]
     stage_types = [data[1] for data in raw_stage_convert_time]
@@ -77,6 +90,7 @@ def visualize_memory(dict, memory_type="GPU"):
 
     plt.plot(time_stamps, gpu_memory, label="total")
     plt.plot(time_stamps, gpu_chunk_memory, label="chunk")
+    plt.plot(postive_time_stamp, postive_gpu_non_model_memory, label="non-model")
     plt.legend()
 
     plt.xlabel("time/s")
@@ -151,13 +165,13 @@ def visualize_access(dict):
     plt.show()
 
 
-def visualize_profile(filename, fig_type="memory", memory_type="GPU"):
+def visualize_profile(filename, fig_type="memory", memory_type="GPU", rm_warmup=True):
     # load profile data
     with open(filename, "rb") as f:
         dict = pickle.load(f)
 
     if fig_type == "memory":
-        visualize_memory(dict, memory_type=memory_type)
+        visualize_memory(dict, memory_type=memory_type, rm_warmup=rm_warmup)
     elif fig_type == "access":
         visualize_access(dict)
     else:
