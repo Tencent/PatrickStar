@@ -21,8 +21,6 @@ from patrickstar.utils import get_sys_memory_used, get_world_size, SingletonMeta
 
 
 class Metronome(object):
-    """节拍器"""
-
     def __init__(self):
         self._moment = 0
         self._total_moment = None
@@ -47,11 +45,7 @@ class Metronome(object):
 
 
 class PatrickStarManager(metaclass=SingletonMeta):
-    """
-    知道所有设备的使用情况，来指导payload的迁移
-    singleton类，被所有进程访问
-    拥有所有chunk信息的overview picture
-    """
+    r"""Storing information about devices to help payload move."""
 
     def __init__(self, local_rank: int = 0, config=None):
         self.local_rank = local_rank
@@ -62,7 +56,6 @@ class PatrickStarManager(metaclass=SingletonMeta):
         self.cpu_chunk_used_mem = 0
 
         if config is not None:
-            # 需要设置的超参数
             self._overall_gpu_mem_ratio = config.overall_gpu_mem_ratio
             self._overall_cpu_mem_ratio = config.overall_cpu_mem_ratio
             self._margin_use_ratio = config.margin_use_ratio
@@ -78,7 +71,7 @@ class PatrickStarManager(metaclass=SingletonMeta):
             self.always_warmup = False
 
         if self.use_fake_dist:
-            # 伪分布式训练是，大家共享一块GPU
+            # Fake distribtued mode: all processes share the same GPU.
             self._overall_gpu_mem = (
                 torch.cuda.get_device_properties(0).total_memory
                 * self._overall_gpu_mem_ratio
@@ -90,7 +83,6 @@ class PatrickStarManager(metaclass=SingletonMeta):
                 / get_world_size()
             )
         else:
-            # 获得系统的存储信息
             self._overall_gpu_mem = (
                 torch.cuda.get_device_properties(self.local_rank).total_memory
                 * self._overall_gpu_mem_ratio
@@ -105,7 +97,6 @@ class PatrickStarManager(metaclass=SingletonMeta):
             f"Init Manager over all gpu mem {self._overall_gpu_mem / 1e6} MB, "
             f"cpu mem {self._overall_cpu_mem / 1e6} MB"
         )
-        # 统计信息
         self.cpu_used_list = []
         self.cpu_chunk_used_list = []
         # non-chunk memory
@@ -115,14 +106,14 @@ class PatrickStarManager(metaclass=SingletonMeta):
         self.gpu_chunk_used_list = []
         self.gpu_sys_used_list = []
 
-        # 节拍器
         self.metronome = Metronome()
 
-        # 预热标志
         self.is_warmup = False
         self._start_training = False
         self._training_stage = TrainingStage.UNSTART
-        # 总gpu可用内存 减去 峰值系统内存占用 减去 paramfp16峰值
+        # The number of gpu chunks for adam.
+        # Calculated by substracting the peak memory of fp16 params
+        # from peak system memory.
         self._margin_chunk_num_for_gpu_adam = 0
         self._default_chunk_size = 0
 
@@ -146,9 +137,7 @@ class PatrickStarManager(metaclass=SingletonMeta):
         logger.info("Start to train.")
 
     def update_margin_mem(self):
-        """
-        更新GPU内剩余的空间可存储的Chunk数目
-        """
+        r"""Update the number of GPU free chunks for optimizer."""
         max_gpu_sys_used = max(self.gpu_sys_used_list)
         margin_mem_size = (
             self._overall_gpu_mem - max_gpu_sys_used - self._param_fp16_chunk_size
@@ -189,9 +178,7 @@ class PatrickStarManager(metaclass=SingletonMeta):
         return self._margin_chunk_num_for_gpu_adam
 
     def tiktac(self, client):
-        """
-        打节拍，同时记录此刻的内存使用情况
-        """
+        """Record the memory usage of the moment and increase moment counter."""
         if torch.distributed.is_initialized():
             rank = client.local_rank
         else:
@@ -215,7 +202,6 @@ class PatrickStarManager(metaclass=SingletonMeta):
 
         if self.is_warmup:
             self.gpu_used_list.append(gpu_used)
-            # 精确地统计chunk used memory
             self.gpu_chunk_used_list.append(self.gpu_chunk_used_mem)
             self.gpu_sys_used_list.append((gpu_used - self.gpu_chunk_used_mem))
 
@@ -224,14 +210,14 @@ class PatrickStarManager(metaclass=SingletonMeta):
             self.cpu_chunk_used_list.append(self.cpu_chunk_used_mem)
             self.cpu_sys_used_list.append((cpu_used - self.cpu_chunk_used_mem))
 
-            # 非warmup迭代时按照cur_mom下标更新，warmup迭代更新在list末尾。
-            # 确保list最后一个元素和cur_mom和此时更新的下标一致
+            # For non-warmup iter, we update the mem of index cur_mom,
+            # and for warmup iter, we append the gpu mem to the end of the list.
+            # Make sure the length of the list is 1 more than `cur_mom`.
             cur_mom = self.metronome.moment()
             assert len(self.gpu_sys_used_list) - 1 == cur_mom
         else:
-            # 非warmup需要对Chunk Memory调仓
-            # 如果下一刻的Chunk Memory可用空间小于当前Chunk Memory
-            # 则需要从设备内存移出Chunk
+            # If the available chunk memory is smaller than current chunk memory,
+            # we need to move chunks from compute device to make room.
             next_mom = self.metronome.next_moment()
             cur_mom = self.metronome.moment()
             gpu_next_mom_ava_chunk_mem = (
@@ -242,10 +228,10 @@ class PatrickStarManager(metaclass=SingletonMeta):
             )
             if gpu_next_mom_ava_chunk_mem < gpu_cur_mom_used_chunk_mem:
                 offload_size = gpu_cur_mom_used_chunk_mem - gpu_next_mom_ava_chunk_mem
-                # Note 触发GPU-CPU内存移动
+                # NOTE() Here will be GPU <-> CPU memory movement.
                 client.chunk_list.make_room(offload_size, gpu_device)
 
-            # 每个节拍都校准gpu sys used
+            # Calibrate the GPU sys used memory.
             self.gpu_sys_used_list[cur_mom] = gpu_used - self.gpu_chunk_used_mem
 
         self.metronome.tiktac()
@@ -257,9 +243,6 @@ class PatrickStarManager(metaclass=SingletonMeta):
         return self.metronome.get_total_mom()
 
     def add(self, device_type: str, size_in_bytes: int):
-        """
-        登记，设备device_type:index增加size个bytes内存使用
-        """
         if device_type == "cpu":
             self.cpu_chunk_used_mem += size_in_bytes
         elif device_type == "cuda":
@@ -268,9 +251,6 @@ class PatrickStarManager(metaclass=SingletonMeta):
             raise f"device type {device_type} is not supported"
 
     def delete(self, device_type, size_in_bytes):
-        """
-        checkout，设备device_type:index减少size个bytes内存使用
-        """
         if device_type == "cpu":
             self.cpu_chunk_used_mem -= size_in_bytes
         elif device_type == "cuda":
@@ -279,9 +259,6 @@ class PatrickStarManager(metaclass=SingletonMeta):
             raise f"device type {device_type} is not supported"
 
     def free_chunk_mem(self, device_type):
-        """
-        可以用来分配的Chunk空闲内存，派出已经分配的内存
-        """
         size = self.available_chunk_mem(device_type) - self.used_chunk_mem(device_type)
         logger.debug(
             f"free_chunk_mem on {device_type} {size / 1e6} MB on mement {self.metronome.moment()}"
@@ -297,28 +274,36 @@ class PatrickStarManager(metaclass=SingletonMeta):
             raise RuntimeError(f"used_chunk_mem {device_type}")
 
     def available_chunk_mem(self, device_type):
-        """
-        返回用可以于分配Chunk的内存，即可用内存。
-        可用内存包括已经分配被Chunk占据的内存和闲置(free)的内存。
-        available_chunk_mem = free_chunk_mem + used_chunk_mem
-        预热阶段是部分GPU内存和全部CPU内存。
-        非预热阶段，是当前moment和下一moment可用内存的最小值。
+        r"""The amount of memory that can be used for chunks.
+
+        This includes the memory that has been allocated for chunks
+        and the free memory.
+
+            available_chunk_mem = free_chunk_mem + used_chunk_mem
+
+        In warmup, the available chunk mem is part of GPU mem and all
+        CPU mem.
+        After warmup, it is the minimal value of available mem of the
+        current moment and next moment.
         """
         if device_type == "cpu":
             if self.is_warmup or not self._start_training:
-                # TODO(jiaruifang)瞎拍一个数，预热阶段三分之一GPU显存用来存储chunk
+                # TODO(jiaruifang) using a guessed number -- 1/3 of the GPU
+                # mem is used for chunk.
                 return self._overall_cpu_mem
             else:
                 return self._overall_cpu_mem
         elif device_type == "cuda":
             if self.always_warmup or self.is_warmup or not self._start_training:
                 if self._training_stage == TrainingStage.ADAM:
-                    # ADAM时没有activation所以显存可以全部给Chunk，需要两个default chunk size做buffer，这里先预留6个
+                    # There is no activation during Adam stage, so we can use all the GPU
+                    # mem for chunks. Need 2 * default_chunk_size for buffer, save 6 here for now.
                     ava_mem = self._overall_gpu_mem - 4 * self._default_chunk_size * 4
                     logger.debug(f"GPU available_chunk_mem is {ava_mem / 1e6} MB")
                     return ava_mem
                 else:
-                    # TODO(jiaruifang)瞎拍一个数，预热阶段三分之一GPU显存用来存储chunk
+                    # TODO(jiaruifang) using a guessed number -- 1/3 of the GPU
+                    # mem is used for chunk.
                     return self._overall_gpu_mem * self.warmup_gpu_chunk_mem_ratio
             else:
                 world_size = get_world_size()
