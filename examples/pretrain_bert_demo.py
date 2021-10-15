@@ -28,8 +28,7 @@ from transformers import BertConfig
 
 import patrickstar.utils.global_timer as global_timer
 from data_loader import get_bert_data_loader
-from patrickstar.profiler import profiler
-from profiler import profiler as torch_act_profiler
+from patrickstar.profiler import profiler, torch_profiler
 from patrickstar.runtime import initialize_engine
 from patrickstar.utils import see_memory_usage
 from patrickstar.utils.logging import logger
@@ -292,10 +291,10 @@ def test_bert_model_helper(
             model_func=model_func, local_rank=rank, config=config
         )
     else:
-        from hook_act_stat import setup_act_stats_hook
+        from patrickstar.core.torch_profiler_hook import register_torch_profiler_hook
 
         model = BertForSequenceClassification(bert_config)
-        setup_act_stats_hook(model)
+        register_torch_profiler_hook(model)
         if is_ckp and version.parse(transformers.__version__) >= version.parse(
             "4.11.0"
         ):
@@ -365,10 +364,6 @@ def test_bert_model_helper(
         logger.info(f"Start Step {n} with {dist_plan}...")
 
         step_start_time = time.time()
-        if n == 1:
-            torch_act_profiler.start()
-        if n >= 1:
-            torch_act_profiler.step_start.append(time.time())
 
         optimizer.zero_grad()
 
@@ -378,6 +373,10 @@ def test_bert_model_helper(
             model.backward(loss)
             optimizer.step()
         else:
+            if n == 1:
+                torch_profiler.start()
+            if n >= 1:
+                torch_profiler.step_start.append(time.time())
             if is_fp16:
                 with torch.cuda.amp.autocast():
                     output = model(input_ids=batch[0], labels=batch[1])
@@ -390,12 +389,12 @@ def test_bert_model_helper(
                 loss = output[0]
                 loss.backward()
                 optimizer.step()
+            torch_profiler.step_end.append(time.time())
 
         logger.info(f"LOSS of step {n}: {loss.item()}")
         loss_res.append(loss.item())
 
         step_elapse = time.time() - step_start_time
-        torch_act_profiler.step_end.append(time.time())
 
         if args.rank == 0:
             see_memory_usage(
@@ -422,16 +421,13 @@ def test_bert_model_helper(
     profiler.end()
     if rank == 0:
         profiler.save("profile.pkl")
-    torch_act_profiler.end()
+    torch_profiler.end()
     if rank == 0 and dist_plan == "torch":
-        world_size = torch.distributed.get_world_size()
-        torch_act_profiler.save(
-            f"torch_bs_{batch_size}_ckp_{is_ckp}_actoffload_{args.with_activation_offload}_gpu_{world_size}.pkl"
-        )
-        # see activation stats with
-        # env GPU_NUM=1 DIST_PLAN="torch" ACT_OFFLOAD=0 CKP=1 BS=32 bash run_bert.sh
-        # env GPU_NUM=1 DIST_PLAN="torch" ACT_OFFLOAD=1 CKP=0 BS=32 bash run_bert.sh
-        # env GPU_NUM=1 DIST_PLAN="torch" ACT_OFFLOAD=0 CKP=0 BS=32 bash run_bert.sh
+        # Compare activation stats with:
+        #     env GPU_NUM=1 DIST_PLAN="torch" ACT_OFFLOAD=0 CKP=1 BS=32 bash run_bert.sh
+        #     env GPU_NUM=1 DIST_PLAN="torch" ACT_OFFLOAD=1 CKP=0 BS=32 bash run_bert.sh
+        #     env GPU_NUM=1 DIST_PLAN="torch" ACT_OFFLOAD=0 CKP=0 BS=32 bash run_bert.sh
+        torch_profiler.save("torch_profiler.pkl")
     logging.info("*" * 20)
     return loss_res
 
