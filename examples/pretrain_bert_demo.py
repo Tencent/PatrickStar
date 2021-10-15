@@ -364,10 +364,10 @@ def test_bert_model_helper(
             break
         logger.info(f"Start Step {n} with {dist_plan}...")
 
+        step_start_time = time.time()
         if n == 1:
             torch_act_profiler.start()
         if n >= 1:
-            step_start_time = time.time()
             torch_act_profiler.step_start.append(time.time())
 
         optimizer.zero_grad()
