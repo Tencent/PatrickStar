@@ -1,36 +1,36 @@
-## 派大星使用实例
+## PatrickStar examples
 
-### 在 huggingface 中使用派大星
+### Use PatrickStar with HuggingFace
 
-`huggingface_bert.py` 是一个用派大星 fine-tune huggingface 模型的例子。可以通过对比这个例子和 [huggingface 官方 fine-tune 的例子](https://huggingface.co/transformers/custom_datasets.html#seq-imdb) 来了解如何向已有的项目中引入派大星。
+`huggingface_bert.py` is a fine-tuning Huggingface example with Patrickstar. Could you compare it with the [official Huggingface example](https://huggingface.co/transformers/custom_datasets.html#seq-imdb) to know how to apply PatrickStar to existed projects.
 
-在运行该例子之前，首先需要准备数据：
+Before running the example, you need to prepare the data:
 
 ```bash
 wget http://ai.stanford.edu/~amaas/data/sentiment/aclImdb_v1.tar.gz
 tar -xf aclImdb_v1.tar.gz
 ```
 
-并修改 `get_dataset()` 为指定的目录。之后，直接运行即可：
+And change the directory used in `get_dataset()`. After these, you are ready to go:
 
 ```bash
 python huggingface_bert.py
 ```
 
-### 利用派大星训练大规模模型
+### Use PatrickStar to train large model
 
-`run_bert.sh` 和 `pretrain_bert_demo.py` 是用派大星训练大规模预训练模型的例子。可以通过配置 `run_bert.sh` 中的参数来设置不同大小的模型。
+`run_bert.sh` and `pretrain_bert_demo.py` is an example to train large PTMs with PatrickStar. You could run different size of model by adding config to`run_bert.sh`.
 
-使用 Bert 模型检查收敛精度。
-
-```bash
-bash RES_CHECK=1 run_bert.sh
-```
-
-可以通过下面的设置来调整运行模型的规模，此时我们关闭精度检查：
+The following command will run a model with 4B params:
 
 ```bash
 env MODEL_NAME=GPT2_4B RES_CHECK=0 DIST_PLAN="patrickstar" bash run_bert.sh
 ```
 
-即关闭精度校准，并运行大小为 4B 的 GPT2 模型。可选的 `MODEL_NAME` 详见 `pretrain_bert_demo.py`。
+For the available `MODEL_NAME`, please check `pretrain_bert_demo.py`.
+
+Check the accuracy of PatrickStar with Bert:
+
+```bash
+bash RES_CHECK=1 run_bert.sh
+```
