@@ -38,7 +38,7 @@ class TestModelInitContext(unittest.TestCase):
         client = PatrickStarClient(0, default_chunk_size)
 
         torch.manual_seed(0)
-        with PSPreProcessCtx(client, dtype=torch.float, release_after_init=False):
+        with PSPreProcessCtx(client, dtype=torch.float, release_after_init=True):
             ps_model = model_provider()
 
         torch.manual_seed(0)
@@ -65,5 +65,5 @@ class TestModelInitContext(unittest.TestCase):
 
 
 if __name__ == "__main__":
-    torch.multiprocessing.set_start_method("spawn")
+
     unittest.main()
