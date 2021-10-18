@@ -65,13 +65,12 @@ if __name__ == "__main__":
     res_dict = {}
     file_dict = {}
     if len(sys.argv) > 1:
-        path = str(sys.argv[1])
+        PATH = str(sys.argv[1])
     else:
-        path = "./logs_GPT2small"
-    print(f"see path ${path}")
-    files = os.listdir(path)
+        PATH = "./logs_GPT2small"
+    files = os.listdir(PATH)
     for file in files:
-        is_run_this_file(path, file, res_dict, file_dict)
+        is_run_this_file(PATH, file, res_dict, file_dict)
     # print(res_dict)
     # print(file_dict)
 
