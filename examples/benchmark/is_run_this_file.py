@@ -10,9 +10,8 @@
 # implied. See the License for the specific language governing
 # permissions and limitations under the License.
 # See the AUTHORS file for names of contributors.
-
-from process_logs import is_run_this_file
 import argparse
+from process_logs import is_run_this_file
 
 
 def add_args(parser):
@@ -34,9 +33,9 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="PatrickStar Arguments")
     parser = add_args(parser)
     args = parser.parse_args()
-    is_run = is_run_this_file(args.path, args.file, {}, {})
+    IS_RUN = is_run_this_file(args.path, args.file, {}, {})
 
-    if is_run:
+    if IS_RUN:
         print(1)
     else:
         print(0)

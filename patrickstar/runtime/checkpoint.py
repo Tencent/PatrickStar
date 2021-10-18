@@ -126,7 +126,7 @@ def _load_from_state_dict(
                         with torch.no_grad():
                             ps_data_fp16.copy_(input_param)
                             ps_data_fp32.copy_(input_param)
-                    except Exception as ex:
+                    except MemoryError as ex:
                         error_msgs.append(
                             'While copying the parameter named "{}", '
                             "whose dimensions in the model are {} and "
@@ -151,7 +151,7 @@ def _load_from_state_dict(
                 try:
                     with torch.no_grad():
                         param.copy_(input_param)
-                except Exception as ex:
+                except MemoryError as ex:
                     error_msgs.append(
                         'While copying the parameter named "{}", '
                         "whose dimensions in the model are {} and "

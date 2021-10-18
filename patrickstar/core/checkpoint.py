@@ -10,11 +10,11 @@
 # implied. See the License for the specific language governing
 # permissions and limitations under the License.
 # See the AUTHORS file for names of contributors.
-
-import torch
 import warnings
 from typing import Any, Iterable, List, Tuple
+import torch
 from patrickstar.utils import see_memory_usage
+
 
 CPU_CHECKPOINT = True
 
@@ -70,7 +70,7 @@ def is_activation_to_checkpoint(item):
 
 def get_cpu_activations_for_backward(args, inputs):
     new_args = []
-    for i, (arg, inp) in enumerate(zip(args, inputs)):
+    for _, (arg, inp) in enumerate(zip(args, inputs)):
         if not is_activation_to_checkpoint(arg):
             new_args.append(arg)
             continue
