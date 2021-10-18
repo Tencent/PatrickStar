@@ -273,9 +273,10 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
                     # param tensor here.
                     # When release_after_init is False, this will help cast dtype of
                     # remote params to torch.half (See the NOTE below).
-                    param_fp16.data = torch.tensor(
-                        [], dtype=torch.half, device=param_fp16.device
-                    )
+                    # param_fp16.data = torch.tensor(
+                    #     [], dtype=torch.half, dev
+                    # ice=param_fp16.device
+                    # )
             chunk_num += 1
 
         world_size = get_world_size()
