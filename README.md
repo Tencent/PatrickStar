@@ -13,6 +13,10 @@ In experiment, Patrickstar is able to train a 12B param model with 8 Tesla V100 
 
 ![alt perf](./doc/mgpu_scalability.png "performance testing result")
 
+We've also trained the [CLUE-GPT2](https://huggingface.co/uer/gpt2-chinese-cluecorpussmall) model with PatrickStar, the loss and accuracy curve is shown below:
+
+![CLUE-GPT2](./doc/clue-gpt2-loss-n-acc.png)
+
 ### Installation
 ```bash
 pip install .
