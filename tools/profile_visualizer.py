@@ -20,7 +20,7 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 
 
-def visualize_memory(dict, memory_type="GPU",rm_warmup=False):
+def visualize_memory(dict, memory_type="GPU", rm_warmup=False):
     memory_type = memory_type.upper()
     if memory_type not in ["CPU", "GPU"]:
         raise ValueError(f"memory_type {memory_type} not supported.")
@@ -39,7 +39,6 @@ def visualize_memory(dict, memory_type="GPU",rm_warmup=False):
     if len(raw_memory_used) == 0:
         logging.warning("Empty profile file.")
 
-    # process profile data
     if rm_warmup:
         start_time = warmup_finish_time
     else:
@@ -53,11 +52,11 @@ def visualize_memory(dict, memory_type="GPU",rm_warmup=False):
     gpu_memory = [mem / 1024 / 1024 for mem in gpu_memory]
     gpu_chunk_memory = [mem / 1024 / 1024 for mem in gpu_chunk_memory]
 
-    gpu_non_model_memory = [ o - c for o, c in zip(gpu_memory, gpu_chunk_memory) ]
+    gpu_non_model_memory = [o - c for o, c in zip(gpu_memory, gpu_chunk_memory)]
     postive_time_stamp = []
     postive_gpu_non_model_memory = []
     for t, m in zip(time_stamps, gpu_non_model_memory):
-        if t >= 0.:
+        if t >= 0.0:
             postive_time_stamp.append(t)
             postive_gpu_non_model_memory.append(m)
 
@@ -65,7 +64,7 @@ def visualize_memory(dict, memory_type="GPU",rm_warmup=False):
     stage_types = [data[1] for data in raw_stage_convert_time]
 
     # plot figure
-    plt.style.use('ggplot')
+    plt.style.use("ggplot")
 
     for i in range(len(stage_convert_time) - 1):
         start, end = stage_convert_time[i], stage_convert_time[i + 1]
@@ -74,19 +73,20 @@ def visualize_memory(dict, memory_type="GPU",rm_warmup=False):
         stage = stage_types[i].value
         if stage == 1:
             # TrainStage.FWD
-            facecolor = 'g'
+            facecolor = "g"
         elif stage == 2:
             # TrainStage.BWD
-            facecolor = 'tab:blue'
+            facecolor = "tab:blue"
         elif stage == 3:
             # TrainStage.ADAM
-            facecolor = 'tab:purple'
+            facecolor = "tab:purple"
         else:
             raise RuntimeError(f"Unexpected stage value: {stage_types[i]}")
         plt.axvspan(start, end, facecolor=facecolor, alpha=0.3)
     # The last Adam stage
-    plt.axvspan(stage_convert_time[-1], time_stamps[-1],
-                facecolor='tab:purple', alpha=0.2)
+    plt.axvspan(
+        stage_convert_time[-1], time_stamps[-1], facecolor="tab:purple", alpha=0.2
+    )
 
     plt.plot(time_stamps, gpu_memory, label="total")
     plt.plot(time_stamps, gpu_chunk_memory, label="chunk")
@@ -129,7 +129,7 @@ def visualize_access(dict):
         if life_cycle is not None:
             access_info[chunk_type].append(life_cycle)
 
-    plt.style.use('ggplot')
+    plt.style.use("ggplot")
     _, axis = plt.subplots()
 
     end_time = dict["end_time"] - start_time
@@ -150,8 +150,12 @@ def visualize_access(dict):
                 else:
                     color = "#3385fe"
                 rect = patches.Rectangle(
-                    (timestamp, i + offset + 1), next_timestamp - timestamp, 1, color=color,
-                    alpha=1 if device is not None else 0)
+                    (timestamp, i + offset + 1),
+                    next_timestamp - timestamp,
+                    1,
+                    color=color,
+                    alpha=1 if device is not None else 0,
+                )
                 axis.add_patch(rect)
         offset += len(type_access_info)
 

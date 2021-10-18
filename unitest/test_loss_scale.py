@@ -18,7 +18,7 @@ from apex import amp
 from transformers import BertConfig, BertForSequenceClassification
 
 from common import distributed_test
-from examples.data_loader import get_bert_data_loader
+from data.data_loader import get_bert_data_loader
 from patrickstar.runtime import initialize_engine
 
 
