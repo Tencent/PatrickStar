@@ -39,7 +39,6 @@ def visualize_memory(dict, memory_type="GPU", rm_warmup=False):
     if len(raw_memory_used) == 0:
         logging.warning("Empty profile file.")
 
-    # process profile data
     if rm_warmup:
         start_time = warmup_finish_time
     else:

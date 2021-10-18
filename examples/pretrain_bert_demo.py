@@ -97,7 +97,9 @@ def _add_patrick_star_args(parser):
     group.add_argument(
         "--margin_use_ratio", type=float, default=0.7, help="GPU margin use ratio"
     )
-
+    group.add_argument(
+        "--init_loss_scale", type=float, default=2 ** 6, help="initial loss scale"
+    )
     return parser
 
 
@@ -275,7 +277,7 @@ def test_bert_model_helper(
             },
             "fp16": {
                 "enabled": True,
-                "loss_scale": 2 ** 10,
+                "loss_scale": args.init_loss_scale,
                 "initial_scale_power": 32,
                 "loss_scale_window": 1000,
                 "hysteresis": 2,
@@ -323,7 +325,7 @@ def test_bert_model_helper(
 
         if is_fp16:
             scaler = torch.cuda.amp.GradScaler(
-                init_scale=2 ** 10,
+                init_scale=args.init_loss_scale,
                 growth_factor=2,
                 backoff_factor=0.5,
                 growth_interval=1000,
