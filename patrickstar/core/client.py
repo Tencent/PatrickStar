@@ -304,6 +304,34 @@ class PatrickStarClient(object):
             )
             global_timer.my_timer.finish_profile("CLIENT_fetch_remote_chunks")
 
+    def _access_tensor_in_chunk(self, param, access_type, compute_device, chunk_id):
+        self.chunk_list.access_chunk(chunk_id, compute_device)
+        # 2. Locate the param on the chunk.
+        tensor_id = param.ps_attr.get_tensor_id(access_type)
+        info = self.chunk_tensor_index.get_tensor_info(tensor_id)
+        start_offset = info.start_offset
+        numel = info.numel
+        assert numel == param.ps_attr.numel, f"{numel} vs {param.ps_attr.numel}"
+
+        param.ps_attr.set_tensor(
+            self.chunk_list[chunk_id].payload.narrow(0, start_offset, numel),
+            access_type,
+        )
+
+        # 3. Change the status of param tensor.
+        # The status of chunk should be determined by the status of its tensors.
+        old_status = param.ps_attr.get_status(access_type)
+
+        # If the old status was FREE, we need to fill the param to zero.
+        if old_status == TensorStatus.FREE:
+            param.ps_attr.access_tensor(access_type).zero_()
+
+        # Change the status of param to COMPUTE.
+        self.chunk_list.update_status(chunk_id, old_status, TensorStatus.COMPUTE)
+        param.ps_attr.set_status(TensorStatus.COMPUTE, access_type)
+
+        return param.ps_attr.access_tensor(access_type)
+
     def access_dist(
         self,
         param: torch.nn.Parameter,
@@ -368,48 +396,10 @@ class PatrickStarClient(object):
             )
             self.chunk_list[local_chunk_id].unpin()
 
-        # If the chunk is remote chunk and has been fetched before this `access_dist`,
-        # The _fetch_remote_chunks will not do allgather. We need to move the chunk to
-        # compute_device manually.
-        self.chunk_list.access_chunk(chunk_id, compute_device)
-
-        assert (
-            self.chunk_list[chunk_id].payload is not None
-        ), f"rank {rank} chunk id {chunk_id}' payload is None'"
-        assert self.chunk_list[chunk_id].payload.device == compute_device, (
-            f"rank {rank} chunk id {chunk_id}' payload is not on "
-            f"{compute_device}, but on "
-            f"{self.chunk_list[chunk_id].payload.device}"
-        )
-
-        # 2. Locate the param on the chunk.
-        tensor_id = param.ps_attr.get_tensor_id(access_type)
-        info = self.chunk_tensor_index.get_tensor_info(tensor_id)
-        start_offset = info.start_offset
-        numel = info.numel
-        assert numel == param.ps_attr.numel, f"{numel} vs {param.ps_attr.numel}"
-
-        param.ps_attr.set_tensor(
-            self.chunk_list[chunk_id].payload.narrow(0, start_offset, numel),
-            access_type,
-        )
-
-        # 3. Change the status of param tensor.
-        # The status of chunk should be determined by the status of its tensors.
-        old_status = param.ps_attr.get_status(access_type)
-
-        # If the old status was FREE, we need to fill the param to zero.
-        if old_status == TensorStatus.FREE:
-            param.ps_attr.access_tensor(access_type).zero_()
-
-        # Change the status of param to COMPUTE.
-        self.chunk_list.update_status(chunk_id, old_status, TensorStatus.COMPUTE)
-        param.ps_attr.set_status(TensorStatus.COMPUTE, access_type)
-
+        ret = self._access_tensor_in_chunk(param, access_type, compute_device, chunk_id)
         if self._time_profile:
             global_timer.my_timer.finish_profile("CLIENT_access_dist")
-
-        return param.ps_attr.access_tensor(access_type)
+        return ret
 
     def access(
         self,
@@ -466,34 +456,10 @@ class PatrickStarClient(object):
                 "process before training."
             )
 
-        self.chunk_list.access_chunk(chunk_id, compute_device)
-
-        # 2. Locate the param on the chunk.
-        tensor_id = param.ps_attr.get_tensor_id(access_type)
-        info = self.chunk_tensor_index.get_tensor_info(tensor_id)
-        start_offset = info.start_offset
-        numel = info.numel
-        assert numel == param.ps_attr.numel, f"{numel} vs {param.ps_attr.numel}"
-
-        param.ps_attr.set_tensor(
-            self.chunk_list[chunk_id].payload.narrow(0, start_offset, numel),
-            access_type,
-        )
-
-        # 3. Change the status of param tensor.
-        # The status of chunk should be determined by the status of its tensors.
-        old_status = param.ps_attr.get_status(access_type)
-
-        # If the old status was FREE, we need to fill the param to zero.
-        if old_status == TensorStatus.FREE:
-            param.ps_attr.access_tensor(access_type).zero_()
-
-        self.chunk_list.update_status(chunk_id, old_status, TensorStatus.COMPUTE)
-        param.ps_attr.set_status(TensorStatus.COMPUTE, access_type)
-
+        ret = self._access_tensor_in_chunk(param, access_type, compute_device, chunk_id)
         if self._time_profile:
             global_timer.my_timer.finish_profile("CLIENT_access")
-        return param.ps_attr.access_tensor(access_type)
+        return ret
 
     def access_data(self, param: torch.nn.Parameter, compute_device: torch.device):
         r"""move the PSTensor of param.data to `compute_device`."""
