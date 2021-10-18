@@ -39,7 +39,6 @@ def visualize_memory(dict, memory_type="GPU", rm_warmup=False):
     if len(raw_memory_used) == 0:
         logging.warning("Empty profile file.")
 
-    # process profile data
     if rm_warmup:
         start_time = warmup_finish_time
     else:
@@ -91,8 +90,6 @@ def visualize_memory(dict, memory_type="GPU", rm_warmup=False):
 
     plt.plot(time_stamps, gpu_memory, label="total")
     plt.plot(time_stamps, gpu_chunk_memory, label="chunk")
-    print("postive_time_stamp\n", postive_time_stamp)
-    print("postive_gpu_non_model_memory\n", postive_gpu_non_model_memory)
     plt.plot(postive_time_stamp, postive_gpu_non_model_memory, label="non-model")
     plt.legend()
 

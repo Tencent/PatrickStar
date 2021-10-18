@@ -1,5 +1,7 @@
 ## PatrickStar: Parallel Training of Large Language Models via a Chunk-based Memory Management
 
+![logo](./logo.png)
+
 ### Meeting PatrickStar
 Pre-Trained Models (PTM) are becoming the hotspot of both NLP research and industry application. They are models that are trained with massive data and have learned generic features of the language. In pactice, they are fine-tuned for downstream tasks with task-specific datasets. In this way, PTMs have achieved great performances in almost every tasks. However, the training of PTMs requires enormous hardware resources, which makes it only accessible to small portion of people in the AI community. Now, **PatrickStar will make PTM training available to everyone!**
 
@@ -73,6 +75,10 @@ We use the same `config` format as [DeepSpeed configuration JSON](https://www.de
 For some detail explanation of the above example, please check the guide [here](./GUIDE.md)
 
 For more examples, please check [here](./examples).
+
+### Inside PatrickStar
+
+See [this doc](./INSIDE.md) for the idea behind PatrickStar.
 
 ### License
 BSD 3-Clause License

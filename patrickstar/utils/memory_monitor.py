@@ -17,7 +17,6 @@ import psutil
 import torch
 
 from .distributed import get_rank, get_world_size
-from .logging import logger
 
 
 def get_sys_memory_used(device):
@@ -27,10 +26,14 @@ def get_sys_memory_used(device):
     where N is the world size.
     """
     if device.type == "cuda":
-        return torch.cuda.memory_allocated()
+        ret = torch.cuda.memory_allocated()
+        # get the peak memory to report correct data, so reset the counter for the next call
+        if hasattr(torch.cuda, "reset_peak_memory_stats"):  # pytorch 1.4+
+            torch.cuda.reset_peak_memory_stats()
     elif device.type == "cpu":
         vm_stats = psutil.virtual_memory()
-        return vm_stats.used / get_world_size()
+        ret = vm_stats.used / get_world_size()
+    return ret
 
 
 def see_memory_usage(message, force=False, scale_name="MB"):
@@ -47,8 +50,8 @@ def see_memory_usage(message, force=False, scale_name="MB"):
     elif scale_name == "B":
         scale = 1
     # Print message except when distributed but not rank 0
-    logger.info(message)
-    logger.info(
+    print(message)
+    print(
         f"MA {round(torch.cuda.memory_allocated() / scale, 2)} {scale_name} \
         Max_MA {round(torch.cuda.max_memory_allocated() / scale, 2)} {scale_name} \
         CA {round(torch.cuda.memory_reserved() / scale, 2)} {scale_name} \
@@ -57,9 +60,7 @@ def see_memory_usage(message, force=False, scale_name="MB"):
 
     vm_stats = psutil.virtual_memory()
     used_gb = round(((vm_stats.total - vm_stats.available) / (1024 ** 3)), 2)
-    logger.info(
-        f"CPU Virtual Memory: used = {used_gb} GB, percent = {vm_stats.percent}%"
-    )
+    print(f"CPU Virtual Memory: used = {used_gb} GB, percent = {vm_stats.percent}%")
 
     # get the peak memory to report correct data, so reset the counter for the next call
     if hasattr(torch.cuda, "reset_peak_memory_stats"):  # pytorch 1.4+

@@ -15,10 +15,7 @@ import math
 import unittest
 
 import torch
-
 from common import distributed_test
-from patrickstar.ops.adam import cpu_adam_op
-from patrickstar.utils import logger
 
 
 def torch_adam_update(
@@ -74,6 +71,7 @@ class TestAccess(unittest.TestCase):
         grad_dtype,
         loss_scale,
         use_adamw,
+        cpu_adam_op,
     ):
         self.opt_id = 0
         p_data = torch.rand(shape)
@@ -87,6 +85,7 @@ class TestAccess(unittest.TestCase):
         exp_avg_sq = torch.rand(shape)
         exp_avg_sq_copy = exp_avg_sq.clone()
 
+        cpu_adam_op.create_adam(0, lr, beta1, beta2, eps, weight_decay, use_adamw, True)
         cpu_adam_op.adam_update(
             self.opt_id,
             step,
@@ -138,28 +137,28 @@ class TestAccess(unittest.TestCase):
         self.assertTrue(
             max_exp_avg_sq_diff < 1e-4, f"max_exp_avg_sq_diff {max_exp_avg_sq_diff}"
         )
-        logger.debug(
-            f"Passed check, step {step}, lr {lr} eps {eps} beta1 {beta1} beta2 {beta2} "
-            f"weight_decay {weight_decay} grad_dtype {grad_dtype}"
-        )
 
-    @distributed_test(world_size=[1])
+    @distributed_test(world_size=[1], backend="gloo", use_fake_dist=False)
     def test_ds_adam(self):
-        betas = [0.9, 0.99]
+        from patrickstar.ops.op_builder.cpu_adam import CPUAdamBuilder
+
+        try:
+            # The pre-compiled cpu adam extension.
+            from .adam import cpu_adam_op
+        except ImportError:
+            cpu_adam_op = CPUAdamBuilder().load()
+
         lr = 0.9
         eps = 1e-6
         weight_decay = 0
         for use_adamw in [False, True]:
-            cpu_adam_op.create_adam(
-                0, lr, betas[0], betas[1], eps, weight_decay, use_adamw, True
-            )
             for shape in [(1023,), (1024, 32)]:
-                for step in range(1, 10):
-                    for lr in [0.01, 0.1]:
+                for step in range(1, 2):
+                    for lr in [0.01]:
                         for eps in [1e-8]:
-                            for beta1 in [0.9, 0.8]:
-                                for beta2 in [0.999, 0.9]:
-                                    for weight_decay in [0.001, 0]:
+                            for beta1 in [0.9]:
+                                for beta2 in [0.999]:
+                                    for weight_decay in [0.001]:
                                         for grad_dtype in [torch.float, torch.half]:
                                             for loss_scale in [-1, 2 ** 5]:
                                                 self.check_res(
@@ -173,8 +172,10 @@ class TestAccess(unittest.TestCase):
                                                     grad_dtype,
                                                     loss_scale,
                                                     use_adamw,
+                                                    cpu_adam_op,
                                                 )
 
 
 if __name__ == "__main__":
+
     unittest.main()

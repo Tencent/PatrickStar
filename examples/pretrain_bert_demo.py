@@ -20,11 +20,15 @@ from packaging import version
 import torch
 import numpy as np
 import transformers
-from transformers import BertConfig, BertForSequenceClassification
+from transformers import BertConfig
+
+# from transformers BertForSequenceClassification
+# from ps_modeling_bert import BertForSequenceClassification
+
 
 import patrickstar.utils.global_timer as global_timer
 from data_loader import get_bert_data_loader
-from patrickstar.profiler import profiler
+from patrickstar.profiler import profiler, torch_profiler
 from patrickstar.runtime import initialize_engine
 from patrickstar.utils import see_memory_usage
 from patrickstar.utils.logging import logger
@@ -135,7 +139,12 @@ def _add_test_bert_args(parser):
     group.add_argument(
         "--model_name", type=str, default="GPTsmall", help="The model name."
     )
-
+    group.add_argument(
+        "--with_activation_offload",
+        dest="with_activation_offload",
+        action="store_true",
+        help="Use activation offloading.",
+    )
     return parser
 
 
@@ -212,6 +221,11 @@ def test_bert_model_helper(
     else:
         rank = args.local_rank
 
+    if not args.with_activation_offload:
+        from transformers import BertForSequenceClassification
+    else:
+        from ps_modeling_bert import BertForSequenceClassification
+
     # Avoid gpu0 use more memory.
     # https://discuss.pytorch.org/t/extra-10gb-memory-on-gpu-0-in-ddp-tutorial/118113
     torch.cuda.set_device(rank)
@@ -233,6 +247,7 @@ def test_bert_model_helper(
     eps = 1e-6
     weight_decay = 0
 
+    profiler.start()
     if dist_plan == "patrickstar":
         if not is_fp16:
             logger.warning("PatrickStar will always use mixed precision training.")
@@ -272,19 +287,20 @@ def test_bert_model_helper(
             "use_cpu_embedding": args.use_cpu_embedding,
         }
 
-        profiler.start()
         model, optimizer = initialize_engine(
             model_func=model_func, local_rank=rank, config=config
         )
     else:
+        from patrickstar.core.torch_profiler_hook import register_torch_profiler_hook
+
         model = BertForSequenceClassification(bert_config)
+        register_torch_profiler_hook(model)
         if is_ckp and version.parse(transformers.__version__) >= version.parse(
             "4.11.0"
         ):
             model.gradient_checkpointing_enable()
         model.cuda(rank)
         model.train()
-
         if args.with_lightseq:
             from ls_hf_transformer_encoder_layer import inject_ls_enc_layer
 
@@ -345,8 +361,8 @@ def test_bert_model_helper(
     for n, batch in enumerate(data_loader):
         if n == num_steps:
             break
-
         logger.info(f"Start Step {n} with {dist_plan}...")
+
         step_start_time = time.time()
 
         optimizer.zero_grad()
@@ -357,6 +373,10 @@ def test_bert_model_helper(
             model.backward(loss)
             optimizer.step()
         else:
+            if n == 1:
+                torch_profiler.start()
+            if n >= 1:
+                torch_profiler.step_start.append(time.time())
             if is_fp16:
                 with torch.cuda.amp.autocast():
                     output = model(input_ids=batch[0], labels=batch[1])
@@ -369,6 +389,7 @@ def test_bert_model_helper(
                 loss = output[0]
                 loss.backward()
                 optimizer.step()
+            torch_profiler.step_end.append(time.time())
 
         logger.info(f"LOSS of step {n}: {loss.item()}")
         loss_res.append(loss.item())
@@ -396,11 +417,17 @@ def test_bert_model_helper(
                 )
 
         logger.info(f"End Step {n} with {dist_plan}.\n")
-    if dist_plan == "patrickstar":
-        profiler.end()
-        if rank == 0:
-            profiler.save("profile.pkl")
 
+    profiler.end()
+    if rank == 0:
+        profiler.save("profile.pkl")
+    torch_profiler.end()
+    if rank == 0 and dist_plan == "torch":
+        # Compare activation stats with:
+        #     env GPU_NUM=1 DIST_PLAN="torch" ACT_OFFLOAD=0 CKP=1 BS=32 bash run_bert.sh
+        #     env GPU_NUM=1 DIST_PLAN="torch" ACT_OFFLOAD=1 CKP=0 BS=32 bash run_bert.sh
+        #     env GPU_NUM=1 DIST_PLAN="torch" ACT_OFFLOAD=0 CKP=0 BS=32 bash run_bert.sh
+        torch_profiler.save("torch_profiler.pkl")
     logging.info("*" * 20)
     return loss_res
 
