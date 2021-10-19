@@ -98,7 +98,7 @@ def _add_patrick_star_args(parser):
         "--margin_use_ratio", type=float, default=0.7, help="GPU margin use ratio"
     )
     group.add_argument(
-        "--init_loss_scale", type=float, default=2 ** 6, help="initial loss scale"
+        "--init_loss_scale", type=float, default=2 ** 10, help="initial loss scale"
     )
     return parser
 
@@ -393,7 +393,7 @@ def test_bert_model_helper(
                 optimizer.step()
             torch_profiler.step_end.append(time.time())
 
-        logger.info(f"LOSS of step {n}: {loss.item()}")
+        print(f"LOSS of step {n}: {loss.item()}")
         loss_res.append(loss.item())
 
         step_elapse = time.time() - step_start_time
