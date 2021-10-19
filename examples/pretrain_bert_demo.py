@@ -98,7 +98,7 @@ def _add_patrick_star_args(parser):
         "--margin_use_ratio", type=float, default=0.7, help="GPU margin use ratio"
     )
     group.add_argument(
-        "--init_loss_scale", type=float, default=2 ** 6, help="initial loss scale"
+        "--init_loss_scale", type=float, default=2 ** 10, help="initial loss scale"
     )
     return parser
 
@@ -370,6 +370,8 @@ def test_bert_model_helper(
         optimizer.zero_grad()
 
         if dist_plan == "patrickstar":
+            if n == 1:
+                profiler.warmup_finish()
             output = model(input_ids=batch[0], labels=batch[1])
             loss = output[0]
             model.backward(loss)
@@ -393,7 +395,7 @@ def test_bert_model_helper(
                 optimizer.step()
             torch_profiler.step_end.append(time.time())
 
-        logger.info(f"LOSS of step {n}: {loss.item()}")
+        print(f"LOSS of step {n}: {loss.item()}")
         loss_res.append(loss.item())
 
         step_elapse = time.time() - step_start_time
@@ -422,14 +424,14 @@ def test_bert_model_helper(
 
     profiler.end()
     if rank == 0:
-        profiler.save("profile.pkl")
+        profiler.save(f"ps_{args.model_name}_bs_{batch_size}_ckp_{is_ckp}_offload_{args.with_activation_offload}_profile.pkl")
     torch_profiler.end()
     if rank == 0 and dist_plan == "torch":
         # Compare activation stats with:
         #     env GPU_NUM=1 DIST_PLAN="torch" ACT_OFFLOAD=0 CKP=1 BS=32 bash run_bert.sh
         #     env GPU_NUM=1 DIST_PLAN="torch" ACT_OFFLOAD=1 CKP=0 BS=32 bash run_bert.sh
         #     env GPU_NUM=1 DIST_PLAN="torch" ACT_OFFLOAD=0 CKP=0 BS=32 bash run_bert.sh
-        torch_profiler.save("torch_profiler.pkl")
+        torch_profiler.save(f"torch_{args.model_name}_bs_{batch_size}_ckp_{is_ckp}_offload_{args.with_activation_offload}_profile.pkl")
     logging.info("*" * 20)
     return loss_res
 
