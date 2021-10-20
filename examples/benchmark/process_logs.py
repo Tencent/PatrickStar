@@ -51,12 +51,11 @@ def is_run_this_file(path, file, res_dict, file_dict):
     if not os.path.isdir(file):
         fn_list = file.split(".")[1].split("_")
         for i in range(len(fn_list)):
-            if "GPT" in fn_list[i] or "Bert" in fn_list[i]:
-                model_name = fn_list[i + 1]
+            if "gpu" in fn_list[i]:
+                model_name = fn_list[i - 1]
+                gpu_num = fn_list[i + 1]
             elif "bs" == fn_list[i]:
                 bs = fn_list[i + 1]
-            elif "gpu" == fn_list[i]:
-                gpu_num = fn_list[i + 1]
         key = model_name + "_" + bs + "_" + gpu_num
         iter_f = iter(f)
         for line in iter_f:
@@ -77,6 +76,16 @@ def is_run_this_file(path, file, res_dict, file_dict):
     return is_run
 
 
+def collect_info_from_dir(path):
+    res_dict = {}
+    file_dict = {}
+    files = os.listdir(path)
+    for file in files:
+        is_run_this_file(path, file, res_dict, file_dict)
+    print("process ", path)
+    return res_dict, file_dict
+
+
 if __name__ == "__main__":
     res_dict = {}
     file_dict = {}
@@ -85,14 +94,11 @@ if __name__ == "__main__":
     else:
         PATH = "./logs_GPT2small"
     files = os.listdir(PATH)
-    for file in files:
-        is_run_this_file(PATH, file, res_dict, file_dict)
-    # print(res_dict)
-    # print(file_dict)
-
+    collect_info_from_dir(PATH)
     new_res_list = []
     for k, v in res_dict.items():
         plan = k.split("_")
+        # model_name, bs, gpu_num, best perf, file
         new_res_list.append((plan[0], plan[1], plan[2], v, file_dict[k]))
 
     new_res_list.sort()
