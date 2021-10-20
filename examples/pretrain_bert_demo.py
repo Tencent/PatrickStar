@@ -1,3 +1,32 @@
+# BSD 3-Clause License
+#
+# Copyright (C) 2021 THL A29 Limited, a Tencent company.  All rights reserved.
+#
+# Redistribution and use in source and binary forms, with or without modification,
+# are permitted provided that the following conditions are met:
+#
+#  * Redistributions of source code must retain the above copyright notice, this
+#    list of conditions and the following disclaimer.
+#
+#  * Redistributions in binary form must reproduce the above copyright notice,
+#    this list of conditions and the following disclaimer in the documentation
+#    and/or other materials provided with the distribution.
+#
+#  * Neither the name of the psutil authors nor the names of its contributors
+#    may be used to endorse or promote products derived from this software without
+#    specific prior written permission.
+#
+# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
+# ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+# WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+# DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR
+# ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+# (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+# LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON
+# ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+# (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+# SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
 # Copyright (C) 2021 THL A29 Limited, a Tencent company.
 # All rights reserved.
 # Licensed under the BSD 3-Clause License (the "License"); you may
@@ -28,7 +57,7 @@ from transformers import BertConfig
 
 import patrickstar.utils.global_timer as global_timer
 from data_loader import get_bert_data_loader
-from patrickstar.profiler import profiler, torch_profiler
+from patrickstar.profiler import profiler
 from patrickstar.runtime import initialize_engine
 from patrickstar.utils import see_memory_usage
 from patrickstar.utils.logging import logger
@@ -75,6 +104,11 @@ def _add_patrick_star_args(parser):
         "--always_warmup",
         action="store_true",
         help="Always warmup cancel dynamic GPU chunkable memory.",
+    )
+    group.add_argument(
+        "--with_mem_profiler",
+        action="store_true",
+        help="Profiling memory usage.",
     )
     group.add_argument(
         "--overall_gpu_mem_ratio",
@@ -252,7 +286,9 @@ def test_bert_model_helper(
     eps = 1e-6
     weight_decay = 0
 
-    profiler.start()
+    if args.with_mem_profiler:
+        print("start memory profiler")
+        profiler.start()
     if dist_plan == "patrickstar":
         if not is_fp16:
             logger.warning("PatrickStar will always use mixed precision training.")
@@ -297,10 +333,13 @@ def test_bert_model_helper(
             model_func=model_func, local_rank=rank, config=config
         )
     else:
-        from patrickstar.core.torch_profiler_hook import register_torch_profiler_hook
-
         model = BertForSequenceClassification(bert_config)
-        register_torch_profiler_hook(model)
+        if args.with_mem_profiler:
+            from patrickstar.core.torch_profiler_hook import (
+                register_torch_profiler_hook,
+            )
+
+            register_torch_profiler_hook(model)
         if is_ckp and version.parse(transformers.__version__) >= version.parse(
             "4.11.0"
         ):
@@ -372,19 +411,16 @@ def test_bert_model_helper(
         step_start_time = time.time()
 
         optimizer.zero_grad()
-
-        if dist_plan == "patrickstar":
+        if args.with_mem_profiler:
             if n == 1:
                 profiler.warmup_finish()
+
+        if dist_plan == "patrickstar":
             output = model(input_ids=batch[0], labels=batch[1])
             loss = output[0]
             model.backward(loss)
             optimizer.step()
         else:
-            if n == 1:
-                torch_profiler.start()
-            if n >= 1:
-                torch_profiler.step_start.append(time.time())
             if is_fp16:
                 with torch.cuda.amp.autocast():
                     output = model(input_ids=batch[0], labels=batch[1])
@@ -397,7 +433,6 @@ def test_bert_model_helper(
                 loss = output[0]
                 loss.backward()
                 optimizer.step()
-            torch_profiler.step_end.append(time.time())
 
         print(f"LOSS of step {n}: {loss.item()}")
         loss_res.append(loss.item())
@@ -426,20 +461,13 @@ def test_bert_model_helper(
 
         logger.info(f"End Step {n} with {dist_plan}.\n")
 
-    profiler.end()
-    if rank == 0:
-        profiler.save(
-            f"ps_{args.model_name}_bs_{batch_size}_ckp_{is_ckp}_offload_{args.with_activation_offload}_profile.pkl"
-        )
-    torch_profiler.end()
-    if rank == 0 and dist_plan == "torch":
-        # Compare activation stats with:
-        #     env GPU_NUM=1 DIST_PLAN="torch" ACT_OFFLOAD=0 CKP=1 BS=32 bash run_bert.sh
-        #     env GPU_NUM=1 DIST_PLAN="torch" ACT_OFFLOAD=1 CKP=0 BS=32 bash run_bert.sh
-        #     env GPU_NUM=1 DIST_PLAN="torch" ACT_OFFLOAD=0 CKP=0 BS=32 bash run_bert.sh
-        torch_profiler.save(
-            f"torch_{args.model_name}_bs_{batch_size}_ckp_{is_ckp}_offload_{args.with_activation_offload}_profile.pkl"
-        )
+    if args.with_mem_profiler:
+        profiler.end()
+        if rank == 0:
+            profiler.save(
+                f"{dist_plan}_{args.model_name}_bs_{batch_size}_"
+                f"ckp_{is_ckp}_offload_{args.with_activation_offload}_profile.pkl"
+            )
     logging.info("*" * 20)
     return loss_res
 

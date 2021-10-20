@@ -23,11 +23,19 @@ export CKP=${CKP:-1}
 export NO_RETRY=${NO_RETRY:-0}
 export SKIP_LOG_EXSIT=${SKIP_LOG_EXSIT:-0}
 export AW=${AW:-0}
+export MEM_PROF=${MEM_PROF:-0}
 
 export margin_use_ratio=${margin_use_ratio:-0.8}
 # if warmup fails, lower the ratio
 export warmup_gpu_chunk_mem_ratio=${warmup_gpu_chunk_mem_ratio:-0.2}
 export overall_gpu_mem_ratio=${overall_gpu_mem_ratio:-0.8}
+
+if [[ ${MEM_PROF} == 1 ]];  then
+MEM_PROF_FLAG="--with_mem_profiler"
+else
+export MEM_PROF_FLAG=""
+fi
+
 
 if [[ ${ACT_OFFLOAD} == 1 ]];  then
 ACT_OFFLOAD_FLAG="--with_activation_offload"
@@ -117,5 +125,5 @@ python -m torch.distributed.launch --nproc_per_node=${GPU_NUM} \
     ${LIGHTSEQ_FLAG} \
     ${ACT_OFFLOAD_FLAG} \
     ${AW_FLAG} \
+    ${MEM_PROF_FLAG} \
     2>&1 | tee ${LOG_DIR}/${LOG_FILE}
-

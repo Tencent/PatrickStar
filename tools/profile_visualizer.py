@@ -1,3 +1,32 @@
+# BSD 3-Clause License
+#
+# Copyright (C) 2021 THL A29 Limited, a Tencent company.  All rights reserved.
+#
+# Redistribution and use in source and binary forms, with or without modification,
+# are permitted provided that the following conditions are met:
+#
+#  * Redistributions of source code must retain the above copyright notice, this
+#    list of conditions and the following disclaimer.
+#
+#  * Redistributions in binary form must reproduce the above copyright notice,
+#    this list of conditions and the following disclaimer in the documentation
+#    and/or other materials provided with the distribution.
+#
+#  * Neither the name of the psutil authors nor the names of its contributors
+#    may be used to endorse or promote products derived from this software without
+#    specific prior written permission.
+#
+# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
+# ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+# WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+# DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR
+# ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+# (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+# LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON
+# ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+# (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+# SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
 # Copyright (C) 2021 THL A29 Limited, a Tencent company.
 # All rights reserved.
 # Licensed under the BSD 3-Clause License (the "License"); you may
@@ -20,8 +49,12 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 
 
-def visualize_memory(dict, memory_type="GPU", rm_warmup=False):
+def visualize_memory(dict, filename, memory_type="GPU", rm_warmup=False):
     memory_type = memory_type.upper()
+    is_torch = False
+    if "torch" in filename:
+        is_torch = True
+
     if memory_type not in ["CPU", "GPU"]:
         raise ValueError(f"memory_type {memory_type} not supported.")
 
@@ -47,6 +80,8 @@ def visualize_memory(dict, memory_type="GPU", rm_warmup=False):
     # moments = [data[0] for data in raw_memory_used]
     time_stamps = [data[1] - start_time for data in raw_memory_used]
     gpu_memory = [data[2] for data in raw_memory_used]
+    if raw_chunk_memory_used is None:
+        gpu_chunk_memory = [0 for _ in time_stamps]
     gpu_chunk_memory = [data[2] for data in raw_chunk_memory_used]
 
     gpu_memory = [mem / 1024 / 1024 for mem in gpu_memory]
@@ -60,36 +95,38 @@ def visualize_memory(dict, memory_type="GPU", rm_warmup=False):
             postive_time_stamp.append(t)
             postive_gpu_non_model_memory.append(m)
 
-    stage_convert_time = [data[0] - start_time for data in raw_stage_convert_time]
-    stage_types = [data[1] for data in raw_stage_convert_time]
-
     # plot figure
     plt.style.use("ggplot")
 
-    for i in range(len(stage_convert_time) - 1):
-        start, end = stage_convert_time[i], stage_convert_time[i + 1]
-        # Convert Enum to int value so that we don't need to import patrickstar
-        # in this script.
-        stage = stage_types[i].value
-        if stage == 1:
-            # TrainStage.FWD
-            facecolor = "g"
-        elif stage == 2:
-            # TrainStage.BWD
-            facecolor = "tab:blue"
-        elif stage == 3:
-            # TrainStage.ADAM
-            facecolor = "tab:purple"
-        else:
-            raise RuntimeError(f"Unexpected stage value: {stage_types[i]}")
-        plt.axvspan(start, end, facecolor=facecolor, alpha=0.3)
-    # The last Adam stage
-    plt.axvspan(
-        stage_convert_time[-1], time_stamps[-1], facecolor="tab:purple", alpha=0.2
-    )
+    if not is_torch:
+        stage_convert_time = [data[0] - start_time for data in raw_stage_convert_time]
+        stage_types = [data[1] for data in raw_stage_convert_time]
+
+        for i in range(len(stage_convert_time) - 1):
+            start, end = stage_convert_time[i], stage_convert_time[i + 1]
+            # Convert Enum to int value so that we don't need to import patrickstar
+            # in this script.
+            stage = stage_types[i].value
+            if stage == 1:
+                # TrainStage.FWD
+                facecolor = "g"
+            elif stage == 2:
+                # TrainStage.BWD
+                facecolor = "tab:blue"
+            elif stage == 3:
+                # TrainStage.ADAM
+                facecolor = "tab:purple"
+            else:
+                raise RuntimeError(f"Unexpected stage value: {stage_types[i]}")
+            plt.axvspan(start, end, facecolor=facecolor, alpha=0.3)
+        # The last Adam stage
+        plt.axvspan(
+            stage_convert_time[-1], time_stamps[-1], facecolor="tab:purple", alpha=0.2
+        )
 
     plt.plot(time_stamps, gpu_memory, label="total")
-    plt.plot(time_stamps, gpu_chunk_memory, label="chunk")
+    if not is_torch:
+        plt.plot(time_stamps, gpu_chunk_memory, label="chunk")
     plt.plot(postive_time_stamp, postive_gpu_non_model_memory, label="non-model")
     plt.legend()
 
@@ -175,7 +212,7 @@ def visualize_profile(filename, fig_type="memory", memory_type="GPU", rm_warmup=
         dict = pickle.load(f)
 
     if fig_type == "memory":
-        visualize_memory(dict, memory_type=memory_type, rm_warmup=rm_warmup)
+        visualize_memory(dict, filename, memory_type=memory_type, rm_warmup=rm_warmup)
     elif fig_type == "access":
         visualize_access(dict)
     else:
