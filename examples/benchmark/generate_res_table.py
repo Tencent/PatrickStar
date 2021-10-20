@@ -40,7 +40,8 @@ if __name__ == "__main__":
             overall_res_dict.update(res_dict)
             overall_file_dict.update(file_dict)
 
-    res_table = {}
+    detail_res_table = {}
+    best_res_table = {}
     pos = {1: 0, 2: 2, 4: 4, 8: 6}
 
     for k, v in overall_res_dict.items():
@@ -49,18 +50,35 @@ if __name__ == "__main__":
         bs = plan[1]
         gpu_num = int(plan[2])
         key = (model_scale, bs)
-        if key not in res_table:
-            res_table[key] = [None for i in range(8)]
+        if key not in detail_res_table:
+            detail_res_table[key] = [None for i in range(8)]
 
-        res_table[key][pos[gpu_num]] = v
-        res_table[key][pos[gpu_num] + 1] = overall_file_dict[k]
+        filename = overall_file_dict[k]
+        detail_res_table[key][pos[gpu_num]] = v
+        detail_res_table[key][pos[gpu_num] + 1] = filename
 
-    od = collections.OrderedDict(sorted(res_table.items()))
+        if model_scale not in best_res_table:
+            best_res_table[model_scale] = [0 for i in range(8)]
+        if v > best_res_table[model_scale][pos[gpu_num]]:
+            best_res_table[model_scale][pos[gpu_num]] = v
+            best_res_table[model_scale][pos[gpu_num] + 1] = filename
+
+    od = collections.OrderedDict(sorted(detail_res_table.items()))
     with open("benchmark_res.txt", "w") as wfh:
         for k, v in od.items():
             for item in k:
                 wfh.write(str(item))
                 wfh.write(",")
+            for item in v:
+                wfh.write(str(item))
+                wfh.write(",")
+            wfh.write("\n")
+
+    od = collections.OrderedDict(sorted(best_res_table.items()))
+    with open("best_res.txt", "w") as wfh:
+        for k, v in od.items():
+            wfh.write(str(k))
+            wfh.write(",")
             for item in v:
                 wfh.write(str(item))
                 wfh.write(",")
