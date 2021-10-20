@@ -54,17 +54,17 @@ if __name__ == "__main__":
             detail_res_table[key] = [None for i in range(8)]
 
         filename = overall_file_dict[k]
-        detail_res_table[key][pos[gpu_num]] = v
+        detail_res_table[key][pos[gpu_num]] = v * gpu_num
         detail_res_table[key][pos[gpu_num] + 1] = filename
 
         if model_scale not in best_res_table:
             best_res_table[model_scale] = [0 for i in range(8)]
-        if v > best_res_table[model_scale][pos[gpu_num]]:
-            best_res_table[model_scale][pos[gpu_num]] = v
-            best_res_table[model_scale][pos[gpu_num] + 1] = filename
+        if v * gpu_num > best_res_table[model_scale][pos[gpu_num]]:
+            best_res_table[model_scale][pos[gpu_num]] = v * gpu_num
+            best_res_table[model_scale][pos[gpu_num] + 1] = bs  # filename
 
     od = collections.OrderedDict(sorted(detail_res_table.items()))
-    with open("benchmark_res.txt", "w") as wfh:
+    with open("benchmark_res.csv", "w") as wfh:
         for k, v in od.items():
             for item in k:
                 wfh.write(str(item))
@@ -75,7 +75,8 @@ if __name__ == "__main__":
             wfh.write("\n")
 
     od = collections.OrderedDict(sorted(best_res_table.items()))
-    with open("best_res.txt", "w") as wfh:
+
+    with open("best_res.csv", "w") as wfh:
         for k, v in od.items():
             wfh.write(str(k))
             wfh.write(",")
