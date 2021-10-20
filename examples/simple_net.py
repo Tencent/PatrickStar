@@ -1,17 +1,34 @@
-# Copyright (C) 2021 THL A29 Limited, a Tencent company.
-# All rights reserved.
-# Licensed under the BSD 3-Clause License (the "License"); you may
-# not use this file except in compliance with the License. You may
-# obtain a copy of the License at
-# https://opensource.org/licenses/BSD-3-Clause
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" basis,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
-# implied. See the License for the specific language governing
-# permissions and limitations under the License.
-# See the AUTHORS file for names of contributors.
+# BSD 3-Clause License
+#
+# Copyright (C) 2021 THL A29 Limited, a Tencent company.  All rights reserved.
+#
+# Redistribution and use in source and binary forms, with or without modification,
+# are permitted provided that the following conditions are met:
+#
+#  * Redistributions of source code must retain the above copyright notice, this
+#    list of conditions and the following disclaimer.
+#
+#  * Redistributions in binary form must reproduce the above copyright notice,
+#    this list of conditions and the following disclaimer in the documentation
+#    and/or other materials provided with the distribution.
+#
+#  * Neither the name of the psutil authors nor the names of its contributors
+#    may be used to endorse or promote products derived from this software without
+#    specific prior written permission.
+#
+# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
+# ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+# WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+# DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR
+# ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+# (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+# LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON
+# ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+# (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+# SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import torch
+
 # from checkpoint.torch_checkpoint import checkpoint
 from torch.utils.checkpoint import checkpoint
 from torch.utils.data import SequentialSampler
@@ -25,7 +42,8 @@ class Encoder(torch.nn.Module):
         self.linear1 = torch.nn.Sequential(
             torch.nn.Linear(hidden_dim, hidden_dim),
             torch.nn.Linear(hidden_dim, hidden_dim),
-            torch.nn.Linear(hidden_dim, hidden_dim))
+            torch.nn.Linear(hidden_dim, hidden_dim),
+        )
 
         self.linear3 = torch.nn.Linear(hidden_dim, hidden_dim)
         self.linear4 = torch.nn.Linear(hidden_dim, hidden_dim)
@@ -43,56 +61,53 @@ class Encoder(torch.nn.Module):
         return h5
 
 
-def get_data_loader(batch_size,
-                    total_samples,
-                    hidden_dim,
-                    device,
-                    data_type=torch.float,
-                    is_distrbuted=False):
-    train_data = torch.randn(total_samples,
-                             hidden_dim,
-                             device=device,
-                             dtype=data_type)
-    train_label = torch.empty(total_samples, dtype=torch.long,
-                              device=device).random_(hidden_dim)
+def get_data_loader(
+    batch_size,
+    total_samples,
+    hidden_dim,
+    device,
+    data_type=torch.float,
+    is_distrbuted=False,
+):
+    train_data = torch.randn(total_samples, hidden_dim, device=device, dtype=data_type)
+    train_label = torch.empty(total_samples, dtype=torch.long, device=device).random_(
+        hidden_dim
+    )
     train_dataset = torch.utils.data.TensorDataset(train_data, train_label)
     if is_distrbuted:
-        sampler = torch.utils.data.distributed.DistributedSampler(
-            train_dataset)
+        sampler = torch.utils.data.distributed.DistributedSampler(train_dataset)
     else:
         sampler = SequentialSampler(train_dataset)
-    train_loader = torch.utils.data.DataLoader(train_dataset,
-                                               batch_size=batch_size,
-                                               sampler=sampler)
+    train_loader = torch.utils.data.DataLoader(
+        train_dataset, batch_size=batch_size, sampler=sampler
+    )
     return train_loader
 
 
-def get_bert_data_loader(batch_size,
-                         total_samples,
-                         sequence_length,
-                         device,
-                         is_distrbuted=False):
-    train_data = torch.randint(low=0,
-                               high=10,
-                               size=(total_samples, sequence_length),
-                               device=device,
-                               dtype=torch.long)
+def get_bert_data_loader(
+    batch_size, total_samples, sequence_length, device, is_distrbuted=False
+):
+    train_data = torch.randint(
+        low=0,
+        high=10,
+        size=(total_samples, sequence_length),
+        device=device,
+        dtype=torch.long,
+    )
     train_label = torch.zeros(total_samples, dtype=torch.long, device=device)
     train_dataset = torch.utils.data.TensorDataset(train_data, train_label)
     if is_distrbuted:
-        sampler = torch.utils.data.distributed.DistributedSampler(
-            train_dataset)
+        sampler = torch.utils.data.distributed.DistributedSampler(train_dataset)
     else:
         sampler = SequentialSampler(train_dataset)
-    train_loader = torch.utils.data.DataLoader(train_dataset,
-                                               batch_size=batch_size,
-                                               sampler=sampler)
+    train_loader = torch.utils.data.DataLoader(
+        train_dataset, batch_size=batch_size, sampler=sampler
+    )
     return train_loader
 
 
 class SimpleModel(torch.nn.Module):
-    def __init__(self, hidden_dim, seq_len, is_ckp=False,
-                 is_share_param=False):
+    def __init__(self, hidden_dim, seq_len, is_ckp=False, is_share_param=False):
         super(SimpleModel, self).__init__()
         config = BertConfig()
         config.vocab_size = 25

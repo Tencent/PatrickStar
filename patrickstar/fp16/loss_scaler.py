@@ -1,15 +1,31 @@
-# Copyright (C) 2021 THL A29 Limited, a Tencent company.
-# All rights reserved.
-# Licensed under the BSD 3-Clause License (the "License"); you may
-# not use this file except in compliance with the License. You may
-# obtain a copy of the License at
-# https://opensource.org/licenses/BSD-3-Clause
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" basis,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
-# implied. See the License for the specific language governing
-# permissions and limitations under the License.
-# See the AUTHORS file for names of contributors.
+# BSD 3-Clause License
+#
+# Copyright (C) 2021 THL A29 Limited, a Tencent company.  All rights reserved.
+#
+# Redistribution and use in source and binary forms, with or without modification,
+# are permitted provided that the following conditions are met:
+#
+#  * Redistributions of source code must retain the above copyright notice, this
+#    list of conditions and the following disclaimer.
+#
+#  * Redistributions in binary form must reproduce the above copyright notice,
+#    this list of conditions and the following disclaimer in the documentation
+#    and/or other materials provided with the distribution.
+#
+#  * Neither the name of the psutil authors nor the names of its contributors
+#    may be used to endorse or promote products derived from this software without
+#    specific prior written permission.
+#
+# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
+# ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+# WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+# DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR
+# ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+# (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+# LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON
+# ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+# (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+# SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 # coding=utf-8
 # Copyright (c) 2020, NVIDIA CORPORATION.  All rights reserved.
@@ -36,6 +52,7 @@ class LossScaler:
     Args:
         scale (float, optional, default=1.0):  The loss scale.
     """
+
     def __init__(self, scale=1):
         self.cur_scale = scale
 
@@ -86,13 +103,16 @@ class DynamicLossScaler:
         scale_window (int, optional, default=1000):  Number of consecutive iterations
         without an overflow to wait before increasing the loss scale.
     """
-    def __init__(self,
-                 init_scale=2**32,
-                 scale_factor=2.,
-                 scale_window=1000,
-                 min_scale=1,
-                 delayed_shift=1,
-                 consecutive_hysteresis=False):
+
+    def __init__(
+        self,
+        init_scale=2 ** 32,
+        scale_factor=2.0,
+        scale_window=1000,
+        min_scale=1,
+        delayed_shift=1,
+        consecutive_hysteresis=False,
+    ):
         self.cur_scale = init_scale
         self.cur_iter = 0
         self.last_overflow_iter = -1
@@ -126,35 +146,36 @@ class DynamicLossScaler:
                 raise
             return True
         else:
-            if cpu_sum == float(
-                    'inf') or cpu_sum == -float('inf') or cpu_sum != cpu_sum:
+            if (
+                cpu_sum == float("inf")
+                or cpu_sum == -float("inf")
+                or cpu_sum != cpu_sum
+            ):
                 return True
             return False
 
     # `overflow` is boolean indicating whether the gradient overflowed
     def update_scale(self, overflow):
 
-        if not hasattr(self, 'min_scale'):
+        if not hasattr(self, "min_scale"):
             self.min_scale = 1
-        if not hasattr(self, 'delayed_shift'):
+        if not hasattr(self, "delayed_shift"):
             self.delayed_shift = 1
-        if not hasattr(self, 'cur_hysteresis'):
+        if not hasattr(self, "cur_hysteresis"):
             self.cur_hysteresis = 1
-        if not hasattr(self, 'consecutive_hysteresis'):
+        if not hasattr(self, "consecutive_hysteresis"):
             self.consecutive_hysteresis = True
         if overflow:
             # self.cur_scale /= self.scale_factor
             if self.delayed_shift == 1 or self.cur_hysteresis == 1:
-                self.cur_scale = max(self.cur_scale / self.scale_factor,
-                                     self.min_scale)
+                self.cur_scale = max(self.cur_scale / self.scale_factor, self.min_scale)
             else:
                 self.cur_hysteresis -= 1
             self.last_overflow_iter = self.cur_iter
         else:
             if self.consecutive_hysteresis:
                 self.cur_hysteresis = self.delayed_shift
-            if (self.cur_iter -
-                    self.last_overflow_iter) % self.scale_window == 0:
+            if (self.cur_iter - self.last_overflow_iter) % self.scale_window == 0:
                 if not self.consecutive_hysteresis:
                     self.cur_hysteresis = self.delayed_shift
                 self.cur_scale *= self.scale_factor
