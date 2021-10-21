@@ -184,7 +184,7 @@ class PatrickStarEngine(torch.nn.Module):
 
     def state_dict(self, destination=None, prefix="", keep_vars=False):
         return state_dict(
-            self,
+            self.module,
             self.client,
             destination=destination,
             prefix=prefix,
@@ -192,4 +192,6 @@ class PatrickStarEngine(torch.nn.Module):
         )
 
     def load_state_dict(self, state_dict, strict=False):
-        return load_state_dict(self, self.client, state_dict=state_dict, strict=strict)
+        return load_state_dict(
+            self.module, self.client, state_dict=state_dict, strict=strict
+        )
