@@ -33,6 +33,7 @@ import itertools
 import torch
 
 from patrickstar.core import is_param_registered, ParamType
+from patrickstar.utils import logger
 
 
 def state_dict(module, client, destination=None, prefix="", keep_vars=False):
@@ -40,7 +41,10 @@ def state_dict(module, client, destination=None, prefix="", keep_vars=False):
         for name, param in module._parameters.items():
             if param is not None:
                 if is_param_registered(param):
-                    if param.ps_attr.is_local():
+                    attr_name = param.ps_attr.name
+                    if attr_name == "embedding_dummy" or attr_name.startswith("dummy_"):
+                        continue
+                    elif param.ps_attr.is_local():
                         if param.ps_attr.param_type == ParamType.CHUNK_BASED:
                             param_fp32 = client.param_fp16_to_param_fp32_map[param]
                             ps_data_fp32 = client.access_data(
@@ -226,25 +230,21 @@ def load_state_dict(module, client, state_dict, strict=False):
     load(module)
     del load
 
-    if strict:
-        if len(unexpected_keys) > 0:
-            error_msgs.insert(
-                0,
-                "Unexpected key(s) in state_dict: {}. ".format(
-                    ", ".join('"{}"'.format(k) for k in unexpected_keys)
-                ),
-            )
-        if len(missing_keys) > 0:
-            error_msgs.insert(
-                0,
-                "Missing key(s) in state_dict: {}. ".format(
-                    ", ".join('"{}"'.format(k) for k in missing_keys)
-                ),
-            )
-
-    if len(error_msgs) > 0:
-        raise RuntimeError(
-            "Error(s) in loading state_dict for {}:\n\t{}".format(
-                module.__class__.__name__, "\n\t".join(error_msgs)
-            )
+    if unexpected_keys:
+        logger.warning(
+            "Unexpected key(s) in state_dict: {}. ".format(
+                ", ".join('"{}"'.format(k) for k in unexpected_keys)
+            ),
         )
+
+    missing_keys = list(filter(lambda k: k[-6:] != ".dummy", missing_keys))
+    if missing_keys:
+        logger.warning(
+            "Missing key(s) in state_dict: {}. ".format(
+                ", ".join('"{}"'.format(k) for k in missing_keys)
+            ),
+        )
+
+    if strict:
+        if unexpected_keys or missing_keys:
+            raise RuntimeError("Failed to load model strictly.")
