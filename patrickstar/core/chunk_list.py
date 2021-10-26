@@ -39,7 +39,7 @@ from patrickstar.utils import logger, get_rank, get_world_size
 import patrickstar.utils.global_timer as global_timer
 from .chunk_data import Chunk
 from .comm import CommInfo
-from .const import ChunkStatus
+from .const import ChunkState
 
 
 class ChunkList(object):
@@ -138,13 +138,13 @@ class ChunkList(object):
             cur_mem = mgr.get_cur_mom()
             chunk.append_moment(cur_mem, compute_device)
 
-        chunk_status = chunk.get_status()
+        chunk_state = chunk.get_state()
 
         payload_space = chunk.get_chunk_space()
 
         # If chunk was released, we need to reallocate it.
         # In distributed mode, we need a global payload.
-        if chunk_status == ChunkStatus.RELEASED:
+        if chunk_state == ChunkState.RELEASED:
             logger.debug(
                 f"rank {get_rank()} access_chunk chunk {chunk_id}, "
                 f"need to allocate {payload_space} B memory on {compute_device}"
@@ -241,7 +241,7 @@ class ChunkList(object):
     def make_room(self, offload_size_in_bytes, target_device):
         r"""Move `offload_size_in_bytes` size of chunks away from `target_device`.
 
-        Can not move chunk of status `COMPUTE`.
+        Can not move chunk of state `COMPUTE`.
 
         Args:
             offload_size_in_bytes: int.
@@ -386,7 +386,7 @@ class ChunkList(object):
             if (
                 chunk.get_device() is not None
                 and chunk.get_device().type == target_device.type
-                and chunk.get_status() != ChunkStatus.COMPUTE
+                and chunk.get_state() != ChunkState.COMPUTE
                 and not chunk.is_pin()
             ):
                 # The next moment when this chunk was accessed.
@@ -396,7 +396,7 @@ class ChunkList(object):
                 q.put((-next_mom, chunk_id))
                 movable_chunk_info.append(f"{next_mom}_{chunk_id}")
             # TODO(jiaruifang) Do not release `FREE` chunks immediately for reuse.
-            # assert chunk.get_status() != ChunkStatus.FREE
+            # assert chunk.get_state() != ChunkState.FREE
         while not q.empty():
             next_mom, chunk_id = q.get()
             moved_bytes += self.id_to_chunk_map[chunk_id].get_payload_space()
@@ -421,9 +421,9 @@ class ChunkList(object):
 
         return moved_list
 
-    def update_status(self, chunk_id, old_status, new_status):
-        r"""Update the status of chunk of id `chunk_id`."""
-        self.id_to_chunk_map[chunk_id].update_status(old_status, new_status)
+    def update_state(self, chunk_id, old_state, new_state):
+        r"""Update the state of chunk of id `chunk_id`."""
+        self.id_to_chunk_map[chunk_id].update_state(old_state, new_state)
 
     def display_access_info(self):
         logger.debug("----------- SHOW ACCESS INFO -----------")

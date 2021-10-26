@@ -171,7 +171,7 @@ class TestAccess(unittest.TestCase):
 
     def test_chunk_layout_consistency(self):
         r"""
-        Check if the chunk layout of optimizer status are aligned to
+        Check if the chunk layout of optimizer state are aligned to
         param fp16.
         """
         chunk_tensor_index = ChunkTensorIndex(20)

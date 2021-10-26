@@ -29,7 +29,7 @@
 
 import torch
 
-from .const import TensorStatus, AccessType, ParamType
+from .const import TensorState, AccessType, ParamType
 
 
 class PSTensor(object):
@@ -38,11 +38,11 @@ class PSTensor(object):
     def __init__(self):
         self.tensor = None
         self.id = PSTensor.global_id
-        self.status = TensorStatus.FREE
+        self.state = TensorState.FREE
         PSTensor.global_id += 1
 
     def __str__(self):
-        return f"id: {self.id}, status: {self.status}, tensor: {self.tensor}"
+        return f"id: {self.id}, state: {self.state}, tensor: {self.tensor}"
 
 
 class PSParameter(object):
@@ -134,18 +134,18 @@ class PSParameter(object):
     def access_tensor(self, access_type: AccessType):
         return self._access_ps_tensor(access_type).tensor
 
-    def get_status(self, access_type: AccessType):
-        return self._access_ps_tensor(access_type).status
+    def get_state(self, access_type: AccessType):
+        return self._access_ps_tensor(access_type).state
 
-    def set_status(self, status: TensorStatus, access_type: AccessType):
+    def set_state(self, state: TensorState, access_type: AccessType):
         """
-        Only in COMPUTE status when tensor will point to chunk payload.
+        Only in COMPUTE state when tensor will point to chunk payload.
         Otherwise, the tensor should be None to prevent unnecessary copy.
         TODO(jiaruifang) Need to param reset data和grad
         """
         ps_tensor = self._access_ps_tensor(access_type)
-        ps_tensor.status = status
-        if status != TensorStatus.COMPUTE:
+        ps_tensor.state = state
+        if state != TensorState.COMPUTE:
             ps_tensor.tensor = None
 
 

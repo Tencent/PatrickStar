@@ -61,11 +61,11 @@ class TensorInfo(object):
         return (
             f"tensor_id: {self.tensor_id}, name: {self.tensor_name}, "
             f"shape: {self.param.shape}, chunk_id: {self.chunk_id}, "
-            f"start_offset: {self.start_offset}, numel: {self.numel}, status: {self.status()}"
+            f"start_offset: {self.start_offset}, numel: {self.numel}, state: {self.state()}"
         )
 
-    def status(self):
+    def state(self):
         if self.param.ps_attr.param_type == ParamType.TORCH_BASED:
             return None
         else:
-            return self.param.ps_attr.get_status(self.access_type)
+            return self.param.ps_attr.get_state(self.access_type)
