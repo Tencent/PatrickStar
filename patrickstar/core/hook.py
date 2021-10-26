@@ -33,7 +33,7 @@ import patrickstar.utils.global_timer as global_timer
 from patrickstar.core.parameter import ParamType
 from patrickstar.manager import PatrickStarManager
 from patrickstar.utils import logger, get_rank, get_world_size
-from .const import TensorStatus, AccessType, TrainingStage
+from .const import TensorState, AccessType, TrainingStage
 
 
 # For each tensor in outputs run the forward_funciton and register backward_function as hook
@@ -155,12 +155,12 @@ def post_sub_module_forward_function(sub_module, client, name):
             client.release_dist(
                 param,
                 AccessType.DATA,
-                TensorStatus.HOLD_AFTER_FWD,
+                TensorState.HOLD_AFTER_FWD,
                 training_stage=TrainingStage.FWD,
                 is_allreduce=False,
             )
         else:
-            client.release_data(param, TensorStatus.HOLD_AFTER_FWD)
+            client.release_data(param, TensorState.HOLD_AFTER_FWD)
 
         if mgr._training_stage == TrainingStage.FWD:
             param.ps_attr.fwd_used_cnt += 1
@@ -215,12 +215,12 @@ def post_sub_module_backward_function(sub_module, client, name):
                 client.release_dist(
                     param,
                     AccessType.DATA,
-                    TensorStatus.HOLD_AFTER_BWD,
+                    TensorState.HOLD_AFTER_BWD,
                     training_stage=TrainingStage.BWD,
                     is_allreduce=True,
                 )
             else:
-                client.release_data(param, TensorStatus.HOLD_AFTER_BWD)
+                client.release_data(param, TensorState.HOLD_AFTER_BWD)
             rank = get_rank()
             logger.debug(f"rank {rank} BWD post before release_dist {name}.{sub_name}")
             param.grad = None

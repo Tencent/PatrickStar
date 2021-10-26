@@ -29,7 +29,7 @@
 
 import torch
 
-from patrickstar.core import ChunkStatus, TensorStatus, TrainingStage
+from patrickstar.core import ChunkState, TensorState, TrainingStage
 from patrickstar.fp16 import LossScaler, DynamicLossScaler
 from patrickstar.manager import PatrickStarManager
 from patrickstar.ops import FP16Adam
@@ -132,19 +132,19 @@ class PatrickStarEngine(torch.nn.Module):
         for _, chunk in self.client.chunk_list.generate_chunk():
             chunk.unused = 0
 
-    def _set_status_after_forward(self):
+    def _set_state_after_forward(self):
         """
-        After forward calculation, we need to reset the status of
+        After forward calculation, we need to reset the state of
         tensors from HOLD_AFTER_FWD to HOLD. Otherwise, chunks may be
         released accidentally when using gradient checkpointing.
         """
         for chunk_id, chunk in self.client.chunk_list.generate_chunk():
             if (
-                chunk.get_status() == ChunkStatus.HOLD
-                or chunk.get_status() == ChunkStatus.HOLD_AFTER_FWD
+                chunk.get_state() == ChunkState.HOLD
+                or chunk.get_state() == ChunkState.HOLD_AFTER_FWD
             ):
                 chunk.set_unused()
-                self.client.set_all_tensors_status_in_chunk(chunk_id, TensorStatus.HOLD)
+                self.client.set_all_tensors_state_in_chunk(chunk_id, TensorState.HOLD)
 
     def forward(self, *inputs, **kwargs):
         r"""Execute forward propagation
@@ -158,7 +158,7 @@ class PatrickStarEngine(torch.nn.Module):
         self._reset_before_forward()
 
         loss = self.module(*inputs, **kwargs)
-        self._set_status_after_forward()
+        self._set_state_after_forward()
         global_timer.my_timer.finish_profile("FWD")
         return loss
 

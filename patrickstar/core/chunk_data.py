@@ -34,7 +34,7 @@ from patrickstar.manager import PatrickStarManager
 from patrickstar.profiler import profiler
 from patrickstar.utils import logger, getsizeof
 import patrickstar.utils.global_timer as global_timer
-from .const import TensorStatus, ChunkStatus
+from .const import TensorState, ChunkState
 
 
 class Chunk(object):
@@ -49,7 +49,7 @@ class Chunk(object):
         r"""
         Chunk is the minimal unit of the data transfer.
         It is a contiguous memory for saving tensors.
-        To remove a tensor, we only need to set the status of the tensor to `FREE`.
+        To remove a tensor, we only need to set the state of the tensor to `FREE`.
 
         Chunk does no know if we are doing distributed training or not.
         Every process will observe its own chunk instances.
@@ -68,13 +68,13 @@ class Chunk(object):
         self.local_rank = local_rank
         self._is_dummy = is_dummy
 
-        # the number of tensors of the chunk in each status
-        self._status_dict = {
-            TensorStatus.COMPUTE: 0,
-            TensorStatus.HOLD: 0,
-            TensorStatus.HOLD_AFTER_FWD: 0,
-            TensorStatus.HOLD_AFTER_BWD: 0,
-            TensorStatus.FREE: 0,
+        # the number of tensors of the chunk in each state
+        self._state_dict = {
+            TensorState.COMPUTE: 0,
+            TensorState.HOLD: 0,
+            TensorState.HOLD_AFTER_FWD: 0,
+            TensorState.HOLD_AFTER_BWD: 0,
+            TensorState.FREE: 0,
         }
         # the number of tensors that are not used in the forward calculation
         self.unused = 0
@@ -189,7 +189,7 @@ class Chunk(object):
     def release_payload(self):
         r"""Release the payload.
 
-        NOTE() Please make sure all tensors are in the `FREE` status.
+        NOTE() Please make sure all tensors are in the `FREE` state.
         """
         mgr = PatrickStarManager()
         mgr.delete(self.get_device().type, self.get_payload_space())
@@ -203,64 +203,64 @@ class Chunk(object):
                 (time.time(), "release", None)
             )
 
-    def update_status(self, old_status, new_status):
-        r"""Update the status counter of tensors of the chunk.
+    def update_state(self, old_state, new_state):
+        r"""Update the state counter of tensors of the chunk.
 
         Args:
-            old_status: :class:`TensorStatus`.
-            new_status: :class:`TensorStatus`.
+            old_state: :class:`TensorState`.
+            new_state: :class:`TensorState`.
         """
-        self._status_dict[old_status] -= 1
-        self._status_dict[new_status] += 1
+        self._state_dict[old_state] -= 1
+        self._state_dict[new_state] += 1
 
-    def get_status(self):
+    def get_state(self):
         """
-        When payload is None, the status is `RELEASED`,
-        otherwise, status of the chunk is decided by its tensors.
+        When payload is None, the state is `RELEASED`,
+        otherwise, state of the chunk is decided by its tensors.
 
         Returns:
-            :class:`ChunkStatus`.
+            :class:`ChunkState`.
         """
         if self.payload is None:
-            return ChunkStatus.RELEASED
+            return ChunkState.RELEASED
 
         # Distributed training need to fix the chunk on the compute device.
-        if self._status_dict[TensorStatus.COMPUTE] > 0:
-            return ChunkStatus.COMPUTE
-        elif self._status_dict[TensorStatus.HOLD] > 0:
-            return ChunkStatus.HOLD
-        elif self._status_dict[TensorStatus.HOLD_AFTER_FWD] > 0:
-            return ChunkStatus.HOLD_AFTER_FWD
-        elif self._status_dict[TensorStatus.HOLD_AFTER_BWD] > 0:
-            return ChunkStatus.HOLD_AFTER_BWD
+        if self._state_dict[TensorState.COMPUTE] > 0:
+            return ChunkState.COMPUTE
+        elif self._state_dict[TensorState.HOLD] > 0:
+            return ChunkState.HOLD
+        elif self._state_dict[TensorState.HOLD_AFTER_FWD] > 0:
+            return ChunkState.HOLD_AFTER_FWD
+        elif self._state_dict[TensorState.HOLD_AFTER_BWD] > 0:
+            return ChunkState.HOLD_AFTER_BWD
         else:
-            return ChunkStatus.FREE
+            return ChunkState.FREE
 
-    def all_tensor_status(self, status):
-        r"""If all tensors are in the status or `FREE`.
+    def all_tensor_state(self, state):
+        r"""If all tensors are in the state or `FREE`.
 
         Args:
-            status: :class:`TensorStatus`.
+            state: :class:`TensorState`.
         Return:
             bool.
         """
-        for k, v in self._status_dict.items():
-            if k != TensorStatus.FREE and k != status:
+        for k, v in self._state_dict.items():
+            if k != TensorState.FREE and k != state:
                 if v != 0:
                     # Ignore the unused tensors.
-                    if k == TensorStatus.HOLD and v == self.unused:
+                    if k == TensorState.HOLD and v == self.unused:
                         continue
                     return False
         return True
 
     def set_unused(self):
         r"""
-        After forward calculation, the tensors in `HOLD` status are the ones
+        After forward calculation, the tensors in `HOLD` state are the ones
         that are not used. Remember them for the release.
         NOTE() This function can only be called at the end of forward calculation.
         """
         # TODO(zilinzhu) Find a better way to represent the unused tensors
-        self.unused = self._status_dict[TensorStatus.HOLD]
+        self.unused = self._state_dict[TensorState.HOLD]
 
     def move(self, target_device: torch.device):
         r"""

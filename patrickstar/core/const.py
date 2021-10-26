@@ -35,8 +35,8 @@ class AccessType(Enum):
     GRAD = 2
 
 
-class ChunkStatus(Enum):
-    r"""Chunk status during training."""
+class ChunkState(Enum):
+    r"""Chunk state during training."""
     FREE = 0
     # Chunk memory is allocated.
     # Tensors are used for computing.
@@ -51,11 +51,11 @@ class ChunkStatus(Enum):
     RELEASED = 5
 
 
-class TensorStatus(Enum):
-    r"""Tensor status during training
+class TensorState(Enum):
+    r"""Tensor state during training
 
-    Notice that this is the status of the tensor in the chunk,
-    while `ChunkStatus` is the status of the whole status.
+    Notice that this is the state of the tensor in the chunk,
+    while `ChunkState` is the state of the whole state.
     """
     # Can be released.
     FREE = 0

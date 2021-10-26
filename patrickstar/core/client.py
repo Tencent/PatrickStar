@@ -36,7 +36,7 @@ import patrickstar.utils.global_timer as global_timer
 from patrickstar.utils import logger, get_world_size, get_rank
 from .chunk_list import ChunkList, ChunkType
 from .chunk_tensor_index import ChunkTensorIndex
-from .const import AccessType, ChunkStatus, TensorStatus, TrainingStage
+from .const import AccessType, ChunkState, TensorState, TrainingStage
 from .hook import setup_patrickstar_hooks
 from .parameter import register_param, is_param_registered, ParamType
 
@@ -108,7 +108,7 @@ class PatrickStarClient(object):
         dummy = torch.nn.Parameter(
             torch.tensor([], dtype=data_type), requires_grad=False
         )
-        # Add a dummy param to dummy chunk, so that the chunk can be set in HOLD status.
+        # Add a dummy param to dummy chunk, so that the chunk can be set in HOLD state.
         register_param(
             dummy, ParamType.CHUNK_BASED, torch.half, f"dummy_{comm_info.group_id}"
         )
@@ -215,19 +215,19 @@ class PatrickStarClient(object):
             + (world_size - 1) * self.default_chunk_size * 2
         )
 
-    def set_all_tensors_status_in_chunk(self, chunk_id, new_status):
-        r"""Set the status of all tensors in a chunk.
+    def set_all_tensors_state_in_chunk(self, chunk_id, new_state):
+        r"""Set the state of all tensors in a chunk.
 
-        Notice that the status of the chunk will change as well.
+        Notice that the state of the chunk will change as well.
         And this method has nothing to do with whether the payload of
         the chunk is allocated or not.
         """
         for info in self.chunk_tensor_index.generate_tensor_info_in_order(chunk_id):
             param = info.param
             access_type = info.access_type
-            old_status = param.ps_attr.get_status(access_type)
-            self.chunk_list.update_status(chunk_id, old_status, new_status)
-            param.ps_attr.set_status(new_status, access_type)
+            old_state = param.ps_attr.get_state(access_type)
+            self.chunk_list.update_state(chunk_id, old_state, new_state)
+            param.ps_attr.set_state(new_state, access_type)
 
     def register_model_hook(self, model):
         setup_patrickstar_hooks(model, self)
@@ -261,12 +261,12 @@ class PatrickStarClient(object):
         # the first time, collect the chunk group to local.
         # How can we determine if a chunk group is being visited for the first time,
         # so that we can trigger the correct allgather?
-        # When the first param is visited, the remote chunk should be of status
-        # RELEASED, therefore, we do the allgather when the status of chunks are
+        # When the first param is visited, the remote chunk should be of state
+        # RELEASED, therefore, we do the allgather when the state of chunks are
         # changing form HOLD_AFTER_FWD(HOLD_ADFTER_BWD) to RELEASED.
         has_released_chunk = False
         for i in chunk_id_list:
-            if self.chunk_list[i].get_status() == ChunkStatus.RELEASED:
+            if self.chunk_list[i].get_state() == ChunkState.RELEASED:
                 has_released_chunk = True
                 break
         if not has_released_chunk:
@@ -291,7 +291,7 @@ class PatrickStarClient(object):
                 # Make sure the newly allocated chunk is not moved to other deviced
                 # before allgather.
                 self.chunk_list[chunk_id].pin()
-            self.set_all_tensors_status_in_chunk(chunk_id, TensorStatus.HOLD)
+            self.set_all_tensors_state_in_chunk(chunk_id, TensorState.HOLD)
             allgather_payload_buff.append(self.chunk_list[chunk_id].payload)
         comm_data_amount = (
             len(allgather_payload_buff) * allgather_payload_buff[0].numel() * 2
@@ -334,17 +334,17 @@ class PatrickStarClient(object):
             access_type,
         )
 
-        # 3. Change the status of param tensor.
-        # The status of chunk should be determined by the status of its tensors.
-        old_status = param.ps_attr.get_status(access_type)
+        # 3. Change the state of param tensor.
+        # The state of chunk should be determined by the state of its tensors.
+        old_state = param.ps_attr.get_state(access_type)
 
-        # If the old status was FREE, we need to fill the param to zero.
-        if old_status == TensorStatus.FREE:
+        # If the old state was FREE, we need to fill the param to zero.
+        if old_state == TensorState.FREE:
             param.ps_attr.access_tensor(access_type).zero_()
 
-        # Change the status of param to COMPUTE.
-        self.chunk_list.update_status(chunk_id, old_status, TensorStatus.COMPUTE)
-        param.ps_attr.set_status(TensorStatus.COMPUTE, access_type)
+        # Change the state of param to COMPUTE.
+        self.chunk_list.update_state(chunk_id, old_state, TensorState.COMPUTE)
+        param.ps_attr.set_state(TensorState.COMPUTE, access_type)
 
         return param.ps_attr.access_tensor(access_type)
 
@@ -400,7 +400,7 @@ class PatrickStarClient(object):
             self.chunk_list.access_chunk(local_chunk_id, compute_device)
 
             # Prevent the local chunk being moved to other devices during _fetch_remote_chunks.
-            # Because its status is HOLD, pin.
+            # Because its state is HOLD, pin.
             self.chunk_list[local_chunk_id].pin()
 
             # 1.2 Fetch the remote chunks to local.
@@ -492,7 +492,7 @@ class PatrickStarClient(object):
         self,
         param: torch.nn.Parameter,
         access_type: AccessType,
-        reset_to_status: TensorStatus,
+        reset_to_state: TensorState,
         training_stage: TrainingStage,
         is_allreduce: bool,
     ):
@@ -502,7 +502,7 @@ class PatrickStarClient(object):
         stay in the current compute device.
 
         Steps:
-            1. Update the status of tensor and chunk.
+            1. Update the state of tensor and chunk.
             2. If the chunk can be released,
                 if `is_allreduce` is True, do reduce scatter to average the gradients.
                 then released the payload.
@@ -510,7 +510,7 @@ class PatrickStarClient(object):
         Args:
             param: :class:`torch.nn.Parameter`.
             access_type: :class:`AccessType`.
-            reset_to_status: :class:`TensorStatus`. The status to reset tensor to.
+            reset_to_state: :class:`TensorState`. The state to reset tensor to.
             training_stage: :class:`TrainingStage`.
             is_allreduce: bool. Whether to do allreduce(reduce scatter).
                 Notice that because user may use gradient checkpointing, the is_allreduce
@@ -523,7 +523,7 @@ class PatrickStarClient(object):
             global_timer.my_timer.start_profile("CLIENT_release_dist")
         rank = get_rank()
 
-        assert isinstance(reset_to_status, TensorStatus)
+        assert isinstance(reset_to_state, TensorState)
         assert (
             training_stage == TrainingStage.FWD or training_stage == TrainingStage.BWD
         )
@@ -535,14 +535,14 @@ class PatrickStarClient(object):
         local_chunk_id = chunk_id_list[rank]
 
         logger.debug(
-            f"rank {rank} release tensor {param.ps_attr.name} of chunk_id {chunk_id} to {reset_to_status}"
+            f"rank {rank} release tensor {param.ps_attr.name} of chunk_id {chunk_id} to {reset_to_state}"
         )
 
-        # Update the status of tensor and chunk.
-        self.chunk_list.update_status(
-            chunk_id, param.ps_attr.get_status(access_type), reset_to_status
+        # Update the state of tensor and chunk.
+        self.chunk_list.update_state(
+            chunk_id, param.ps_attr.get_state(access_type), reset_to_state
         )
-        param.ps_attr.set_status(reset_to_status, access_type)
+        param.ps_attr.set_state(reset_to_state, access_type)
 
         if access_type == AccessType.DATA:
             # NOTE(jiaruifang) device must be the same as the origin param.
@@ -556,24 +556,24 @@ class PatrickStarClient(object):
         # Check if we finished using all tensors in all chunks of the chunk group,
         # then we can release the remote chunks.
         # The condition for releasing chunks are:
-        #     FWD: All non-dummy chunks are of status HOLD_AFTER_FWD;
-        #     BWD: All non-dummy chunks are of status HOLD_AFTER_BWD.
+        #     FWD: All non-dummy chunks are of state HOLD_AFTER_FWD;
+        #     BWD: All non-dummy chunks are of state HOLD_AFTER_BWD.
         world_size = get_world_size()
         if world_size > 1:
             all_chunks_ready = True
             for i in chunk_id_list:
                 if training_stage == TrainingStage.FWD:
                     if (
-                        not self.chunk_list[i].all_tensor_status(
-                            TensorStatus.HOLD_AFTER_FWD
+                        not self.chunk_list[i].all_tensor_state(
+                            TensorState.HOLD_AFTER_FWD
                         )
                         and not self.chunk_list[i].is_dummy()
                     ):
                         all_chunks_ready = False
                 elif training_stage == TrainingStage.BWD:
                     if (
-                        not self.chunk_list[i].all_tensor_status(
-                            TensorStatus.HOLD_AFTER_BWD
+                        not self.chunk_list[i].all_tensor_state(
+                            TensorState.HOLD_AFTER_BWD
                         )
                         and not self.chunk_list[i].is_dummy()
                     ):
@@ -618,7 +618,7 @@ class PatrickStarClient(object):
                     if i != local_chunk_id:
                         logger.debug(f"rank {rank} remove payload of chunk_id {i}")
                         self.chunk_list[i].release_payload()
-                        self.set_all_tensors_status_in_chunk(i, TensorStatus.FREE)
+                        self.set_all_tensors_state_in_chunk(i, TensorState.FREE)
 
         if self._time_profile:
             global_timer.my_timer.finish_profile("CLIENT_release_dist")
@@ -627,7 +627,7 @@ class PatrickStarClient(object):
         self,
         param: torch.nn.Parameter,
         access_type: AccessType,
-        reset_to_status: TensorStatus = TensorStatus.HOLD,
+        reset_to_state: TensorState = TensorState.HOLD,
     ):
         r"""Release the param in standalone environment.
 
@@ -635,31 +635,31 @@ class PatrickStarClient(object):
         stay in the current compute device.
 
         Steps:
-            1. Update the status of tensor and chunk.
+            1. Update the state of tensor and chunk.
             2. If the chunk can be released released the payload.
 
         Args:
             param: :class:`torch.nn.Parameter`.
             access_type: :class:`AccessType`.
-            reset_to_status: :class:`TensorStatus`. The status to reset tensor to.
+            reset_to_state: :class:`TensorState`. The state to reset tensor to.
         """
         if param.ps_attr.param_type == ParamType.TORCH_BASED:
             return
         if self._time_profile:
             global_timer.my_timer.start_profile("CLIENT_release")
         rank = self.local_rank
-        assert isinstance(reset_to_status, TensorStatus)
+        assert isinstance(reset_to_state, TensorState)
 
         chunk_id = self.chunk_tensor_index.get_chunk_id(param, access_type)
         logger.debug(
-            f"rank {rank} release a tensor of {access_type} chunk_id {chunk_id} to {reset_to_status}"
+            f"rank {rank} release a tensor of {access_type} chunk_id {chunk_id} to {reset_to_state}"
         )
 
-        # Update the status of tensor and chunk.
-        self.chunk_list.update_status(
-            chunk_id, param.ps_attr.get_status(access_type), reset_to_status
+        # Update the state of tensor and chunk.
+        self.chunk_list.update_state(
+            chunk_id, param.ps_attr.get_state(access_type), reset_to_state
         )
-        param.ps_attr.set_status(reset_to_status, access_type)
+        param.ps_attr.set_state(reset_to_state, access_type)
 
         if access_type == AccessType.DATA:
             # NOTE(jiaruifang) device must be the same as the origin param.
@@ -676,17 +676,17 @@ class PatrickStarClient(object):
     def release_data(
         self,
         param: torch.nn.Parameter,
-        reset_to_status: TensorStatus = TensorStatus.HOLD,
+        reset_to_state: TensorState = TensorState.HOLD,
     ):
         r"""release the param tensor to FREE or HOLD"""
-        self.release(param, AccessType.DATA, reset_to_status)
+        self.release(param, AccessType.DATA, reset_to_state)
 
     def release_grad(
         self,
         param: torch.nn.Parameter,
-        reset_to_status: TensorStatus = TensorStatus.HOLD,
+        reset_to_state: TensorState = TensorState.HOLD,
     ):
-        self.release(param, AccessType.GRAD, reset_to_status)
+        self.release(param, AccessType.GRAD, reset_to_state)
 
     def reset(self):
         raise NotImplementedError
@@ -706,7 +706,7 @@ class PatrickStarClient(object):
                 assert comm_info is not None
 
                 logger.info(
-                    f"Chunk id {chunk.chunk_id}, status {chunk.get_status()}, "
+                    f"Chunk id {chunk.chunk_id}, state {chunk.get_state()}, "
                     f"comm info {comm_info}, "
                     f"capacity {chunk.capacity / 1024 / 1024} M elems, "
                     f"dtype {chunk.data_type} device {chunk.get_device()}"
@@ -718,7 +718,7 @@ class PatrickStarClient(object):
                     logger.debug(
                         f"** tensor: chunk_id {chunk_id}, start {info.start_offset}, "
                         f"end {info.start_offset + info.numel}, size {info.numel}, "
-                        f"tensor_id {info.tensor_id}, status {info.status()}, name {info.tensor_name}"
+                        f"tensor_id {info.tensor_id}, state {info.state()}, name {info.tensor_name}"
                     )
                 overall_size += chunk.get_chunk_space()
 
