@@ -91,7 +91,7 @@ BSD 3-Clause License
 ```
 @article{fang2021patrickstar,
   title={PatrickStar: Parallel Training of Pre-trained Models via a Chunk-based Memory Management},
-  author={Fang, Jiarui and Yu, Yang and Li, Shenggui and You, Yang and Zhou, Jie},
+  author={Fang, Jiarui and Yu, Yang and Zhu, Zilin and Li, Shenggui and You, Yang and Zhou, Jie},
   journal={arXiv preprint arXiv:2108.05818},
   year={2021}
 }

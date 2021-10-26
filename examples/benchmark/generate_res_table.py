@@ -27,9 +27,9 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 # SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-from process_logs import collect_info_from_dir
 import os
 import collections
+from process_logs import collect_info_from_dir
 
 if __name__ == "__main__":
     overall_res_dict = {}
