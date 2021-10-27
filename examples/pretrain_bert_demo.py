@@ -39,10 +39,6 @@ import numpy as np
 import transformers
 from transformers import BertConfig
 
-# from transformers BertForSequenceClassification
-# from ps_modeling_bert import BertForSequenceClassification
-
-
 import patrickstar.utils.global_timer as global_timer
 from data_loader import get_bert_data_loader
 from patrickstar.profiler import profiler
@@ -97,27 +93,6 @@ def _add_patrick_star_args(parser):
         "--with_mem_profiler",
         action="store_true",
         help="Profiling memory usage.",
-    )
-    group.add_argument(
-        "--overall_gpu_mem_ratio",
-        type=float,
-        default=0.8,
-        help="Used GPU memory in manager / total gpu memory.",
-    )
-    group.add_argument(
-        "--overall_cpu_mem_ratio",
-        type=float,
-        default=0.8,
-        help="Used CPU memory in manager / total gpu memory.",
-    )
-    group.add_argument(
-        "--warmup_gpu_chunk_mem_ratio",
-        type=float,
-        default=0.4,
-        help="warmup used gpu memory ratio.",
-    )
-    group.add_argument(
-        "--margin_use_ratio", type=float, default=0.7, help="GPU margin use ratio"
     )
     group.add_argument(
         "--init_loss_scale_power",
