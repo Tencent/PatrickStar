@@ -471,6 +471,8 @@ if __name__ == "__main__":
     # HIDDEN_DIM 1024, batch 16, seqence_len 1024, ckp True.
     # PatrickStar is able to run the training, while PyTorch failed.
 
+    # You could set the logger level to INFO to view more runtime
+    # information.
     logger.setLevel(logging.WARNING)
     if not torch.distributed.is_initialized():
         torch.distributed.init_process_group(
