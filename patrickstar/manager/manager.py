@@ -29,12 +29,17 @@
 
 
 import time
-import psutil
 import torch
 
 from patrickstar.core.const import TrainingStage
 from patrickstar.profiler import profiler
-from patrickstar.utils import get_sys_memory_used, get_world_size, SingletonMeta, logger
+from patrickstar.utils import (
+    get_memory_info,
+    get_sys_memory_used,
+    get_world_size,
+    SingletonMeta,
+    logger,
+)
 
 
 class Metronome(object):
@@ -89,6 +94,7 @@ class PatrickStarManager(metaclass=SingletonMeta):
             self.use_fake_dist = False
             self.always_warmup = False
 
+        mem_info = get_memory_info()
         if self.use_fake_dist:
             # Fake distribtued mode: all processes share the same GPU.
             self._overall_gpu_mem = (
@@ -97,9 +103,7 @@ class PatrickStarManager(metaclass=SingletonMeta):
                 / get_world_size()
             )
             self._overall_cpu_mem = (
-                psutil.virtual_memory().total
-                * self._overall_cpu_mem_ratio
-                / get_world_size()
+                mem_info.total * self._overall_cpu_mem_ratio / get_world_size()
             )
         else:
             self._overall_gpu_mem = (
@@ -107,9 +111,7 @@ class PatrickStarManager(metaclass=SingletonMeta):
                 * self._overall_gpu_mem_ratio
             )
             self._overall_cpu_mem = (
-                psutil.virtual_memory().total
-                * self._overall_cpu_mem_ratio
-                / get_world_size()
+                mem_info.total * self._overall_cpu_mem_ratio / get_world_size()
             )
 
         logger.info(
