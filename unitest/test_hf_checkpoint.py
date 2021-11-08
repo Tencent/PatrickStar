@@ -133,12 +133,12 @@ def bert_model(
     assert loss3 == loss0, f"{loss3} vs {loss0}"
 
 
-class TestModelInitContext(unittest.TestCase):
+class TestHfCheckpointContext(unittest.TestCase):
     def setUp(self):
         pass
 
     @distributed_test(world_size=[1], backend="gloo", use_fake_dist=False)
-    def test_checkpoint(self):
+    def test_hf_checkpoint(self):
         # 0.11B
         hidden_dim = 768
         sequence_length = 512

@@ -180,7 +180,7 @@ def bert_model(
     assert loss1 == loss3, f"Optimizer checkpoint error. {loss1} vs {loss3}"
 
 
-class TestModelInitContext(unittest.TestCase):
+class TestCheckpointContext(unittest.TestCase):
     def setUp(self):
         pass
 
