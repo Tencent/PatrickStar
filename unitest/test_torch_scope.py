@@ -27,12 +27,32 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 # SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-from .chunk_data import Chunk
-from .chunk_list import ChunkList
-from .chunk_tensor_index import ChunkTensorIndex
-from .client import PatrickStarClient
-from .const import AccessType, ChunkState, TensorState, TrainingStage, ChunkType
-from .hook import setup_patrickstar_hooks
-from .parameter import PSParameter, register_param, is_param_registered, ParamType
-from .preprocess import PSPreProcessCtx, torch_scope
-from .checkpoint import checkpoint
+import unittest
+
+import torch
+
+from common import distributed_test
+from patrickstar.core import PatrickStarClient, PSPreProcessCtx, torch_scope, ParamType
+
+
+class TestTorchScopeContext(unittest.TestCase):
+    def setUp(self):
+        pass
+
+    @distributed_test(world_size=[1])
+    def test_torch_scope(self):
+        def model_provider():
+            with torch_scope():
+                return torch.nn.Linear(5, 10)
+
+        default_chunk_size = 1 * 1024 * 1024
+        client = PatrickStarClient(0, default_chunk_size)
+
+        with PSPreProcessCtx(client, dtype=torch.float):
+            ps_model = model_provider()
+
+        assert ps_model.weight.ps_attr.param_type == ParamType.TORCH_BASED
+
+
+if __name__ == "__main__":
+    unittest.main()
