@@ -38,7 +38,7 @@ from patrickstar.core import PatrickStarClient
 from patrickstar.ops import FP16Adam
 
 
-class TestModelInitContext(unittest.TestCase):
+class TestOptimizerInitContext(unittest.TestCase):
     def setUp(self):
         pass
 
@@ -61,5 +61,4 @@ class TestModelInitContext(unittest.TestCase):
 
 
 if __name__ == "__main__":
-
     unittest.main()
