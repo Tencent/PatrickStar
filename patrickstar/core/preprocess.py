@@ -26,7 +26,7 @@
 # ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 # SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-
+import contextlib
 import functools
 
 import torch
@@ -73,6 +73,19 @@ def new_cpu_tensor(cls, *args):
     device = torch.device("cpu:0")
     tensor = torch.ones((1, 1), device=device).new_empty(*args)
     return tensor
+
+
+USE_CHUNK = True
+
+
+@contextlib.contextmanager
+def torch_scope():
+    r"""All parameters initialized in this scope will not be managed in chunks."""
+    global USE_CHUNK
+    old_val = USE_CHUNK
+    USE_CHUNK = False
+    yield
+    USE_CHUNK = old_val
 
 
 # Inserts _post_init_method at the end of init method
@@ -326,6 +339,12 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
                 return
 
         print_rank(f"Converting Params in {module.__class__.__name__}", force=False)
+
+        if not USE_CHUNK:
+            for name, param in module.named_parameters(recurse=False):
+                name = f"{module.__class__.__name__}.{name}_{self.param_idx}"
+                register_param(param, ParamType.TORCH_BASED, torch.float, name)
+            return
 
         # The granularity of `post_init_method` is nn.Module, e.g. BertAttention.
         # For every process, we will initialize the params.
