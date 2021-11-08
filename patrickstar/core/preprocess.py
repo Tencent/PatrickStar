@@ -88,6 +88,30 @@ def torch_scope():
     USE_CHUNK = old_val
 
 
+def cast_forward(module, dtype):
+    if not isinstance(dtype, torch.dtype):
+        raise ValueError("dtype should be of torch.dtype.")
+
+    old_forward = module.forward
+
+    def forward(*args, **kwargs):
+        casted_args = []
+        for arg in args:
+            if isinstance(arg, torch.Tensor) and torch.is_floating_point(arg):
+                casted_args.append(arg.to(dtype))
+            else:
+                casted_args.append(arg)
+        casted_kwargs = {}
+        for k, v in kwargs.items():
+            if isinstance(v, torch.Tensor) and torch.is_floating_point(v):
+                casted_kwargs[k] = v.to(dtype)
+            else:
+                casted_kwargs[k] = v
+        return old_forward(*casted_args, **casted_kwargs)
+
+    module.forward = forward
+
+
 # Inserts _post_init_method at the end of init method
 # for all sub classes of torch.nn.Module
 class InsertPostInitMethodToModuleSubClasses(object):
@@ -344,6 +368,9 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
             for name, param in module.named_parameters(recurse=False):
                 name = f"{module.__class__.__name__}.{name}_{self.param_idx}"
                 register_param(param, ParamType.TORCH_BASED, torch.float, name)
+
+            # We need to cast the inputs to fp32 for the unmanaged modules.
+            cast_forward(module, torch.float)
             return
 
         # The granularity of `post_init_method` is nn.Module, e.g. BertAttention.
@@ -403,3 +430,5 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
             else:
                 param_fp16.ps_attr._is_local = True
                 param_fp32.ps_attr._is_local = True
+
+        cast_forward(module, torch.half)
