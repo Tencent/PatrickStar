@@ -38,7 +38,7 @@ from patrickstar.core.const import TensorState, AccessType, TrainingStage
 from patrickstar.core.parameter import register_param, ParamType
 from patrickstar.manager import PatrickStarManager
 import patrickstar.utils.global_timer as global_timer
-from patrickstar.utils import logger, get_rank
+from patrickstar.utils import logger, get_rank, close_asyn_mem_monitor
 from .chunk_io_buff import FP32ChunkReadBuffer, FP16ChunkWriteBuffer
 from .op_builder.cpu_adam import CPUAdamBuilder
 
@@ -615,6 +615,7 @@ class FP16Adam(torch.optim.Optimizer):
 
         if mgr.is_warmup_training():
             self.client.chunk_list.display_access_info()
+            close_asyn_mem_monitor()
             mgr.is_warmup = False
             logger.info("----------------- WARMUP PHASE OVER -----------------")
 

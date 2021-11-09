@@ -39,7 +39,7 @@ from patrickstar.core.hook import (
 from patrickstar.utils import get_sys_memory_used, logger
 
 from patrickstar.profiler import profiler
-from patrickstar.utils.memory_monitor import AsyncMemoryMonitor
+from patrickstar.utils.memory_monitor import max_mem_usage_period
 
 
 def _cur_mem_usage():
@@ -52,19 +52,6 @@ def _cur_mem_usage():
     return gpu_mem_used
 
 
-def _max_mem_usage_period():
-    """
-    A function used to find the max memory usage during a period time by sampling,
-    between now and the perivous call of this function.
-    ret:
-        the max GPU memory used during this period
-    """
-    monitor = AsyncMemoryMonitor(10)
-    max_mem = monitor.finish()
-    monitor.start()
-    return max_mem
-
-
 def _record_mem_stats():
     """
     Record memory statistics at this moment for the profiler.
@@ -73,7 +60,7 @@ def _record_mem_stats():
     # In case of an operator running too short,
     # the sampler dose not capture any information.
     # we add mem of cur mom as the default memory usage of the period.
-    max_mem_between_cur_prev = max(_max_mem_usage_period(), mem_cur_mon)
+    max_mem_between_cur_prev = max(max_mem_usage_period(), mem_cur_mon)
     profiler.gpu_memory_used.append(
         (None, time.time(), max_mem_between_cur_prev, mem_cur_mon)
     )

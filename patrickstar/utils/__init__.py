@@ -31,5 +31,11 @@ from .distributed import get_world_size, get_rank
 from .helper import getsizeof
 from .logging import log_dist, logger, print_rank
 from .memory import get_memory_info
-from .memory_monitor import see_memory_usage, get_sys_memory_used, AsyncMemoryMonitor
+from .memory_monitor import (
+    see_memory_usage,
+    get_sys_memory_used,
+    AsyncMemoryMonitor,
+    max_mem_usage_period,
+    close_asyn_mem_monitor,
+)
 from .singleton_meta import SingletonMeta

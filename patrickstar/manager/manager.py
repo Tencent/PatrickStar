@@ -39,6 +39,7 @@ from patrickstar.utils import (
     get_world_size,
     SingletonMeta,
     logger,
+    max_mem_usage_period,
 )
 
 
@@ -224,6 +225,9 @@ class PatrickStarManager(metaclass=SingletonMeta):
             )
 
         if self.is_warmup:
+            # max_mem_perid involves temp buff used inside an operator.
+            max_mem_period = max_mem_usage_period()
+            gpu_used = max(max_mem_period, gpu_used)
             self.gpu_used_list.append(gpu_used)
             self.gpu_chunk_used_list.append(self.gpu_chunk_used_mem)
             self.gpu_sys_used_list.append((gpu_used - self.gpu_chunk_used_mem))
@@ -251,11 +255,11 @@ class PatrickStarManager(metaclass=SingletonMeta):
             )
             if gpu_next_mom_ava_chunk_mem < gpu_cur_mom_used_chunk_mem:
                 offload_size = gpu_cur_mom_used_chunk_mem - gpu_next_mom_ava_chunk_mem
-                # NOTE() Here will be GPU <-> CPU memory movement.
+                # NOTE() Here will lead to GPU <-> CPU memory movement.
                 client.chunk_list.make_room(offload_size, gpu_device)
 
             # Calibrate the GPU sys used memory.
-            self.gpu_sys_used_list[cur_mom] = gpu_used - self.gpu_chunk_used_mem
+            # self.gpu_sys_used_list[cur_mom] = gpu_used - self.gpu_chunk_used_mem
 
         self.metronome.tiktac()
 
@@ -336,10 +340,10 @@ class PatrickStarManager(metaclass=SingletonMeta):
                     next_mom = self.metronome.next_moment()
                     cur_mom = self.metronome.moment()
                     next_mom_ava_mem = (
-                        self._overall_gpu_mem - 1.5 * self.gpu_sys_used_list[next_mom]
+                        self._overall_gpu_mem - self.gpu_sys_used_list[next_mom]
                     )
                     cur_mom_ava_mem = (
-                        self._overall_gpu_mem - 1.5 * self.gpu_sys_used_list[cur_mom]
+                        self._overall_gpu_mem - self.gpu_sys_used_list[cur_mom]
                     )
                     return (
                         min(next_mom_ava_mem, cur_mom_ava_mem)
@@ -349,10 +353,10 @@ class PatrickStarManager(metaclass=SingletonMeta):
                     next_mom = self.metronome.next_moment()
                     cur_mom = self.metronome.moment()
                     next_mom_ava_mem = (
-                        self._overall_gpu_mem - 2 * self.gpu_sys_used_list[next_mom]
+                        self._overall_gpu_mem - self.gpu_sys_used_list[next_mom]
                     )
                     cur_mom_ava_mem = (
-                        self._overall_gpu_mem - 2 * self.gpu_sys_used_list[cur_mom]
+                        self._overall_gpu_mem - self.gpu_sys_used_list[cur_mom]
                     )
                     return (
                         min(next_mom_ava_mem, cur_mom_ava_mem)

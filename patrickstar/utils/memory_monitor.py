@@ -50,6 +50,9 @@ class AsyncMemoryMonitor(metaclass=SingletonMeta):
         self.monitor_thread = None
         self.interval = 1 / (10 ** power)
 
+    def set_interval(self, power: int):
+        self.interval = 1 / (10 ** power)
+
     def start(self):
         self.keep_measuring = True
         self.monitor_thread = self.executor.submit(self._measure_usage)
@@ -75,6 +78,24 @@ class AsyncMemoryMonitor(metaclass=SingletonMeta):
             sleep(self.interval)
 
         return max_usage
+
+
+def close_asyn_mem_monitor():
+    monitor = AsyncMemoryMonitor()
+    monitor.finish()
+
+
+def max_mem_usage_period(interval: int = None):
+    """
+    A function used to find the max memory usage during a period time by sampling,
+    between now and the perivous call of this function.
+    ret:
+        the max GPU memory used during this period
+    """
+    monitor = AsyncMemoryMonitor()
+    max_mem = monitor.finish()
+    monitor.start(interval)
+    return max_mem
 
 
 def get_sys_memory_used(device):
