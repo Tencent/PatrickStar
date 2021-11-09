@@ -65,6 +65,7 @@ class ChunkList(object):
         self._time_profile = True
         self.moments_cnt_of_iteration = None
         self.local_rank = local_rank
+        self.device = torch.device(f"cuda:{local_rank}")
 
     def chunk_ids_generator(self, chunk_type: ChunkType):
         r"""Return the chunk_id of all chunks with type `chunk_type`
@@ -226,9 +227,7 @@ class ChunkList(object):
         # to new device. However, the size of the chunk may be smaller than the ava_chunk_mem
         # of the new device and trigger bugs.
         new_device = (
-            torch.device("cpu")
-            if target_device.type == "cuda"
-            else torch.device(f"cuda:{self.local_rank}")
+            torch.device("cpu") if target_device.type == "cuda" else self.device
         )
 
         # Move the chunk to new device. If there are not enough space on the new device, abort.
@@ -255,9 +254,7 @@ class ChunkList(object):
         )
 
         new_device = (
-            torch.device("cpu")
-            if target_device.type == "cuda"
-            else torch.device(f"cuda:{self.local_rank}")
+            torch.device("cpu") if target_device.type == "cuda" else self.device
         )
 
         for idx in moved_list:
