@@ -32,7 +32,7 @@ from patrickstar.utils import close_asyn_mem_monitor
 from patrickstar.manager import PatrickStarManager
 
 
-def adam_warmup_warpper(func):
+def adam_warmup_wrapper(func):
     @functools.wraps(func)
     def wrapper(*args, **kw):
         retval = func(*args, **kw)
