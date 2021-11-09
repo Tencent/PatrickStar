@@ -130,14 +130,12 @@ def pre_sub_module_forward_function(sub_module, client, name):
     for _, param in sub_module.named_parameters(recurse=False):
         if param.ps_attr.param_type == ParamType.TORCH_BASED:
             continue
-        param.data = client.access_dist(
-            param, AccessType.DATA, torch.device(f"cuda:{client.local_rank}")
-        )
+        param.data = client.access_dist(param, AccessType.DATA, client.device)
         flag = True
     # TODO(zilinzhu) Currently we move all buffers to GPU as the buffer size is
     # relatively small. Maybe find a better way to deal with them.
     for _, buffer in sub_module.named_buffers(recurse=False):
-        buffer.data = buffer.data.to(torch.device(f"cuda:{client.local_rank}"))
+        buffer.data = buffer.data.to(client.device)
     if flag:
         mgr = PatrickStarManager()
         mgr.tiktac(client)
@@ -176,9 +174,7 @@ def pre_sub_module_backward_function(sub_module, client, name):
         rank = get_rank()
         logger.debug(f"rank {rank} BWD pre {name}.{sub_name}")
         if param.ps_attr.data_type == torch.half:
-            tmp_tensor = client.access_dist(
-                param, AccessType.DATA, torch.device(f"cuda:{client.local_rank}")
-            )
+            tmp_tensor = client.access_dist(param, AccessType.DATA, client.device)
             param.data = tmp_tensor
 
             # NOTE() bwd first visits this param

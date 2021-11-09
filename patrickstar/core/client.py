@@ -48,6 +48,7 @@ class PatrickStarClient(object):
         self.pid = os.getpid()
 
         self.local_rank = rank
+        self.device = torch.device(f"cuda:{rank}")
 
         self.module = None
 
@@ -588,9 +589,7 @@ class PatrickStarClient(object):
                     assert self.chunk_list[local_chunk_id].payload is not None
                     input_list = []
                     for i in chunk_id_list:
-                        self.chunk_list.access_chunk(
-                            i, torch.device(f"cuda:{self.local_rank}")
-                        )
+                        self.chunk_list.access_chunk(i, self.device)
                         self.chunk_list[i].pin()
                         input_list.append(self.chunk_list[i].payload)
                     torch.distributed.reduce_scatter(

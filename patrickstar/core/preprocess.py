@@ -26,7 +26,7 @@
 # ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 # SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-
+import contextlib
 import functools
 
 import torch
@@ -73,6 +73,43 @@ def new_cpu_tensor(cls, *args):
     device = torch.device("cpu:0")
     tensor = torch.ones((1, 1), device=device).new_empty(*args)
     return tensor
+
+
+USE_CHUNK = True
+
+
+@contextlib.contextmanager
+def torch_scope():
+    r"""All parameters initialized in this scope will not be managed in chunks."""
+    global USE_CHUNK
+    old_val = USE_CHUNK
+    USE_CHUNK = False
+    yield
+    USE_CHUNK = old_val
+
+
+def cast_forward(module, dtype):
+    if not isinstance(dtype, torch.dtype):
+        raise ValueError("dtype should be of torch.dtype.")
+
+    old_forward = module.forward
+
+    def forward(*args, **kwargs):
+        casted_args = []
+        for arg in args:
+            if isinstance(arg, torch.Tensor) and torch.is_floating_point(arg):
+                casted_args.append(arg.to(dtype))
+            else:
+                casted_args.append(arg)
+        casted_kwargs = {}
+        for k, v in kwargs.items():
+            if isinstance(v, torch.Tensor) and torch.is_floating_point(v):
+                casted_kwargs[k] = v.to(dtype)
+            else:
+                casted_kwargs[k] = v
+        return old_forward(*casted_args, **casted_kwargs)
+
+    module.forward = forward
 
 
 # Inserts _post_init_method at the end of init method
@@ -327,6 +364,15 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
 
         print_rank(f"Converting Params in {module.__class__.__name__}", force=False)
 
+        if not USE_CHUNK:
+            for name, param in module.named_parameters(recurse=False):
+                name = f"{module.__class__.__name__}.{name}_{self.param_idx}"
+                register_param(param, ParamType.TORCH_BASED, torch.float, name)
+
+            # We need to cast the inputs to fp32 for the unmanaged modules.
+            cast_forward(module, torch.float)
+            return
+
         # The granularity of `post_init_method` is nn.Module, e.g. BertAttention.
         # For every process, we will initialize the params.
         # NOTE() The order of params in model initialization is a bit different from the
@@ -384,3 +430,5 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
             else:
                 param_fp16.ps_attr._is_local = True
                 param_fp32.ps_attr._is_local = True
+
+        cast_forward(module, torch.half)
