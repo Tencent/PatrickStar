@@ -94,7 +94,7 @@ def max_mem_usage_period(interval: int = None):
     """
     monitor = AsyncMemoryMonitor()
     max_mem = monitor.finish()
-    monitor.start(interval)
+    monitor.start()
     return max_mem
 
 
