@@ -40,7 +40,7 @@ import patrickstar.utils.global_timer as global_timer
 from patrickstar.utils import logger, get_rank
 from .chunk_io_buff import FP32ChunkReadBuffer, FP16ChunkWriteBuffer
 from .op_builder.cpu_adam import CPUAdamBuilder
-from patrickstar.core.warmup_handler import adam_warmup_warpper
+from patrickstar.core.warmup_handler import adam_warmup_wrapper
 
 
 def get_real_data_tensor(param):
@@ -478,7 +478,7 @@ class FP16Adam(torch.optim.Optimizer):
         write_chunk_buff.reset()
         read_chunk_buff.reset()
 
-    @adam_warmup_warpper
+    @adam_warmup_wrapper
     @torch.no_grad()
     def step(self, closure=None):
         """Performs a single optimization step.
