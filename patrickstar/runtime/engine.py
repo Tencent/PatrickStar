@@ -33,7 +33,7 @@ from patrickstar.core import ChunkState, TensorState, TrainingStage, ParamType
 from patrickstar.fp16 import LossScaler, DynamicLossScaler
 from patrickstar.manager import PatrickStarManager
 from patrickstar.ops import FP16Adam
-from patrickstar.utils import logger, global_timer, get_space_of
+from patrickstar.utils import logger, global_timer
 
 from .checkpoint import state_dict, load_state_dict
 
@@ -128,18 +128,15 @@ class PatrickStarEngine(torch.nn.Module):
         logger.info("PatrickStarEngine initialized.")
 
     def _move_torch_parts_to_gpu(self, model):
-        mgr = PatrickStarManager()
         # TODO(zilinzhu) Currently we move all buffers to GPU as the buffer size is
         # relatively small. Maybe find a better way to deal with them.
         for buffer in model.buffers():
             buffer.data = buffer.data.to(self.client.device)
-            mgr.add("cuda", get_space_of(buffer.data))
         for name, param in model.named_parameters():
             if param.ps_attr.param_type == ParamType.TORCH_BASED:
                 if ".embedding." in name:
                     continue
                 param.data = param.data.to(self.client.device)
-                mgr.add("cuda", get_space_of(param.data))
 
     def _reset_before_forward(self):
         mgr = PatrickStarManager()

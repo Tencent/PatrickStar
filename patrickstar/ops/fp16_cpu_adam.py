@@ -30,7 +30,6 @@
 from copy import deepcopy
 import math
 from typing import List
-from patrickstar.utils.helper import get_space_of
 import torch
 
 from patrickstar.core import ChunkType
@@ -117,7 +116,6 @@ class FP16Adam(torch.optim.Optimizer):
         assert (
             len(self.param_groups) == 1
         ), "Only support one param group at the moment."
-        mgr = PatrickStarManager()
         # Eager state initialization, different from Pytorch
         for group in self.param_groups:
             for p in group["params"]:
@@ -139,9 +137,6 @@ class FP16Adam(torch.optim.Optimizer):
                         register_param(
                             state["exp_avg_sq"], ParamType.TORCH_BASED, torch.float
                         )
-                        if p.device.type == "cuda":
-                            mgr.add("cuda", get_space_of(state["exp_avg"].data))
-                            mgr.add("cuda", get_space_of(state["exp_avg_sq"].data))
                 elif p.ps_attr.is_local():
                     # Only create the local optimizer state params.
                     name = p.ps_attr.name
