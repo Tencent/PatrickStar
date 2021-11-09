@@ -132,10 +132,6 @@ def pre_sub_module_forward_function(sub_module, client, name):
             continue
         param.data = client.access_dist(param, AccessType.DATA, client.device)
         flag = True
-    # TODO(zilinzhu) Currently we move all buffers to GPU as the buffer size is
-    # relatively small. Maybe find a better way to deal with them.
-    for _, buffer in sub_module.named_buffers(recurse=False):
-        buffer.data = buffer.data.to(client.device)
     if flag:
         mgr = PatrickStarManager()
         mgr.tiktac(client)
