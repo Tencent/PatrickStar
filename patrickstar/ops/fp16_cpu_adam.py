@@ -30,7 +30,6 @@
 from copy import deepcopy
 import math
 from typing import List
-
 import torch
 
 from patrickstar.core import ChunkType
@@ -38,9 +37,10 @@ from patrickstar.core.const import TensorState, AccessType, TrainingStage
 from patrickstar.core.parameter import register_param, ParamType
 from patrickstar.manager import PatrickStarManager
 import patrickstar.utils.global_timer as global_timer
-from patrickstar.utils import logger, get_rank, close_asyn_mem_monitor
+from patrickstar.utils import logger, get_rank
 from .chunk_io_buff import FP32ChunkReadBuffer, FP16ChunkWriteBuffer
 from .op_builder.cpu_adam import CPUAdamBuilder
+from patrickstar.core.warmup_handler import adam_warmup_warpper
 
 
 def get_real_data_tensor(param):
@@ -478,6 +478,7 @@ class FP16Adam(torch.optim.Optimizer):
         write_chunk_buff.reset()
         read_chunk_buff.reset()
 
+    @adam_warmup_warpper
     @torch.no_grad()
     def step(self, closure=None):
         """Performs a single optimization step.
@@ -610,14 +611,6 @@ class FP16Adam(torch.optim.Optimizer):
             True,
             margin_chunk_num_for_gpu_adam,
         )
-
-        mgr = PatrickStarManager()
-
-        if mgr.is_warmup_training():
-            self.client.chunk_list.display_access_info()
-            close_asyn_mem_monitor()
-            mgr.is_warmup = False
-            logger.info("----------------- WARMUP PHASE OVER -----------------")
 
         if self.loss_scaler:
             self.loss_scaler.update_scale(False)
