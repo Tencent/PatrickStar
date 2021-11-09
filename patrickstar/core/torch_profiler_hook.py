@@ -39,13 +39,44 @@ from patrickstar.core.hook import (
 from patrickstar.utils import get_sys_memory_used, logger
 
 from patrickstar.profiler import profiler
+from patrickstar.utils.memory_monitor import AsyncMemoryMonitor
 
 
-def _update_global_var():
-    gpu_mem_used = get_sys_memory_used(
-        torch.device(f"cuda:{torch.cuda.current_device()}")
+def _cur_mem_usage():
+    """
+    A function used to sample memory usage at the moment
+    before and after an operator sharted and finished.
+    """
+    dev = torch.device(f"cuda:{torch.cuda.current_device()}")
+    gpu_mem_used = get_sys_memory_used(dev)
+    return gpu_mem_used
+
+
+def _max_mem_usage_period():
+    """
+    A function used to find the max memory usage during a period time by sampling,
+    between now and the perivous call of this function.
+    ret:
+        the max GPU memory used during this period
+    """
+    monitor = AsyncMemoryMonitor(10)
+    max_mem = monitor.finish()
+    monitor.start()
+    return max_mem
+
+
+def _record_mem_stats():
+    """
+    Record memory statistics at this moment for the profiler.
+    """
+    mem_cur_mon = _cur_mem_usage()
+    # In case of an operator running too short,
+    # the sampler dose not capture any information.
+    # we add mem of cur moment as the default memory usage of the period.
+    max_mem_between_cur_prev = max(_max_mem_usage_period(), mem_cur_mon)
+    profiler.gpu_memory_used.append(
+        (None, time.time(), max_mem_between_cur_prev, mem_cur_mon)
     )
-    profiler.gpu_memory_used.append((None, time.time(), gpu_mem_used))
 
 
 def _register_hooks_recursively(module, name=""):
@@ -63,16 +94,13 @@ def _register_hooks_recursively(module, name=""):
     ):
         return
 
-    def _pre_forward_module_hook(module, *args):
-        _update_global_var()
-
-    def _post_forward_module_hook(module, *args):
-        _update_global_var()
+    def _pre_post_forward_module_hook(module, *args):
+        _record_mem_stats()
 
     # The hook can modify the output
     def _pre_backward_module_hook(module, inputs, output):
         def _run_before_backward_function(sub_module):
-            _update_global_var()
+            _record_mem_stats()
 
         return _apply_to_tensors_only(
             module, PreBackwardFunction, _run_before_backward_function, output
@@ -80,14 +108,14 @@ def _register_hooks_recursively(module, name=""):
 
     def _post_backward_module_hook(module, inputs):
         def _run_after_backward_function(sub_module):
-            _update_global_var()
+            _record_mem_stats()
 
         return _apply_to_tensors_only(
             module, PostBackwardFunction, _run_after_backward_function, inputs
         )
 
-    module.register_forward_pre_hook(_pre_forward_module_hook)
-    module.register_forward_hook(_post_forward_module_hook)
+    module.register_forward_pre_hook(_pre_post_forward_module_hook)
+    module.register_forward_hook(_pre_post_forward_module_hook)
 
     module.register_forward_hook(_pre_backward_module_hook)
     module.register_forward_pre_hook(_post_backward_module_hook)

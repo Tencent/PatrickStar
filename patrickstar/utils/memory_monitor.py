@@ -31,9 +31,50 @@ import gc
 
 import psutil
 import torch
-
+from time import sleep
 from .distributed import get_rank, get_world_size
 from .memory import get_memory_info
+from .singleton_meta import SingletonMeta
+from concurrent.futures import ThreadPoolExecutor
+
+
+class AsyncMemoryMonitor(metaclass=SingletonMeta):
+    def __init__(self, power=3):
+        """
+        An Async Mem Monitor runing during computing.
+        Sampling GPU memory usage of the current GPU dev
+        at interval of 1/(10**power) sec.
+        """
+        self.keep_measuring = False
+        self.executor = ThreadPoolExecutor(max_workers=1)
+        self.monitor_thread = None
+        self.interval = 1 / (10 ** power)
+
+    def start(self):
+        self.keep_measuring = True
+        self.monitor_thread = self.executor.submit(self._measure_usage)
+
+    def finish(self):
+        if self.keep_measuring is False:
+            return 0
+        self.keep_measuring = False
+        max_usage = self.monitor_thread.result()
+        self.monitor_thread = None
+        return max_usage
+
+    def _measure_usage(self):
+        max_usage = 0
+        dev = torch.device(f"cuda:{torch.cuda.current_device()}")
+        while self.keep_measuring:
+            max_usage = max(
+                max_usage,
+                # resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+                get_sys_memory_used(dev),
+            )
+            # print(f"tmp max usage {max_usage}")
+            sleep(self.interval)
+
+        return max_usage
 
 
 def get_sys_memory_used(device):

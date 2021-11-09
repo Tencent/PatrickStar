@@ -27,13 +27,42 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 # SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import logging
 import unittest
 
+import torch
+from patrickstar.utils import AsyncMemoryMonitor, get_sys_memory_used
+
+
+class TestAsynMemoryMonitor(unittest.TestCase):
+    def setUp(self):
+        pass
+
+    def helper_func(self):
+        dev = torch.device("cuda:0")
+        m = 400
+        n = 500
+        k = 600
+        a = torch.randn(m, k, device=torch.device("cuda:0"))
+        b = torch.randn(k, n, device=torch.device("cuda:0"))
+        c = torch.randn(m, n, device=torch.device("cuda:0"))
+        print(f"mem usage before matmul: {get_sys_memory_used(dev)}")
+        start_mem = get_sys_memory_used(dev)
+        for i in range(10):
+            c += torch.matmul(a, b)
+        print(f"mem usage after matmul: {get_sys_memory_used(dev)}")
+        finish_mem = get_sys_memory_used(dev)
+        return max(start_mem, finish_mem)
+
+    def test_async_mem_monitor(self):
+        mem_monitor = AsyncMemoryMonitor()
+        mem_monitor.start()
+        max_mem_coarse = self.helper_func()
+        max_mem_fine = mem_monitor.finish()
+        self.assertTrue(max_mem_fine >= max_mem_coarse)
+        # max_mem fine 3760640, corse 2960384
+        # indicates the operator will generate singnificant temp buff.
+        print(f"max_mem fine {max_mem_fine}, corse {max_mem_coarse}")
+
+
 if __name__ == "__main__":
-    logging.basicConfig(
-        format="%(asctime)s,%(msecs)d %(levelname)-8s [%(filename)s:%(lineno)d] %(message)s",
-        datefmt="%Y-%m-%d:%H:%M:%S",
-        level=logging.DEBUG,
-    )
     unittest.main()
