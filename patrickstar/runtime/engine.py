@@ -39,7 +39,7 @@ from .checkpoint import state_dict, load_state_dict
 
 
 class PatrickStarEngine(torch.nn.Module):
-    r"""DeepSpeed engine for training."""
+    r"""patrickStar engine for training."""
 
     def __init__(self, model, client, config):
         super(PatrickStarEngine, self).__init__()

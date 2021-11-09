@@ -27,15 +27,37 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 # SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-from .distributed import get_world_size, get_rank
-from .helper import getsizeof
-from .logging import log_dist, logger, print_rank
-from .memory import get_memory_info
-from .memory_monitor import (
-    see_memory_usage,
-    get_sys_memory_used,
-    AsyncMemoryMonitor,
-    max_mem_usage_period,
-    close_asyn_mem_monitor,
-)
-from .singleton_meta import SingletonMeta
+import functools
+from patrickstar.utils import close_asyn_mem_monitor
+from patrickstar.manager import PatrickStarManager
+
+
+def adam_warmup_warpper(func):
+    @functools.wraps(func)
+    def wrapper(*args, **kw):
+        retval = func(*args, **kw)
+        mgr = PatrickStarManager()
+        if mgr.is_warmup_training():
+            # self.client.chunk_list.display_access_info()
+            close_asyn_mem_monitor()
+            mgr.is_warmup = False
+            print("----------------- WARMUP PHASE OVER -----------------")
+        return retval
+
+    return wrapper
+
+
+class WarmupHandler(object):
+    def __init__(self, client, warmup_steps: int = 1):
+        """
+        A handler to process warmup logic
+        args:
+            client: a patrickstar client.
+            warmup_steps: run how many steps during training for warmup.
+        """
+        pass
+
+    def process(step: int):
+        """
+        trigger warmup logic
+        """
