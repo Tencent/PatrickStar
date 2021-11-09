@@ -129,6 +129,8 @@ def pre_sub_module_forward_function(sub_module, client, name):
     )
     for _, param in sub_module.named_parameters(recurse=False):
         if param.ps_attr.param_type == ParamType.TORCH_BASED:
+            if sub_module.__class__.__name__ != "Embedding":
+                param.data = param.data.to(client.local_rank)
             continue
         param.data = client.access_dist(
             param, AccessType.DATA, torch.device(f"cuda:{client.local_rank}")
@@ -137,7 +139,7 @@ def pre_sub_module_forward_function(sub_module, client, name):
     # TODO(zilinzhu) Currently we move all buffers to GPU as the buffer size is
     # relatively small. Maybe find a better way to deal with them.
     for _, buffer in sub_module.named_buffers(recurse=False):
-        buffer.data = buffer.data.to(torch.device(f"cuda:{client.local_rank}"))
+        buffer.data = buffer.data.to(client.local_rank)
     if flag:
         mgr = PatrickStarManager()
         mgr.tiktac(client)
@@ -148,6 +150,8 @@ def post_sub_module_forward_function(sub_module, client, name):
     mgr = PatrickStarManager()
     for sub_name, param in sub_module.named_parameters(recurse=False):
         if param.ps_attr.param_type == ParamType.TORCH_BASED:
+            if sub_module.__class__.__name__ != "Embedding":
+                param.data = param.data.cpu()
             continue
         rank = get_rank()
         logger.debug(f"rank {rank} FWD post {name}.{sub_name}")
@@ -172,6 +176,10 @@ def pre_sub_module_backward_function(sub_module, client, name):
     flag = False
     for sub_name, param in sub_module.named_parameters(recurse=False):
         if param.ps_attr.param_type == ParamType.TORCH_BASED:
+            if sub_module.__class__.__name__ != "Embedding":
+                param.data = param.data.to(client.local_rank)
+                if param.grad is not None:
+                    param.grad = param.grad.to(client.local_rank)
             continue
         rank = get_rank()
         logger.debug(f"rank {rank} BWD pre {name}.{sub_name}")
@@ -197,6 +205,9 @@ def post_sub_module_backward_function(sub_module, client, name):
     mgr = PatrickStarManager()
     for sub_name, param in sub_module.named_parameters(recurse=False):
         if param.ps_attr.param_type == ParamType.TORCH_BASED:
+            if sub_module.__class__.__name__ != "Embedding":
+                param.data = param.data.cpu()
+                param.grad = param.grad.cpu()
             continue
         # NOTE() We add a fp16 or fp32 attribute to the ps_attr of param.
         # We should not use the data type of param.data in the condition judgment.
