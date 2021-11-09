@@ -27,37 +27,45 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 # SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import functools
-from patrickstar.utils import close_asyn_mem_monitor
-from patrickstar.manager import PatrickStarManager
+from .training_stage_mgr import TrainingStageMgr
 
 
-def adam_warmup_wrapper(func):
-    @functools.wraps(func)
-    def wrapper(*args, **kw):
-        retval = func(*args, **kw)
-        mgr = PatrickStarManager()
-        if mgr.is_warmup_training():
-            # self.client.chunk_list.display_access_info()
-            close_asyn_mem_monitor()
-            mgr.is_warmup = False
-            print("----------------- WARMUP PHASE OVER -----------------")
-        return retval
+class Metronome(object):
+    """
+    A metronome for memory stats sampling.
+    Tiktac before and after computing of an operator.
+    It also contain the training stage information.
+    """
 
-    return wrapper
+    def __init__(self):
+        self._moment = 0
+        self._total_moment = None
+        self.training_stage = TrainingStageMgr()
 
+    def is_warmup(self):
+        return self.training_stage.is_warmup
 
-class WarmupHandler(object):
-    def __init__(self, client, warmup_steps: int = 1):
-        """
-        A handler to process warmup logic
-        args:
-            client: a patrickstar client.
-            warmup_steps: run how many steps during training for warmup.
-        """
-        pass
+    def training_stage(self):
+        return self.training_stage.training_phase
 
-    def process(step: int):
-        """
-        trigger warmup logic
-        """
+    def get_total_mom(self):
+        assert self._total_moment is not None, "Don not use get_total during warmup"
+        return self._total_moment
+
+    def tiktac(self):
+        self._moment += 1
+
+    def moment(self):
+        return self._moment
+
+    def reset(self):
+        self._total_moment = self._moment
+        self._moment = 0
+
+    def next_moment(self):
+        assert self._total_moment is not None
+        return min(self._total_moment, self._moment + 1) % self._total_moment
+
+    def prev_moment(self):
+        assert self._total_moment is not None
+        return (max(0, self._moment - 1)) % self._total_moment

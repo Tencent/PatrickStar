@@ -27,37 +27,47 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 # SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import functools
-from patrickstar.utils import close_asyn_mem_monitor
-from patrickstar.manager import PatrickStarManager
+import unittest
+
+import torch
+from patrickstar.core.eviction_policy import LatestAccessChunkEvictionPolicy
+from patrickstar.core.chunk_data import Chunk
+from patrickstar.manager.metronome import Metronome
 
 
-def adam_warmup_wrapper(func):
-    @functools.wraps(func)
-    def wrapper(*args, **kw):
-        retval = func(*args, **kw)
-        mgr = PatrickStarManager()
-        if mgr.is_warmup_training():
-            # self.client.chunk_list.display_access_info()
-            close_asyn_mem_monitor()
-            mgr.is_warmup = False
-            print("----------------- WARMUP PHASE OVER -----------------")
-        return retval
-
-    return wrapper
-
-
-class WarmupHandler(object):
-    def __init__(self, client, warmup_steps: int = 1):
-        """
-        A handler to process warmup logic
-        args:
-            client: a patrickstar client.
-            warmup_steps: run how many steps during training for warmup.
-        """
+class TestEvictionPolicy(unittest.TestCase):
+    def setUp(self):
         pass
 
-    def process(step: int):
-        """
-        trigger warmup logic
-        """
+    def test_chunk_eviction(self):
+        id_to_chunk_list = {}
+        dev = torch.device("cpu:0")
+        id_to_chunk_list[0] = Chunk(10, torch.float, 0, 0, False)
+        id_to_chunk_list[0].allocate_payload(dev)
+        id_to_chunk_list[1] = Chunk(10, torch.float, 1, 0, False)
+        id_to_chunk_list[1].allocate_payload(dev)
+        metronome = Metronome()
+        metronome.training_stage.is_warmup = True
+        policy = LatestAccessChunkEvictionPolicy(metronome)
+
+        # trace chunk access
+        policy.trace_access(0, dev)
+        metronome.tiktac()
+        policy.trace_access(1, dev)
+        print(policy.chunk_access_dict)
+
+        # Finish warmup
+        metronome.training_stage.is_warmup = False
+        metronome.reset()
+
+        # Test eviction strategy
+        ret_list = policy.derive_eviction_list(id_to_chunk_list, 10, dev)
+        self.assertTrue(ret_list == [0])
+
+        metronome.tiktac()
+        ret_list = policy.derive_eviction_list(id_to_chunk_list, 10, dev)
+        self.assertTrue(ret_list == [1])
+
+
+if __name__ == "__main__":
+    unittest.main()

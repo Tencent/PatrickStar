@@ -27,37 +27,14 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 # SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import functools
-from patrickstar.utils import close_asyn_mem_monitor
-from patrickstar.manager import PatrickStarManager
+from patrickstar.core.const import TrainingStage
 
 
-def adam_warmup_wrapper(func):
-    @functools.wraps(func)
-    def wrapper(*args, **kw):
-        retval = func(*args, **kw)
-        mgr = PatrickStarManager()
-        if mgr.is_warmup_training():
-            # self.client.chunk_list.display_access_info()
-            close_asyn_mem_monitor()
-            mgr.is_warmup = False
-            print("----------------- WARMUP PHASE OVER -----------------")
-        return retval
-
-    return wrapper
-
-
-class WarmupHandler(object):
-    def __init__(self, client, warmup_steps: int = 1):
+class TrainingStageMgr:
+    def __init__(self):
         """
-        A handler to process warmup logic
-        args:
-            client: a patrickstar client.
-            warmup_steps: run how many steps during training for warmup.
+        Tell us in which stage the training are. (FWD, BWD, ADAM)
+        Also tell us whether in an warmup iteration.
         """
-        pass
-
-    def process(step: int):
-        """
-        trigger warmup logic
-        """
+        self.training_phase = TrainingStage.UNSTART
+        self.is_warmup = False
