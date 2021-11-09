@@ -32,12 +32,14 @@ from torch.utils.data import DataLoader
 from transformers import BertForSequenceClassification
 
 from patrickstar.runtime import initialize_engine
+from patrickstar.utils import get_rank
 
 from imdb_dataset import get_dataset
 
 
-# Uncomment this line when doing multiprocess training
+# Uncomment these lines when doing multiprocess training
 # torch.distributed.init_process_group(backend='nccl')
+# torch.cuda.set_device(get_rank())
 
 train_dataset, _, test_dataset = get_dataset("/root/aclImdb")
 
@@ -48,21 +50,16 @@ def model_func():
     return BertForSequenceClassification.from_pretrained("bert-base-uncased")
 
 
-LR = 5e-5
-BETAS = (0.9, 0.999)
-EPS = 1e-6
-WEIGHT_DECAY = 0
-
 config = {
     # The same format as optimizer config of DeepSpeed
     # https://www.deepspeed.ai/docs/config-json/#optimizer-parameters
     "optimizer": {
         "type": "Adam",
         "params": {
-            "lr": LR,
-            "betas": BETAS,
-            "eps": EPS,
-            "weight_decay": WEIGHT_DECAY,
+            "lr": 5e-5,
+            "betas": (0.9, 0.999),
+            "eps": 1e-6,
+            "weight_decay": 0,
             "use_hybrid_adam": True,
         },
     },
@@ -79,7 +76,9 @@ config = {
     "use_cpu_embedding": False,
 }
 
-model, optim = initialize_engine(model_func=model_func, local_rank=0, config=config)
+model, optim = initialize_engine(
+    model_func=model_func, local_rank=get_rank(), config=config
+)
 
 train_loader = DataLoader(train_dataset, batch_size=16, shuffle=True)
 

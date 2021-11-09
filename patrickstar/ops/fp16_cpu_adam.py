@@ -30,6 +30,7 @@
 from copy import deepcopy
 import math
 from typing import List
+from patrickstar.utils.helper import get_space_of
 import torch
 
 from patrickstar.core import ChunkType
@@ -52,9 +53,9 @@ def get_real_data_tensor(param):
         raise RuntimeError
 
 
-def zero_cpu_param(p):
+def zero_param(p):
     return torch.nn.Parameter(
-        torch.zeros_like(p, dtype=torch.float, device=torch.device("cpu:0")),
+        torch.zeros_like(p, dtype=torch.float),
         requires_grad=False,
     )
 
@@ -116,6 +117,7 @@ class FP16Adam(torch.optim.Optimizer):
         assert (
             len(self.param_groups) == 1
         ), "Only support one param group at the moment."
+        mgr = PatrickStarManager()
         # Eager state initialization, different from Pytorch
         for group in self.param_groups:
             for p in group["params"]:
@@ -129,14 +131,17 @@ class FP16Adam(torch.optim.Optimizer):
 
                 if p.ps_attr.param_type == ParamType.TORCH_BASED:
                     if p.requires_grad:
-                        state["exp_avg"] = zero_cpu_param(p)
+                        state["exp_avg"] = zero_param(p)
                         register_param(
                             state["exp_avg"], ParamType.TORCH_BASED, torch.float
                         )
-                        state["exp_avg_sq"] = zero_cpu_param(p)
+                        state["exp_avg_sq"] = zero_param(p)
                         register_param(
                             state["exp_avg_sq"], ParamType.TORCH_BASED, torch.float
                         )
+                        if p.device.type == "cuda":
+                            mgr.add("cuda", get_space_of(state["exp_avg"].data))
+                            mgr.add("cuda", get_space_of(state["exp_avg_sq"].data))
                 elif p.ps_attr.is_local():
                     # Only create the local optimizer state params.
                     name = p.ps_attr.name
@@ -354,7 +359,6 @@ class FP16Adam(torch.optim.Optimizer):
                 # If fp16_param is managed by native torch, it should be on CPU,
                 # because only cpu_embedding optimization are managed by native torch
                 # now and it is fp32.
-                assert fp16_param.data.device.type == "cpu"
                 assert fp32_param is None
                 fp32_param = fp16_param
                 # Here the grad is already of dtype fp32.

@@ -35,5 +35,17 @@ def getsizeof(data_type: torch.dtype):
         return 4
     elif data_type == torch.half:
         return 2
+    elif data_type == torch.int8:
+        return 1
+    elif data_type == torch.int16:
+        return 2
+    elif data_type == torch.int32:
+        return 4
+    elif data_type == torch.int64:
+        return 8
     else:
         raise TypeError(f"getsizeof dose not support data type {data_type}")
+
+
+def get_space_of(tensor):
+    return tensor.numel() * getsizeof(tensor.dtype)
