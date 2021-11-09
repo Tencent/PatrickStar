@@ -45,7 +45,7 @@ from patrickstar.utils.memory_monitor import AsyncMemoryMonitor
 def _cur_mem_usage():
     """
     A function used to sample memory usage at the moment
-    before and after an operator sharting and finishinig.
+    before and after an operator sharted and finished.
     """
     dev = torch.device(f"cuda:{torch.cuda.current_device()}")
     gpu_mem_used = get_sys_memory_used(dev)
@@ -72,7 +72,7 @@ def _record_mem_stats():
     mem_cur_mon = _cur_mem_usage()
     # In case of an operator running too short,
     # the sampler dose not capture any information.
-    # we add mem of cur mom as the default memory usage of the period.
+    # we add mem of cur moment as the default memory usage of the period.
     max_mem_between_cur_prev = max(_max_mem_usage_period(), mem_cur_mon)
     profiler.gpu_memory_used.append(
         (None, time.time(), max_mem_between_cur_prev, mem_cur_mon)
@@ -94,10 +94,7 @@ def _register_hooks_recursively(module, name=""):
     ):
         return
 
-    def _pre_forward_module_hook(module, *args):
-        _record_mem_stats()
-
-    def _post_forward_module_hook(module, *args):
+    def _pre_post_forward_module_hook(module, *args):
         _record_mem_stats()
 
     # The hook can modify the output
@@ -117,8 +114,8 @@ def _register_hooks_recursively(module, name=""):
             module, PostBackwardFunction, _run_after_backward_function, inputs
         )
 
-    module.register_forward_pre_hook(_pre_forward_module_hook)
-    module.register_forward_hook(_post_forward_module_hook)
+    module.register_forward_pre_hook(_pre_post_forward_module_hook)
+    module.register_forward_hook(_pre_post_forward_module_hook)
 
     module.register_forward_hook(_pre_backward_module_hook)
     module.register_forward_pre_hook(_post_backward_module_hook)
