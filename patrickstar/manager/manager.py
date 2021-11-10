@@ -162,7 +162,7 @@ class RuntimeMemTracer(metaclass=SingletonMeta):
     def get_margin_chunk_num_for_gpu_adam(self):
         return self._margin_chunk_num_for_gpu_adam
 
-    def tiktac(self, client):
+    def trace_memory(self, client):
         """Record the memory usage of the moment and increase moment counter."""
         if torch.distributed.is_initialized():
             rank = client.local_rank

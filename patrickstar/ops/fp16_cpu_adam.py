@@ -507,7 +507,7 @@ class FP16Adam(torch.optim.Optimizer):
         if profiler.started():
             profiler.stage_convert_time.append((time.time(), TrainingStage.ADAM))
         self.client.metronome.set_training_phase(TrainingStage.ADAM)
-        mgr.tiktac(self.client)
+        mgr.trace_memory(self.client)
 
         loss = None
         if closure is not None:

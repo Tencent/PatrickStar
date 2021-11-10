@@ -134,7 +134,7 @@ def pre_sub_module_forward_function(sub_module, client, name):
         flag = True
     if flag:
         mgr = RuntimeMemTracer()
-        mgr.tiktac(client)
+        mgr.trace_memory(client)
 
 
 # release submodule
@@ -159,7 +159,7 @@ def post_sub_module_forward_function(sub_module, client, name):
         if client.metronome.training_stage() == TrainingStage.FWD:
             param.ps_attr.fwd_used_cnt += 1
 
-    mgr.tiktac(client)
+    mgr.trace_memory(client)
 
 
 def pre_sub_module_backward_function(sub_module, client, name):
@@ -182,7 +182,7 @@ def pre_sub_module_backward_function(sub_module, client, name):
         flag = True
     if flag:
         mgr = RuntimeMemTracer()
-        mgr.tiktac(client)
+        mgr.trace_memory(client)
 
 
 def post_sub_module_backward_function(sub_module, client, name):
@@ -217,7 +217,7 @@ def post_sub_module_backward_function(sub_module, client, name):
             logger.debug(f"rank {rank} BWD post before release_dist {name}.{sub_name}")
             param.grad = None
 
-    mgr.tiktac(client)
+    mgr.trace_memory(client)
 
 
 def _register_hooks_recursively(module, client, name=""):
