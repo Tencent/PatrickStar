@@ -33,7 +33,7 @@ import unittest
 import torch
 
 from common import distributed_test
-from patrickstar import PatrickStarManager
+from patrickstar import RuntimeMemTracer
 from patrickstar.core import PatrickStarClient, AccessType, register_param, ChunkType
 from patrickstar.core.parameter import ParamType
 
@@ -45,7 +45,7 @@ class TestClientAccess(unittest.TestCase):
 
     @distributed_test(world_size=[1])
     def test_append_ps_tensor(self):
-        PatrickStarManager(0)
+        RuntimeMemTracer(0)
         self.client = PatrickStarClient(
             rank=0, default_chunk_size=self.default_chunk_size
         )

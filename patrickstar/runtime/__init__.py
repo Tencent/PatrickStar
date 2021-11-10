@@ -29,7 +29,7 @@
 
 import torch
 from patrickstar.core import PSPreProcessCtx, PatrickStarClient
-from patrickstar.manager import PatrickStarManager
+from patrickstar.manager import RuntimeMemTracer
 from patrickstar.utils import logger
 from .engine import PatrickStarEngine
 
@@ -82,7 +82,7 @@ def initialize_engine(model_func, local_rank, config=None, client=None):
     engine = PatrickStarEngine(model=model, client=client, config=config)
 
     # 开启预热优化
-    mgr = PatrickStarManager(local_rank=local_rank)
+    mgr = RuntimeMemTracer(local_rank=local_rank)
     mgr.start_train(
         param_fp16_chunk_size=client.param_fp16_chunks_max_mem_usage(),
         chunk_size=client.default_chunk_size,
