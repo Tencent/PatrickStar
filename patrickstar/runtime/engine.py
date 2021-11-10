@@ -36,6 +36,9 @@ from patrickstar.ops import FP16Adam
 from patrickstar.utils import logger, global_timer
 
 from .checkpoint import state_dict, load_state_dict
+from patrickstar.profiler import profiler
+from patrickstar.utils.memory_monitor import close_asyn_mem_monitor
+import time
 
 
 class PatrickStarEngine(torch.nn.Module):
@@ -125,6 +128,9 @@ class PatrickStarEngine(torch.nn.Module):
         )
 
         self.client.init(self.module, self.optimizer)
+        self.iteration_cnt_ = 0
+        # TODO(jiaruifang) pass in via config.
+        self.warmup_times = 1
         logger.info("PatrickStarEngine initialized.")
 
     def _move_torch_parts_to_gpu(self, model):
@@ -174,9 +180,18 @@ class PatrickStarEngine(torch.nn.Module):
             *inputs: Variable length input list
             **kwargs: variable length keyword arguments
         """
+        # warmup logic, we have to make sure a iteration run the entire FWD+BWD process.
+        # Considering the grad overflow situation.
+        if self.iteration_cnt_ == 0:
+            self.client.metronome.set_warmup(True)
+        if self.iteration_cnt_ == self.warmup_times:
+            self.client.metronome.set_warmup(False)
+            close_asyn_mem_monitor()
+
         global_timer.my_timer.start_profile("FWD")
-        mgr = PatrickStarManager()
-        mgr.set_training_stage(TrainingStage.FWD)
+        if profiler.started():
+            profiler.stage_convert_time.append((time.time(), TrainingStage.FWD))
+
         self.client.metronome.set_training_phase(TrainingStage.FWD)
         self._reset_before_forward()
 
@@ -192,7 +207,8 @@ class PatrickStarEngine(torch.nn.Module):
         """
         global_timer.my_timer.start_profile("BWD")
         mgr = PatrickStarManager()
-        mgr.set_training_stage(TrainingStage.BWD)
+        if profiler.started():
+            profiler.stage_convert_time.append((time.time(), TrainingStage.FWD))
         self.client.metronome.set_training_phase(TrainingStage.BWD)
 
         for param_fp16 in self.client.chunk_based_param_fp16:
@@ -204,6 +220,7 @@ class PatrickStarEngine(torch.nn.Module):
         else:
             loss.backward()
         mgr.update_margin_mem()
+        self.iteration_cnt_ += 1
         global_timer.my_timer.finish_profile("BWD")
 
     def state_dict(self, destination=None, prefix="", keep_vars=False):

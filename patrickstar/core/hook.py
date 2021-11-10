@@ -156,7 +156,7 @@ def post_sub_module_forward_function(sub_module, client, name):
         else:
             client.release_data(param, TensorState.HOLD_AFTER_FWD)
 
-        if mgr._training_stage == TrainingStage.FWD:
+        if client.metronome.training_stage() == TrainingStage.FWD:
             param.ps_attr.fwd_used_cnt += 1
 
     mgr.tiktac(client)

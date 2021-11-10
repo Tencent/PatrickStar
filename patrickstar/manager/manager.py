@@ -41,11 +41,12 @@ from patrickstar.utils import (
     logger,
     max_mem_usage_period,
 )
-from .metronome import Metronome
 
 
 class PatrickStarManager(metaclass=SingletonMeta):
-    r"""Storing information about devices to help payload move."""
+    r"""Collecting memory statistics on CPU and GPU during training,
+    to direct chunk moving.
+    """
 
     def __init__(self, local_rank: int = 0, config=None):
         self.local_rank = local_rank
@@ -106,21 +107,13 @@ class PatrickStarManager(metaclass=SingletonMeta):
         self.gpu_sys_used_list = []
 
         self._start_training = False
-        self._training_stage = TrainingStage.UNSTART
         # The number of gpu chunks for adam.
         # Calculated by substracting the peak memory of fp16 params
         # from peak system memory.
         self._margin_chunk_num_for_gpu_adam = 0
         self._default_chunk_size = 0
 
-    def set_training_stage(self, training_stage: TrainingStage):
-        if profiler.started():
-            profiler.stage_convert_time.append((time.time(), training_stage))
-        self._training_stage = training_stage
-        logger.info(f"Enter {self._training_stage}")
-
-    def start_train(self, metronome: Metronome, param_fp16_chunk_size, chunk_size):
-        metronome.set_warmup(True)
+    def start_train(self, param_fp16_chunk_size, chunk_size):
         self._start_training = True
         self._param_fp16_chunk_size = param_fp16_chunk_size
         self._default_chunk_size = chunk_size
@@ -294,7 +287,7 @@ class PatrickStarManager(metaclass=SingletonMeta):
                 return self._overall_cpu_mem
         elif device_type == "cuda":
             if self.always_warmup or metronome.is_warmup() or not self._start_training:
-                if self._training_stage == TrainingStage.ADAM:
+                if metronome.training_stage() == TrainingStage.ADAM:
                     # There is no activation during Adam stage, so we can use all the GPU
                     # mem for chunks. Need 2 * default_chunk_size for buffer, save 6 here for now.
                     ava_mem = self._overall_gpu_mem - 4 * self._default_chunk_size * 4
@@ -306,9 +299,9 @@ class PatrickStarManager(metaclass=SingletonMeta):
                     return self._overall_gpu_mem * self.warmup_gpu_chunk_mem_ratio
             else:
                 world_size = get_world_size()
-                if self._training_stage == TrainingStage.ADAM:
+                if metronome.training_stage() == TrainingStage.ADAM:
                     return self._overall_gpu_mem - 4 * self._default_chunk_size * 4
-                elif self._training_stage == TrainingStage.FWD:
+                elif metronome.training_stage() == TrainingStage.FWD:
                     next_mom = metronome.next_moment()
                     cur_mom = metronome.moment()
                     next_mom_ava_mem = (
@@ -321,7 +314,7 @@ class PatrickStarManager(metaclass=SingletonMeta):
                         min(next_mom_ava_mem, cur_mom_ava_mem)
                         - world_size * 2 * self._default_chunk_size
                     )
-                elif self._training_stage == TrainingStage.BWD:
+                elif metronome.training_stage() == TrainingStage.BWD:
                     next_mom = metronome.next_moment()
                     cur_mom = metronome.moment()
                     next_mom_ava_mem = (

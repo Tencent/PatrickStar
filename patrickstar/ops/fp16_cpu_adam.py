@@ -31,6 +31,7 @@ from copy import deepcopy
 import math
 from typing import List
 import torch
+import time
 
 from patrickstar.core import ChunkType
 from patrickstar.core.const import TensorState, AccessType, TrainingStage
@@ -40,8 +41,8 @@ import patrickstar.utils.global_timer as global_timer
 from patrickstar.utils import logger, get_rank
 from .chunk_io_buff import FP32ChunkReadBuffer, FP16ChunkWriteBuffer
 from .op_builder.cpu_adam import CPUAdamBuilder
-from patrickstar.utils.memory_monitor import close_asyn_mem_monitor
 from patrickstar.utils.helper import get_real_data_tensor
+from patrickstar.profiler import profiler
 
 
 def zero_param(p):
@@ -503,7 +504,8 @@ class FP16Adam(torch.optim.Optimizer):
                     )
                 else:
                     self.client.release_data(param, TensorState.HOLD_AFTER_BWD)
-        mgr.set_training_stage(TrainingStage.ADAM)
+        if profiler.started():
+            profiler.stage_convert_time.append((time.time(), TrainingStage.ADAM))
         self.client.metronome.set_training_phase(TrainingStage.ADAM)
         mgr.tiktac(self.client)
 
@@ -605,10 +607,6 @@ class FP16Adam(torch.optim.Optimizer):
 
         if self.loss_scaler:
             self.loss_scaler.update_scale(False)
-
-        # TODO(jiaruifang) manage warmup smartly
-        self.client.metronome.set_warmup(False)
-        close_asyn_mem_monitor()
 
         global_timer.my_timer.finish_profile("ADAM")
         return loss
