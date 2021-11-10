@@ -32,7 +32,7 @@ from typing import List
 import torch
 
 from patrickstar.core.const import ChunkType
-from patrickstar.manager import PatrickStarManager
+from patrickstar.manager import RuntimeMemTracer
 from patrickstar.profiler import profiler
 from patrickstar.utils import logger, get_rank, get_world_size
 import patrickstar.utils.global_timer as global_timer
@@ -172,7 +172,7 @@ class ChunkList(object):
         if self._time_profile:
             global_timer.my_timer.start_profile("CHUNK_LIST_prepare_device")
 
-        mgr = PatrickStarManager()
+        mgr = RuntimeMemTracer()
         ava_chunk_mem_size = mgr.available_chunk_mem(
             self.chunk_eviction_policy.metronome, target_device.type
         )
@@ -276,7 +276,7 @@ class ChunkList(object):
 
         chunk = self.id_to_chunk_map[chunk_id]
 
-        mgr = PatrickStarManager()
+        mgr = RuntimeMemTracer()
         free_chunk_mem_size = mgr.free_chunk_mem(
             self.chunk_eviction_policy.metronome, device.type
         )

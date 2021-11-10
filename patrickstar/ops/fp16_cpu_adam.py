@@ -36,7 +36,7 @@ import time
 from patrickstar.core import ChunkType
 from patrickstar.core.const import TensorState, AccessType, TrainingStage
 from patrickstar.core.parameter import register_param, ParamType
-from patrickstar.manager import PatrickStarManager
+from patrickstar.manager import RuntimeMemTracer
 import patrickstar.utils.global_timer as global_timer
 from patrickstar.utils import logger, get_rank
 from .chunk_io_buff import FP32ChunkReadBuffer, FP16ChunkWriteBuffer
@@ -481,7 +481,7 @@ class FP16Adam(torch.optim.Optimizer):
         global_timer.my_timer.start_profile("ADAM")
 
         rank = get_rank()
-        mgr = PatrickStarManager()
+        mgr = RuntimeMemTracer()
         for name, param in self.client.module.named_parameters():
             if param.ps_attr.param_type == ParamType.TORCH_BASED:
                 continue

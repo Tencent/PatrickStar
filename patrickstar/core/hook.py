@@ -31,7 +31,7 @@ import torch
 
 import patrickstar.utils.global_timer as global_timer
 from patrickstar.core.parameter import ParamType
-from patrickstar.manager import PatrickStarManager
+from patrickstar.manager import RuntimeMemTracer
 from patrickstar.utils import logger, get_rank, get_world_size
 from .const import TensorState, AccessType, TrainingStage
 
@@ -133,13 +133,13 @@ def pre_sub_module_forward_function(sub_module, client, name):
         param.data = client.access_dist(param, AccessType.DATA, client.device)
         flag = True
     if flag:
-        mgr = PatrickStarManager()
+        mgr = RuntimeMemTracer()
         mgr.tiktac(client)
 
 
 # release submodule
 def post_sub_module_forward_function(sub_module, client, name):
-    mgr = PatrickStarManager()
+    mgr = RuntimeMemTracer()
     for sub_name, param in sub_module.named_parameters(recurse=False):
         if param.ps_attr.param_type == ParamType.TORCH_BASED:
             continue
@@ -181,12 +181,12 @@ def pre_sub_module_backward_function(sub_module, client, name):
             raise RuntimeError("fp32 training is not supported!")
         flag = True
     if flag:
-        mgr = PatrickStarManager()
+        mgr = RuntimeMemTracer()
         mgr.tiktac(client)
 
 
 def post_sub_module_backward_function(sub_module, client, name):
-    mgr = PatrickStarManager()
+    mgr = RuntimeMemTracer()
     for sub_name, param in sub_module.named_parameters(recurse=False):
         if param.ps_attr.param_type == ParamType.TORCH_BASED:
             continue

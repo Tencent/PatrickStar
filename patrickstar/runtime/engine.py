@@ -31,7 +31,7 @@ import torch
 
 from patrickstar.core import ChunkState, TensorState, TrainingStage, ParamType
 from patrickstar.fp16 import LossScaler, DynamicLossScaler
-from patrickstar.manager import PatrickStarManager
+from patrickstar.manager import RuntimeMemTracer
 from patrickstar.ops import FP16Adam
 from patrickstar.utils import logger, global_timer
 
@@ -151,7 +151,7 @@ class PatrickStarEngine(torch.nn.Module):
         move_param_to_gpu(model)
 
     def _reset_before_forward(self):
-        mgr = PatrickStarManager()
+        mgr = RuntimeMemTracer()
         mgr.reset_memory_stats(self.client.metronome)
 
         self.client.metronome.reset()
@@ -206,7 +206,7 @@ class PatrickStarEngine(torch.nn.Module):
             loss: Torch tensor on which to execute backward propagation
         """
         global_timer.my_timer.start_profile("BWD")
-        mgr = PatrickStarManager()
+        mgr = RuntimeMemTracer()
         if profiler.started():
             profiler.stage_convert_time.append((time.time(), TrainingStage.FWD))
         self.client.metronome.set_training_phase(TrainingStage.BWD)

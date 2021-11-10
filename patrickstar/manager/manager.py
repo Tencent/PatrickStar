@@ -43,7 +43,7 @@ from patrickstar.utils import (
 )
 
 
-class PatrickStarManager(metaclass=SingletonMeta):
+class RuntimeMemTracer(metaclass=SingletonMeta):
     r"""Collecting memory statistics on CPU and GPU during training,
     to direct chunk moving.
     """
@@ -55,8 +55,6 @@ class PatrickStarManager(metaclass=SingletonMeta):
 
         self.gpu_chunk_used_mem = 0
         self.cpu_chunk_used_mem = 0
-
-        self.copy_stream = torch.cuda.Stream()
 
         if config is not None:
             self._overall_gpu_mem_ratio = config.overall_gpu_mem_ratio

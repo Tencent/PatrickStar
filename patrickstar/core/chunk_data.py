@@ -30,7 +30,8 @@
 import time
 import torch
 
-from patrickstar.manager import PatrickStarManager
+from patrickstar.manager import RuntimeMemTracer
+from patrickstar.manager.cuda_context import CUDAContext
 from patrickstar.profiler import profiler
 from patrickstar.utils import logger, getsizeof
 import patrickstar.utils.global_timer as global_timer
@@ -127,7 +128,7 @@ class Chunk(object):
             self.payload = torch.zeros(
                 payload_size, dtype=self.data_type, device=device
             )
-        mgr = PatrickStarManager()
+        mgr = RuntimeMemTracer()
         mgr.add(device.type, self.get_payload_space())
 
         if profiler.started():
@@ -143,7 +144,7 @@ class Chunk(object):
 
         NOTE() Please make sure all tensors are in the `FREE` state.
         """
-        mgr = PatrickStarManager()
+        mgr = RuntimeMemTracer()
         mgr.delete(self.get_device().type, self.get_payload_space())
 
         # Remove the memory of the chunk.
@@ -233,7 +234,7 @@ class Chunk(object):
             else:
                 global_timer.my_timer.start_profile("chunk_gpu_cpu_move")
         src_device = self.get_device()
-        mgr = PatrickStarManager()
+        mgr = RuntimeMemTracer()
 
         logger.debug(
             f"move chunk {self.chunk_id}, which has {self.payload.numel() / 1e6} M {self.payload.dtype} elements, "
@@ -241,6 +242,7 @@ class Chunk(object):
             f"used mem {mgr.used_chunk_mem(target_device.type) / 1e6} MB"
         )
 
+        cuda_ctx = CUDAContext()
         # TODO(jiaruifang) asyc copy.
         if target_device.type == "cpu":
             pinned_payload_cpu = torch.empty(
@@ -249,12 +251,12 @@ class Chunk(object):
                 device="cpu:0",
                 pin_memory=True,
             )
-            with torch.cuda.stream(mgr.copy_stream):
+            with torch.cuda.stream(cuda_ctx.copy_stream):
                 pinned_payload_cpu.copy_(self.payload)
             self.payload = pinned_payload_cpu
         elif target_device.type == "cuda":
             self.payload = self.payload.pin_memory()
-            with torch.cuda.stream(mgr.copy_stream):
+            with torch.cuda.stream(cuda_ctx.copy_stream):
                 self.payload = self.payload.to(target_device)
 
         mgr.delete(src_device.type, self.get_payload_space())
