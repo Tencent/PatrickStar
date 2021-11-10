@@ -39,7 +39,7 @@ import patrickstar.utils.global_timer as global_timer
 from .chunk_data import Chunk
 from .comm import CommInfo
 from .const import ChunkState
-from patrickstar.core.eviction_policy import ChunkEvictionPolicyFactory
+from patrickstar.core.eviction_policy import ChunkEvictionPolicyBase
 
 
 class ChunkList(object):
@@ -52,9 +52,7 @@ class ChunkList(object):
 
     generated_chunk_id = -1
 
-    def __init__(
-        self, local_rank: int, chunk_eviction_policy: ChunkEvictionPolicyFactory
-    ):
+    def __init__(self, local_rank: int, chunk_eviction_policy: ChunkEvictionPolicyBase):
         """
         Args:
             local_rank: int.
