@@ -78,8 +78,9 @@ class ChunkEvictionPolicyFactory(ABC):
         """
         The very next memonet chunk_id has to be placed on dev.
         """
+        # warmup, every chunk has the same priority
         if self.metronome.is_warmup():
-            raise RuntimeError("Shall not call _chunk_next_used_moment during warmup.")
+            return 0
         cur_mom = self.metronome.moment()
         total_mom = self.metronome._total_moment
         access_mom_list = self.chunk_access_dict[(chunk_id, dev)]

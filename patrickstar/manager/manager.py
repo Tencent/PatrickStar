@@ -41,30 +41,7 @@ from patrickstar.utils import (
     logger,
     max_mem_usage_period,
 )
-
-
-class Metronome(object):
-    def __init__(self):
-        self._moment = 0
-        self._total_moment = None
-
-    def get_total_mom(self):
-        assert self._total_moment is not None, "Don not use get_total during warmup"
-        return self._total_moment
-
-    def tiktac(self):
-        self._moment += 1
-
-    def moment(self):
-        return self._moment
-
-    def reset(self):
-        self._total_moment = self._moment
-        self._moment = 0
-
-    def next_moment(self):
-        assert self._total_moment is not None
-        return (self._moment + 1) % self._total_moment
+from .metronome import Metronome
 
 
 class PatrickStarManager(metaclass=SingletonMeta):
@@ -153,6 +130,8 @@ class PatrickStarManager(metaclass=SingletonMeta):
 
     def start_train(self, param_fp16_chunk_size, chunk_size):
         self.is_warmup = True
+        # TODO(jiaruifang) remove self.is_warmup
+        self.metronome.training_stage.is_warmup = True
         self._start_training = True
         self._param_fp16_chunk_size = param_fp16_chunk_size
         self._default_chunk_size = chunk_size
