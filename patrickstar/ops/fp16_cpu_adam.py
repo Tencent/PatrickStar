@@ -504,7 +504,7 @@ class FP16Adam(torch.optim.Optimizer):
                 else:
                     self.client.release_data(param, TensorState.HOLD_AFTER_BWD)
         mgr.set_training_stage(TrainingStage.ADAM)
-        self.client.metronome.training_stage.training_phase = TrainingStage.ADAM
+        self.client.metronome.set_training_phase(TrainingStage.ADAM)
         mgr.tiktac(self.client)
 
         loss = None
