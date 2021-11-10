@@ -206,21 +206,6 @@ class RuntimeMemTracer(object):
             assert (
                 len(self.gpu_sys_used_list) - 1 == cur_mom
             ), f"{len(self.gpu_sys_used_list) - 1} vs {cur_mom}"
-        # else:
-        #     # If the available chunk memory is smaller than current chunk memory,
-        #     # we need to move chunks from compute device to make room.
-        #     next_mom = metronome.next_moment()
-        #     cur_mom = metronome.moment()
-        #     gpu_next_mom_ava_chunk_mem = (
-        #         self._overall_gpu_mem - self.gpu_sys_used_list[next_mom]
-        #     )
-        #     gpu_cur_mom_used_chunk_mem = chunk_list.get_chunk_memory_used(
-        #         gpu_device
-        #     )
-        #     if gpu_next_mom_ava_chunk_mem < gpu_cur_mom_used_chunk_mem:
-        #         offload_size = gpu_cur_mom_used_chunk_mem - gpu_next_mom_ava_chunk_mem
-        #         # NOTE() Here will lead to GPU <-> CPU memory movement.
-        #         chunk_list.make_room(offload_size, gpu_device)
 
         # The async memory monitor maybe time-consuming.
         # We only run it during warmup.
