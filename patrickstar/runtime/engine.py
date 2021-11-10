@@ -151,7 +151,6 @@ class PatrickStarEngine(torch.nn.Module):
 
     def _reset_before_forward(self):
         self.client.mem_tracer.reset_memory_stats(self.client.metronome)
-
         self.client.metronome.reset()
         for param_fp16 in self.client.chunk_based_param_fp16:
             param_fp16.ps_attr.fwd_used_cnt = 0
