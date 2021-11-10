@@ -132,11 +132,17 @@ class PatrickStarEngine(torch.nn.Module):
         # relatively small. Maybe find a better way to deal with them.
         for buffer in model.buffers():
             buffer.data = buffer.data.to(self.client.device)
-        for name, param in model.named_parameters():
-            if param.ps_attr.param_type == ParamType.TORCH_BASED:
-                if ".embedding." in name:
-                    continue
-                param.data = param.data.to(self.client.device)
+
+        def move_param_to_gpu(module):
+            if module.__class__.__name__ == "Embedding":
+                return
+            for param in module.parameters(recurse=False):
+                if param.ps_attr.param_type == ParamType.TORCH_BASED:
+                    param.data = param.data.to(self.client.device)
+            for submodule in module.children():
+                move_param_to_gpu(submodule)
+
+        move_param_to_gpu(model)
 
     def _reset_before_forward(self):
         mgr = PatrickStarManager()
