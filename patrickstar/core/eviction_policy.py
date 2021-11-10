@@ -34,7 +34,7 @@ from patrickstar.manager.metronome import Metronome
 from patrickstar.core.const import ChunkState
 
 
-class ChunkEvictionPolicyFactory(ABC):
+class ChunkEvictionPolicyBase(ABC):
     def __init__(self, metronome: Metronome):
         self.chunk_access_dict = {}
         self.chunk_release_dict = {}
@@ -94,7 +94,7 @@ class ChunkEvictionPolicyFactory(ABC):
         NotImplemented
 
 
-class LatestAccessChunkEvictionPolicy(ChunkEvictionPolicyFactory):
+class LatestAccessChunkEvictionPolicy(ChunkEvictionPolicyBase):
     def derive_eviction_list(self, id_to_chunk_map, need_bytes, target_device):
         """
         Evict the chunk latest to be accessed on the current device.

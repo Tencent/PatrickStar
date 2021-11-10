@@ -33,7 +33,11 @@ from .training_stage_mgr import TrainingStageMgr
 class Metronome(object):
     """
     A metronome for memory stats sampling.
-    Tiktac before and after computing of an operator.
+    Use two indicators to tell us where the training is now
+    One is moment, indicates the moment of one iteration.
+    The other is training stage, indicates FWD/BWD/ADAM and is this iteration is
+    a warmup iteration.
+
     It also contain the training stage information.
     """
 
@@ -41,6 +45,12 @@ class Metronome(object):
         self._moment = 0
         self._total_moment = None
         self.training_stage = TrainingStageMgr()
+
+    def set_training_phase(self, phase):
+        self.training_stage.training_phase = phase
+
+    def set_warmup(self, flag):
+        self.training_stage.is_warmup = flag
 
     def is_warmup(self):
         return self.training_stage.is_warmup
@@ -53,12 +63,18 @@ class Metronome(object):
         return self._total_moment
 
     def tiktac(self):
+        """
+        The function should be called right before and after computing of an operator.
+        """
         self._moment += 1
 
     def moment(self):
         return self._moment
 
     def reset(self):
+        """
+        The function is called after a trainig iteration is finished.
+        """
         self._total_moment = self._moment
         self._moment = 0
 
@@ -68,4 +84,4 @@ class Metronome(object):
 
     def prev_moment(self):
         assert self._total_moment is not None
-        return (max(0, self._moment - 1)) % self._total_moment
+        return max(0, self._moment - 1) % self._total_moment

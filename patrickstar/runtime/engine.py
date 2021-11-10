@@ -146,7 +146,9 @@ class PatrickStarEngine(torch.nn.Module):
 
     def _reset_before_forward(self):
         mgr = PatrickStarManager()
-        mgr.reset_metronome()
+        mgr.reset_memory_stats(self.client.metronome)
+
+        self.client.metronome.reset()
         for param_fp16 in self.client.chunk_based_param_fp16:
             param_fp16.ps_attr.fwd_used_cnt = 0
         for _, chunk in self.client.chunk_list.generate_chunk():
@@ -175,6 +177,7 @@ class PatrickStarEngine(torch.nn.Module):
         global_timer.my_timer.start_profile("FWD")
         mgr = PatrickStarManager()
         mgr.set_training_stage(TrainingStage.FWD)
+        self.client.metronome.set_training_phase(TrainingStage.FWD)
         self._reset_before_forward()
 
         loss = self.module(*inputs, **kwargs)
@@ -190,6 +193,7 @@ class PatrickStarEngine(torch.nn.Module):
         global_timer.my_timer.start_profile("BWD")
         mgr = PatrickStarManager()
         mgr.set_training_stage(TrainingStage.BWD)
+        self.client.metronome.set_training_phase(TrainingStage.BWD)
 
         for param_fp16 in self.client.chunk_based_param_fp16:
             param_fp16.ps_attr.bwd_used_cnt = 0

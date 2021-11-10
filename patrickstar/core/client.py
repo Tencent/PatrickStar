@@ -27,9 +27,7 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 # SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import os
 from typing import List
-
 import torch
 
 import patrickstar.utils.global_timer as global_timer
@@ -40,22 +38,20 @@ from .const import AccessType, ChunkState, TensorState, TrainingStage
 from .hook import setup_patrickstar_hooks
 from .parameter import register_param, is_param_registered, ParamType
 from .eviction_policy import LatestAccessChunkEvictionPolicy
-from patrickstar.manager import PatrickStarManager
+from patrickstar.manager.metronome import Metronome
 
 
 class PatrickStarClient(object):
     r"""The client for managing chunks."""
 
     def __init__(self, rank: int, default_chunk_size: int):
-        self.pid = os.getpid()
-
         self.local_rank = rank
         self.device = torch.device(f"cuda:{rank}")
 
         self.module = None
 
-        mgr = PatrickStarManager()
-        self.chunk_eviction_strategy = LatestAccessChunkEvictionPolicy(mgr.metronome)
+        self.metronome = Metronome()
+        self.chunk_eviction_strategy = LatestAccessChunkEvictionPolicy(self.metronome)
 
         self.default_chunk_size = default_chunk_size
         self.chunk_tensor_index = ChunkTensorIndex(self.default_chunk_size)
