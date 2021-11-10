@@ -105,9 +105,6 @@ class PatrickStarManager(metaclass=SingletonMeta):
         self.gpu_chunk_used_list = []
         self.gpu_sys_used_list = []
 
-        self.metronome = Metronome()
-
-        self.is_warmup = False
         self._start_training = False
         self._training_stage = TrainingStage.UNSTART
         # The number of gpu chunks for adam.
@@ -116,22 +113,14 @@ class PatrickStarManager(metaclass=SingletonMeta):
         self._margin_chunk_num_for_gpu_adam = 0
         self._default_chunk_size = 0
 
-    def is_warmup_training(self):
-        return self._start_training and self.is_warmup
-
-    def is_nonwarmup_training(self):
-        return self._start_training and not self.is_warmup
-
     def set_training_stage(self, training_stage: TrainingStage):
         if profiler.started():
             profiler.stage_convert_time.append((time.time(), training_stage))
         self._training_stage = training_stage
         logger.info(f"Enter {self._training_stage}")
 
-    def start_train(self, param_fp16_chunk_size, chunk_size):
-        self.is_warmup = True
-        # TODO(jiaruifang) remove self.is_warmup
-        self.metronome.training_stage.is_warmup = True
+    def start_train(self, metronome: Metronome, param_fp16_chunk_size, chunk_size):
+        metronome.set_warmup(True)
         self._start_training = True
         self._param_fp16_chunk_size = param_fp16_chunk_size
         self._default_chunk_size = chunk_size
@@ -159,13 +148,17 @@ class PatrickStarManager(metaclass=SingletonMeta):
         )
         logger.info(f"OVERALL GPU MEM {self._overall_gpu_mem}")
 
-    def reset_metronome(self):
-        self.metronome.reset()
+    def reset_memory_stats(self, metronome):
+        """
+        Reset statistics collected from memory tracing.
+        It is used in case of gradient overflow during warmup and
+        the memory stats is incomplete.
+        """
         # As the reset happens right before forward, if the manager
         # is still doing warmup, it means the previous run didn't
         # cover the full procedure (forward -> backward -> optimizer).
         # Therefore clean the stats collected.
-        if self.is_warmup:
+        if metronome.is_warmup():
             self.cpu_used_list = []
             self.cpu_chunk_used_list = []
             self.cpu_sys_used_list = []
@@ -173,7 +166,7 @@ class PatrickStarManager(metaclass=SingletonMeta):
             self.gpu_used_list = []
             self.gpu_chunk_used_list = []
             self.gpu_sys_used_list = []
-        logger.info("Manager Resets Metronome")
+        logger.info("Reset Memory Statistics")
 
     def get_margin_chunk_num_for_gpu_adam(self):
         return self._margin_chunk_num_for_gpu_adam
@@ -190,7 +183,7 @@ class PatrickStarManager(metaclass=SingletonMeta):
 
         if profiler.started():
             timestamp = time.time()
-            cur_mom = self.metronome.moment()
+            cur_mom = client.metronome.moment()
             profiler.gpu_memory_used.append((cur_mom, timestamp, gpu_used))
             profiler.gpu_chunk_memory_used.append(
                 (cur_mom, timestamp, self.gpu_chunk_used_mem)
@@ -203,7 +196,7 @@ class PatrickStarManager(metaclass=SingletonMeta):
                 (cur_mom, timestamp, self.cpu_chunk_used_mem)
             )
 
-        if self.is_warmup:
+        if client.metronome.is_warmup():
             # max_mem_perid involves temp buff used inside an operator.
             max_mem_period = max_mem_usage_period()
             gpu_used = max(max_mem_period, gpu_used)
@@ -219,13 +212,15 @@ class PatrickStarManager(metaclass=SingletonMeta):
             # For non-warmup iter, we update the mem of index cur_mom,
             # and for warmup iter, we append the gpu mem to the end of the list.
             # Make sure the length of the list is 1 more than `cur_mom`.
-            cur_mom = self.metronome.moment()
-            assert len(self.gpu_sys_used_list) - 1 == cur_mom
+            cur_mom = client.metronome.moment()
+            assert (
+                len(self.gpu_sys_used_list) - 1 == cur_mom
+            ), f"{len(self.gpu_sys_used_list) - 1} vs {cur_mom}"
         else:
             # If the available chunk memory is smaller than current chunk memory,
             # we need to move chunks from compute device to make room.
-            next_mom = self.metronome.next_moment()
-            cur_mom = self.metronome.moment()
+            next_mom = client.metronome.next_moment()
+            cur_mom = client.metronome.moment()
             gpu_next_mom_ava_chunk_mem = (
                 self._overall_gpu_mem - self.gpu_sys_used_list[next_mom]
             )
@@ -237,16 +232,12 @@ class PatrickStarManager(metaclass=SingletonMeta):
                 # NOTE() Here will lead to GPU <-> CPU memory movement.
                 client.chunk_list.make_room(offload_size, gpu_device)
 
+            # The async memory monitor maybe time-consuming.
+            # We only run it during warmup.
             # Calibrate the GPU sys used memory.
             # self.gpu_sys_used_list[cur_mom] = gpu_used - self.gpu_chunk_used_mem
 
-        self.metronome.tiktac()
-
-    def get_cur_mom(self):
-        return self.metronome.moment()
-
-    def get_total_mom(self):
-        return self.metronome.get_total_mom()
+        client.metronome.tiktac()
 
     def add(self, device_type: str, size_in_bytes: int):
         if device_type == "cpu":
@@ -264,10 +255,12 @@ class PatrickStarManager(metaclass=SingletonMeta):
         else:
             raise f"device type {device_type} is not supported"
 
-    def free_chunk_mem(self, device_type):
-        size = self.available_chunk_mem(device_type) - self.used_chunk_mem(device_type)
+    def free_chunk_mem(self, metronome, device_type):
+        size = self.available_chunk_mem(metronome, device_type) - self.used_chunk_mem(
+            device_type
+        )
         logger.debug(
-            f"free_chunk_mem on {device_type} {size / 1e6} MB on mement {self.metronome.moment()}"
+            f"free_chunk_mem on {device_type} {size / 1e6} MB on mement {metronome.moment()}"
         )
         return size
 
@@ -279,7 +272,7 @@ class PatrickStarManager(metaclass=SingletonMeta):
         else:
             raise RuntimeError(f"used_chunk_mem {device_type}")
 
-    def available_chunk_mem(self, device_type):
+    def available_chunk_mem(self, metronome, device_type):
         r"""The amount of memory that can be used for chunks.
 
         This includes the memory that has been allocated for chunks
@@ -293,14 +286,14 @@ class PatrickStarManager(metaclass=SingletonMeta):
         current moment and next moment.
         """
         if device_type == "cpu":
-            if self.is_warmup or not self._start_training:
+            if metronome.is_warmup() or not self._start_training:
                 # TODO(jiaruifang) using a guessed number -- 1/3 of the GPU
                 # mem is used for chunk.
                 return self._overall_cpu_mem
             else:
                 return self._overall_cpu_mem
         elif device_type == "cuda":
-            if self.always_warmup or self.is_warmup or not self._start_training:
+            if self.always_warmup or metronome.is_warmup() or not self._start_training:
                 if self._training_stage == TrainingStage.ADAM:
                     # There is no activation during Adam stage, so we can use all the GPU
                     # mem for chunks. Need 2 * default_chunk_size for buffer, save 6 here for now.
@@ -316,8 +309,8 @@ class PatrickStarManager(metaclass=SingletonMeta):
                 if self._training_stage == TrainingStage.ADAM:
                     return self._overall_gpu_mem - 4 * self._default_chunk_size * 4
                 elif self._training_stage == TrainingStage.FWD:
-                    next_mom = self.metronome.next_moment()
-                    cur_mom = self.metronome.moment()
+                    next_mom = metronome.next_moment()
+                    cur_mom = metronome.moment()
                     next_mom_ava_mem = (
                         self._overall_gpu_mem - self.gpu_sys_used_list[next_mom]
                     )
@@ -329,8 +322,8 @@ class PatrickStarManager(metaclass=SingletonMeta):
                         - world_size * 2 * self._default_chunk_size
                     )
                 elif self._training_stage == TrainingStage.BWD:
-                    next_mom = self.metronome.next_moment()
-                    cur_mom = self.metronome.moment()
+                    next_mom = metronome.next_moment()
+                    cur_mom = metronome.moment()
                     next_mom_ava_mem = (
                         self._overall_gpu_mem - self.gpu_sys_used_list[next_mom]
                     )

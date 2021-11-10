@@ -46,6 +46,12 @@ class Metronome(object):
         self._total_moment = None
         self.training_stage = TrainingStageMgr()
 
+    def set_training_phase(self, phase):
+        self.training_stage.training_phase = phase
+
+    def set_warmup(self, flag):
+        self.training_stage.is_warmup = flag
+
     def is_warmup(self):
         return self.training_stage.is_warmup
 

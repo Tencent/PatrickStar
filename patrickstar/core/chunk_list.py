@@ -175,8 +175,12 @@ class ChunkList(object):
             global_timer.my_timer.start_profile("CHUNK_LIST_prepare_device")
 
         mgr = PatrickStarManager()
-        ava_chunk_mem_size = mgr.available_chunk_mem(target_device.type)
-        free_chunk_mem_size = mgr.free_chunk_mem(target_device.type)
+        ava_chunk_mem_size = mgr.available_chunk_mem(
+            self.chunk_eviction_policy.metronome, target_device.type
+        )
+        free_chunk_mem_size = mgr.free_chunk_mem(
+            self.chunk_eviction_policy.metronome, target_device.type
+        )
 
         logger.debug(
             f"prepare_target: device {target_device} need_bytes {need_bytes / 1e6} MB, "
@@ -275,7 +279,9 @@ class ChunkList(object):
         chunk = self.id_to_chunk_map[chunk_id]
 
         mgr = PatrickStarManager()
-        free_chunk_mem_size = mgr.free_chunk_mem(device.type)
+        free_chunk_mem_size = mgr.free_chunk_mem(
+            self.chunk_eviction_policy.metronome, device.type
+        )
 
         chunk_mem_size = chunk.get_payload_space()
         if free_chunk_mem_size < chunk_mem_size:

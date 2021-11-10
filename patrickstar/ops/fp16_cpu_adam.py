@@ -40,16 +40,8 @@ import patrickstar.utils.global_timer as global_timer
 from patrickstar.utils import logger, get_rank
 from .chunk_io_buff import FP32ChunkReadBuffer, FP16ChunkWriteBuffer
 from .op_builder.cpu_adam import CPUAdamBuilder
-from patrickstar.core.warmup_handler import adam_warmup_wrapper
-
-
-def get_real_data_tensor(param):
-    if param.ps_attr.param_type == ParamType.TORCH_BASED:
-        return param.data
-    elif param.ps_attr.param_type == ParamType.CHUNK_BASED:
-        return param.ps_attr.access_tensor(AccessType.DATA)
-    else:
-        raise RuntimeError
+from patrickstar.utils.memory_monitor import close_asyn_mem_monitor
+from patrickstar.utils.helper import get_real_data_tensor
 
 
 def zero_param(p):
@@ -477,7 +469,6 @@ class FP16Adam(torch.optim.Optimizer):
         write_chunk_buff.reset()
         read_chunk_buff.reset()
 
-    @adam_warmup_wrapper
     @torch.no_grad()
     def step(self, closure=None):
         """Performs a single optimization step.
@@ -513,6 +504,7 @@ class FP16Adam(torch.optim.Optimizer):
                 else:
                     self.client.release_data(param, TensorState.HOLD_AFTER_BWD)
         mgr.set_training_stage(TrainingStage.ADAM)
+        self.client.metronome.training_stage.training_phase = TrainingStage.ADAM
         mgr.tiktac(self.client)
 
         loss = None
@@ -613,6 +605,10 @@ class FP16Adam(torch.optim.Optimizer):
 
         if self.loss_scaler:
             self.loss_scaler.update_scale(False)
+
+        # TODO(jiaruifang) manage warmup smartly
+        self.client.metronome.set_warmup(False)
+        close_asyn_mem_monitor()
 
         global_timer.my_timer.finish_profile("ADAM")
         return loss

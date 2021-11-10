@@ -27,25 +27,8 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 # SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import functools
-from patrickstar.utils import close_asyn_mem_monitor
-from patrickstar.manager import PatrickStarManager
-
-
-def adam_warmup_wrapper(func):
-    @functools.wraps(func)
-    def wrapper(*args, **kw):
-        retval = func(*args, **kw)
-        mgr = PatrickStarManager()
-        if mgr.is_warmup_training():
-            close_asyn_mem_monitor()
-            # TODO(jiaruifang) rm mgr.warmup
-            mgr.is_warmup = False
-            mgr.metronome.training_stage.is_warmup = False
-            print("----------------- WARMUP PHASE OVER -----------------")
-        return retval
-
-    return wrapper
+# import functools
+# from patrickstar.utils import close_asyn_mem_monitor
 
 
 class WarmupHandler(object):
