@@ -44,19 +44,19 @@ class Metronome(object):
     def __init__(self):
         self._moment = 0
         self._total_moment = None
-        self.training_stage = TrainingStageMgr()
+        self.training_stage_mgr = TrainingStageMgr()
 
     def set_training_phase(self, phase):
-        self.training_stage.training_phase = phase
+        self.training_stage_mgr.training_phase = phase
 
     def set_warmup(self, flag):
-        self.training_stage.is_warmup = flag
+        self.training_stage_mgr.is_warmup = flag
 
     def is_warmup(self):
-        return self.training_stage.is_warmup
+        return self.training_stage_mgr.is_warmup
 
     def training_stage(self):
-        return self.training_stage.training_phase
+        return self.training_stage_mgr.training_phase
 
     def get_total_mom(self):
         assert self._total_moment is not None, "Don not use get_total during warmup"
