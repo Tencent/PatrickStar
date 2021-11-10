@@ -37,13 +37,12 @@ from patrickstar.utils import (
     get_memory_info,
     get_sys_memory_used,
     get_world_size,
-    SingletonMeta,
     logger,
     max_mem_usage_period,
 )
 
 
-class RuntimeMemTracer(metaclass=SingletonMeta):
+class RuntimeMemTracer(object):
     r"""Collecting memory statistics on CPU and GPU during training,
     to direct chunk moving.
     """
@@ -115,7 +114,7 @@ class RuntimeMemTracer(metaclass=SingletonMeta):
         self._start_training = True
         self._param_fp16_chunk_size = param_fp16_chunk_size
         self._default_chunk_size = chunk_size
-        logger.info("Start to train.")
+        logger.info("Memory Tracer Starts To Work.")
 
     def update_margin_mem(self):
         r"""Update the number of GPU free chunks for optimizer."""
@@ -162,10 +161,10 @@ class RuntimeMemTracer(metaclass=SingletonMeta):
     def get_margin_chunk_num_for_gpu_adam(self):
         return self._margin_chunk_num_for_gpu_adam
 
-    def trace_memory(self, client):
+    def trace_memory(self, metronome):
         """Record the memory usage of the moment and increase moment counter."""
         if torch.distributed.is_initialized():
-            rank = client.local_rank
+            rank = self.local_rank
         else:
             rank = 0
         gpu_device = torch.device(f"cuda:{rank}")
@@ -174,7 +173,7 @@ class RuntimeMemTracer(metaclass=SingletonMeta):
 
         if profiler.started():
             timestamp = time.time()
-            cur_mom = client.metronome.moment()
+            cur_mom = metronome.moment()
             profiler.gpu_memory_used.append((cur_mom, timestamp, gpu_used))
             profiler.gpu_chunk_memory_used.append(
                 (cur_mom, timestamp, self.gpu_chunk_used_mem)
@@ -187,7 +186,7 @@ class RuntimeMemTracer(metaclass=SingletonMeta):
                 (cur_mom, timestamp, self.cpu_chunk_used_mem)
             )
 
-        if client.metronome.is_warmup():
+        if metronome.is_warmup():
             # max_mem_perid involves temp buff used inside an operator.
             max_mem_period = max_mem_usage_period()
             gpu_used = max(max_mem_period, gpu_used)
@@ -203,32 +202,32 @@ class RuntimeMemTracer(metaclass=SingletonMeta):
             # For non-warmup iter, we update the mem of index cur_mom,
             # and for warmup iter, we append the gpu mem to the end of the list.
             # Make sure the length of the list is 1 more than `cur_mom`.
-            cur_mom = client.metronome.moment()
+            cur_mom = metronome.moment()
             assert (
                 len(self.gpu_sys_used_list) - 1 == cur_mom
             ), f"{len(self.gpu_sys_used_list) - 1} vs {cur_mom}"
-        else:
-            # If the available chunk memory is smaller than current chunk memory,
-            # we need to move chunks from compute device to make room.
-            next_mom = client.metronome.next_moment()
-            cur_mom = client.metronome.moment()
-            gpu_next_mom_ava_chunk_mem = (
-                self._overall_gpu_mem - self.gpu_sys_used_list[next_mom]
-            )
-            gpu_cur_mom_used_chunk_mem = client.chunk_list.get_chunk_memory_used(
-                gpu_device
-            )
-            if gpu_next_mom_ava_chunk_mem < gpu_cur_mom_used_chunk_mem:
-                offload_size = gpu_cur_mom_used_chunk_mem - gpu_next_mom_ava_chunk_mem
-                # NOTE() Here will lead to GPU <-> CPU memory movement.
-                client.chunk_list.make_room(offload_size, gpu_device)
+        # else:
+        #     # If the available chunk memory is smaller than current chunk memory,
+        #     # we need to move chunks from compute device to make room.
+        #     next_mom = metronome.next_moment()
+        #     cur_mom = metronome.moment()
+        #     gpu_next_mom_ava_chunk_mem = (
+        #         self._overall_gpu_mem - self.gpu_sys_used_list[next_mom]
+        #     )
+        #     gpu_cur_mom_used_chunk_mem = chunk_list.get_chunk_memory_used(
+        #         gpu_device
+        #     )
+        #     if gpu_next_mom_ava_chunk_mem < gpu_cur_mom_used_chunk_mem:
+        #         offload_size = gpu_cur_mom_used_chunk_mem - gpu_next_mom_ava_chunk_mem
+        #         # NOTE() Here will lead to GPU <-> CPU memory movement.
+        #         chunk_list.make_room(offload_size, gpu_device)
 
-            # The async memory monitor maybe time-consuming.
-            # We only run it during warmup.
-            # Calibrate the GPU sys used memory.
-            # self.gpu_sys_used_list[cur_mom] = gpu_used - self.gpu_chunk_used_mem
+        # The async memory monitor maybe time-consuming.
+        # We only run it during warmup.
+        # Calibrate the GPU sys used memory.
+        # self.gpu_sys_used_list[cur_mom] = gpu_used - self.gpu_chunk_used_mem
 
-        client.metronome.tiktac()
+        metronome.tiktac()
 
     def add(self, device_type: str, size_in_bytes: int):
         if device_type == "cpu":

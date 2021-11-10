@@ -31,7 +31,6 @@ import torch
 
 import patrickstar.utils.global_timer as global_timer
 from patrickstar.core.parameter import ParamType
-from patrickstar.manager import RuntimeMemTracer
 from patrickstar.utils import logger, get_rank, get_world_size
 from .const import TensorState, AccessType, TrainingStage
 
@@ -133,13 +132,12 @@ def pre_sub_module_forward_function(sub_module, client, name):
         param.data = client.access_dist(param, AccessType.DATA, client.device)
         flag = True
     if flag:
-        mgr = RuntimeMemTracer()
-        mgr.trace_memory(client)
+        client.trigger_memory_tracing()
+        client.adjust_chunk_layout()
 
 
 # release submodule
 def post_sub_module_forward_function(sub_module, client, name):
-    mgr = RuntimeMemTracer()
     for sub_name, param in sub_module.named_parameters(recurse=False):
         if param.ps_attr.param_type == ParamType.TORCH_BASED:
             continue
@@ -159,7 +157,8 @@ def post_sub_module_forward_function(sub_module, client, name):
         if client.metronome.training_stage() == TrainingStage.FWD:
             param.ps_attr.fwd_used_cnt += 1
 
-    mgr.trace_memory(client)
+    client.trigger_memory_tracing()
+    client.adjust_chunk_layout()
 
 
 def pre_sub_module_backward_function(sub_module, client, name):
@@ -181,12 +180,11 @@ def pre_sub_module_backward_function(sub_module, client, name):
             raise RuntimeError("fp32 training is not supported!")
         flag = True
     if flag:
-        mgr = RuntimeMemTracer()
-        mgr.trace_memory(client)
+        client.trigger_memory_tracing()
+        client.adjust_chunk_layout()
 
 
 def post_sub_module_backward_function(sub_module, client, name):
-    mgr = RuntimeMemTracer()
     for sub_name, param in sub_module.named_parameters(recurse=False):
         if param.ps_attr.param_type == ParamType.TORCH_BASED:
             continue
@@ -217,7 +215,8 @@ def post_sub_module_backward_function(sub_module, client, name):
             logger.debug(f"rank {rank} BWD post before release_dist {name}.{sub_name}")
             param.grad = None
 
-    mgr.trace_memory(client)
+    client.trigger_memory_tracing()
+    client.adjust_chunk_layout()
 
 
 def _register_hooks_recursively(module, client, name=""):
