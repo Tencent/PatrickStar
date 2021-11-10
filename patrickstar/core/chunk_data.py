@@ -81,55 +81,7 @@ class Chunk(object):
 
         self.payload = None
         self._time_profile = True
-
-        self.gpu_access_moments = []
-        self.cpu_access_moments = []
         self._pin_flag = False
-
-    def append_moment(self, mom, compute_device):
-        mgr = PatrickStarManager()
-        assert mgr.is_warmup_training()
-
-        access_moments = (
-            self.gpu_access_moments
-            if compute_device.type == "cuda"
-            else self.cpu_access_moments
-        )
-        if len(access_moments) > 0 and mom == access_moments[-1]:
-            return
-        else:
-            access_moments.append(mom)
-
-    def next_accessed_mom(self, compute_device):
-        r"""Get the next accessed moment after the warmup step.
-
-        Args:
-            compute_device: :class:`torch.device`.
-        Returns:
-            An int. The next access moment of the chunk. During warmup,
-            return 0.
-        """
-        mgr = PatrickStarManager()
-        access_moments = (
-            self.gpu_access_moments
-            if compute_device.type == "cuda"
-            else self.cpu_access_moments
-        )
-        if mgr.is_nonwarmup_training():
-            cur_mom = mgr.get_cur_mom()
-            max_mom_small_than_cur = 0
-            for i in access_moments:
-                if i > cur_mom:
-                    return i
-                if i < cur_mom:
-                    max_mom_small_than_cur = i
-            return mgr.get_total_mom() + max_mom_small_than_cur
-        else:
-            return 0
-
-    def display_access_mom_info(self):
-        logger.info(f"\t {self.chunk_id} cpu_access_moments {self.cpu_access_moments}")
-        logger.info(f"\t {self.chunk_id} gpu_access_moments {self.gpu_access_moments}")
 
     def is_dummy(self):
         return self._is_dummy

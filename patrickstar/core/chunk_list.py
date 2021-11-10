@@ -27,7 +27,6 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 # SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-from queue import PriorityQueue
 from typing import List
 
 import torch
@@ -40,6 +39,7 @@ import patrickstar.utils.global_timer as global_timer
 from .chunk_data import Chunk
 from .comm import CommInfo
 from .const import ChunkState
+from patrickstar.core.eviction_policy import ChunkEvictionPolicyFactory
 
 
 class ChunkList(object):
@@ -52,7 +52,9 @@ class ChunkList(object):
 
     generated_chunk_id = -1
 
-    def __init__(self, local_rank: int):
+    def __init__(
+        self, local_rank: int, chunk_eviction_policy: ChunkEvictionPolicyFactory
+    ):
         """
         Args:
             local_rank: int.
@@ -66,6 +68,7 @@ class ChunkList(object):
         self.moments_cnt_of_iteration = None
         self.local_rank = local_rank
         self.device = torch.device(f"cuda:{local_rank}")
+        self.chunk_eviction_policy = chunk_eviction_policy
 
     def chunk_ids_generator(self, chunk_type: ChunkType):
         r"""Return the chunk_id of all chunks with type `chunk_type`
@@ -132,12 +135,6 @@ class ChunkList(object):
         """
 
         chunk = self.id_to_chunk_map[chunk_id]
-
-        # The moment of chunk accessing during warmup.
-        mgr = PatrickStarManager()
-        if mgr.is_warmup_training():
-            cur_mem = mgr.get_cur_mom()
-            chunk.append_moment(cur_mem, compute_device)
 
         chunk_state = chunk.get_state()
 
@@ -369,62 +366,11 @@ class ChunkList(object):
         Returns:
             A list of chunk_ids.
         """
-        still_need_bytes = size_in_bytes
-        moved_bytes = 0
-        moved_list = []
-
-        # TODO(jiaruifang) Now we are using a greedy method to find the chunk to move.
-        # Find a better way with the lifecycle of the chunk.
-
-        movable_chunk_info = []
-
-        q = PriorityQueue()
-        for chunk_id, chunk in self.id_to_chunk_map.items():
-            if (
-                chunk.get_device() is not None
-                and chunk.get_device().type == target_device.type
-                and chunk.get_state() != ChunkState.COMPUTE
-                and not chunk.is_pin()
-            ):
-                # The next moment when this chunk was accessed.
-                next_mom = chunk.next_accessed_mom(target_device)
-                # Order by `next_mom`s, from large to small
-                # and by chunk_ids if `next_mom` are the same (only happens during warmup).
-                q.put((-next_mom, chunk_id))
-                movable_chunk_info.append(f"{next_mom}_{chunk_id}")
-            # TODO(jiaruifang) Do not release `FREE` chunks immediately for reuse.
-            # assert chunk.get_state() != ChunkState.FREE
-        while not q.empty():
-            next_mom, chunk_id = q.get()
-            moved_bytes += self.id_to_chunk_map[chunk_id].get_payload_space()
-            moved_list.append(chunk_id)
-            if moved_bytes >= still_need_bytes:
-                break
-
-        mgr = PatrickStarManager()
-        logger.info(
-            f"**** EVICT INFO(next_mom, chunk_id) {target_device}: "
-            f"cur_mom {mgr.get_cur_mom()} movable_chunk_info {movable_chunk_info}, "
-            f"real moved_list {moved_list}"
+        moved_list = self.chunk_eviction_policy.derive_eviction_list(
+            self.id_to_chunk_map, size_in_bytes, target_device
         )
-        # Raise error when failed to make enough room.
-        if moved_bytes < still_need_bytes:
-            raise RuntimeError(
-                f"device {target_device} still needs {still_need_bytes / 1e6} MB, "
-                f"but there is not enough space on it, only {moved_bytes / 1e6} MB available. "
-                f"chunk mem used memory on {target_device} is "
-                f"{self.get_chunk_memory_used(target_device) / 1e6} MB"
-            )
-
         return moved_list
 
     def update_state(self, chunk_id, old_state, new_state):
         r"""Update the state of chunk of id `chunk_id`."""
         self.id_to_chunk_map[chunk_id].update_state(old_state, new_state)
-
-    def display_access_info(self):
-        logger.debug("----------- SHOW ACCESS INFO -----------")
-        for chunk_id in self.chunk_type_to_id_list_map[ChunkType.PARAM_FP16]:
-            chunk = self.id_to_chunk_map[chunk_id]
-            logger.debug(f"\t {chunk_id} cpu_access_moments {chunk.cpu_access_moments}")
-            logger.debug(f"\t {chunk_id} gpu_access_moments {chunk.gpu_access_moments}")

@@ -38,9 +38,10 @@ def adam_warmup_wrapper(func):
         retval = func(*args, **kw)
         mgr = PatrickStarManager()
         if mgr.is_warmup_training():
-            # self.client.chunk_list.display_access_info()
             close_asyn_mem_monitor()
+            # TODO(jiaruifang) rm mgr.warmup
             mgr.is_warmup = False
+            mgr.metronome.training_stage.is_warmup = False
             print("----------------- WARMUP PHASE OVER -----------------")
         return retval
 

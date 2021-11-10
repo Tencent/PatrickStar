@@ -39,6 +39,8 @@ from .chunk_tensor_index import ChunkTensorIndex
 from .const import AccessType, ChunkState, TensorState, TrainingStage
 from .hook import setup_patrickstar_hooks
 from .parameter import register_param, is_param_registered, ParamType
+from .eviction_policy import LatestAccessChunkEvictionPolicy
+from patrickstar.manager import PatrickStarManager
 
 
 class PatrickStarClient(object):
@@ -52,9 +54,12 @@ class PatrickStarClient(object):
 
         self.module = None
 
+        mgr = PatrickStarManager()
+        self.chunk_eviction_strategy = LatestAccessChunkEvictionPolicy(mgr.metronome)
+
         self.default_chunk_size = default_chunk_size
         self.chunk_tensor_index = ChunkTensorIndex(self.default_chunk_size)
-        self.chunk_list = ChunkList(self.local_rank)
+        self.chunk_list = ChunkList(self.local_rank, self.chunk_eviction_strategy)
 
         self._time_profile = True
 
@@ -412,6 +417,11 @@ class PatrickStarClient(object):
                 param.ps_attr.name,
             )
             self.chunk_list[local_chunk_id].unpin()
+        else:
+            local_chunk_id = chunk_id
+
+        # collect the time a chunk has to be placed on compute-device
+        self.chunk_eviction_strategy.trace_access(local_chunk_id, compute_device)
 
         ret = self._access_tensor_in_chunk(param, access_type, compute_device, chunk_id)
         if self._time_profile:
@@ -465,6 +475,9 @@ class PatrickStarClient(object):
         # 1. Prepare the memory of the chunks. If the chunk is not one the
         #   compute device, then we need to move or allocate.
         chunk_id = self.chunk_tensor_index.get_chunk_id(param, access_type)
+
+        # collect the time a chunk has to be placed on compute-device
+        self.chunk_eviction_strategy.trace_access(chunk_id, compute_device)
 
         if chunk_id is None:
             raise RuntimeError(
