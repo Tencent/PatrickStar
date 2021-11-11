@@ -39,6 +39,7 @@ from .hook import setup_patrickstar_hooks
 from .parameter import register_param, is_param_registered, ParamType
 from .eviction_policy import LatestAccessChunkEvictionPolicy
 from patrickstar.manager.metronome import Metronome
+from patrickstar.manager.manager import RuntimeMemTracer
 
 
 class PatrickStarClient(object):
@@ -55,7 +56,10 @@ class PatrickStarClient(object):
 
         self.default_chunk_size = default_chunk_size
         self.chunk_tensor_index = ChunkTensorIndex(self.default_chunk_size)
-        self.chunk_list = ChunkList(self.local_rank, self.chunk_eviction_strategy)
+        self.mem_tracer = RuntimeMemTracer(self.local_rank)
+        self.chunk_list = ChunkList(
+            self.local_rank, self.mem_tracer, self.chunk_eviction_strategy
+        )
 
         self._time_profile = True
 
@@ -81,6 +85,38 @@ class PatrickStarClient(object):
             self.display_chunk_info()
         # Here we register the forward and backward hooks.
         self.register_model_hook(model)
+
+    def trigger_memory_tracing(self):
+        self.mem_tracer.trace_memory(self.metronome)
+
+    def adjust_chunk_layout(self):
+        """ "
+        Adjust chunk layout in heterogenous memory space
+        according to the runtime memory statictis.
+        """
+        if self.metronome.is_warmup():
+            return
+        gpu_device = torch.device(f"cuda:{self.local_rank}")
+        next_mom = self.metronome.next_moment()
+        # cur_mom = self.metronome.moment()
+        gpu_next_mom_ava_chunk_mem = (
+            self.mem_tracer._overall_gpu_mem
+            - self.mem_tracer.gpu_sys_used_list[next_mom]
+        )
+        gpu_cur_mom_used_chunk_mem = self.chunk_list.get_chunk_memory_used(gpu_device)
+        if gpu_next_mom_ava_chunk_mem < gpu_cur_mom_used_chunk_mem:
+            offload_size = gpu_cur_mom_used_chunk_mem - gpu_next_mom_ava_chunk_mem
+            # NOTE() Here will lead to GPU <-> CPU memory movement.
+            self.chunk_list.make_room(offload_size, gpu_device)
+
+    def start_mem_tracer(self):
+        """
+        Memory tracer start to work!
+        """
+        self.mem_tracer.start_train(
+            param_fp16_chunk_size=self.param_fp16_chunks_max_mem_usage(),
+            chunk_size=self.default_chunk_size,
+        )
 
     def append_chunk(self, data_type, chunk_type, is_dummy=False):
         r"""Append a new chunk to chunk_list and chunk_tensor_index.

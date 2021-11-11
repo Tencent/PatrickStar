@@ -80,12 +80,5 @@ def initialize_engine(model_func, local_rank, config=None, client=None):
             model = model_func()
 
     engine = PatrickStarEngine(model=model, client=client, config=config)
-
-    # 开启预热优化
-    mgr = RuntimeMemTracer(local_rank=local_rank)
-    mgr.start_train(
-        param_fp16_chunk_size=client.param_fp16_chunks_max_mem_usage(),
-        chunk_size=client.default_chunk_size,
-    )
-
+    client.start_mem_tracer()
     return (engine, engine.optimizer)

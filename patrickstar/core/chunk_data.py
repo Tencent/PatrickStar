@@ -44,6 +44,7 @@ class Chunk(object):
         capacity: int,
         data_type: torch.dtype,
         chunk_id: int,
+        memory_tracer: RuntimeMemTracer,
         local_rank: int = 0,
         is_dummy: bool = False,
     ):
@@ -68,7 +69,7 @@ class Chunk(object):
         self.data_type = data_type
         self.local_rank = local_rank
         self._is_dummy = is_dummy
-
+        self.memory_tracer = memory_tracer
         # the number of tensors of the chunk in each state
         self._state_dict = {
             TensorState.COMPUTE: 0,
@@ -128,8 +129,7 @@ class Chunk(object):
             self.payload = torch.zeros(
                 payload_size, dtype=self.data_type, device=device
             )
-        mgr = RuntimeMemTracer()
-        mgr.add(device.type, self.get_payload_space())
+        self.memory_tracer.add(device.type, self.get_payload_space())
 
         if profiler.started():
             profiler.chunk_life_cycle[self.chunk_id]["life_cycle"].append(
@@ -144,8 +144,7 @@ class Chunk(object):
 
         NOTE() Please make sure all tensors are in the `FREE` state.
         """
-        mgr = RuntimeMemTracer()
-        mgr.delete(self.get_device().type, self.get_payload_space())
+        self.memory_tracer.delete(self.get_device().type, self.get_payload_space())
 
         # Remove the memory of the chunk.
         del self.payload
@@ -234,12 +233,11 @@ class Chunk(object):
             else:
                 global_timer.my_timer.start_profile("chunk_gpu_cpu_move")
         src_device = self.get_device()
-        mgr = RuntimeMemTracer()
 
         logger.debug(
             f"move chunk {self.chunk_id}, which has {self.payload.numel() / 1e6} M {self.payload.dtype} elements, "
             f"from {src_device} to {target_device}, "
-            f"used mem {mgr.used_chunk_mem(target_device.type) / 1e6} MB"
+            f"used mem {self.memory_tracer.used_chunk_mem(target_device.type) / 1e6} MB"
         )
 
         cuda_ctx = CUDAContext()
@@ -259,8 +257,8 @@ class Chunk(object):
             with torch.cuda.stream(cuda_ctx.copy_stream):
                 self.payload = self.payload.to(target_device)
 
-        mgr.delete(src_device.type, self.get_payload_space())
-        mgr.add(target_device.type, self.get_payload_space())
+        self.memory_tracer.delete(src_device.type, self.get_payload_space())
+        self.memory_tracer.add(target_device.type, self.get_payload_space())
 
         if self._time_profile:
             if target_device.type == "cuda":

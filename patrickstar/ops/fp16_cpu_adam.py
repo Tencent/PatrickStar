@@ -36,7 +36,6 @@ import time
 from patrickstar.core import ChunkType
 from patrickstar.core.const import TensorState, AccessType, TrainingStage
 from patrickstar.core.parameter import register_param, ParamType
-from patrickstar.manager import RuntimeMemTracer
 import patrickstar.utils.global_timer as global_timer
 from patrickstar.utils import logger, get_rank
 from .chunk_io_buff import FP32ChunkReadBuffer, FP16ChunkWriteBuffer
@@ -481,7 +480,7 @@ class FP16Adam(torch.optim.Optimizer):
         global_timer.my_timer.start_profile("ADAM")
 
         rank = get_rank()
-        mgr = RuntimeMemTracer()
+        mem_tracer = self.client.mem_tracer
         for name, param in self.client.module.named_parameters():
             if param.ps_attr.param_type == ParamType.TORCH_BASED:
                 continue
@@ -507,7 +506,8 @@ class FP16Adam(torch.optim.Optimizer):
         if profiler.started():
             profiler.stage_convert_time.append((time.time(), TrainingStage.ADAM))
         self.client.metronome.set_training_phase(TrainingStage.ADAM)
-        mgr.trace_memory(self.client)
+        self.client.trigger_memory_tracing()
+        self.client.adjust_chunk_layout()
 
         loss = None
         if closure is not None:
@@ -515,7 +515,9 @@ class FP16Adam(torch.optim.Optimizer):
                 loss = closure()
 
         if self.use_hybrid_adam:
-            margin_chunk_num_for_gpu_adam = mgr.get_margin_chunk_num_for_gpu_adam()
+            margin_chunk_num_for_gpu_adam = (
+                mem_tracer.get_margin_chunk_num_for_gpu_adam()
+            )
         else:
             margin_chunk_num_for_gpu_adam = 0
 

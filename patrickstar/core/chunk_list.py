@@ -52,7 +52,12 @@ class ChunkList(object):
 
     generated_chunk_id = -1
 
-    def __init__(self, local_rank: int, chunk_eviction_policy: ChunkEvictionPolicyBase):
+    def __init__(
+        self,
+        local_rank: int,
+        memory_tracer: RuntimeMemTracer,
+        chunk_eviction_policy: ChunkEvictionPolicyBase,
+    ):
         """
         Args:
             local_rank: int.
@@ -67,6 +72,7 @@ class ChunkList(object):
         self.local_rank = local_rank
         self.device = torch.device(f"cuda:{local_rank}")
         self.chunk_eviction_policy = chunk_eviction_policy
+        self.memory_tracer = memory_tracer
 
     def chunk_ids_generator(self, chunk_type: ChunkType):
         r"""Return the chunk_id of all chunks with type `chunk_type`
@@ -172,11 +178,10 @@ class ChunkList(object):
         if self._time_profile:
             global_timer.my_timer.start_profile("CHUNK_LIST_prepare_device")
 
-        mgr = RuntimeMemTracer()
-        ava_chunk_mem_size = mgr.available_chunk_mem(
+        ava_chunk_mem_size = self.memory_tracer.available_chunk_mem(
             self.chunk_eviction_policy.metronome, target_device.type
         )
-        free_chunk_mem_size = mgr.free_chunk_mem(
+        free_chunk_mem_size = self.memory_tracer.free_chunk_mem(
             self.chunk_eviction_policy.metronome, target_device.type
         )
 
@@ -276,8 +281,7 @@ class ChunkList(object):
 
         chunk = self.id_to_chunk_map[chunk_id]
 
-        mgr = RuntimeMemTracer()
-        free_chunk_mem_size = mgr.free_chunk_mem(
+        free_chunk_mem_size = self.memory_tracer.free_chunk_mem(
             self.chunk_eviction_policy.metronome, device.type
         )
 
@@ -322,6 +326,7 @@ class ChunkList(object):
             capacity=chunk_size,
             data_type=data_type,
             chunk_id=chunk_id,
+            memory_tracer=self.memory_tracer,
             local_rank=self.local_rank,
             is_dummy=is_dummy,
         )
