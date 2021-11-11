@@ -34,7 +34,7 @@ from apex import amp
 from transformers import BertConfig, BertForSequenceClassification
 
 from common import distributed_test
-from data.data_loader import get_bert_data_loader
+from examples.data_loader import get_bert_data_loader
 from patrickstar.runtime import initialize_engine
 
 
@@ -178,7 +178,7 @@ def bert_model(
     return loss_list, scale_list
 
 
-class TestModelInitContext(unittest.TestCase):
+class TestLossScaleContext(unittest.TestCase):
     def setUp(self):
         pass
 
@@ -194,10 +194,11 @@ class TestModelInitContext(unittest.TestCase):
 
         assert hidden_dim % num_head == 0
 
-        # 这里我们采用 torch amp (autocast)，apex O2 和 patrickstar 对比。
-        # 其中：
-        # torch amp 的策略类似于 apex O1，会更多地使用 fp32，所以其能够适应的 loss scale 可能会更大；
-        # apex O2 和 patrickstar 的策略基本相同。
+        # Here we are comparing torch amp (autocast), apex O2 and PatrickStar.
+        # Note that:
+        # - torch amp is similar to apex O1, which uses more fp32, so its non-overflow loss scale
+        #   may be larger.
+        # - apex O2 is using basically the same mixed precision training strategy as PatrickStar.
         stop_step = 10
         torch.manual_seed(0)
         torch_res_list, torch_scale_list = bert_model(

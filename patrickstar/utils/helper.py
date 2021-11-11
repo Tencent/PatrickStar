@@ -28,6 +28,16 @@
 # SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import torch
+from patrickstar.core.const import ParamType, AccessType
+
+
+def get_real_data_tensor(param):
+    if param.ps_attr.param_type == ParamType.TORCH_BASED:
+        return param.data
+    elif param.ps_attr.param_type == ParamType.CHUNK_BASED:
+        return param.ps_attr.access_tensor(AccessType.DATA)
+    else:
+        raise RuntimeError
 
 
 def getsizeof(data_type: torch.dtype):
@@ -35,5 +45,17 @@ def getsizeof(data_type: torch.dtype):
         return 4
     elif data_type == torch.half:
         return 2
+    elif data_type == torch.int8:
+        return 1
+    elif data_type == torch.int16:
+        return 2
+    elif data_type == torch.int32:
+        return 4
+    elif data_type == torch.int64:
+        return 8
     else:
         raise TypeError(f"getsizeof dose not support data type {data_type}")
+
+
+def get_space_of(tensor):
+    return tensor.numel() * getsizeof(tensor.dtype)

@@ -30,34 +30,39 @@
 import unittest
 
 import torch
-from transformers import BertModel, BertConfig
-
-from common import distributed_test
-from patrickstar.core import PSPreProcessCtx
-from patrickstar.core import PatrickStarClient
-from patrickstar.ops import FP16Adam
+from patrickstar.utils.memory_monitor import get_sys_memory_used
+from patrickstar.core.memtracer.memtracer import AsyncMemoryMonitor
 
 
-class TestOptimizerInitContext(unittest.TestCase):
+class TestAsynMemoryMonitor(unittest.TestCase):
     def setUp(self):
         pass
 
-    @distributed_test(world_size=[1])
-    def test_optimizer_init(self):
-        def model_provider():
-            cfg = BertConfig()
-            cfg.vocab_size = 10
-            model = BertModel(cfg)
-            return model
+    def helper_func(self):
+        dev = torch.device("cuda:0")
+        m = 400
+        n = 500
+        k = 600
+        a = torch.randn(m, k, device=torch.device("cuda:0"))
+        b = torch.randn(k, n, device=torch.device("cuda:0"))
+        c = torch.randn(m, n, device=torch.device("cuda:0"))
+        print(f"mem usage before matmul: {get_sys_memory_used(dev)}")
+        start_mem = get_sys_memory_used(dev)
+        for i in range(10):
+            c += torch.matmul(a, b)
+        print(f"mem usage after matmul: {get_sys_memory_used(dev)}")
+        finish_mem = get_sys_memory_used(dev)
+        return max(start_mem, finish_mem)
 
-        default_chunk_size = 32 * 1024 * 1024
-        client = PatrickStarClient(0, default_chunk_size)
-
-        torch.manual_seed(0)
-        with PSPreProcessCtx(client, dtype=torch.float):
-            ps_model = model_provider()
-
-        FP16Adam(client, ps_model.parameters())
+    def test_async_mem_monitor(self):
+        mem_monitor = AsyncMemoryMonitor()
+        mem_monitor.start()
+        max_mem_coarse = self.helper_func()
+        max_mem_fine = mem_monitor.finish()
+        self.assertTrue(max_mem_fine >= max_mem_coarse)
+        # max_mem fine 3760640, corse 2960384
+        # indicates the operator will generate singnificant temp buff.
+        print(f"max_mem fine {max_mem_fine}, corse {max_mem_coarse}")
 
 
 if __name__ == "__main__":

@@ -30,7 +30,8 @@
 import time
 import torch
 
-from patrickstar.manager import PatrickStarManager
+from patrickstar.core.memtracer import RuntimeMemTracer
+from patrickstar.manager.cuda_context import CUDAContext
 from patrickstar.profiler import profiler
 from patrickstar.utils import logger, getsizeof
 import patrickstar.utils.global_timer as global_timer
@@ -43,6 +44,7 @@ class Chunk(object):
         capacity: int,
         data_type: torch.dtype,
         chunk_id: int,
+        memory_tracer: RuntimeMemTracer,
         local_rank: int = 0,
         is_dummy: bool = False,
     ):
@@ -67,7 +69,7 @@ class Chunk(object):
         self.data_type = data_type
         self.local_rank = local_rank
         self._is_dummy = is_dummy
-
+        self.memory_tracer = memory_tracer
         # the number of tensors of the chunk in each state
         self._state_dict = {
             TensorState.COMPUTE: 0,
@@ -81,55 +83,7 @@ class Chunk(object):
 
         self.payload = None
         self._time_profile = True
-
-        self.gpu_access_moments = []
-        self.cpu_access_moments = []
         self._pin_flag = False
-
-    def append_moment(self, mom, compute_device):
-        mgr = PatrickStarManager()
-        assert mgr.is_warmup_training()
-
-        access_moments = (
-            self.gpu_access_moments
-            if compute_device.type == "cuda"
-            else self.cpu_access_moments
-        )
-        if len(access_moments) > 0 and mom == access_moments[-1]:
-            return
-        else:
-            access_moments.append(mom)
-
-    def next_accessed_mom(self, compute_device):
-        r"""Get the next accessed moment after the warmup step.
-
-        Args:
-            compute_device: :class:`torch.device`.
-        Returns:
-            An int. The next access moment of the chunk. During warmup,
-            return 0.
-        """
-        mgr = PatrickStarManager()
-        access_moments = (
-            self.gpu_access_moments
-            if compute_device.type == "cuda"
-            else self.cpu_access_moments
-        )
-        if mgr.is_nonwarmup_training():
-            cur_mom = mgr.get_cur_mom()
-            max_mom_small_than_cur = 0
-            for i in access_moments:
-                if i > cur_mom:
-                    return i
-                if i < cur_mom:
-                    max_mom_small_than_cur = i
-            return mgr.get_total_mom() + max_mom_small_than_cur
-        else:
-            return 0
-
-    def display_access_mom_info(self):
-        logger.info(f"\t {self.chunk_id} cpu_access_moments {self.cpu_access_moments}")
-        logger.info(f"\t {self.chunk_id} gpu_access_moments {self.gpu_access_moments}")
 
     def is_dummy(self):
         return self._is_dummy
@@ -175,8 +129,7 @@ class Chunk(object):
             self.payload = torch.zeros(
                 payload_size, dtype=self.data_type, device=device
             )
-        mgr = PatrickStarManager()
-        mgr.add(device.type, self.get_payload_space())
+        self.memory_tracer.add(device.type, self.get_payload_space())
 
         if profiler.started():
             profiler.chunk_life_cycle[self.chunk_id]["life_cycle"].append(
@@ -191,8 +144,7 @@ class Chunk(object):
 
         NOTE() Please make sure all tensors are in the `FREE` state.
         """
-        mgr = PatrickStarManager()
-        mgr.delete(self.get_device().type, self.get_payload_space())
+        self.memory_tracer.delete(self.get_device().type, self.get_payload_space())
 
         # Remove the memory of the chunk.
         del self.payload
@@ -281,14 +233,14 @@ class Chunk(object):
             else:
                 global_timer.my_timer.start_profile("chunk_gpu_cpu_move")
         src_device = self.get_device()
-        mgr = PatrickStarManager()
 
         logger.debug(
             f"move chunk {self.chunk_id}, which has {self.payload.numel() / 1e6} M {self.payload.dtype} elements, "
             f"from {src_device} to {target_device}, "
-            f"used mem {mgr.used_chunk_mem(target_device.type) / 1e6} MB"
+            f"used mem {self.memory_tracer.used_chunk_mem(target_device.type) / 1e6} MB"
         )
 
+        cuda_ctx = CUDAContext()
         # TODO(jiaruifang) asyc copy.
         if target_device.type == "cpu":
             pinned_payload_cpu = torch.empty(
@@ -297,16 +249,16 @@ class Chunk(object):
                 device="cpu:0",
                 pin_memory=True,
             )
-            with torch.cuda.stream(mgr.copy_stream):
+            with torch.cuda.stream(cuda_ctx.copy_stream):
                 pinned_payload_cpu.copy_(self.payload)
             self.payload = pinned_payload_cpu
         elif target_device.type == "cuda":
             self.payload = self.payload.pin_memory()
-            with torch.cuda.stream(mgr.copy_stream):
+            with torch.cuda.stream(cuda_ctx.copy_stream):
                 self.payload = self.payload.to(target_device)
 
-        mgr.delete(src_device.type, self.get_payload_space())
-        mgr.add(target_device.type, self.get_payload_space())
+        self.memory_tracer.delete(src_device.type, self.get_payload_space())
+        self.memory_tracer.add(target_device.type, self.get_payload_space())
 
         if self._time_profile:
             if target_device.type == "cuda":

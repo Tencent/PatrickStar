@@ -29,17 +29,18 @@
 
 import torch
 
-from patrickstar.core import ChunkState, TensorState, TrainingStage
+from patrickstar.core import ChunkState, TensorState, TrainingStage, ParamType
 from patrickstar.fp16 import LossScaler, DynamicLossScaler
-from patrickstar.manager import PatrickStarManager
 from patrickstar.ops import FP16Adam
 from patrickstar.utils import logger, global_timer
 
 from .checkpoint import state_dict, load_state_dict
+from patrickstar.profiler import profiler
+import time
 
 
 class PatrickStarEngine(torch.nn.Module):
-    r"""DeepSpeed engine for training."""
+    r"""patrickStar engine for training."""
 
     def __init__(self, model, client, config):
         super(PatrickStarEngine, self).__init__()
@@ -108,6 +109,9 @@ class PatrickStarEngine(torch.nn.Module):
             self.loss_scaler = None
             self.gradient_clipping = -1
 
+        # This need to be placed before the initialization of optimizer.
+        self._move_torch_parts_to_gpu(model)
+
         self.optimizer = FP16Adam(
             self.client,
             self.module.parameters(),
@@ -122,11 +126,33 @@ class PatrickStarEngine(torch.nn.Module):
         )
 
         self.client.init(self.module, self.optimizer)
+        self.iteration_cnt_ = 0
+        # TODO(jiaruifang) pass in via config.
+        self.warmup_times = 1
         logger.info("PatrickStarEngine initialized.")
 
+    def _move_torch_parts_to_gpu(self, model):
+        # TODO(zilinzhu) Currently we move all buffers to GPU as the buffer size is
+        # relatively small. Maybe find a better way to deal with them.
+        for buffer in model.buffers():
+            buffer.data = buffer.data.to(self.client.device)
+
+        def move_param_to_gpu(module):
+            if module.__class__.__name__ == "Embedding":
+                return
+            for param in module.parameters(recurse=False):
+                if param.ps_attr.param_type == ParamType.TORCH_BASED:
+                    param.data = param.data.to(self.client.device)
+            for submodule in module.children():
+                move_param_to_gpu(submodule)
+
+        move_param_to_gpu(model)
+
     def _reset_before_forward(self):
-        mgr = PatrickStarManager()
-        mgr.reset_metronome()
+        # TODO(jiaruifang) so difficult to understand.
+        # about grad overflow.
+        self.client.mem_tracer.reset_memory_stats()
+        self.client.mem_tracer.metronome.reset()
         for param_fp16 in self.client.chunk_based_param_fp16:
             param_fp16.ps_attr.fwd_used_cnt = 0
         for _, chunk in self.client.chunk_list.generate_chunk():
@@ -152,9 +178,19 @@ class PatrickStarEngine(torch.nn.Module):
             *inputs: Variable length input list
             **kwargs: variable length keyword arguments
         """
+        # warmup logic, we have to make sure a iteration run the entire FWD+BWD process.
+        # Considering the grad overflow situation.
+        if self.iteration_cnt_ == 0:
+            self.client.set_warmup(True)
+        if self.iteration_cnt_ == self.warmup_times:
+            self.client.set_warmup(False)
+            self.client.mem_tracer.close_tracer()
+
         global_timer.my_timer.start_profile("FWD")
-        mgr = PatrickStarManager()
-        mgr.set_training_stage(TrainingStage.FWD)
+        if profiler.started():
+            profiler.stage_convert_time.append((time.time(), TrainingStage.FWD))
+
+        self.client.set_training_phase(TrainingStage.FWD)
         self._reset_before_forward()
 
         loss = self.module(*inputs, **kwargs)
@@ -168,8 +204,9 @@ class PatrickStarEngine(torch.nn.Module):
             loss: Torch tensor on which to execute backward propagation
         """
         global_timer.my_timer.start_profile("BWD")
-        mgr = PatrickStarManager()
-        mgr.set_training_stage(TrainingStage.BWD)
+        if profiler.started():
+            profiler.stage_convert_time.append((time.time(), TrainingStage.FWD))
+        self.client.set_training_phase(TrainingStage.BWD)
 
         for param_fp16 in self.client.chunk_based_param_fp16:
             param_fp16.ps_attr.bwd_used_cnt = 0
@@ -179,7 +216,8 @@ class PatrickStarEngine(torch.nn.Module):
             self.loss_scaler.backward(loss)
         else:
             loss.backward()
-        mgr.update_margin_mem()
+        self.client.mem_tracer.update_margin_mem()
+        self.iteration_cnt_ += 1
         global_timer.my_timer.finish_profile("BWD")
 
     def state_dict(self, destination=None, prefix="", keep_vars=False):

@@ -39,10 +39,6 @@ import numpy as np
 import transformers
 from transformers import BertConfig
 
-# from transformers BertForSequenceClassification
-# from ps_modeling_bert import BertForSequenceClassification
-
-
 import patrickstar.utils.global_timer as global_timer
 from data_loader import get_bert_data_loader
 from patrickstar.profiler import profiler
@@ -99,31 +95,15 @@ def _add_patrick_star_args(parser):
         help="Profiling memory usage.",
     )
     group.add_argument(
-        "--overall_gpu_mem_ratio",
-        type=float,
-        default=0.8,
-        help="Used GPU memory in manager / total gpu memory.",
-    )
-    group.add_argument(
-        "--overall_cpu_mem_ratio",
-        type=float,
-        default=0.8,
-        help="Used CPU memory in manager / total gpu memory.",
-    )
-    group.add_argument(
-        "--warmup_gpu_chunk_mem_ratio",
-        type=float,
-        default=0.4,
-        help="warmup used gpu memory ratio.",
-    )
-    group.add_argument(
-        "--margin_use_ratio", type=float, default=0.7, help="GPU margin use ratio"
-    )
-    group.add_argument(
         "--init_loss_scale_power",
         type=float,
         default=10,
         help="initial loss scale power",
+    )
+    group.add_argument(
+        "--with_async_mem_monitor",
+        action="store_true",
+        help="Use async memory monitor.",
     )
     return parser
 
@@ -315,6 +295,11 @@ def test_bert_model_helper(
             "release_after_init": args.release_after_init,
             "use_fake_dist": args.use_fake_dist,
             "use_cpu_embedding": args.use_cpu_embedding,
+            "client": {
+                "mem_sampler": {
+                    "use_async_mem_monitor": args.with_async_mem_monitor,
+                }
+            },
         }
 
         model, optimizer = initialize_engine(
@@ -435,7 +420,7 @@ def test_bert_model_helper(
             if dist_plan == "patrickstar":
                 print(
                     f'{"[WARM UP] " if n == 0 else ""}'
-                    f"Step elaspe {step_elapse} s, {total_macs / 1e12 / step_elapse} Tflops"
+                    f"Step {n} elaspe {step_elapse} s, {total_macs / 1e12 / step_elapse} Tflops"
                 )
                 global_timer.my_timer.print()
                 global_timer.data_move_cnter.print()
@@ -444,7 +429,7 @@ def test_bert_model_helper(
                 global_timer.data_move_cnter.reset()
             else:
                 print(
-                    f"Step elaspe {step_elapse} s, {total_macs / 1e12 / step_elapse} Tflops"
+                    f"Step {n} elaspe {step_elapse} s, {total_macs / 1e12 / step_elapse} Tflops"
                 )
 
         logger.info(f"End Step {n} with {dist_plan}.\n")
@@ -471,6 +456,8 @@ if __name__ == "__main__":
     # HIDDEN_DIM 1024, batch 16, seqence_len 1024, ckp True.
     # PatrickStar is able to run the training, while PyTorch failed.
 
+    # You could set the logger level to INFO to view more runtime
+    # information.
     logger.setLevel(logging.WARNING)
     if not torch.distributed.is_initialized():
         torch.distributed.init_process_group(

@@ -24,11 +24,15 @@ export NO_RETRY=${NO_RETRY:-0}
 export SKIP_LOG_EXSIT=${SKIP_LOG_EXSIT:-0}
 export AW=${AW:-0}
 export MEM_PROF=${MEM_PROF:-0}
+# asyn memory monitor for mem sampler
+export AMM=${AMM:-1}
 
-export margin_use_ratio=${margin_use_ratio:-0.8}
-# if warmup fails, lower the ratio
-export warmup_gpu_chunk_mem_ratio=${warmup_gpu_chunk_mem_ratio:-0.2}
-export overall_gpu_mem_ratio=${overall_gpu_mem_ratio:-0.8}
+if [[ ${AMM} == 1 ]];  then
+AMM_FLAG="--with_async_mem_monitor"
+else
+export AMM_FLAG=""
+fi
+
 
 if [[ ${MEM_PROF} == 1 ]];  then
 MEM_PROF_FLAG="--with_mem_profiler"
@@ -82,7 +86,7 @@ export HYBRID_ADAM_FLAG="--use_hybrid_adam"
 LOG_DIR="./logs_${MODEL_NAME}"
 mkdir -p ${LOG_DIR}
 
-LOG_FILE="log.${MODEL_NAME}_gpu_${GPU_NUM}_cs_${CS}_bs_${BS}_cpueb_${CPU_EBD}_margin_${margin_use_ratio}_warmup_${warmup_gpu_chunk_mem_ratio}_gpu_${overall_gpu_mem_ratio}_lightseq_${LIGHTSEQ}_offload_${ACT_OFFLOAD}_AW_${AW}"
+LOG_FILE="log.${MODEL_NAME}_gpu_${GPU_NUM}_cs_${CS}_bs_${BS}_cpueb_${CPU_EBD}_lightseq_${LIGHTSEQ}_offload_${ACT_OFFLOAD}_AW_${AW}_AMM_${AMM}"
 
 is_run_flag=`python ./benchmark/is_run_this_file.py --path "${LOG_DIR}" --file "${LOG_FILE}"`
 echo is_run_flag $is_run_flag
@@ -114,10 +118,7 @@ python -m torch.distributed.launch --nproc_per_node=${GPU_NUM} \
     --dist_plan=${DIST_PLAN} \
     --batch_size=${BS} \
     --model_name=${MODEL_NAME} \
-    --overall_gpu_mem_ratio=${overall_gpu_mem_ratio} \
     --batch_size=${BS} \
-    --margin_use_ratio=${margin_use_ratio} \
-    --warmup_gpu_chunk_mem_ratio=${warmup_gpu_chunk_mem_ratio} \
     ${CPU_EBD_FLAG} \
     ${HYBRID_ADAM_FLAG} \
     ${RELEASE_AFTER_INIT_FLAG} \
@@ -126,4 +127,5 @@ python -m torch.distributed.launch --nproc_per_node=${GPU_NUM} \
     ${ACT_OFFLOAD_FLAG} \
     ${AW_FLAG} \
     ${MEM_PROF_FLAG} \
+    ${AMM_FLAG} \
     2>&1 | tee ${LOG_DIR}/${LOG_FILE}

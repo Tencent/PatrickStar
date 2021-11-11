@@ -30,34 +30,46 @@
 import unittest
 
 import torch
-from transformers import BertModel, BertConfig
-
-from common import distributed_test
-from patrickstar.core import PSPreProcessCtx
-from patrickstar.core import PatrickStarClient
-from patrickstar.ops import FP16Adam
+from patrickstar.core.eviction_policy import LatestAccessChunkEvictionPolicy
+from patrickstar.core.chunk_data import Chunk
+from patrickstar.core.memtracer import RuntimeMemTracer
 
 
-class TestOptimizerInitContext(unittest.TestCase):
+class TestEvictionPolicy(unittest.TestCase):
     def setUp(self):
         pass
 
-    @distributed_test(world_size=[1])
-    def test_optimizer_init(self):
-        def model_provider():
-            cfg = BertConfig()
-            cfg.vocab_size = 10
-            model = BertModel(cfg)
-            return model
+    def test_chunk_eviction(self):
+        id_to_chunk_list = {}
+        dev = torch.device("cpu:0")
+        mem_tracer = RuntimeMemTracer(
+            local_rank=0, config={"use_async_mem_monitor": True}
+        )
+        id_to_chunk_list[0] = Chunk(10, torch.float, 0, mem_tracer, 0, False)
+        id_to_chunk_list[0].allocate_payload(dev)
+        id_to_chunk_list[1] = Chunk(10, torch.float, 1, mem_tracer, 0, False)
+        id_to_chunk_list[1].allocate_payload(dev)
+        metronome = mem_tracer.metronome
+        metronome.set_warmup(True)
+        policy = LatestAccessChunkEvictionPolicy(metronome)
 
-        default_chunk_size = 32 * 1024 * 1024
-        client = PatrickStarClient(0, default_chunk_size)
+        # trace chunk access
+        policy.trace_access(0, dev)
+        metronome.tiktac()
+        policy.trace_access(1, dev)
+        print(policy.chunk_access_dict)
 
-        torch.manual_seed(0)
-        with PSPreProcessCtx(client, dtype=torch.float):
-            ps_model = model_provider()
+        # Finish warmup
+        metronome.set_warmup(False)
+        metronome.reset()
 
-        FP16Adam(client, ps_model.parameters())
+        # Test eviction strategy
+        ret_list = policy.derive_eviction_list(id_to_chunk_list, 10, dev)
+        self.assertTrue(ret_list == [0])
+
+        metronome.tiktac()
+        ret_list = policy.derive_eviction_list(id_to_chunk_list, 10, dev)
+        self.assertTrue(ret_list == [1])
 
 
 if __name__ == "__main__":

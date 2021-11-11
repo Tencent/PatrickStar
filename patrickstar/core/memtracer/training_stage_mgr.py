@@ -27,13 +27,14 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 # SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import logging
-import unittest
+from patrickstar.core.const import TrainingStage
 
-if __name__ == "__main__":
-    logging.basicConfig(
-        format="%(asctime)s,%(msecs)d %(levelname)-8s [%(filename)s:%(lineno)d] %(message)s",
-        datefmt="%Y-%m-%d:%H:%M:%S",
-        level=logging.DEBUG,
-    )
-    unittest.main()
+
+class TrainingStageMgr:
+    def __init__(self):
+        """
+        Tell us in which stage the training are. (FWD, BWD, ADAM)
+        Also tell us whether in an warmup iteration.
+        """
+        self.training_phase = TrainingStage.UNSTART
+        self.is_warmup = False

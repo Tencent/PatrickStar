@@ -27,9 +27,7 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 # SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import os
 from typing import List
-
 import torch
 
 import patrickstar.utils.global_timer as global_timer
@@ -39,21 +37,31 @@ from .chunk_tensor_index import ChunkTensorIndex
 from .const import AccessType, ChunkState, TensorState, TrainingStage
 from .hook import setup_patrickstar_hooks
 from .parameter import register_param, is_param_registered, ParamType
+from .eviction_policy import LatestAccessChunkEvictionPolicy
+from patrickstar.core.memtracer import RuntimeMemTracer
 
 
 class PatrickStarClient(object):
     r"""The client for managing chunks."""
 
-    def __init__(self, rank: int, default_chunk_size: int):
-        self.pid = os.getpid()
-
+    def __init__(self, rank: int, default_chunk_size: int, config=None):
         self.local_rank = rank
+        self.device = torch.device(f"cuda:{rank}")
 
         self.module = None
 
+        tracer_config = config.get("mem_tracer", None)
+        self.mem_tracer = RuntimeMemTracer(self.local_rank, tracer_config)
+
+        self.chunk_eviction_strategy = LatestAccessChunkEvictionPolicy(
+            self.mem_tracer.metronome
+        )
+
         self.default_chunk_size = default_chunk_size
         self.chunk_tensor_index = ChunkTensorIndex(self.default_chunk_size)
-        self.chunk_list = ChunkList(self.local_rank)
+        self.chunk_list = ChunkList(
+            self.local_rank, self.mem_tracer, self.chunk_eviction_strategy
+        )
 
         self._time_profile = True
 
@@ -70,6 +78,19 @@ class PatrickStarClient(object):
         # for post backward hook
         self.grad_accs = []
 
+    # expose APIs from metrome ti client
+    def training_stage(self):
+        return self.mem_tracer.metronome.training_stage()
+
+    def set_training_phase(self, phase):
+        self.mem_tracer.metronome.set_training_phase(phase)
+
+    def set_warmup(self, flag):
+        self.mem_tracer.metronome.set_warmup(flag)
+
+    def is_warmup(self):
+        return self.mem_tracer.is_warmup()
+
     def init(self, model, optimizer):
         r"""Initialize and store model and optimizer"""
 
@@ -79,6 +100,38 @@ class PatrickStarClient(object):
             self.display_chunk_info()
         # Here we register the forward and backward hooks.
         self.register_model_hook(model)
+
+    def trigger_memory_tracing(self):
+        self.mem_tracer.trace_memory()
+
+    def adjust_chunk_layout(self):
+        """ "
+        Adjust chunk layout in heterogenous memory space
+        according to the runtime memory statictis.
+        """
+        if self.mem_tracer.metronome.is_warmup():
+            return
+        gpu_device = torch.device(f"cuda:{self.local_rank}")
+        next_mom = self.mem_tracer.metronome.next_moment()
+        # cur_mom = self.mem_tracer.metronome.moment()
+        gpu_next_mom_ava_chunk_mem = (
+            self.mem_tracer._overall_gpu_mem
+            - self.mem_tracer.gpu_sys_used_list[next_mom]
+        )
+        gpu_cur_mom_used_chunk_mem = self.chunk_list.get_chunk_memory_used(gpu_device)
+        if gpu_next_mom_ava_chunk_mem < gpu_cur_mom_used_chunk_mem:
+            offload_size = gpu_cur_mom_used_chunk_mem - gpu_next_mom_ava_chunk_mem
+            # NOTE() Here will lead to GPU <-> CPU memory movement.
+            self.chunk_list.make_room(offload_size, gpu_device)
+
+    def start_mem_tracer(self):
+        """
+        Memory tracer start to work!
+        """
+        self.mem_tracer.start_train(
+            param_fp16_chunk_size=self.param_fp16_chunks_max_mem_usage(),
+            chunk_size=self.default_chunk_size,
+        )
 
     def append_chunk(self, data_type, chunk_type, is_dummy=False):
         r"""Append a new chunk to chunk_list and chunk_tensor_index.
@@ -411,6 +464,11 @@ class PatrickStarClient(object):
                 param.ps_attr.name,
             )
             self.chunk_list[local_chunk_id].unpin()
+        else:
+            local_chunk_id = chunk_id
+
+        # collect the time a chunk has to be placed on compute-device
+        self.chunk_eviction_strategy.trace_access(local_chunk_id, compute_device)
 
         ret = self._access_tensor_in_chunk(param, access_type, compute_device, chunk_id)
         if self._time_profile:
@@ -464,6 +522,9 @@ class PatrickStarClient(object):
         # 1. Prepare the memory of the chunks. If the chunk is not one the
         #   compute device, then we need to move or allocate.
         chunk_id = self.chunk_tensor_index.get_chunk_id(param, access_type)
+
+        # collect the time a chunk has to be placed on compute-device
+        self.chunk_eviction_strategy.trace_access(chunk_id, compute_device)
 
         if chunk_id is None:
             raise RuntimeError(
@@ -588,9 +649,7 @@ class PatrickStarClient(object):
                     assert self.chunk_list[local_chunk_id].payload is not None
                     input_list = []
                     for i in chunk_id_list:
-                        self.chunk_list.access_chunk(
-                            i, torch.device(f"cuda:{self.local_rank}")
-                        )
+                        self.chunk_list.access_chunk(i, self.device)
                         self.chunk_list[i].pin()
                         input_list.append(self.chunk_list[i].payload)
                     torch.distributed.reduce_scatter(

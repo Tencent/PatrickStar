@@ -99,3 +99,5 @@ BSD 3-Clause License
 
 ### Contact Us
 {jiaruifang, zilinzhu, josephyu}@tencent.com
+
+Powered by WeChat AI Team, Tencent NLP Oteam.

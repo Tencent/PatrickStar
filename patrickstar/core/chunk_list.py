@@ -27,19 +27,19 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 # SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-from queue import PriorityQueue
 from typing import List
 
 import torch
 
 from patrickstar.core.const import ChunkType
-from patrickstar.manager import PatrickStarManager
+from patrickstar.core.memtracer import RuntimeMemTracer
 from patrickstar.profiler import profiler
 from patrickstar.utils import logger, get_rank, get_world_size
 import patrickstar.utils.global_timer as global_timer
 from .chunk_data import Chunk
 from .comm import CommInfo
 from .const import ChunkState
+from patrickstar.core.eviction_policy import ChunkEvictionPolicyBase
 
 
 class ChunkList(object):
@@ -52,7 +52,12 @@ class ChunkList(object):
 
     generated_chunk_id = -1
 
-    def __init__(self, local_rank: int):
+    def __init__(
+        self,
+        local_rank: int,
+        memory_tracer: RuntimeMemTracer,
+        chunk_eviction_policy: ChunkEvictionPolicyBase,
+    ):
         """
         Args:
             local_rank: int.
@@ -65,6 +70,9 @@ class ChunkList(object):
         self._time_profile = True
         self.moments_cnt_of_iteration = None
         self.local_rank = local_rank
+        self.device = torch.device(f"cuda:{local_rank}")
+        self.chunk_eviction_policy = chunk_eviction_policy
+        self.memory_tracer = memory_tracer
 
     def chunk_ids_generator(self, chunk_type: ChunkType):
         r"""Return the chunk_id of all chunks with type `chunk_type`
@@ -132,12 +140,6 @@ class ChunkList(object):
 
         chunk = self.id_to_chunk_map[chunk_id]
 
-        # The moment of chunk accessing during warmup.
-        mgr = PatrickStarManager()
-        if mgr.is_warmup_training():
-            cur_mem = mgr.get_cur_mom()
-            chunk.append_moment(cur_mem, compute_device)
-
         chunk_state = chunk.get_state()
 
         payload_space = chunk.get_chunk_space()
@@ -176,14 +178,15 @@ class ChunkList(object):
         if self._time_profile:
             global_timer.my_timer.start_profile("CHUNK_LIST_prepare_device")
 
-        mgr = PatrickStarManager()
-        ava_chunk_mem_size = mgr.available_chunk_mem(target_device.type)
-        free_chunk_mem_size = mgr.free_chunk_mem(target_device.type)
+        ava_chunk_mem_size = self.memory_tracer.available_chunk_mem(target_device.type)
+        remaining_chunk_mem_size = self.memory_tracer.remaining_chunk_mem(
+            target_device.type
+        )
 
         logger.debug(
             f"prepare_target: device {target_device} need_bytes {need_bytes / 1e6} MB, "
             f"ava_chunk_mem_size {ava_chunk_mem_size / 1e6} MB, "
-            f"free_chunk_mem_size {free_chunk_mem_size / 1e6} MB."
+            f"remaining_chunk_mem_size {remaining_chunk_mem_size / 1e6} MB."
         )
 
         # TODO(jiaruifang) Situation where there is no space.
@@ -200,11 +203,11 @@ class ChunkList(object):
                 f"Avaibale Chunk Memory is {ava_chunk_mem_size / 1e6} MB"
             )
 
-        extra_need_bytes = need_bytes - free_chunk_mem_size
+        extra_need_bytes = need_bytes - remaining_chunk_mem_size
 
         logger.debug(
             f"{target_device} (ava_chunk_mem_size {ava_chunk_mem_size / 1e6} MB) "
-            f"now free_chunk_mem_size size {free_chunk_mem_size / 1e6} MB, "
+            f"now remaining_chunk_mem_size size {remaining_chunk_mem_size / 1e6} MB, "
             f"needs {need_bytes / 1e6} MB"
         )
         # No need for new allocation.
@@ -226,9 +229,7 @@ class ChunkList(object):
         # to new device. However, the size of the chunk may be smaller than the ava_chunk_mem
         # of the new device and trigger bugs.
         new_device = (
-            torch.device("cpu")
-            if target_device.type == "cuda"
-            else torch.device(f"cuda:{self.local_rank}")
+            torch.device("cpu") if target_device.type == "cuda" else self.device
         )
 
         # Move the chunk to new device. If there are not enough space on the new device, abort.
@@ -255,9 +256,7 @@ class ChunkList(object):
         )
 
         new_device = (
-            torch.device("cpu")
-            if target_device.type == "cuda"
-            else torch.device(f"cuda:{self.local_rank}")
+            torch.device("cpu") if target_device.type == "cuda" else self.device
         )
 
         for idx in moved_list:
@@ -269,7 +268,7 @@ class ChunkList(object):
     def chunk_move(self, chunk_id: int, device: torch.device):
         r"""Move chunk of id `chunk_id` to `device`.
 
-        NOTE(): Please make sure `device` has enough free_chunk_mem before.
+        NOTE(): Please make sure `device` has enough remaining_chunk_mem before.
 
         Args:
             chunk_id: int.
@@ -280,14 +279,13 @@ class ChunkList(object):
 
         chunk = self.id_to_chunk_map[chunk_id]
 
-        mgr = PatrickStarManager()
-        free_chunk_mem_size = mgr.free_chunk_mem(device.type)
+        remaining_chunk_mem_size = self.memory_tracer.remaining_chunk_mem(device.type)
 
         chunk_mem_size = chunk.get_payload_space()
-        if free_chunk_mem_size < chunk_mem_size:
+        if remaining_chunk_mem_size < chunk_mem_size:
             raise RuntimeError(
                 f"chunk move failed. {device} has not {chunk_mem_size / 1e6} MB memory space. "
-                f"Free space is {free_chunk_mem_size / 1e6} MB. "
+                f"Free space is {remaining_chunk_mem_size / 1e6} MB. "
                 f"The reason may be that the overall memory of CPU and GPU is not enough for the model."
             )
         if chunk.get_device() != device:
@@ -324,6 +322,7 @@ class ChunkList(object):
             capacity=chunk_size,
             data_type=data_type,
             chunk_id=chunk_id,
+            memory_tracer=self.memory_tracer,
             local_rank=self.local_rank,
             is_dummy=is_dummy,
         )
@@ -372,62 +371,11 @@ class ChunkList(object):
         Returns:
             A list of chunk_ids.
         """
-        still_need_bytes = size_in_bytes
-        moved_bytes = 0
-        moved_list = []
-
-        # TODO(jiaruifang) Now we are using a greedy method to find the chunk to move.
-        # Find a better way with the lifecycle of the chunk.
-
-        movable_chunk_info = []
-
-        q = PriorityQueue()
-        for chunk_id, chunk in self.id_to_chunk_map.items():
-            if (
-                chunk.get_device() is not None
-                and chunk.get_device().type == target_device.type
-                and chunk.get_state() != ChunkState.COMPUTE
-                and not chunk.is_pin()
-            ):
-                # The next moment when this chunk was accessed.
-                next_mom = chunk.next_accessed_mom(target_device)
-                # Order by `next_mom`s, from large to small
-                # and by chunk_ids if `next_mom` are the same (only happens during warmup).
-                q.put((-next_mom, chunk_id))
-                movable_chunk_info.append(f"{next_mom}_{chunk_id}")
-            # TODO(jiaruifang) Do not release `FREE` chunks immediately for reuse.
-            # assert chunk.get_state() != ChunkState.FREE
-        while not q.empty():
-            next_mom, chunk_id = q.get()
-            moved_bytes += self.id_to_chunk_map[chunk_id].get_payload_space()
-            moved_list.append(chunk_id)
-            if moved_bytes >= still_need_bytes:
-                break
-
-        mgr = PatrickStarManager()
-        logger.info(
-            f"**** EVICT INFO(next_mom, chunk_id) {target_device}: "
-            f"cur_mom {mgr.get_cur_mom()} movable_chunk_info {movable_chunk_info}, "
-            f"real moved_list {moved_list}"
+        moved_list = self.chunk_eviction_policy.derive_eviction_list(
+            self.id_to_chunk_map, size_in_bytes, target_device
         )
-        # Raise error when failed to make enough room.
-        if moved_bytes < still_need_bytes:
-            raise RuntimeError(
-                f"device {target_device} still needs {still_need_bytes / 1e6} MB, "
-                f"but there is not enough space on it, only {moved_bytes / 1e6} MB available. "
-                f"chunk mem used memory on {target_device} is "
-                f"{self.get_chunk_memory_used(target_device) / 1e6} MB"
-            )
-
         return moved_list
 
     def update_state(self, chunk_id, old_state, new_state):
         r"""Update the state of chunk of id `chunk_id`."""
         self.id_to_chunk_map[chunk_id].update_state(old_state, new_state)
-
-    def display_access_info(self):
-        logger.debug("----------- SHOW ACCESS INFO -----------")
-        for chunk_id in self.chunk_type_to_id_list_map[ChunkType.PARAM_FP16]:
-            chunk = self.id_to_chunk_map[chunk_id]
-            logger.debug(f"\t {chunk_id} cpu_access_moments {chunk.cpu_access_moments}")
-            logger.debug(f"\t {chunk_id} gpu_access_moments {chunk.gpu_access_moments}")

@@ -28,7 +28,11 @@
 # SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 from .distributed import get_world_size, get_rank
-from .helper import getsizeof
-from .memory_monitor import see_memory_usage, get_sys_memory_used
+from .helper import getsizeof, get_space_of
 from .logging import log_dist, logger, print_rank
+from .memory import get_memory_info
+from .memory_monitor import (
+    see_memory_usage,
+    get_sys_memory_used,
+)
 from .singleton_meta import SingletonMeta

@@ -31,7 +31,6 @@ import torch
 
 import patrickstar.utils.global_timer as global_timer
 from patrickstar.core.parameter import ParamType
-from patrickstar.manager import PatrickStarManager
 from patrickstar.utils import logger, get_rank, get_world_size
 from .const import TensorState, AccessType, TrainingStage
 
@@ -130,22 +129,15 @@ def pre_sub_module_forward_function(sub_module, client, name):
     for _, param in sub_module.named_parameters(recurse=False):
         if param.ps_attr.param_type == ParamType.TORCH_BASED:
             continue
-        param.data = client.access_dist(
-            param, AccessType.DATA, torch.device(f"cuda:{client.local_rank}")
-        )
+        param.data = client.access_dist(param, AccessType.DATA, client.device)
         flag = True
-    # TODO(zilinzhu) Currently we move all buffers to GPU as the buffer size is
-    # relatively small. Maybe find a better way to deal with them.
-    for _, buffer in sub_module.named_buffers(recurse=False):
-        buffer.data = buffer.data.to(torch.device(f"cuda:{client.local_rank}"))
     if flag:
-        mgr = PatrickStarManager()
-        mgr.tiktac(client)
+        client.trigger_memory_tracing()
+        client.adjust_chunk_layout()
 
 
 # release submodule
 def post_sub_module_forward_function(sub_module, client, name):
-    mgr = PatrickStarManager()
     for sub_name, param in sub_module.named_parameters(recurse=False):
         if param.ps_attr.param_type == ParamType.TORCH_BASED:
             continue
@@ -162,10 +154,11 @@ def post_sub_module_forward_function(sub_module, client, name):
         else:
             client.release_data(param, TensorState.HOLD_AFTER_FWD)
 
-        if mgr._training_stage == TrainingStage.FWD:
+        if client.training_stage() == TrainingStage.FWD:
             param.ps_attr.fwd_used_cnt += 1
 
-    mgr.tiktac(client)
+    client.trigger_memory_tracing()
+    client.adjust_chunk_layout()
 
 
 def pre_sub_module_backward_function(sub_module, client, name):
@@ -176,9 +169,7 @@ def pre_sub_module_backward_function(sub_module, client, name):
         rank = get_rank()
         logger.debug(f"rank {rank} BWD pre {name}.{sub_name}")
         if param.ps_attr.data_type == torch.half:
-            tmp_tensor = client.access_dist(
-                param, AccessType.DATA, torch.device(f"cuda:{client.local_rank}")
-            )
+            tmp_tensor = client.access_dist(param, AccessType.DATA, client.device)
             param.data = tmp_tensor
 
             # NOTE() bwd first visits this param
@@ -189,12 +180,11 @@ def pre_sub_module_backward_function(sub_module, client, name):
             raise RuntimeError("fp32 training is not supported!")
         flag = True
     if flag:
-        mgr = PatrickStarManager()
-        mgr.tiktac(client)
+        client.trigger_memory_tracing()
+        client.adjust_chunk_layout()
 
 
 def post_sub_module_backward_function(sub_module, client, name):
-    mgr = PatrickStarManager()
     for sub_name, param in sub_module.named_parameters(recurse=False):
         if param.ps_attr.param_type == ParamType.TORCH_BASED:
             continue
@@ -225,7 +215,8 @@ def post_sub_module_backward_function(sub_module, client, name):
             logger.debug(f"rank {rank} BWD post before release_dist {name}.{sub_name}")
             param.grad = None
 
-    mgr.tiktac(client)
+    client.trigger_memory_tracing()
+    client.adjust_chunk_layout()
 
 
 def _register_hooks_recursively(module, client, name=""):

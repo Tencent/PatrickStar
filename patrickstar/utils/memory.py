@@ -27,38 +27,44 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 # SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import unittest
+from collections import namedtuple
 
-import torch
-from transformers import BertModel, BertConfig
-
-from common import distributed_test
-from patrickstar.core import PSPreProcessCtx
-from patrickstar.core import PatrickStarClient
-from patrickstar.ops import FP16Adam
+import psutil
 
 
-class TestOptimizerInitContext(unittest.TestCase):
-    def setUp(self):
-        pass
-
-    @distributed_test(world_size=[1])
-    def test_optimizer_init(self):
-        def model_provider():
-            cfg = BertConfig()
-            cfg.vocab_size = 10
-            model = BertModel(cfg)
-            return model
-
-        default_chunk_size = 32 * 1024 * 1024
-        client = PatrickStarClient(0, default_chunk_size)
-
-        torch.manual_seed(0)
-        with PSPreProcessCtx(client, dtype=torch.float):
-            ps_model = model_provider()
-
-        FP16Adam(client, ps_model.parameters())
+ps_mem_info = namedtuple("ps_mem_info", ["total", "free", "cached", "buffers", "used"])
 
 
-if __name__ == "__main__":
-    unittest.main()
+def get_memory_info():
+    try:
+        # psutil reads the memory info from /proc/memory_info,
+        # which results in returning the host memory instead of
+        # that of container.
+        # Here we try to read the container memory with method in:
+        # https://stackoverflow.com/a/46213331/5163915
+        # TODO(zilinzhu) Make this robust on most OS.
+        mems = {}
+        with open("/sys/fs/cgroup/memory/memory.meminfo", "rb") as f:
+            for line in f:
+                fields = line.split()
+                mems[fields[0]] = int(fields[1]) * 1024
+        total = mems[b"MemTotal:"]
+        free = mems[b"MemFree:"]
+        cached = mems[b"Cached:"]
+        buffers = mems[b"Buffers:"]
+        used = total - free - cached - buffers
+        if used < 0:
+            used = total - free
+        mem_info = ps_mem_info(
+            total=total, free=free, cached=cached, buffers=buffers, used=used
+        )
+    except FileNotFoundError:
+        mems = psutil.virtual_memory()
+        mem_info = ps_mem_info(
+            total=mems.total,
+            free=mems.free,
+            cached=mems.cached,
+            buffers=mems.buffers,
+            used=mems.used,
+        )
+    return mem_info

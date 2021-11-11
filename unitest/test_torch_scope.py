@@ -30,34 +30,28 @@
 import unittest
 
 import torch
-from transformers import BertModel, BertConfig
 
 from common import distributed_test
-from patrickstar.core import PSPreProcessCtx
-from patrickstar.core import PatrickStarClient
-from patrickstar.ops import FP16Adam
+from patrickstar.core import PatrickStarClient, PSPreProcessCtx, torch_scope, ParamType
 
 
-class TestOptimizerInitContext(unittest.TestCase):
+class TestTorchScopeContext(unittest.TestCase):
     def setUp(self):
         pass
 
     @distributed_test(world_size=[1])
-    def test_optimizer_init(self):
+    def test_torch_scope(self):
         def model_provider():
-            cfg = BertConfig()
-            cfg.vocab_size = 10
-            model = BertModel(cfg)
-            return model
+            with torch_scope():
+                return torch.nn.Linear(5, 10)
 
-        default_chunk_size = 32 * 1024 * 1024
+        default_chunk_size = 1 * 1024 * 1024
         client = PatrickStarClient(0, default_chunk_size)
 
-        torch.manual_seed(0)
         with PSPreProcessCtx(client, dtype=torch.float):
             ps_model = model_provider()
 
-        FP16Adam(client, ps_model.parameters())
+        assert ps_model.weight.ps_attr.param_type == ParamType.TORCH_BASED
 
 
 if __name__ == "__main__":

@@ -30,31 +30,23 @@
 from copy import deepcopy
 import math
 from typing import List
-
 import torch
+import time
 
 from patrickstar.core import ChunkType
 from patrickstar.core.const import TensorState, AccessType, TrainingStage
 from patrickstar.core.parameter import register_param, ParamType
-from patrickstar.manager import PatrickStarManager
 import patrickstar.utils.global_timer as global_timer
 from patrickstar.utils import logger, get_rank
 from .chunk_io_buff import FP32ChunkReadBuffer, FP16ChunkWriteBuffer
 from .op_builder.cpu_adam import CPUAdamBuilder
+from patrickstar.utils.helper import get_real_data_tensor
+from patrickstar.profiler import profiler
 
 
-def get_real_data_tensor(param):
-    if param.ps_attr.param_type == ParamType.TORCH_BASED:
-        return param.data
-    elif param.ps_attr.param_type == ParamType.CHUNK_BASED:
-        return param.ps_attr.access_tensor(AccessType.DATA)
-    else:
-        raise RuntimeError
-
-
-def zero_cpu_param(p):
+def zero_param(p):
     return torch.nn.Parameter(
-        torch.zeros_like(p, dtype=torch.float, device=torch.device("cpu:0")),
+        torch.zeros_like(p, dtype=torch.float),
         requires_grad=False,
     )
 
@@ -129,11 +121,11 @@ class FP16Adam(torch.optim.Optimizer):
 
                 if p.ps_attr.param_type == ParamType.TORCH_BASED:
                     if p.requires_grad:
-                        state["exp_avg"] = zero_cpu_param(p)
+                        state["exp_avg"] = zero_param(p)
                         register_param(
                             state["exp_avg"], ParamType.TORCH_BASED, torch.float
                         )
-                        state["exp_avg_sq"] = zero_cpu_param(p)
+                        state["exp_avg_sq"] = zero_param(p)
                         register_param(
                             state["exp_avg_sq"], ParamType.TORCH_BASED, torch.float
                         )
@@ -354,7 +346,6 @@ class FP16Adam(torch.optim.Optimizer):
                 # If fp16_param is managed by native torch, it should be on CPU,
                 # because only cpu_embedding optimization are managed by native torch
                 # now and it is fp32.
-                assert fp16_param.data.device.type == "cpu"
                 assert fp32_param is None
                 fp32_param = fp16_param
                 # Here the grad is already of dtype fp32.
@@ -489,7 +480,7 @@ class FP16Adam(torch.optim.Optimizer):
         global_timer.my_timer.start_profile("ADAM")
 
         rank = get_rank()
-        mgr = PatrickStarManager()
+        mem_tracer = self.client.mem_tracer
         for name, param in self.client.module.named_parameters():
             if param.ps_attr.param_type == ParamType.TORCH_BASED:
                 continue
@@ -512,8 +503,12 @@ class FP16Adam(torch.optim.Optimizer):
                     )
                 else:
                     self.client.release_data(param, TensorState.HOLD_AFTER_BWD)
-        mgr.set_training_stage(TrainingStage.ADAM)
-        mgr.tiktac(self.client)
+        if profiler.started():
+            profiler.stage_convert_time.append((time.time(), TrainingStage.ADAM))
+        self.client.set_training_phase(TrainingStage.ADAM)
+
+        self.client.trigger_memory_tracing()
+        self.client.adjust_chunk_layout()
 
         loss = None
         if closure is not None:
@@ -521,7 +516,9 @@ class FP16Adam(torch.optim.Optimizer):
                 loss = closure()
 
         if self.use_hybrid_adam:
-            margin_chunk_num_for_gpu_adam = mgr.get_margin_chunk_num_for_gpu_adam()
+            margin_chunk_num_for_gpu_adam = (
+                mem_tracer.get_margin_chunk_num_for_gpu_adam()
+            )
         else:
             margin_chunk_num_for_gpu_adam = 0
 
@@ -610,13 +607,6 @@ class FP16Adam(torch.optim.Optimizer):
             True,
             margin_chunk_num_for_gpu_adam,
         )
-
-        mgr = PatrickStarManager()
-
-        if mgr.is_warmup_training():
-            self.client.chunk_list.display_access_info()
-            mgr.is_warmup = False
-            logger.info("----------------- WARMUP PHASE OVER -----------------")
 
         if self.loss_scaler:
             self.loss_scaler.update_scale(False)

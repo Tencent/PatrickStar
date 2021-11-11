@@ -37,15 +37,25 @@ from patrickstar.core.hook import (
     _apply_to_tensors_only,
 )
 from patrickstar.utils import get_sys_memory_used, logger
-
 from patrickstar.profiler import profiler
 
 
-def _update_global_var():
-    gpu_mem_used = get_sys_memory_used(
-        torch.device(f"cuda:{torch.cuda.current_device()}")
-    )
-    profiler.gpu_memory_used.append((None, time.time(), gpu_mem_used))
+def _cur_mem_usage():
+    """
+    A function used to sample memory usage at the moment
+    before and after an operator sharted and finished.
+    """
+    dev = torch.device(f"cuda:{torch.cuda.current_device()}")
+    gpu_mem_used = get_sys_memory_used(dev)
+    return gpu_mem_used
+
+
+def _record_mem_stats():
+    """
+    Record memory statistics at this moment for the profiler.
+    """
+    mem_cur_mon = _cur_mem_usage()
+    profiler.gpu_memory_used.append((None, time.time(), mem_cur_mon))
 
 
 def _register_hooks_recursively(module, name=""):
@@ -63,16 +73,13 @@ def _register_hooks_recursively(module, name=""):
     ):
         return
 
-    def _pre_forward_module_hook(module, *args):
-        _update_global_var()
-
-    def _post_forward_module_hook(module, *args):
-        _update_global_var()
+    def _pre_post_forward_module_hook(module, *args):
+        _record_mem_stats()
 
     # The hook can modify the output
     def _pre_backward_module_hook(module, inputs, output):
         def _run_before_backward_function(sub_module):
-            _update_global_var()
+            _record_mem_stats()
 
         return _apply_to_tensors_only(
             module, PreBackwardFunction, _run_before_backward_function, output
@@ -80,14 +87,14 @@ def _register_hooks_recursively(module, name=""):
 
     def _post_backward_module_hook(module, inputs):
         def _run_after_backward_function(sub_module):
-            _update_global_var()
+            _record_mem_stats()
 
         return _apply_to_tensors_only(
             module, PostBackwardFunction, _run_after_backward_function, inputs
         )
 
-    module.register_forward_pre_hook(_pre_forward_module_hook)
-    module.register_forward_hook(_post_forward_module_hook)
+    module.register_forward_pre_hook(_pre_post_forward_module_hook)
+    module.register_forward_hook(_pre_post_forward_module_hook)
 
     module.register_forward_hook(_pre_backward_module_hook)
     module.register_forward_pre_hook(_post_backward_module_hook)

@@ -27,38 +27,10 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 # SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import unittest
-
+from patrickstar.utils import SingletonMeta
 import torch
-from transformers import BertModel, BertConfig
-
-from common import distributed_test
-from patrickstar.core import PSPreProcessCtx
-from patrickstar.core import PatrickStarClient
-from patrickstar.ops import FP16Adam
 
 
-class TestOptimizerInitContext(unittest.TestCase):
-    def setUp(self):
-        pass
-
-    @distributed_test(world_size=[1])
-    def test_optimizer_init(self):
-        def model_provider():
-            cfg = BertConfig()
-            cfg.vocab_size = 10
-            model = BertModel(cfg)
-            return model
-
-        default_chunk_size = 32 * 1024 * 1024
-        client = PatrickStarClient(0, default_chunk_size)
-
-        torch.manual_seed(0)
-        with PSPreProcessCtx(client, dtype=torch.float):
-            ps_model = model_provider()
-
-        FP16Adam(client, ps_model.parameters())
-
-
-if __name__ == "__main__":
-    unittest.main()
+class CUDAContext(metaclass=SingletonMeta):
+    def __init__(self):
+        self.copy_stream = torch.cuda.Stream()

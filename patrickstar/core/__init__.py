@@ -34,5 +34,5 @@ from .client import PatrickStarClient
 from .const import AccessType, ChunkState, TensorState, TrainingStage, ChunkType
 from .hook import setup_patrickstar_hooks
 from .parameter import PSParameter, register_param, is_param_registered, ParamType
-from .preprocess import PSPreProcessCtx
+from .preprocess import PSPreProcessCtx, torch_scope
 from .checkpoint import checkpoint
