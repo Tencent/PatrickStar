@@ -507,6 +507,9 @@ class FP16Adam(torch.optim.Optimizer):
             profiler.stage_convert_time.append((time.time(), TrainingStage.ADAM))
         self.client.metronome.set_training_phase(TrainingStage.ADAM)
 
+        self.client.trigger_memory_tracing()
+        self.client.adjust_chunk_layout()
+
         loss = None
         if closure is not None:
             with torch.enable_grad():
