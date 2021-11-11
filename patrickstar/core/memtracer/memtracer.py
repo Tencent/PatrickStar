@@ -124,7 +124,9 @@ class RuntimeMemTracer(object):
         if self.use_async_mem_monitor:
             self.async_mem_monitor = AsyncMemoryMonitor()
 
-        print(f"use_async_mem_monitor {self.use_async_mem_monitor}")
+        print(
+            f"[Mem Tracer] Using Asyn Mem Monitor Flag : {self.use_async_mem_monitor}"
+        )
 
         mem_info = get_memory_info()
         if self.use_fake_dist:
@@ -171,13 +173,14 @@ class RuntimeMemTracer(object):
         """
         if self.use_async_mem_monitor:
             self.async_mem_monitor.finish()
+        print("**** Memory Tracer is closed! ****")
 
     def start_train(self, param_fp16_chunk_size, chunk_size):
         self._param_fp16_chunk_size = param_fp16_chunk_size
         self._default_chunk_size = chunk_size
         if self.use_async_mem_monitor:
             self.async_mem_monitor.start()
-        logger.info("Memory Tracer Starts To Work.")
+        print("**** Memory Tracer is stared! ****")
 
     def update_margin_mem(self):
         r"""Update the number of GPU free chunks for optimizer."""
