@@ -41,11 +41,11 @@ require_list = fetch_requirements("requirements.txt")
 
 setup(
     name="patrickstar",
-    version="0.1",
+    version="0.4",
     description="PatrickStart library",
     long_description="PatrickStar: Parallel Training of Large Language Models via a Chunk-based Parameter Server",
     long_description_content_type="text/markdown",
-    author="Jiarui Fang",
+    author="Tencent PatrickStar Team",
     author_email="fangjiarui123@gmail.com",
     url="https://fangjiarui.github.io/",
     install_requires=require_list,
