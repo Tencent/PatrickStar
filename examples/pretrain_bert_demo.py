@@ -420,7 +420,7 @@ def test_bert_model_helper(
             if dist_plan == "patrickstar":
                 print(
                     f'{"[WARM UP] " if n == 0 else ""}'
-                    f"Step elaspe {step_elapse} s, {total_macs / 1e12 / step_elapse} Tflops"
+                    f"Step {n} elaspe {step_elapse} s, {total_macs / 1e12 / step_elapse} Tflops"
                 )
                 global_timer.my_timer.print()
                 global_timer.data_move_cnter.print()
@@ -429,7 +429,7 @@ def test_bert_model_helper(
                 global_timer.data_move_cnter.reset()
             else:
                 print(
-                    f"Step elaspe {step_elapse} s, {total_macs / 1e12 / step_elapse} Tflops"
+                    f"Step {n} elaspe {step_elapse} s, {total_macs / 1e12 / step_elapse} Tflops"
                 )
 
         logger.info(f"End Step {n} with {dist_plan}.\n")
