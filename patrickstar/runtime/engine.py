@@ -149,8 +149,10 @@ class PatrickStarEngine(torch.nn.Module):
         move_param_to_gpu(model)
 
     def _reset_before_forward(self):
-        self.client.mem_tracer.reset_memory_stats(self.client.metronome)
-        self.client.metronome.reset()
+        # TODO(jiaruifang) so difficult to understand.
+        # about grad overflow.
+        self.client.mem_tracer.reset_memory_stats()
+        self.client.mem_tracer.metronome.reset()
         for param_fp16 in self.client.chunk_based_param_fp16:
             param_fp16.ps_attr.fwd_used_cnt = 0
         for _, chunk in self.client.chunk_list.generate_chunk():
@@ -179,16 +181,16 @@ class PatrickStarEngine(torch.nn.Module):
         # warmup logic, we have to make sure a iteration run the entire FWD+BWD process.
         # Considering the grad overflow situation.
         if self.iteration_cnt_ == 0:
-            self.client.metronome.set_warmup(True)
+            self.client.set_warmup(True)
         if self.iteration_cnt_ == self.warmup_times:
-            self.client.metronome.set_warmup(False)
+            self.client.set_warmup(False)
             self.client.mem_tracer.close_tracer()
 
         global_timer.my_timer.start_profile("FWD")
         if profiler.started():
             profiler.stage_convert_time.append((time.time(), TrainingStage.FWD))
 
-        self.client.metronome.set_training_phase(TrainingStage.FWD)
+        self.client.set_training_phase(TrainingStage.FWD)
         self._reset_before_forward()
 
         loss = self.module(*inputs, **kwargs)
@@ -204,7 +206,7 @@ class PatrickStarEngine(torch.nn.Module):
         global_timer.my_timer.start_profile("BWD")
         if profiler.started():
             profiler.stage_convert_time.append((time.time(), TrainingStage.FWD))
-        self.client.metronome.set_training_phase(TrainingStage.BWD)
+        self.client.set_training_phase(TrainingStage.BWD)
 
         for param_fp16 in self.client.chunk_based_param_fp16:
             param_fp16.ps_attr.bwd_used_cnt = 0

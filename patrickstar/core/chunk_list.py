@@ -178,12 +178,8 @@ class ChunkList(object):
         if self._time_profile:
             global_timer.my_timer.start_profile("CHUNK_LIST_prepare_device")
 
-        ava_chunk_mem_size = self.memory_tracer.available_chunk_mem(
-            self.chunk_eviction_policy.metronome, target_device.type
-        )
-        free_chunk_mem_size = self.memory_tracer.free_chunk_mem(
-            self.chunk_eviction_policy.metronome, target_device.type
-        )
+        ava_chunk_mem_size = self.memory_tracer.available_chunk_mem(target_device.type)
+        free_chunk_mem_size = self.memory_tracer.free_chunk_mem(target_device.type)
 
         logger.debug(
             f"prepare_target: device {target_device} need_bytes {need_bytes / 1e6} MB, "
@@ -281,9 +277,7 @@ class ChunkList(object):
 
         chunk = self.id_to_chunk_map[chunk_id]
 
-        free_chunk_mem_size = self.memory_tracer.free_chunk_mem(
-            self.chunk_eviction_policy.metronome, device.type
-        )
+        free_chunk_mem_size = self.memory_tracer.free_chunk_mem(device.type)
 
         chunk_mem_size = chunk.get_payload_space()
         if free_chunk_mem_size < chunk_mem_size:
