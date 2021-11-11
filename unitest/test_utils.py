@@ -30,10 +30,8 @@
 import unittest
 
 import torch
-from patrickstar.utils import (
-    AsyncMemoryMonitor,
-    get_sys_memory_used,
-)
+from patrickstar.utils.memory_monitor import get_sys_memory_used
+from patrickstar.core.memtracer.memtracer import AsyncMemoryMonitor
 
 
 class TestAsynMemoryMonitor(unittest.TestCase):

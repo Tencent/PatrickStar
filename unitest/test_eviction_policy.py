@@ -33,6 +33,7 @@ import torch
 from patrickstar.core.eviction_policy import LatestAccessChunkEvictionPolicy
 from patrickstar.core.chunk_data import Chunk
 from patrickstar.core.memtracer import Metronome
+from patrickstar.core.memtracer import RuntimeMemTracer
 
 
 class TestEvictionPolicy(unittest.TestCase):
@@ -42,9 +43,12 @@ class TestEvictionPolicy(unittest.TestCase):
     def test_chunk_eviction(self):
         id_to_chunk_list = {}
         dev = torch.device("cpu:0")
-        id_to_chunk_list[0] = Chunk(10, torch.float, 0, 0, False)
+        mem_tracer = RuntimeMemTracer(
+            local_rank=0, config={"use_async_mem_monitor": True}
+        )
+        id_to_chunk_list[0] = Chunk(10, torch.float, 0, mem_tracer, 0, False)
         id_to_chunk_list[0].allocate_payload(dev)
-        id_to_chunk_list[1] = Chunk(10, torch.float, 1, 0, False)
+        id_to_chunk_list[1] = Chunk(10, torch.float, 1, mem_tracer, 0, False)
         id_to_chunk_list[1].allocate_payload(dev)
         metronome = Metronome()
         metronome.set_warmup(True)
