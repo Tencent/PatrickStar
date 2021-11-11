@@ -38,7 +38,6 @@ from .const import AccessType, ChunkState, TensorState, TrainingStage
 from .hook import setup_patrickstar_hooks
 from .parameter import register_param, is_param_registered, ParamType
 from .eviction_policy import LatestAccessChunkEvictionPolicy
-from patrickstar.core.memtracer import Metronome
 from patrickstar.core.memtracer import RuntimeMemTracer
 
 
@@ -51,13 +50,15 @@ class PatrickStarClient(object):
 
         self.module = None
 
-        self.metronome = Metronome()
-        self.chunk_eviction_strategy = LatestAccessChunkEvictionPolicy(self.metronome)
+        tracer_config = config.get("mem_tracer", None)
+        self.mem_tracer = RuntimeMemTracer(self.local_rank, tracer_config)
+
+        self.chunk_eviction_strategy = LatestAccessChunkEvictionPolicy(
+            self.mem_tracer.metronome
+        )
 
         self.default_chunk_size = default_chunk_size
         self.chunk_tensor_index = ChunkTensorIndex(self.default_chunk_size)
-        tracer_config = config.get("mem_tracer", None)
-        self.mem_tracer = RuntimeMemTracer(self.local_rank, tracer_config)
         self.chunk_list = ChunkList(
             self.local_rank, self.mem_tracer, self.chunk_eviction_strategy
         )
@@ -77,6 +78,19 @@ class PatrickStarClient(object):
         # for post backward hook
         self.grad_accs = []
 
+    # expose APIs from metrome ti client
+    def training_stage(self):
+        return self.mem_tracer.metronome.training_stage()
+
+    def set_training_phase(self, phase):
+        self.mem_tracer.metronome.set_training_phase(phase)
+
+    def set_warmup(self, flag):
+        self.mem_tracer.metronome.set_warmup(flag)
+
+    def is_warmup(self):
+        return self.mem_tracer.is_warmup()
+
     def init(self, model, optimizer):
         r"""Initialize and store model and optimizer"""
 
@@ -88,18 +102,18 @@ class PatrickStarClient(object):
         self.register_model_hook(model)
 
     def trigger_memory_tracing(self):
-        self.mem_tracer.trace_memory(self.metronome)
+        self.mem_tracer.trace_memory()
 
     def adjust_chunk_layout(self):
         """ "
         Adjust chunk layout in heterogenous memory space
         according to the runtime memory statictis.
         """
-        if self.metronome.is_warmup():
+        if self.mem_tracer.metronome.is_warmup():
             return
         gpu_device = torch.device(f"cuda:{self.local_rank}")
-        next_mom = self.metronome.next_moment()
-        # cur_mom = self.metronome.moment()
+        next_mom = self.mem_tracer.metronome.next_moment()
+        # cur_mom = self.mem_tracer.metronome.moment()
         gpu_next_mom_ava_chunk_mem = (
             self.mem_tracer._overall_gpu_mem
             - self.mem_tracer.gpu_sys_used_list[next_mom]

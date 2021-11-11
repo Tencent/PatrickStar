@@ -39,7 +39,7 @@ from patrickstar.utils import (
     get_world_size,
     logger,
 )
-
+from patrickstar.core.memtracer.metronome import Metronome
 from concurrent.futures import ThreadPoolExecutor
 from time import sleep
 
@@ -93,6 +93,7 @@ class RuntimeMemTracer(object):
 
     def __init__(self, local_rank: int = 0, config=None):
         self.local_rank = local_rank
+        self.metronome = Metronome()
         self.gpu_chunk_available_mem = 0
         self.cpu_chunk_available_mem = 0
 
@@ -200,7 +201,7 @@ class RuntimeMemTracer(object):
         )
         logger.info(f"OVERALL GPU MEM {self._overall_gpu_mem}")
 
-    def reset_memory_stats(self, metronome):
+    def reset_memory_stats(self):
         """
         Reset statistics collected from memory tracing.
         It is used in case of gradient overflow during warmup and
@@ -210,7 +211,7 @@ class RuntimeMemTracer(object):
         # is still doing warmup, it means the previous run didn't
         # cover the full procedure (forward -> backward -> optimizer).
         # Therefore clean the stats collected.
-        if metronome.is_warmup():
+        if self.metronome.is_warmup():
             self.cpu_used_list = []
             self.cpu_chunk_used_list = []
             self.cpu_sys_used_list = []
@@ -223,7 +224,7 @@ class RuntimeMemTracer(object):
     def get_margin_chunk_num_for_gpu_adam(self):
         return self._margin_chunk_num_for_gpu_adam
 
-    def trace_memory(self, metronome):
+    def trace_memory(self):
         """Record the memory usage of the moment and increase moment counter."""
         if torch.distributed.is_initialized():
             rank = self.local_rank
@@ -235,7 +236,7 @@ class RuntimeMemTracer(object):
 
         if profiler.started():
             timestamp = time.time()
-            cur_mom = metronome.moment()
+            cur_mom = self.metronome.moment()
             profiler.gpu_memory_used.append((cur_mom, timestamp, gpu_used))
             profiler.gpu_chunk_memory_used.append(
                 (cur_mom, timestamp, self.gpu_chunk_used_mem)
@@ -248,7 +249,7 @@ class RuntimeMemTracer(object):
                 (cur_mom, timestamp, self.cpu_chunk_used_mem)
             )
 
-        if metronome.is_warmup():
+        if self.metronome.is_warmup():
             # Get peak memory between cur tracing and the prev tracing
             if self.use_async_mem_monitor:
                 max_mem_period = self.async_mem_monitor.finish()
@@ -267,7 +268,7 @@ class RuntimeMemTracer(object):
             # For non-warmup iter, we update the mem of index cur_mom,
             # and for warmup iter, we append the gpu mem to the end of the list.
             # Make sure the length of the list is 1 more than `cur_mom`.
-            cur_mom = metronome.moment()
+            cur_mom = self.metronome.moment()
             assert (
                 len(self.gpu_sys_used_list) - 1 == cur_mom
             ), f"{len(self.gpu_sys_used_list) - 1} vs {cur_mom}"
@@ -277,7 +278,7 @@ class RuntimeMemTracer(object):
         # Calibrate the GPU sys used memory.
         # self.gpu_sys_used_list[cur_mom] = gpu_used - self.gpu_chunk_used_mem
 
-        metronome.tiktac()
+        self.metronome.tiktac()
 
     def add(self, device_type: str, size_in_bytes: int):
         if device_type == "cpu":
@@ -295,12 +296,10 @@ class RuntimeMemTracer(object):
         else:
             raise f"device type {device_type} is not supported"
 
-    def free_chunk_mem(self, metronome, device_type):
-        size = self.available_chunk_mem(metronome, device_type) - self.used_chunk_mem(
-            device_type
-        )
+    def free_chunk_mem(self, device_type):
+        size = self.available_chunk_mem(device_type) - self.used_chunk_mem(device_type)
         logger.debug(
-            f"free_chunk_mem on {device_type} {size / 1e6} MB on mement {metronome.moment()}"
+            f"free_chunk_mem on {device_type} {size / 1e6} MB on mement {self.metronome.moment()}"
         )
         return size
 
@@ -312,7 +311,7 @@ class RuntimeMemTracer(object):
         else:
             raise RuntimeError(f"used_chunk_mem {device_type}")
 
-    def available_chunk_mem(self, metronome, device_type):
+    def available_chunk_mem(self, device_type):
         r"""The amount of memory that can be used for chunks.
 
         This includes the memory that has been allocated for chunks
@@ -326,15 +325,19 @@ class RuntimeMemTracer(object):
         current moment and next moment.
         """
         if device_type == "cpu":
-            if metronome.is_warmup() or not self._start_training:
+            if self.metronome.is_warmup() or not self._start_training:
                 # TODO(jiaruifang) using a guessed number -- 1/3 of the GPU
                 # mem is used for chunk.
                 return self._overall_cpu_mem
             else:
                 return self._overall_cpu_mem
         elif device_type == "cuda":
-            if self.always_warmup or metronome.is_warmup() or not self._start_training:
-                if metronome.training_stage() == TrainingStage.ADAM:
+            if (
+                self.always_warmup
+                or self.metronome.is_warmup()
+                or not self._start_training
+            ):
+                if self.metronome.training_stage() == TrainingStage.ADAM:
                     # There is no activation during Adam stage, so we can use all the GPU
                     # mem for chunks. Need 2 * default_chunk_size for buffer, save 6 here for now.
                     ava_mem = self._overall_gpu_mem - 4 * self._default_chunk_size * 4
@@ -346,11 +349,11 @@ class RuntimeMemTracer(object):
                     return self._overall_gpu_mem * self.warmup_gpu_chunk_mem_ratio
             else:
                 world_size = get_world_size()
-                if metronome.training_stage() == TrainingStage.ADAM:
+                if self.metronome.training_stage() == TrainingStage.ADAM:
                     return self._overall_gpu_mem - 4 * self._default_chunk_size * 4
-                elif metronome.training_stage() == TrainingStage.FWD:
-                    next_mom = metronome.next_moment()
-                    cur_mom = metronome.moment()
+                elif self.metronome.training_stage() == TrainingStage.FWD:
+                    next_mom = self.metronome.next_moment()
+                    cur_mom = self.metronome.moment()
                     next_mom_ava_mem = (
                         self._overall_gpu_mem - self.gpu_sys_used_list[next_mom]
                     )
@@ -361,9 +364,9 @@ class RuntimeMemTracer(object):
                         min(next_mom_ava_mem, cur_mom_ava_mem)
                         - world_size * 2 * self._default_chunk_size
                     )
-                elif metronome.training_stage() == TrainingStage.BWD:
-                    next_mom = metronome.next_moment()
-                    cur_mom = metronome.moment()
+                elif self.metronome.training_stage() == TrainingStage.BWD:
+                    next_mom = self.metronome.next_moment()
+                    cur_mom = self.metronome.moment()
                     next_mom_ava_mem = (
                         self._overall_gpu_mem - self.gpu_sys_used_list[next_mom]
                     )
