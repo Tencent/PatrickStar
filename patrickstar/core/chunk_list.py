@@ -179,12 +179,14 @@ class ChunkList(object):
             global_timer.my_timer.start_profile("CHUNK_LIST_prepare_device")
 
         ava_chunk_mem_size = self.memory_tracer.available_chunk_mem(target_device.type)
-        free_chunk_mem_size = self.memory_tracer.free_chunk_mem(target_device.type)
+        remaining_chunk_mem_size = self.memory_tracer.remaining_chunk_mem(
+            target_device.type
+        )
 
         logger.debug(
             f"prepare_target: device {target_device} need_bytes {need_bytes / 1e6} MB, "
             f"ava_chunk_mem_size {ava_chunk_mem_size / 1e6} MB, "
-            f"free_chunk_mem_size {free_chunk_mem_size / 1e6} MB."
+            f"remaining_chunk_mem_size {remaining_chunk_mem_size / 1e6} MB."
         )
 
         # TODO(jiaruifang) Situation where there is no space.
@@ -201,11 +203,11 @@ class ChunkList(object):
                 f"Avaibale Chunk Memory is {ava_chunk_mem_size / 1e6} MB"
             )
 
-        extra_need_bytes = need_bytes - free_chunk_mem_size
+        extra_need_bytes = need_bytes - remaining_chunk_mem_size
 
         logger.debug(
             f"{target_device} (ava_chunk_mem_size {ava_chunk_mem_size / 1e6} MB) "
-            f"now free_chunk_mem_size size {free_chunk_mem_size / 1e6} MB, "
+            f"now remaining_chunk_mem_size size {remaining_chunk_mem_size / 1e6} MB, "
             f"needs {need_bytes / 1e6} MB"
         )
         # No need for new allocation.
@@ -266,7 +268,7 @@ class ChunkList(object):
     def chunk_move(self, chunk_id: int, device: torch.device):
         r"""Move chunk of id `chunk_id` to `device`.
 
-        NOTE(): Please make sure `device` has enough free_chunk_mem before.
+        NOTE(): Please make sure `device` has enough remaining_chunk_mem before.
 
         Args:
             chunk_id: int.
@@ -277,13 +279,13 @@ class ChunkList(object):
 
         chunk = self.id_to_chunk_map[chunk_id]
 
-        free_chunk_mem_size = self.memory_tracer.free_chunk_mem(device.type)
+        remaining_chunk_mem_size = self.memory_tracer.remaining_chunk_mem(device.type)
 
         chunk_mem_size = chunk.get_payload_space()
-        if free_chunk_mem_size < chunk_mem_size:
+        if remaining_chunk_mem_size < chunk_mem_size:
             raise RuntimeError(
                 f"chunk move failed. {device} has not {chunk_mem_size / 1e6} MB memory space. "
-                f"Free space is {free_chunk_mem_size / 1e6} MB. "
+                f"Free space is {remaining_chunk_mem_size / 1e6} MB. "
                 f"The reason may be that the overall memory of CPU and GPU is not enough for the model."
             )
         if chunk.get_device() != device:
