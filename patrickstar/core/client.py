@@ -38,8 +38,8 @@ from .const import AccessType, ChunkState, TensorState, TrainingStage
 from .hook import setup_patrickstar_hooks
 from .parameter import register_param, is_param_registered, ParamType
 from .eviction_policy import LatestAccessChunkEvictionPolicy
-from patrickstar.manager.metronome import Metronome
-from patrickstar.manager.manager import RuntimeMemTracer
+from patrickstar.core.memtracer import Metronome
+from patrickstar.core.memtracer import RuntimeMemTracer
 
 
 class PatrickStarClient(object):

@@ -32,7 +32,7 @@ from typing import List
 import torch
 
 from patrickstar.core.const import ChunkType
-from patrickstar.manager import RuntimeMemTracer
+from patrickstar.core.memtracer import RuntimeMemTracer
 from patrickstar.profiler import profiler
 from patrickstar.utils import logger, get_rank, get_world_size
 import patrickstar.utils.global_timer as global_timer
