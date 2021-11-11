@@ -36,7 +36,6 @@ from patrickstar.utils import logger, global_timer
 
 from .checkpoint import state_dict, load_state_dict
 from patrickstar.profiler import profiler
-from patrickstar.utils.memory_monitor import close_asyn_mem_monitor
 import time
 
 
@@ -183,7 +182,7 @@ class PatrickStarEngine(torch.nn.Module):
             self.client.metronome.set_warmup(True)
         if self.iteration_cnt_ == self.warmup_times:
             self.client.metronome.set_warmup(False)
-            close_asyn_mem_monitor()
+            self.client.mem_tracer.close_tracer()
 
         global_timer.my_timer.start_profile("FWD")
         if profiler.started():

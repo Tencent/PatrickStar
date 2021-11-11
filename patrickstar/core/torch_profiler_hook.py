@@ -37,9 +37,7 @@ from patrickstar.core.hook import (
     _apply_to_tensors_only,
 )
 from patrickstar.utils import get_sys_memory_used, logger
-
 from patrickstar.profiler import profiler
-from patrickstar.utils.memory_monitor import max_mem_usage_period
 
 
 def _cur_mem_usage():
@@ -57,14 +55,7 @@ def _record_mem_stats():
     Record memory statistics at this moment for the profiler.
     """
     mem_cur_mon = _cur_mem_usage()
-    # In case of an operator running too short,
-    # the sampler dose not capture any information.
-    # we add mem of cur mom as the default memory usage of the period.
-    max_mem_between_cur_prev = max(max_mem_usage_period(), mem_cur_mon)
-
-    profiler.gpu_memory_used.append(
-        (None, time.time(), max_mem_between_cur_prev, mem_cur_mon)
-    )
+    profiler.gpu_memory_used.append((None, time.time(), mem_cur_mon))
 
 
 def _register_hooks_recursively(module, name=""):
