@@ -34,7 +34,7 @@ import torch
 from common import distributed_test
 from patrickstar.core import ChunkList, ChunkState, ChunkType
 from patrickstar.core.eviction_policy import LatestAccessChunkEvictionPolicy
-from patrickstar.manager.metronome import Metronome
+from patrickstar.core.memtracer import Metronome
 
 
 class TestChunkData(unittest.TestCase):

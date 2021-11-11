@@ -29,7 +29,7 @@
 
 import torch
 from patrickstar.core import PSPreProcessCtx, PatrickStarClient
-from patrickstar.manager import RuntimeMemTracer
+from patrickstar.core.memtracer import RuntimeMemTracer
 from patrickstar.utils import logger
 from .engine import PatrickStarEngine
 

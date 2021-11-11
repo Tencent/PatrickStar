@@ -30,7 +30,7 @@
 import time
 import torch
 
-from patrickstar.manager import RuntimeMemTracer
+from patrickstar.core.memtracer import RuntimeMemTracer
 from patrickstar.manager.cuda_context import CUDAContext
 from patrickstar.profiler import profiler
 from patrickstar.utils import logger, getsizeof

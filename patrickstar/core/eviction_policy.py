@@ -30,7 +30,7 @@
 from __future__ import annotations
 from abc import ABC, abstractmethod
 from queue import PriorityQueue
-from patrickstar.manager.metronome import Metronome
+from patrickstar.core.memtracer import Metronome
 from patrickstar.core.const import ChunkState
 
 

@@ -32,7 +32,7 @@ import unittest
 import torch
 from patrickstar.core.eviction_policy import LatestAccessChunkEvictionPolicy
 from patrickstar.core.chunk_data import Chunk
-from patrickstar.manager.metronome import Metronome
+from patrickstar.core.memtracer import Metronome
 
 
 class TestEvictionPolicy(unittest.TestCase):
