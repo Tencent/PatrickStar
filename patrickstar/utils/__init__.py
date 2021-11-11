@@ -34,8 +34,5 @@ from .memory import get_memory_info
 from .memory_monitor import (
     see_memory_usage,
     get_sys_memory_used,
-    AsyncMemoryMonitor,
-    max_mem_usage_period,
-    close_asyn_mem_monitor,
 )
 from .singleton_meta import SingletonMeta

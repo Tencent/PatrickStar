@@ -31,7 +31,6 @@ import pickle
 import time
 
 from patrickstar.utils import SingletonMeta
-from patrickstar.utils import AsyncMemoryMonitor
 
 
 class Profiler(metaclass=SingletonMeta):
@@ -61,8 +60,6 @@ class Profiler(metaclass=SingletonMeta):
         self._nested_level += 1
 
     def end(self):
-        mem_monitor = AsyncMemoryMonitor()
-        mem_monitor.finish()
         self._nested_level = max(0, self._nested_level - 1)
         if self._nested_level == 0:
             self.end_time = time.time()

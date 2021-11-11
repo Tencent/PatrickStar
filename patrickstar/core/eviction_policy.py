@@ -83,6 +83,11 @@ class ChunkEvictionPolicyBase(ABC):
             return 0
         cur_mom = self.metronome.moment()
         total_mom = self.metronome._total_moment
+        # TODO(jiaruifang) 12B model KeyError: (1, device(type='cuda', index=0))
+        # if the chunk is not in access_mom_list, it means it never required on
+        # the dev, make it required time as far as possible.
+        if (chunk_id, dev) not in self.chunk_access_dict:
+            return 2 * total_mom
         access_mom_list = self.chunk_access_dict[(chunk_id, dev)]
         for mom in access_mom_list:
             if mom > cur_mom:

@@ -45,7 +45,7 @@ from patrickstar.manager.manager import RuntimeMemTracer
 class PatrickStarClient(object):
     r"""The client for managing chunks."""
 
-    def __init__(self, rank: int, default_chunk_size: int):
+    def __init__(self, rank: int, default_chunk_size: int, config=None):
         self.local_rank = rank
         self.device = torch.device(f"cuda:{rank}")
 
@@ -56,7 +56,8 @@ class PatrickStarClient(object):
 
         self.default_chunk_size = default_chunk_size
         self.chunk_tensor_index = ChunkTensorIndex(self.default_chunk_size)
-        self.mem_tracer = RuntimeMemTracer(self.local_rank)
+        tracer_config = config.get("mem_tracer", None)
+        self.mem_tracer = RuntimeMemTracer(self.local_rank, tracer_config)
         self.chunk_list = ChunkList(
             self.local_rank, self.mem_tracer, self.chunk_eviction_strategy
         )

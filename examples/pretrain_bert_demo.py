@@ -100,6 +100,11 @@ def _add_patrick_star_args(parser):
         default=10,
         help="initial loss scale power",
     )
+    group.add_argument(
+        "--with_async_mem_monitor",
+        action="store_true",
+        help="Use async memory monitor.",
+    )
     return parser
 
 
@@ -290,6 +295,11 @@ def test_bert_model_helper(
             "release_after_init": args.release_after_init,
             "use_fake_dist": args.use_fake_dist,
             "use_cpu_embedding": args.use_cpu_embedding,
+            "client": {
+                "mem_sampler": {
+                    "use_async_mem_monitor": args.with_async_mem_monitor,
+                }
+            },
         }
 
         model, optimizer = initialize_engine(

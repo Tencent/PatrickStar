@@ -38,8 +38,52 @@ from patrickstar.utils import (
     get_sys_memory_used,
     get_world_size,
     logger,
-    max_mem_usage_period,
 )
+
+from concurrent.futures import ThreadPoolExecutor
+from time import sleep
+
+
+class AsyncMemoryMonitor:
+    def __init__(self, power=3):
+        """
+        An Async Mem Monitor runing during computing.
+        Sampling GPU memory usage of the current GPU dev
+        at interval of 1/(10**power) sec.
+        """
+        self.keep_measuring = False
+        self.executor = ThreadPoolExecutor(max_workers=1)
+        self.monitor_thread = None
+        self.interval = 1 / (10 ** power)
+
+    def set_interval(self, power: int):
+        self.interval = 1 / (10 ** power)
+
+    def start(self):
+        self.keep_measuring = True
+        self.monitor_thread = self.executor.submit(self._measure_usage)
+
+    def finish(self):
+        if self.keep_measuring is False:
+            return 0
+        self.keep_measuring = False
+        max_usage = self.monitor_thread.result()
+        self.monitor_thread = None
+        return max_usage
+
+    def _measure_usage(self):
+        max_usage = 0
+        dev = torch.device(f"cuda:{torch.cuda.current_device()}")
+        while self.keep_measuring:
+            max_usage = max(
+                max_usage,
+                # resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+                get_sys_memory_used(dev),
+            )
+            # print(f"tmp max usage {max_usage}")
+            sleep(self.interval)
+
+        return max_usage
 
 
 class RuntimeMemTracer(object):
@@ -56,12 +100,16 @@ class RuntimeMemTracer(object):
         self.cpu_chunk_used_mem = 0
 
         if config is not None:
-            self._overall_gpu_mem_ratio = config.overall_gpu_mem_ratio
-            self._overall_cpu_mem_ratio = config.overall_cpu_mem_ratio
-            self._margin_use_ratio = config.margin_use_ratio
-            self.warmup_gpu_chunk_mem_ratio = config.warmup_gpu_chunk_mem_ratio
-            self.use_fake_dist = config.use_fake_dist
-            self.always_warmup = config.always_warmup
+            self._overall_gpu_mem_ratio = config.get("overall_gpu_mem_ratio", 0.8)
+            self._overall_cpu_mem_ratio = config.get("overall_cpu_mem_ratio", 0.8)
+            self._margin_use_ratio = config.get("margin_use_ratio", 0.8)
+            self.warmup_gpu_chunk_mem_ratio = config.get(
+                "warmup_gpu_chunk_mem_ratio", 0.1
+            )
+            self.use_fake_dist = config.get("use_fake_dist", False)
+            self.always_warmup = config.get("always_warmup", False)
+            self.use_async_mem_monitor = config.get("use_async_mem_monitor", False)
+
         else:
             self._overall_gpu_mem_ratio = 0.8
             self._overall_cpu_mem_ratio = 0.8
@@ -69,6 +117,11 @@ class RuntimeMemTracer(object):
             self.warmup_gpu_chunk_mem_ratio = 0.2
             self.use_fake_dist = False
             self.always_warmup = False
+            self.use_async_mem_monitor = True
+        if self.use_async_mem_monitor:
+            self.async_mem_monitor = AsyncMemoryMonitor()
+
+        print(f"use_async_mem_monitor {self.use_async_mem_monitor}")
 
         mem_info = get_memory_info()
         if self.use_fake_dist:
@@ -110,10 +163,19 @@ class RuntimeMemTracer(object):
         self._margin_chunk_num_for_gpu_adam = 0
         self._default_chunk_size = 0
 
+    def close_tracer(self):
+        """
+        Close memory tracer.
+        """
+        if self.use_async_mem_monitor:
+            self.async_mem_monitor.finish()
+
     def start_train(self, param_fp16_chunk_size, chunk_size):
         self._start_training = True
         self._param_fp16_chunk_size = param_fp16_chunk_size
         self._default_chunk_size = chunk_size
+        if self.use_async_mem_monitor:
+            self.async_mem_monitor.start()
         logger.info("Memory Tracer Starts To Work.")
 
     def update_margin_mem(self):
@@ -187,9 +249,12 @@ class RuntimeMemTracer(object):
             )
 
         if metronome.is_warmup():
-            # max_mem_perid involves temp buff used inside an operator.
-            max_mem_period = max_mem_usage_period()
-            gpu_used = max(max_mem_period, gpu_used)
+            # Get peak memory between cur tracing and the prev tracing
+            if self.use_async_mem_monitor:
+                max_mem_period = self.async_mem_monitor.finish()
+                gpu_used = max(max_mem_period, gpu_used)
+                self.async_mem_monitor.start()
+
             self.gpu_used_list.append(gpu_used)
             self.gpu_chunk_used_list.append(self.gpu_chunk_used_mem)
             self.gpu_sys_used_list.append((gpu_used - self.gpu_chunk_used_mem))
