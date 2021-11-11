@@ -157,8 +157,8 @@ def post_sub_module_forward_function(sub_module, client, name):
         if client.training_stage() == TrainingStage.FWD:
             param.ps_attr.fwd_used_cnt += 1
 
-    client.trigger_memory_tracing()
-    client.adjust_chunk_layout()
+    # client.trigger_memory_tracing()
+    # client.adjust_chunk_layout()
 
 
 def pre_sub_module_backward_function(sub_module, client, name):
@@ -215,8 +215,8 @@ def post_sub_module_backward_function(sub_module, client, name):
             logger.debug(f"rank {rank} BWD post before release_dist {name}.{sub_name}")
             param.grad = None
 
-    client.trigger_memory_tracing()
-    client.adjust_chunk_layout()
+    # client.trigger_memory_tracing()
+    # client.adjust_chunk_layout()
 
 
 def _register_hooks_recursively(module, client, name=""):
