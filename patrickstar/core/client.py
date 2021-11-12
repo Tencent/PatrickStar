@@ -346,7 +346,10 @@ class PatrickStarClient(object):
                     self.chunk_list.prepare_device(
                         compute_device, 2 * self.chunk_list[chunk_id].get_chunk_space()
                     )
-                    self.chunk_list[chunk_id].allocate_payload(compute_device)
+                    if not self.chunk_list[chunk_id].allocate_payload(compute_device):
+                        raise RuntimeError(
+                            f"Allocate Payload Failed even if we have moved out more memory from {compute_device}"
+                        )
                 # before allgather.
                 self.chunk_list[chunk_id].pin()
             self.set_all_tensors_state_in_chunk(chunk_id, TensorState.HOLD)

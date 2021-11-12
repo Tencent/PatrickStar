@@ -157,8 +157,11 @@ class ChunkList(object):
             if chunk.allocate_payload(compute_device):
                 return
             else:
-                self.prepare_device(compute_device, payload_space)
-                chunk.allocate_payload(compute_device)
+                self.prepare_device(compute_device, 2 * payload_space)
+                if chunk.allocate_payload(compute_device) is False:
+                    raise RuntimeError(
+                        f"Allocate Payload Failed even if we have moved out more memory from {compute_device}"
+                    )
             return
         elif chunk.get_device().type != compute_device.type:
             self.prepare_device(compute_device, payload_space)
