@@ -94,7 +94,7 @@ if __name__ == "__main__":
     else:
         PATH = "./logs_GPT2small"
     files = os.listdir(PATH)
-    collect_info_from_dir(PATH)
+    res_dict, file_dict = collect_info_from_dir(PATH)
     new_res_list = []
     for k, v in res_dict.items():
         plan = k.split("_")
