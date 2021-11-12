@@ -149,7 +149,7 @@ def post_sub_module_forward_function(sub_module, client, name):
                 AccessType.DATA,
                 TensorState.HOLD_AFTER_FWD,
                 training_stage=TrainingStage.FWD,
-                is_allreduce=False,
+                do_allreduce=False,
             )
         else:
             client.release_data(param, TensorState.HOLD_AFTER_FWD)
@@ -207,7 +207,7 @@ def post_sub_module_backward_function(sub_module, client, name):
                     AccessType.DATA,
                     TensorState.HOLD_AFTER_BWD,
                     training_stage=TrainingStage.BWD,
-                    is_allreduce=True,
+                    do_allreduce=True,
                 )
             else:
                 client.release_data(param, TensorState.HOLD_AFTER_BWD)
@@ -288,7 +288,7 @@ def setup_patrickstar_hooks(module, client):
 
     # torch param will not override data with grad,
     # we could use the standard register_hook on them.
-    for param in client.torch_param_list:
+    for param in client.torch_param_allreduce_list:
         if param.requires_grad:
             param_tmp = param.expand_as(param)
             grad_acc = param_tmp.grad_fn.next_functions[0][0]

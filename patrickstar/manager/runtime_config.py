@@ -26,6 +26,35 @@
 # ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 # SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+from copy import deepcopy
 
-from .cuda_context import CUDAContext
-from .runtime_config import _runtime_config
+from patrickstar.utils import SingletonMeta
+
+
+class RuntimeConfig(metaclass=SingletonMeta):
+    def __init__(self):
+        self.config = {
+            "use_chunk": True,
+            # Whether the torch based tensors will do allreduce,
+            # this is strongly related to `torch_scope`
+            "do_allreduce": True,
+        }
+        self.old_configs = []
+
+    @property
+    def use_chunk(self):
+        return self.config["use_chunk"]
+
+    @property
+    def do_allreduce(self):
+        return self.config["do_allreduce"]
+
+    def push(self):
+        self.old_configs.append(self.config)
+        self.config = deepcopy(self.config)
+
+    def pop(self):
+        self.config = self.old_configs.pop()
+
+
+_runtime_config = RuntimeConfig()
