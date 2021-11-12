@@ -177,6 +177,7 @@ class ChunkList(object):
         """
         Move out all chunks not in comput on target_device.
         """
+        print(f"Offloading all chunks not used on {target_device}")
         new_device = (
             torch.device("cpu") if target_device.type == "cuda" else self.device
         )

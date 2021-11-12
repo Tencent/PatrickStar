@@ -85,9 +85,9 @@ def _add_patrick_star_args(parser):
     )
     # Some hyperparams to tune when you failed to run a model.
     group.add_argument(
-        "--always_warmup",
+        "--with_static_partion",
         action="store_true",
-        help="Always warmup cancel dynamic GPU chunkable memory.",
+        help="Use static partition for model data on CPU and GPU.",
     )
     group.add_argument(
         "--with_mem_profiler",
@@ -298,6 +298,12 @@ def test_bert_model_helper(
             "client": {
                 "mem_sampler": {
                     "use_async_mem_monitor": args.with_async_mem_monitor,
+                    "warmup_gpu_chunk_mem_ratio": 0.1,
+                    "overall_gpu_mem_ratio": 0.8,
+                    "overall_cpu_mem_ratio": 0.8,
+                    "margin_use_ratio": 0.8,
+                    "use_fake_dist": False,
+                    "with_static_partion": args.with_static_partion,
                 }
             },
         }
