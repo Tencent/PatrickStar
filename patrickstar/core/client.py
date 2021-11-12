@@ -336,19 +336,22 @@ class PatrickStarClient(object):
         comm_data_amount = 0
         for chunk_id in chunk_id_list:
             if chunk_id != local_chunk_id:
-                self.chunk_list.prepare_device(
-                    compute_device, self.chunk_list[chunk_id].get_chunk_space()
+                self.chunk_list.try_best_allocate_payload(
+                    self.chunk_list[chunk_id], compute_device
                 )
-                # TODO(jiaruifang) We may reuse a comm_buffer here.
-                flag = self.chunk_list[chunk_id].allocate_payload(compute_device)
-                # Make sure the newly allocated chunk is not moved to other deviced
-                if flag is False:
-                    self.chunk_list.clear_useless_chunks(compute_device)
-                    if not self.chunk_list[chunk_id].allocate_payload(compute_device):
-                        raise RuntimeError(
-                            f"Allocate Payload Failed even if we have moved out more memory from {compute_device}"
-                        )
-                # before allgather.
+                # self.chunk_list.prepare_device(
+                #     compute_device, self.chunk_list[chunk_id].get_chunk_space()
+                # )
+                # # TODO(jiaruifang) We may reuse a comm_buffer here.
+                # flag = self.chunk_list[chunk_id].allocate_payload(compute_device)
+                # # Make sure the newly allocated chunk is not moved to other deviced
+                # if flag is False:
+                #     self.chunk_list.clear_useless_chunks(compute_device)
+                #     if not self.chunk_list[chunk_id].allocate_payload(compute_device):
+                #         raise RuntimeError(
+                #             f"Allocate Payload Failed even if we have moved out more memory from {compute_device}"
+                #         )
+                # # before allgather.
                 self.chunk_list[chunk_id].pin()
             self.set_all_tensors_state_in_chunk(chunk_id, TensorState.HOLD)
             allgather_payload_buff.append(self.chunk_list[chunk_id].payload)

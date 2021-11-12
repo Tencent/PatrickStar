@@ -85,7 +85,7 @@ def _add_patrick_star_args(parser):
     )
     # Some hyperparams to tune when you failed to run a model.
     group.add_argument(
-        "--with_static_partion",
+        "--with_static_partition",
         action="store_true",
         help="Use static partition for model data on CPU and GPU.",
     )
@@ -303,7 +303,7 @@ def test_bert_model_helper(
                     "overall_cpu_mem_ratio": 0.8,
                     "margin_use_ratio": 0.8,
                     "use_fake_dist": False,
-                    "with_static_partion": args.with_static_partion,
+                    "with_static_partition": args.with_static_partition,
                 }
             },
         }

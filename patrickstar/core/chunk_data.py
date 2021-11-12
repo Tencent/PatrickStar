@@ -113,7 +113,7 @@ class Chunk(object):
 
         NOTE() This method does not check availability. Please check if
         there is enough room for the chunk.
-        This function should be exeception-safe.
+        This function should be exception-safe.
         Args:
             device: :class:`torch.device`.
         """

@@ -106,7 +106,7 @@ fi
 
 if [[ ${SP} == 1 ]];
 then
-SP_FLAG="--with_static_partion"
+SP_FLAG="--with_static_partition"
 fi
 
 
