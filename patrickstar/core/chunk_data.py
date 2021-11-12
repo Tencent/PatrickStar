@@ -134,7 +134,7 @@ class Chunk(object):
         except RuntimeError:
             if self._time_profile:
                 global_timer.my_timer.finish_profile("CHUNK_allocate_payload")
-            raise RuntimeError
+            return False
         if profiler.started():
             profiler.chunk_life_cycle[self.chunk_id]["life_cycle"].append(
                 (time.time(), "allocate", device)
@@ -142,6 +142,7 @@ class Chunk(object):
 
         if self._time_profile:
             global_timer.my_timer.finish_profile("CHUNK_allocate_payload")
+        return True
 
     def release_payload(self):
         r"""Release the payload.

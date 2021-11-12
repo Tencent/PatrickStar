@@ -154,10 +154,10 @@ class ChunkList(object):
 
             # TODO(jiaruifang) We need to prepare for the distributed environment.
             self.prepare_device(compute_device, payload_space)
-            try:
-                chunk.allocate_payload(compute_device)
-            except RuntimeError:
-                self.prepare_device(compute_device, 2 * payload_space)
+            if chunk.allocate_payload(compute_device):
+                return
+            else:
+                self.prepare_device(compute_device, payload_space)
                 chunk.allocate_payload(compute_device)
             return
         elif chunk.get_device().type != compute_device.type:

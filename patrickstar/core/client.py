@@ -339,11 +339,10 @@ class PatrickStarClient(object):
                 self.chunk_list.prepare_device(
                     compute_device, self.chunk_list[chunk_id].get_chunk_space()
                 )
-                try:
-                    # TODO(jiaruifang) We may reuse a comm_buffer here.
-                    self.chunk_list[chunk_id].allocate_payload(compute_device)
-                    # Make sure the newly allocated chunk is not moved to other deviced
-                except RuntimeError:
+                # TODO(jiaruifang) We may reuse a comm_buffer here.
+                flag = self.chunk_list[chunk_id].allocate_payload(compute_device)
+                # Make sure the newly allocated chunk is not moved to other deviced
+                if flag is False:
                     self.chunk_list.prepare_device(
                         compute_device, 2 * self.chunk_list[chunk_id].get_chunk_space()
                     )
