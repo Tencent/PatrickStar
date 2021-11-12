@@ -343,9 +343,7 @@ class PatrickStarClient(object):
                 flag = self.chunk_list[chunk_id].allocate_payload(compute_device)
                 # Make sure the newly allocated chunk is not moved to other deviced
                 if flag is False:
-                    self.chunk_list.prepare_device(
-                        compute_device, 2 * self.chunk_list[chunk_id].get_chunk_space()
-                    )
+                    self.chunk_list.clear_useless_chunks(compute_device)
                     if not self.chunk_list[chunk_id].allocate_payload(compute_device):
                         raise RuntimeError(
                             f"Allocate Payload Failed even if we have moved out more memory from {compute_device}"

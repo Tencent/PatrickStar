@@ -157,7 +157,7 @@ class ChunkList(object):
             if chunk.allocate_payload(compute_device):
                 return
             else:
-                self.prepare_device(compute_device, 2 * payload_space)
+                self.clear_useless_chunks(compute_device)
                 if chunk.allocate_payload(compute_device) is False:
                     raise RuntimeError(
                         f"Allocate Payload Failed even if we have moved out more memory from {compute_device}"
@@ -172,6 +172,22 @@ class ChunkList(object):
             return
         else:
             logger.debug(f"access_chunk chunk {chunk_id} already on {compute_device}")
+
+    def clear_useless_chunks(self, target_device: torch.device):
+        """
+        Move out all chunks not in comput on target_device.
+        """
+        new_device = (
+            torch.device("cpu") if target_device.type == "cuda" else self.device
+        )
+        for chunk_id, chunk in self.id_to_chunk_map.items():
+            if (
+                chunk.get_device() is not None
+                and chunk.get_device().type == target_device.type
+                and chunk.get_state() != ChunkState.COMPUTE
+                and not chunk.is_pin()
+            ):
+                self.chunk_move(chunk_id, new_device)
 
     def prepare_device(self, target_device: torch.device, need_bytes: int):
         """
