@@ -113,7 +113,7 @@ class Chunk(object):
 
         NOTE() This method does not check availability. Please check if
         there is enough room for the chunk.
-
+        This function should be exception-safe.
         Args:
             device: :class:`torch.device`.
         """
@@ -121,16 +121,20 @@ class Chunk(object):
             global_timer.my_timer.start_profile("CHUNK_allocate_payload")
 
         payload_size = self.capacity
-        if device.type == "cpu":
-            self.payload = torch.zeros(
-                payload_size, dtype=self.data_type, device=device, pin_memory=True
-            )
-        else:
-            self.payload = torch.zeros(
-                payload_size, dtype=self.data_type, device=device
-            )
-        self.memory_tracer.add(device.type, self.get_payload_space())
-
+        try:
+            if device.type == "cpu":
+                self.payload = torch.zeros(
+                    payload_size, dtype=self.data_type, device=device, pin_memory=True
+                )
+            else:
+                self.payload = torch.zeros(
+                    payload_size, dtype=self.data_type, device=device
+                )
+            self.memory_tracer.add(device.type, self.get_payload_space())
+        except RuntimeError:
+            if self._time_profile:
+                global_timer.my_timer.finish_profile("CHUNK_allocate_payload")
+            return False
         if profiler.started():
             profiler.chunk_life_cycle[self.chunk_id]["life_cycle"].append(
                 (time.time(), "allocate", device)
@@ -138,6 +142,7 @@ class Chunk(object):
 
         if self._time_profile:
             global_timer.my_timer.finish_profile("CHUNK_allocate_payload")
+        return True
 
     def release_payload(self):
         r"""Release the payload.

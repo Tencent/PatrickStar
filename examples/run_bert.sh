@@ -22,7 +22,8 @@ export CKP=${CKP:-1}
 # no retry after failed, used for torch 1.9.0
 export NO_RETRY=${NO_RETRY:-0}
 export SKIP_LOG_EXSIT=${SKIP_LOG_EXSIT:-0}
-export AW=${AW:-0}
+# static partition.
+export SP=${SP:-0}
 export MEM_PROF=${MEM_PROF:-0}
 # asyn memory monitor for mem sampler
 export AMM=${AMM:-1}
@@ -86,7 +87,7 @@ export HYBRID_ADAM_FLAG="--use_hybrid_adam"
 LOG_DIR="./logs_${MODEL_NAME}"
 mkdir -p ${LOG_DIR}
 
-LOG_FILE="log.${MODEL_NAME}_gpu_${GPU_NUM}_cs_${CS}_bs_${BS}_cpueb_${CPU_EBD}_lightseq_${LIGHTSEQ}_offload_${ACT_OFFLOAD}_AW_${AW}_AMM_${AMM}"
+LOG_FILE="log.${MODEL_NAME}_gpu_${GPU_NUM}_cs_${CS}_bs_${BS}_cpueb_${CPU_EBD}_lightseq_${LIGHTSEQ}_offload_${ACT_OFFLOAD}_SP_${SP}_AMM_${AMM}"
 
 is_run_flag=`python ./benchmark/is_run_this_file.py --path "${LOG_DIR}" --file "${LOG_FILE}"`
 echo is_run_flag $is_run_flag
@@ -103,9 +104,9 @@ NO_RETRY_FLAG="--max_restarts=0"
 fi
 
 
-if [[ ${AW} == 1 ]];
+if [[ ${SP} == 1 ]];
 then
-AW_FLAG="--always_warmup"
+SP_FLAG="--with_static_partition"
 fi
 
 
@@ -125,7 +126,7 @@ python -m torch.distributed.launch --nproc_per_node=${GPU_NUM} \
     --default_chunk_size=${CHUNK_SIZE} \
     ${LIGHTSEQ_FLAG} \
     ${ACT_OFFLOAD_FLAG} \
-    ${AW_FLAG} \
+    ${SP_FLAG} \
     ${MEM_PROF_FLAG} \
     ${AMM_FLAG} \
     2>&1 | tee ${LOG_DIR}/${LOG_FILE}
