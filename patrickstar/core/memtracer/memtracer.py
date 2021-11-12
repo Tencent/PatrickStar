@@ -110,7 +110,7 @@ class RuntimeMemTracer(object):
                 "warmup_gpu_chunk_mem_ratio", 0.1
             )
             self.use_fake_dist = config.get("use_fake_dist", False)
-            self.always_warmup = config.get("always_warmup", False)
+            self.with_static_partition = config.get("with_static_partition", False)
             self.use_async_mem_monitor = config.get("use_async_mem_monitor", False)
 
         else:
@@ -119,7 +119,7 @@ class RuntimeMemTracer(object):
             self._margin_use_ratio = 0.8
             self.warmup_gpu_chunk_mem_ratio = 0.2
             self.use_fake_dist = False
-            self.always_warmup = False
+            self.with_static_partition = False
             self.use_async_mem_monitor = True
         if self.use_async_mem_monitor:
             self.async_mem_monitor = AsyncMemoryMonitor()
@@ -343,7 +343,7 @@ class RuntimeMemTracer(object):
             elif device_type == "cuda":
                 return self._overall_gpu_mem
 
-        is_warmup = self.metronome.is_warmup() or self.always_warmup
+        is_warmup = self.metronome.is_warmup() or self.with_static_partition
 
         # If it is warmup phase, chunk can used gpu_ratio * overall_gpu
         # chunk can used all cpu.

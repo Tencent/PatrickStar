@@ -122,6 +122,23 @@ class ChunkList(object):
             max_size = max(chunk.capacity, max_size)
         return max_size
 
+    def try_best_allocate_payload(self, chunk, compute_device):
+        """
+        Try our best to allocate payload for chunk.
+        First free up chunk size space on the target device.
+        If it dose not work, we second free up all chunks not in used on the target device.
+        """
+        payload_space = chunk.get_chunk_space()
+        self.prepare_device(compute_device, payload_space)
+        if chunk.allocate_payload(compute_device):
+            return
+        else:
+            self.clear_useless_chunks(compute_device)
+            if chunk.allocate_payload(compute_device) is False:
+                raise RuntimeError(
+                    f"Allocation chunk payload fails on {compute_device}, even if we try our best."
+                )
+
     def access_chunk(self, chunk_id: int, compute_device: torch.device):
         r"""Prepare the memory of chunk to `compute_device` with `chunk_id`.
 
@@ -151,10 +168,7 @@ class ChunkList(object):
                 f"rank {get_rank()} access_chunk chunk {chunk_id}, "
                 f"need to allocate {payload_space} B memory on {compute_device}"
             )
-
-            # TODO(jiaruifang) We need to prepare for the distributed environment.
-            self.prepare_device(compute_device, payload_space)
-            chunk.allocate_payload(compute_device)
+            self.try_best_allocate_payload(chunk, compute_device)
             return
         elif chunk.get_device().type != compute_device.type:
             self.prepare_device(compute_device, payload_space)
@@ -165,6 +179,23 @@ class ChunkList(object):
             return
         else:
             logger.debug(f"access_chunk chunk {chunk_id} already on {compute_device}")
+
+    def clear_useless_chunks(self, target_device: torch.device):
+        """
+        Move out all chunks not incompute on target_device.
+        """
+        print(f"Offloading all chunks not used on {target_device}")
+        new_device = (
+            torch.device("cpu") if target_device.type == "cuda" else self.device
+        )
+        for chunk_id, chunk in self.id_to_chunk_map.items():
+            if (
+                chunk.get_device() is not None
+                and chunk.get_device().type == target_device.type
+                and chunk.get_state() != ChunkState.COMPUTE
+                and not chunk.is_pin()
+            ):
+                self.chunk_move(chunk_id, new_device)
 
     def prepare_device(self, target_device: torch.device, need_bytes: int):
         """
