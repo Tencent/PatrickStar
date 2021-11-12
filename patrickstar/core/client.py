@@ -71,7 +71,8 @@ class PatrickStarClient(object):
             self.cpu_comm_group = None
 
         self.dummy_param_list = []
-        self.torch_param_list = []
+        # The list of torch params that will register allreduce hook
+        self.torch_param_allreduce_list = []
         self.param_fp16_to_param_fp32_map = {}
         self.chunk_based_param_fp16 = []
 
@@ -564,7 +565,7 @@ class PatrickStarClient(object):
         access_type: AccessType,
         reset_to_state: TensorState,
         training_stage: TrainingStage,
-        is_allreduce: bool,
+        do_allreduce: bool,
     ):
         r"""Release the param in distributed environment.
 
@@ -574,7 +575,7 @@ class PatrickStarClient(object):
         Steps:
             1. Update the state of tensor and chunk.
             2. If the chunk can be released,
-                if `is_allreduce` is True, do reduce scatter to average the gradients.
+                if `do_allreduce` is True, do reduce scatter to average the gradients.
                 then released the payload.
 
         Args:
@@ -582,8 +583,8 @@ class PatrickStarClient(object):
             access_type: :class:`AccessType`.
             reset_to_state: :class:`TensorState`. The state to reset tensor to.
             training_stage: :class:`TrainingStage`.
-            is_allreduce: bool. Whether to do allreduce(reduce scatter).
-                Notice that because user may use gradient checkpointing, the is_allreduce
+            do_allreduce: bool. Whether to do allreduce(reduce scatter).
+                Notice that because user may use gradient checkpointing, the do_allreduce
                 in TrainingStage.BWD doesn't equal to True.
         """
         if param.ps_attr.param_type == ParamType.TORCH_BASED:
@@ -650,7 +651,7 @@ class PatrickStarClient(object):
                         all_chunks_ready = False
 
             if all_chunks_ready:
-                if is_allreduce:
+                if do_allreduce:
                     if self._time_profile:
                         global_timer.my_timer.start_profile(
                             "CLIENT_release_dist_reduce_scatter"
