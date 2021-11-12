@@ -126,9 +126,15 @@ class Chunk(object):
                 payload_size, dtype=self.data_type, device=device, pin_memory=True
             )
         else:
-            self.payload = torch.zeros(
-                payload_size, dtype=self.data_type, device=device
-            )
+            try:
+                self.payload = torch.zeros(
+                    payload_size, dtype=self.data_type, device=device
+                )
+            except RuntimeError:
+                torch.cuda.empty_cache()
+                self.payload = torch.zeros(
+                    payload_size, dtype=self.data_type, device=device
+                )
         self.memory_tracer.add(device.type, self.get_payload_space())
 
         if profiler.started():
