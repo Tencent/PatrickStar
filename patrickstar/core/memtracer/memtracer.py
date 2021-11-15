@@ -184,7 +184,13 @@ class RuntimeMemTracer(object):
 
     def update_margin_mem(self):
         r"""Update the number of GPU free chunks for optimizer."""
-        max_gpu_sys_used = max(self.gpu_sys_used_list)
+        if len(self.gpu_sys_used_list) == 0:
+            logger.warning(
+                "No gpu info collected. Maybe there are no chunk based tensors."
+            )
+            max_gpu_sys_used = 0
+        else:
+            max_gpu_sys_used = max(self.gpu_sys_used_list)
         margin_mem_size = (
             self._overall_gpu_mem - max_gpu_sys_used - self._param_fp16_chunk_size
         )
@@ -194,9 +200,7 @@ class RuntimeMemTracer(object):
         )
 
         logger.info("--------------- GPU INFO AFTER BWD ----------------")
-        logger.info(
-            f"Max GPU System Mem (non-chunk) Used {max(self.gpu_sys_used_list) / 1e6} MB"
-        )
+        logger.info(f"Max GPU System Mem (non-chunk) Used {max_gpu_sys_used / 1e6} MB")
         logger.info(f"Param FP16 Chunk Size {self._param_fp16_chunk_size / 1e6} MB")
         logger.info(
             f"Margin Mem Size {margin_mem_size / 1e6} MB, "
