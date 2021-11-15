@@ -50,7 +50,22 @@ class PatrickStarClient(object):
 
         self.module = None
 
-        tracer_config = config.get("mem_tracer", None)
+        default_tracer_config = {
+            "use_async_mem_monitor": True,
+            "warmup_gpu_chunk_mem_ratio": 0.1,
+            "overall_gpu_mem_ratio": 0.8,
+            "overall_cpu_mem_ratio": 0.8,
+            "margin_use_ratio": 0.8,
+            "use_fake_dist": False,
+            "with_static_partition": False,
+        }
+        if config is not None:
+            tracer_config = config.get("mem_tracer", None)
+            for k, v in default_tracer_config.items():
+                if k not in tracer_config:
+                    tracer_config[k] = v
+        else:
+            tracer_config = default_tracer_config
         self.mem_tracer = RuntimeMemTracer(self.local_rank, tracer_config)
 
         self.chunk_eviction_strategy = LatestAccessChunkEvictionPolicy(
