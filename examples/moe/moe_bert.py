@@ -50,6 +50,10 @@ def __init__(self, config):
             self.is_decoder
         ), f"{self} should be used as a decoder model if cross attention is added"
         self.crossattention = BertAttention(config)
+    # The MoE modules are mainly of model parallel, we need to use `torch_scope`
+    # to separate it from the other chunk based data parallel modules.
+    # Also, MoE modules will take cart of its own communication, that's why
+    # we need to disable allreduce in the torch scope.
     with torch_scope(do_allreduce=False):
         self.output = fmoe.FMoETransformerMLP(
             num_expert=1,
@@ -66,6 +70,9 @@ def feed_forward_chunk(self, attention_output):
 
 
 def build_moe_bert():
+    # Normally you should write your own Model and create the MoE parts
+    # in it. Here we directly substitute the origin huggingface Bert model
+    # for simplicity.
     old_init = BertLayer.__init__
     old_feed_forward_chunk = BertLayer.feed_forward_chunk
     BertLayer.__init__ = __init__
