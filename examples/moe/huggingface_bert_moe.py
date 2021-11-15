@@ -29,13 +29,12 @@
 
 import torch
 from torch.utils.data import DataLoader
-from transformers import BertForSequenceClassification
 
 from patrickstar.runtime import initialize_engine
 from patrickstar.utils import get_rank
 
 from examples.imdb_dataset import get_dataset
-from moe import convert_to_moe
+from moe_bert import build_moe_bert
 
 
 torch.distributed.init_process_group(backend="nccl")
@@ -51,10 +50,7 @@ device = (
 
 
 def model_func():
-    model = BertForSequenceClassification.from_pretrained("bert-base-uncased")
-    moe_model = convert_to_moe(model)
-
-    return moe_model
+    return build_moe_bert()
 
 
 config = {

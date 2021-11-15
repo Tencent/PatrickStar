@@ -26,7 +26,7 @@
 # ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 # SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-from transformers import BertLayer
+from transformers import BertLayer, BertForSequenceClassification
 from transformers.models.bert.modeling_bert import BertAttention
 
 from patrickstar.core import torch_scope
@@ -65,12 +65,12 @@ def feed_forward_chunk(self, attention_output):
     return layer_output
 
 
-FMoEBertLayer = BertLayer
-FMoEBertLayer.__init__ = __init__
-FMoEBertLayer.feed_forward_chunk = feed_forward_chunk
-
-
-def convert_to_moe(model):
-    for i in range(len(model.bert.encoder.layer)):
-        model.bert.encoder.layer[i] = FMoEBertLayer(model.config)
+def build_moe_bert():
+    old_init = BertLayer.__init__
+    old_feed_forward_chunk = BertLayer.feed_forward_chunk
+    BertLayer.__init__ = __init__
+    BertLayer.feed_forward_chunk = feed_forward_chunk
+    model = BertForSequenceClassification.from_pretrained("bert-base-uncased")
+    BertLayer.__init__ = old_init
+    BertLayer.feed_forward_chunk = old_feed_forward_chunk
     return model
