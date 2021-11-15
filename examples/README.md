@@ -34,3 +34,13 @@ Check the accuracy of PatrickStar with Bert:
 ```bash
 bash RES_CHECK=1 run_bert.sh
 ```
+
+### MoE support
+
+PatrickStar also support training MoE models. In the `examples/moe` directory, run:
+
+```bash
+python -m torch.distributed.launch --nproc_per_node=4 huggingface_bert_moe.py
+```
+
+Note that you need to install [FastMoE](https://github.com/laekov/fastmoe) before running this example.
