@@ -499,7 +499,7 @@ class FP16Adam(torch.optim.Optimizer):
                         AccessType.DATA,
                         TensorState.HOLD_AFTER_BWD,
                         training_stage=TrainingStage.BWD,
-                        is_allreduce=True,
+                        do_allreduce=True,
                     )
                 else:
                     self.client.release_data(param, TensorState.HOLD_AFTER_BWD)

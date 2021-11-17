@@ -33,6 +33,7 @@ import torch
 
 from patrickstar.core import PatrickStarClient, AccessType, ChunkType
 from patrickstar.core import register_param, is_param_registered, ParamType
+from patrickstar.manager import _runtime_config
 from patrickstar.ops import Embedding
 from patrickstar.utils import logger, print_rank, get_rank, get_world_size
 from patrickstar.utils import see_memory_usage
@@ -75,17 +76,14 @@ def new_cpu_tensor(cls, *args):
     return tensor
 
 
-USE_CHUNK = True
-
-
 @contextlib.contextmanager
-def torch_scope():
+def torch_scope(do_allreduce=True):
     r"""All parameters initialized in this scope will not be managed in chunks."""
-    global USE_CHUNK
-    old_val = USE_CHUNK
-    USE_CHUNK = False
+    _runtime_config.push()
+    _runtime_config.config["use_chunk"] = False
+    _runtime_config.config["do_allreduce"] = do_allreduce
     yield
-    USE_CHUNK = old_val
+    _runtime_config.pop()
 
 
 def cast_forward(module, dtype):
@@ -359,15 +357,17 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
                     register_param(
                         param, ParamType.TORCH_BASED, torch.float, f"embedding_{name}"
                     )
-                    self.client.torch_param_list.append(param)
+                    self.client.torch_param_allreduce_list.append(param)
                 return
 
         print_rank(f"Converting Params in {module.__class__.__name__}", force=False)
 
-        if not USE_CHUNK:
+        if not _runtime_config.use_chunk:
             for name, param in module.named_parameters(recurse=False):
                 name = f"{module.__class__.__name__}.{name}_{self.param_idx}"
                 register_param(param, ParamType.TORCH_BASED, torch.float, name)
+                if _runtime_config.do_allreduce:
+                    self.client.torch_param_allreduce_list.append(param)
 
             # We need to cast the inputs to fp32 for the unmanaged modules.
             cast_forward(module, torch.float)
