@@ -56,7 +56,7 @@ def __init__(self, config):
     # we need to disable allreduce in the torch scope.
     with torch_scope(do_allreduce=False):
         self.output = fmoe.FMoETransformerMLP(
-            num_expert=1,
+            num_expert=2,
             world_size=get_world_size(),
             d_model=config.hidden_size,
             d_hidden=config.intermediate_size,
@@ -73,11 +73,7 @@ def build_moe_bert():
     # Normally you should write your own Model and create the MoE parts
     # in it. Here we directly substitute the origin huggingface Bert model
     # for simplicity.
-    old_init = BertLayer.__init__
-    old_feed_forward_chunk = BertLayer.feed_forward_chunk
     BertLayer.__init__ = __init__
     BertLayer.feed_forward_chunk = feed_forward_chunk
     model = BertForSequenceClassification.from_pretrained("bert-base-uncased")
-    BertLayer.__init__ = old_init
-    BertLayer.feed_forward_chunk = old_feed_forward_chunk
     return model
