@@ -296,7 +296,7 @@ def test_bert_model_helper(
             "use_fake_dist": args.use_fake_dist,
             "use_cpu_embedding": args.use_cpu_embedding,
             "client": {
-                "mem_sampler": {
+                "mem_tracer": {
                     "use_async_mem_monitor": args.with_async_mem_monitor,
                     "warmup_gpu_chunk_mem_ratio": 0.1,
                     "overall_gpu_mem_ratio": 0.8,

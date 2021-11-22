@@ -62,7 +62,7 @@ config = {
     "release_after_init": True,
     "use_cpu_embedding": False,
     "client": {
-        "mem_sampler": {
+        "mem_tracer": {
             "use_async_mem_monitor": args.with_async_mem_monitor,
         }
     },
