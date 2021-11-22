@@ -129,7 +129,13 @@ class ChunkList(object):
         If it dose not work, we second free up all chunks not in used on the target device.
         """
         payload_space = chunk.get_chunk_space()
-        self.prepare_device(compute_device, payload_space)
+        # Add the twice prepare_device for warmup phase.
+        if not self.prepare_device(compute_device, payload_space):
+            self.clear_useless_chunks(compute_device)
+            if not self.prepare_device(compute_device, payload_space):
+                raise RuntimeError(
+                    f"Prepare device fails on {compute_device}, even if we try our best."
+                )
         if chunk.allocate_payload(compute_device):
             return
         else:
@@ -227,12 +233,13 @@ class ChunkList(object):
             logger.error(
                 f"{target_device} has not enough space for {need_bytes} elements"
             )
+            return False
             # TODO(jiaruifang) We can catch the error and the release or move the chunks here.
-            raise RuntimeError(
-                f"{target_device} has not enough space for {need_bytes / 1e6} MB. "
-                f"Device used Chunk Memory is {self.get_chunk_memory_used(target_device) / 1e6} MB. "
-                f"Avaibale Chunk Memory is {ava_chunk_mem_size / 1e6} MB"
-            )
+            # raise RuntimeError(
+            #     f"{target_device} has not enough space for {need_bytes / 1e6} MB. "
+            #     f"Device used Chunk Memory is {self.get_chunk_memory_used(target_device) / 1e6} MB. "
+            #     f"Avaibale Chunk Memory is {ava_chunk_mem_size / 1e6} MB"
+            # )
 
         extra_need_bytes = need_bytes - remaining_chunk_mem_size
 
@@ -269,6 +276,7 @@ class ChunkList(object):
 
         if self._time_profile:
             global_timer.my_timer.finish_profile("CHUNK_LIST_prepare_device")
+        return True
 
     def make_room(self, offload_size_in_bytes, target_device):
         r"""Move `offload_size_in_bytes` size of chunks away from `target_device`.
