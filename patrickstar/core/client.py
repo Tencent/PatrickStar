@@ -59,14 +59,21 @@ class PatrickStarClient(object):
             "use_fake_dist": False,
             "with_static_partition": False,
         }
+        default_hook_config = {
+            "with_mem_saving_comm": False,
+        }
         if config is not None:
             tracer_config = config.get("mem_tracer", None)
             for k, v in default_tracer_config.items():
                 if k not in tracer_config:
                     tracer_config[k] = v
+            hook_conifg = config.get("hooks", None)
         else:
             tracer_config = default_tracer_config
+            hook_conifg = default_hook_config
+
         self.mem_tracer = RuntimeMemTracer(self.local_rank, tracer_config)
+        self.hook_config = hook_conifg
 
         self.chunk_eviction_strategy = LatestAccessChunkEvictionPolicy(
             self.mem_tracer.metronome
@@ -314,6 +321,7 @@ class PatrickStarClient(object):
         chunk_id_list,
         local_chunk_id,
         compute_device,
+        with_mem_saving_comm: bool,
         param_name,
     ):
         r"""Fetch the remote chunks to local.
@@ -325,7 +333,6 @@ class PatrickStarClient(object):
             param_name: str.
         """
         rank = get_rank()
-
         # During FWD, when there are param in the chunk group being visited for
         # the first time, collect the chunk group to local.
         # How can we determine if a chunk group is being visited for the first time,
@@ -347,50 +354,67 @@ class PatrickStarClient(object):
         logger.debug(
             f"rank {rank} fetch {param_name} remote chunks {chunk_id_list} local chunk {local_chunk_id}"
         )
-        allgather_payload_buff = []
 
-        comm_data_amount = 0
-        for chunk_id in chunk_id_list:
-            if chunk_id != local_chunk_id:
-                self.chunk_list.try_best_allocate_payload(
-                    self.chunk_list[chunk_id], compute_device
+        if with_mem_saving_comm:
+            # Use memory saving communication pattern.
+            # Bcast chunk one by one, so that the bcasted chunks can be moved to CPU
+            for cur_rank, chunk_id in enumerate(chunk_id_list):
+                if chunk_id == local_chunk_id:
+                    self.chunk_list.access_chunk(local_chunk_id, compute_device)
+                    torch.distributed.broadcast(
+                        self.chunk_list[local_chunk_id].payload,
+                        src=cur_rank,
+                        async_op=False,
+                    )
+                else:
+                    self.chunk_list.try_best_allocate_payload(
+                        self.chunk_list[chunk_id], compute_device
+                    )
+                    torch.distributed.broadcast(
+                        self.chunk_list[chunk_id].payload,
+                        src=cur_rank,
+                        async_op=False,
+                    )
+                self.set_all_tensors_state_in_chunk(chunk_id, TensorState.HOLD)
+        else:
+            # Use collective communication to achieve the most efficient communication.
+            # However, it is memory consumping. world_size chunks on GPU simutaneously.
+            self.chunk_list.access_chunk(local_chunk_id, compute_device)
+            self.chunk_list[local_chunk_id].pin()
+            allgather_payload_buff = []
+            comm_data_amount = 0
+            for chunk_id in chunk_id_list:
+                if chunk_id != local_chunk_id:
+                    self.chunk_list.try_best_allocate_payload(
+                        self.chunk_list[chunk_id], compute_device
+                    )
+                    self.chunk_list[chunk_id].pin()
+                self.set_all_tensors_state_in_chunk(chunk_id, TensorState.HOLD)
+                allgather_payload_buff.append(self.chunk_list[chunk_id].payload)
+            comm_data_amount = (
+                len(allgather_payload_buff) * allgather_payload_buff[0].numel() * 2
+            )  # half = 2 bytes
+            for chunk_id in chunk_id_list:
+                self.chunk_list[chunk_id].unpin()
+
+            assert (
+                torch.distributed.is_initialized()
+            ), "torch distributed is not initialized during allgather"
+            if self._time_profile:
+                global_timer.my_timer.start_profile(
+                    "CLIENT_fetch_remote_chunks_allgather"
                 )
-                # self.chunk_list.prepare_device(
-                #     compute_device, self.chunk_list[chunk_id].get_chunk_space()
-                # )
-                # # TODO(jiaruifang) We may reuse a comm_buffer here.
-                # flag = self.chunk_list[chunk_id].allocate_payload(compute_device)
-                # # Make sure the newly allocated chunk is not moved to other deviced
-                # if flag is False:
-                #     self.chunk_list.clear_useless_chunks(compute_device)
-                #     if not self.chunk_list[chunk_id].allocate_payload(compute_device):
-                #         raise RuntimeError(
-                #             f"Allocate Payload Failed even if we have moved out more memory from {compute_device}"
-                #         )
-                # # before allgather.
-                self.chunk_list[chunk_id].pin()
-            self.set_all_tensors_state_in_chunk(chunk_id, TensorState.HOLD)
-            allgather_payload_buff.append(self.chunk_list[chunk_id].payload)
-        comm_data_amount = (
-            len(allgather_payload_buff) * allgather_payload_buff[0].numel() * 2
-        )  # half = 2 bytes
-        for chunk_id in chunk_id_list:
-            self.chunk_list[chunk_id].unpin()
 
-        assert (
-            torch.distributed.is_initialized()
-        ), "torch distributed is not initialized during allgather"
-        if self._time_profile:
-            global_timer.my_timer.start_profile("CLIENT_fetch_remote_chunks_allgather")
+            logger.info(f"rank {rank} allgather {chunk_id_list}")
+            torch.distributed.all_gather(
+                allgather_payload_buff,
+                self.chunk_list[local_chunk_id].payload,
+                async_op=False,
+            )
 
-        logger.info(f"rank {rank} allgather {chunk_id_list}")
-        torch.distributed.all_gather(
-            allgather_payload_buff,
-            self.chunk_list[local_chunk_id].payload,
-            async_op=False,
-        )
+            allgather_payload_buff = []
+            self.chunk_list[local_chunk_id].unpin()
 
-        allgather_payload_buff = []
         if self._time_profile:
             global_timer.my_timer.finish_profile("CLIENT_fetch_remote_chunks_allgather")
             global_timer.data_move_cnter.update(
@@ -431,6 +455,7 @@ class PatrickStarClient(object):
         param: torch.nn.Parameter,
         access_type: AccessType,
         compute_device: torch.device,
+        with_mem_saving_comm: bool = False,
     ) -> torch.Tensor:
         r"""Visit tensor of param in distributed environment.
 
@@ -474,21 +499,22 @@ class PatrickStarClient(object):
                 f"local_chunk_id {local_chunk_id} chunk_id_list {chunk_id_list}"
             )
 
-            # 1.1 Move the local chunk to compute device.
-            self.chunk_list.access_chunk(local_chunk_id, compute_device)
+            # # 1.1 Move the local chunk to compute device.
+            # self.chunk_list.access_chunk(local_chunk_id, compute_device)
 
-            # Prevent the local chunk being moved to other devices during _fetch_remote_chunks.
-            # Because its state is HOLD, pin.
-            self.chunk_list[local_chunk_id].pin()
+            # # Prevent the local chunk being moved to other devices during _fetch_remote_chunks.
+            # # Because its state is HOLD, pin.
+            # self.chunk_list[local_chunk_id].pin()
 
             # 1.2 Fetch the remote chunks to local.
             self._fetch_remote_chunks(
                 chunk_id_list,
                 local_chunk_id,
                 compute_device,
+                with_mem_saving_comm,
                 param.ps_attr.name,
             )
-            self.chunk_list[local_chunk_id].unpin()
+            # self.chunk_list[local_chunk_id].unpin()
         else:
             local_chunk_id = chunk_id
 

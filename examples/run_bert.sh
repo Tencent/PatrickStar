@@ -27,6 +27,14 @@ export SP=${SP:-0}
 export MEM_PROF=${MEM_PROF:-0}
 # asyn memory monitor for mem sampler
 export AMM=${AMM:-1}
+# mem saving comm
+export MSC=${MSC:-0}
+
+if [[ ${MSC} == 1 ]];  then
+MSC_FLAG="--with_mem_saving_com"
+else
+export MSC_FLAG=""
+fi
 
 if [[ ${AMM} == 1 ]];  then
 AMM_FLAG="--with_async_mem_monitor"
@@ -129,4 +137,5 @@ python -m torch.distributed.launch --nproc_per_node=${GPU_NUM} \
     ${SP_FLAG} \
     ${MEM_PROF_FLAG} \
     ${AMM_FLAG} \
+    ${MSC_FLAG} \
     2>&1 | tee ${LOG_DIR}/${LOG_FILE}

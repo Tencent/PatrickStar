@@ -105,6 +105,11 @@ def _add_patrick_star_args(parser):
         action="store_true",
         help="Use async memory monitor.",
     )
+    group.add_argument(
+        "--with_mem_saving_comm",
+        action="store_true",
+        help="Use communication saving memory.",
+    )
     return parser
 
 
@@ -152,6 +157,7 @@ def _add_test_bert_args(parser):
         action="store_true",
         help="Use activation offloading.",
     )
+
     return parser
 
 
@@ -304,7 +310,10 @@ def test_bert_model_helper(
                     "margin_use_ratio": 0.8,
                     "use_fake_dist": False,
                     "with_static_partition": args.with_static_partition,
-                }
+                },
+                "hooks": {
+                    "with_mem_saving_comm": args.with_mem_saving_comm,
+                },
             },
         }
 
