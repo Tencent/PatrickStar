@@ -122,7 +122,7 @@ class ChunkList(object):
             max_size = max(chunk.capacity, max_size)
         return max_size
 
-    def try_best_allocate_payload(self, chunk, compute_device):
+    def try_best_allocate_payload(self, chunk: Chunk, compute_device):
         """
         Try our best to allocate payload for chunk.
         First free up chunk size space on the target device.
