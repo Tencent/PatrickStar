@@ -155,6 +155,7 @@ def post_sub_module_forward_function(sub_module, client, name):
                 TensorState.HOLD_AFTER_FWD,
                 training_stage=TrainingStage.FWD,
                 do_allreduce=False,
+                with_mem_saving_comm=client.hook_config["with_mem_saving_comm"],
             )
         else:
             client.release_data(param, TensorState.HOLD_AFTER_FWD)
@@ -218,6 +219,7 @@ def post_sub_module_backward_function(sub_module, client, name):
                     TensorState.HOLD_AFTER_BWD,
                     training_stage=TrainingStage.BWD,
                     do_allreduce=True,
+                    with_mem_saving_comm=client.hook_config["with_mem_saving_comm"],
                 )
             else:
                 client.release_data(param, TensorState.HOLD_AFTER_BWD)

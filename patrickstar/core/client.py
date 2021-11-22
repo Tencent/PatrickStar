@@ -609,6 +609,7 @@ class PatrickStarClient(object):
         reset_to_state: TensorState,
         training_stage: TrainingStage,
         do_allreduce: bool,
+        with_mem_saving_comm: bool = False,
     ):
         r"""Release the param in distributed environment.
 
@@ -629,6 +630,8 @@ class PatrickStarClient(object):
             do_allreduce: bool. Whether to do allreduce(reduce scatter).
                 Notice that because user may use gradient checkpointing, the do_allreduce
                 in TrainingStage.BWD doesn't equal to True.
+            with_mem_saving_comm: book. Use memory saving communication pattern. Save memory but
+            underutilze communication bandwidth.
         """
         if param.ps_attr.param_type == ParamType.TORCH_BASED:
             return
@@ -694,43 +697,61 @@ class PatrickStarClient(object):
                         all_chunks_ready = False
 
             if all_chunks_ready:
-                if do_allreduce:
-                    if self._time_profile:
-                        global_timer.my_timer.start_profile(
-                            "CLIENT_release_dist_reduce_scatter"
+                if with_mem_saving_comm:
+                    if do_allreduce:
+                        for cur_rank, cur_chunk_id in enumerate(chunk_id_list):
+                            self.chunk_list.access_chunk(cur_chunk_id, self.device)
+                            torch.distributed.reduce(
+                                self.chunk_list[cur_chunk_id].payload,
+                                cur_rank,
+                                op=torch.distributed.ReduceOp.SUM,
+                                async_op=False,
+                            )
+                            if cur_chunk_id != local_chunk_id:
+                                self.chunk_list[cur_chunk_id].release_payload()
+                                self.set_all_tensors_state_in_chunk(
+                                    cur_chunk_id, TensorState.FREE
+                                )
+                            else:
+                                self.chunk_list[local_chunk_id].payload /= world_size
+                else:
+                    if do_allreduce:
+                        if self._time_profile:
+                            global_timer.my_timer.start_profile(
+                                "CLIENT_release_dist_reduce_scatter"
+                            )
+                        assert self.chunk_list[local_chunk_id].payload is not None
+                        input_list = []
+                        for i in chunk_id_list:
+                            self.chunk_list.access_chunk(i, self.device)
+                            self.chunk_list[i].pin()
+                            input_list.append(self.chunk_list[i].payload)
+                        torch.distributed.reduce_scatter(
+                            self.chunk_list[local_chunk_id].payload,
+                            input_list,
+                            op=torch.distributed.ReduceOp.SUM,
+                            async_op=False,
                         )
-                    assert self.chunk_list[local_chunk_id].payload is not None
-                    input_list = []
+
+                        self.chunk_list[local_chunk_id].payload /= world_size
+                        if self._time_profile:
+                            global_timer.data_move_cnter.update(
+                                "CLIENT_release_dist_reduce_scatter",
+                                self.chunk_list[local_chunk_id].payload.numel()
+                                * 2
+                                * world_size,
+                            )
+                            global_timer.my_timer.finish_profile(
+                                "CLIENT_release_dist_reduce_scatter"
+                            )
+
+                    # Remove the payload of remote chunks.
                     for i in chunk_id_list:
-                        self.chunk_list.access_chunk(i, self.device)
-                        self.chunk_list[i].pin()
-                        input_list.append(self.chunk_list[i].payload)
-                    torch.distributed.reduce_scatter(
-                        self.chunk_list[local_chunk_id].payload,
-                        input_list,
-                        op=torch.distributed.ReduceOp.SUM,
-                        async_op=False,
-                    )
-
-                    self.chunk_list[local_chunk_id].payload /= world_size
-                    if self._time_profile:
-                        global_timer.data_move_cnter.update(
-                            "CLIENT_release_dist_reduce_scatter",
-                            self.chunk_list[local_chunk_id].payload.numel()
-                            * 2
-                            * world_size,
-                        )
-                        global_timer.my_timer.finish_profile(
-                            "CLIENT_release_dist_reduce_scatter"
-                        )
-
-                # Remove the payload of remote chunks.
-                for i in chunk_id_list:
-                    self.chunk_list[i].unpin()
-                    if i != local_chunk_id:
-                        logger.debug(f"rank {rank} remove payload of chunk_id {i}")
-                        self.chunk_list[i].release_payload()
-                        self.set_all_tensors_state_in_chunk(i, TensorState.FREE)
+                        self.chunk_list[i].unpin()
+                        if i != local_chunk_id:
+                            logger.debug(f"rank {rank} remove payload of chunk_id {i}")
+                            self.chunk_list[i].release_payload()
+                            self.set_all_tensors_state_in_chunk(i, TensorState.FREE)
 
         if self._time_profile:
             global_timer.my_timer.finish_profile("CLIENT_release_dist")
