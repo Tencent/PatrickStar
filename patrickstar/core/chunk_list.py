@@ -129,13 +129,7 @@ class ChunkList(object):
         If it dose not work, we second free up all chunks not in used on the target device.
         """
         payload_space = chunk.get_chunk_space()
-        # Add the twice prepare_device for warmup phase.
-        if not self.prepare_device(compute_device, payload_space):
-            self.clear_useless_chunks(compute_device)
-            if not self.prepare_device(compute_device, payload_space):
-                raise RuntimeError(
-                    f"Prepare device fails on {compute_device}, even if we try our best."
-                )
+        self.prepare_device(compute_device, payload_space)
         if chunk.allocate_payload(compute_device):
             return
         else:
@@ -201,6 +195,8 @@ class ChunkList(object):
                 and chunk.get_state() != ChunkState.COMPUTE
                 and not chunk.is_pin()
             ):
+                if not self.prepare_device(new_device, chunk.get_payload_space()):
+                    break
                 self.chunk_move(chunk_id, new_device)
 
     def prepare_device(self, target_device: torch.device, need_bytes: int):
@@ -232,6 +228,11 @@ class ChunkList(object):
         if ava_chunk_mem_size < need_bytes:
             logger.error(
                 f"{target_device} has not enough space for {need_bytes} elements"
+            )
+            logger.error(
+                f"{target_device} has not enough space for {need_bytes / 1e6} MB. "
+                f"Device used Chunk Memory is {self.get_chunk_memory_used(target_device) / 1e6} MB. "
+                f"Avaibale Chunk Memory is {ava_chunk_mem_size / 1e6} MB"
             )
             return False
             # TODO(jiaruifang) We can catch the error and the release or move the chunks here.
