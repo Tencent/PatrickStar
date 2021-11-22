@@ -415,12 +415,14 @@ class PatrickStarClient(object):
             allgather_payload_buff = []
             self.chunk_list[local_chunk_id].unpin()
 
-        if self._time_profile:
-            global_timer.my_timer.finish_profile("CLIENT_fetch_remote_chunks_allgather")
-            global_timer.data_move_cnter.update(
-                "CLIENT_fetch_remote_chunks_allgather", comm_data_amount
-            )
-            global_timer.my_timer.finish_profile("CLIENT_fetch_remote_chunks")
+            if self._time_profile:
+                global_timer.my_timer.finish_profile(
+                    "CLIENT_fetch_remote_chunks_allgather"
+                )
+                global_timer.data_move_cnter.update(
+                    "CLIENT_fetch_remote_chunks_allgather", comm_data_amount
+                )
+                global_timer.my_timer.finish_profile("CLIENT_fetch_remote_chunks")
 
     def _access_tensor_in_chunk(self, param, access_type, compute_device, chunk_id):
         self.chunk_list.access_chunk(chunk_id, compute_device)
