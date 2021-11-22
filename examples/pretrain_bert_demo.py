@@ -558,6 +558,46 @@ if __name__ == "__main__":
         SEQ_LEN = 1024
         NUM_LAYER = 78
         NUM_HEAD = 16
+    # The following configs comes from paper
+    # Efficient Large-Scale Language Model Training on GPU Clusters
+    # NV model is wider in hidden-size
+    elif MODEL_NAME == "GPT_NV_18B":
+        HIDDEN_DIM = 6144
+        SEQ_LEN = 1024
+        NUM_LAYER = 40
+        NUM_HEAD = 16
+    elif MODEL_NAME == "GPT_NV_39B":
+        HIDDEN_DIM = 8192
+        SEQ_LEN = 1024
+        NUM_LAYER = 48
+        NUM_HEAD = 16
+    elif MODEL_NAME == "GPT_NV_76B":
+        HIDDEN_DIM = 10240
+        SEQ_LEN = 1024
+        NUM_LAYER = 60
+        NUM_HEAD = 16
+    # The following configs comes from Deep-Offload
+    # http://pasalabs.org/papers/2021/ATC21_zero-offload.pdf
+    elif MODEL_NAME == "GPT_DS_20B":
+        HIDDEN_DIM = 8192
+        SEQ_LEN = 1024
+        NUM_LAYER = 25
+        NUM_HEAD = 16
+    elif MODEL_NAME == "GPT_DS_40B":
+        HIDDEN_DIM = 8192
+        SEQ_LEN = 1024
+        NUM_LAYER = 50
+        NUM_HEAD = 16
+    elif MODEL_NAME == "GPT_DS_60B":
+        HIDDEN_DIM = 8192
+        SEQ_LEN = 1024
+        NUM_LAYER = 75
+        NUM_HEAD = 16
+    elif MODEL_NAME == "GPT_DS_70B":
+        HIDDEN_DIM = 9216
+        SEQ_LEN = 1024
+        NUM_LAYER = 69
+        NUM_HEAD = 16
     else:
         raise RuntimeError(f"The model name {MODEL_NAME} is not valid!")
     if res_check:
