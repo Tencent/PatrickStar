@@ -714,6 +714,13 @@ class PatrickStarClient(object):
                                 )
                             else:
                                 self.chunk_list[local_chunk_id].payload /= world_size
+                    else:
+                        for cur_rank, cur_chunk_id in enumerate(chunk_id_list):
+                            if cur_chunk_id != local_chunk_id:
+                                self.chunk_list[cur_chunk_id].release_payload()
+                                self.set_all_tensors_state_in_chunk(
+                                    cur_chunk_id, TensorState.FREE
+                                )
                 else:
                     if do_allreduce:
                         if self._time_profile:
