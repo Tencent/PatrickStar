@@ -41,7 +41,7 @@ require_list = fetch_requirements("requirements.txt")
 
 setup(
     name="patrickstar",
-    version="0.4.2",
+    version="0.4.1",
     description="PatrickStart library",
     long_description="PatrickStar: Parallel Training of Large Language Models via a Chunk-based Parameter Server",
     long_description_content_type="text/markdown",
