@@ -159,10 +159,7 @@ class Chunk(object):
         return True
 
     def release_payload(self):
-        r"""Release the payload.
-
-        NOTE() Please make sure all tensors are in the `FREE` state.
-        """
+        r"""Release the payload."""
         ret_flag = self.memory_cache.recycle(self.payload)
         # recycle not success
         if ret_flag is False:

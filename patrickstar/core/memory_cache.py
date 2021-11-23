@@ -70,8 +70,10 @@ class MemoryCache(object):
         """
         Recycle a payload tensor.
         If the cache is fulled, delete the payload.
+        Returns:
+            success recycle or not.
         """
-        device_type = payload.device
+        device_type = payload.device.type
         data_type = payload.dtype
         if (device_type, data_type) not in self.cached_tensors and self.capacity_ > 0:
             self.cached_tensors[(device_type, data_type)] = [payload.zero_()]
