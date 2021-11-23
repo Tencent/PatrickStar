@@ -432,7 +432,7 @@ def test_bert_model_helper(
                 f"After step {n}. using {dist_plan}, gradient checkpoint: {is_ckp}, fp16 {is_fp16}",
                 force=True,
             )
-            if dist_plan == "patrickstar":
+            if dist_plan == "patrickstar" and n == num_steps - 1:
                 print(
                     f'{"[WARM UP] " if n == 0 else ""}'
                     f"Step {n} elaspe {step_elapse} s, {total_macs / 1e12 / step_elapse} Tflops"
@@ -467,9 +467,6 @@ if __name__ == "__main__":
     use_fp16 = args.use_fp16
     dist_plan = args.dist_plan
     res_check = args.res_check
-
-    # HIDDEN_DIM 1024, batch 16, seqence_len 1024, ckp True.
-    # PatrickStar is able to run the training, while PyTorch failed.
 
     # You could set the logger level to INFO to view more runtime
     # information.

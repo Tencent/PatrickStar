@@ -361,19 +361,22 @@ class PatrickStarClient(object):
             for cur_rank, chunk_id in enumerate(chunk_id_list):
                 if chunk_id == local_chunk_id:
                     self.chunk_list.access_chunk(local_chunk_id, compute_device)
-                    torch.distributed.broadcast(
-                        self.chunk_list[local_chunk_id].payload,
-                        src=cur_rank,
-                        async_op=False,
-                    )
                 else:
                     self.chunk_list.try_best_allocate_payload(
                         self.chunk_list[chunk_id], compute_device
                     )
-                    torch.distributed.broadcast(
-                        self.chunk_list[chunk_id].payload,
-                        src=cur_rank,
-                        async_op=False,
+                if self._time_profile:
+                    global_timer.my_timer.start_profile(
+                        "CLIENT_fetch_remote_chunks_broadcast"
+                    )
+                torch.distributed.broadcast(
+                    self.chunk_list[chunk_id].payload,
+                    src=cur_rank,
+                    async_op=False,
+                )
+                if self._time_profile:
+                    global_timer.my_timer.finish_profile(
+                        "CLIENT_fetch_remote_chunks_broadcast"
                     )
                 self.set_all_tensors_state_in_chunk(chunk_id, TensorState.HOLD)
         else:
@@ -701,12 +704,20 @@ class PatrickStarClient(object):
                     if do_allreduce:
                         for cur_rank, cur_chunk_id in enumerate(chunk_id_list):
                             self.chunk_list.access_chunk(cur_chunk_id, self.device)
+                            if self._time_profile:
+                                global_timer.my_timer.start_profile(
+                                    "CLIENT_release_dist_reduce"
+                                )
                             torch.distributed.reduce(
                                 self.chunk_list[cur_chunk_id].payload,
                                 cur_rank,
                                 op=torch.distributed.ReduceOp.SUM,
                                 async_op=False,
                             )
+                            if self._time_profile:
+                                global_timer.my_timer.finish_profile(
+                                    "CLIENT_release_dist_reduce"
+                                )
                             if cur_chunk_id != local_chunk_id:
                                 self.chunk_list[cur_chunk_id].release_payload()
                                 self.set_all_tensors_state_in_chunk(

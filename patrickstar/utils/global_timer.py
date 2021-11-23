@@ -68,10 +68,10 @@ class GlobalTimer(metaclass=SingletonMeta):
             self.elapse_stat["FWD"] + self.elapse_stat["BWD"] + self.elapse_stat["ADAM"]
         )
         for k, v in self.elapse_stat.items():
-            logger.info(
+            print(
                 f'{k} {"." * (dot_length - len(k))} {v}, {v / overall_elapse * 100} %'
             )
-        logger.info(f'TOTAL {"." * (dot_length - len("TOTAL"))} {overall_elapse}')
+        print(f'TOTAL {"." * (dot_length - len("TOTAL"))} {overall_elapse}')
 
 
 my_timer = GlobalTimer()
@@ -96,17 +96,17 @@ class DataMoveCnter(metaclass=SingletonMeta):
             self.amount_dict[k] = 0
 
     def print(self):
-        logger.info("------------- DATA MOVE RESULTS --------------")
+        print("------------- DATA MOVE RESULTS --------------")
         my_timer = GlobalTimer()
         for k, v in self.times_dict.items():
             bwd = 0
             if k in my_timer.elapse_stat and self.amount_dict[k] != 0:
                 bwd = self.amount_dict[k] / my_timer.elapse_stat[k]
-                logger.info(
+                print(
                     f"{k}: {self.amount_dict[k] / 1024 / 1024} MB, {v} times, {bwd / 1024 / 1024} MB/s"
                 )
             else:
-                logger.info(f"{k}: {self.amount_dict[k] / 1024 / 1024} MB")
+                print(f"{k}: {self.amount_dict[k] / 1024 / 1024} MB")
 
 
 data_move_cnter = DataMoveCnter()
