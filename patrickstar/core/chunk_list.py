@@ -142,32 +142,24 @@ class ChunkList(object):
     def access_chunk(self, chunk_id: int, compute_device: torch.device):
         r"""Prepare the memory of chunk to `compute_device` with `chunk_id`.
 
-        1. standalone mode
-        In standalone mode, we need to move the chunk when it is on other devices.
+        We need to move the chunk when it is on other devices.
             TODO(jiaruifang) Add async copy and record the lifecycle of chunks during
             the first iteration, so that we can prefetch the next chunk after sync
             the memcopy of the first chunk.
-        2. distributed mode
-        Use allgather to fetch chunks from other processes.
-
         Args:
             chunk_id: int.
             compute_device: :class:`torch.device`.
         """
-
         chunk = self.id_to_chunk_map[chunk_id]
-
         chunk_state = chunk.get_state()
-
         payload_space = chunk.get_chunk_space()
-
         # If chunk was released, we need to reallocate it.
-        # In distributed mode, we need a global payload.
         if chunk_state == ChunkState.RELEASED:
             logger.debug(
                 f"rank {get_rank()} access_chunk chunk {chunk_id}, "
                 f"need to allocate {payload_space} B memory on {compute_device}"
             )
+            # Allocating a chunk on compute_device.
             self.try_best_allocate_payload(chunk, compute_device)
             return
         elif chunk.get_device().type != compute_device.type:

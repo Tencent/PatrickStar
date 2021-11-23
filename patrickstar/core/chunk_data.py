@@ -36,6 +36,7 @@ from patrickstar.profiler import profiler
 from patrickstar.utils import logger, getsizeof
 import patrickstar.utils.global_timer as global_timer
 from .const import TensorState, ChunkState
+from patrickstar.core.memory_cache import MemoryCache
 
 
 class Chunk(object):
@@ -84,6 +85,7 @@ class Chunk(object):
         self.payload = None
         self._time_profile = True
         self._pin_flag = False
+        self.memory_cache = MemoryCache()
 
     def is_dummy(self):
         return self._is_dummy
@@ -121,6 +123,13 @@ class Chunk(object):
             global_timer.my_timer.start_profile(f"CHUNK_allocate_payload_{device.type}")
 
         payload_size = self.capacity
+
+        # reuse the chunk in cache if possible
+        self.payload = self.memory_cache.allocate(
+            device.type, payload_size, self.data_type, device.type == "cpu"
+        )
+        if self.payload is not None:
+            return True
         try:
             if device.type == "cpu":
                 self.payload = torch.zeros(
@@ -249,25 +258,45 @@ class Chunk(object):
             f"used mem {self.memory_tracer.used_chunk_mem(target_device.type) / 1e6} MB"
         )
 
+        payload_size = self.get_chunk_space()
         cuda_ctx = CUDAContext()
         # TODO(jiaruifang) asyc copy.
         if target_device.type == "cpu":
-            pinned_payload_cpu = torch.empty(
-                self.payload.shape,
-                dtype=self.payload.dtype,
-                device="cpu:0",
-                pin_memory=True,
+            pinned_payload_cpu = self.memory_cache.allocate(
+                "cpu", payload_size, self.data_type, True
             )
+            if pinned_payload_cpu is None:
+                pinned_payload_cpu = torch.empty(
+                    self.payload.shape,
+                    dtype=self.payload.dtype,
+                    device="cpu:0",
+                    pin_memory=True,
+                )
+                self.memory_tracer.add(target_device.type, self.get_payload_space())
             with torch.cuda.stream(cuda_ctx.copy_stream):
                 pinned_payload_cpu.copy_(self.payload)
+            ret_flag = self.memory_cache.recycle(self.payload)
             self.payload = pinned_payload_cpu
         elif target_device.type == "cuda":
             self.payload = self.payload.pin_memory()
+            cuda_tmp_payload = self.memory_cache.allocate(
+                "cuda", payload_size, self.data_type, False
+            )
+            if cuda_tmp_payload is None:
+                cuda_tmp_payload = torch.empty(
+                    self.payload.shape,
+                    dtype=self.payload.dtype,
+                    device=f"cuda:{self.local_rank}",
+                )
+                self.memory_tracer.add(target_device.type, self.get_payload_space())
             with torch.cuda.stream(cuda_ctx.copy_stream):
-                self.payload = self.payload.to(target_device)
+                # self.payload = self.payload.to(target_device)
+                cuda_tmp_payload.copy_(self.payload)
+            ret_flag = self.memory_cache.recycle(self.payload)
+            self.payload = cuda_tmp_payload
 
-        self.memory_tracer.delete(src_device.type, self.get_payload_space())
-        self.memory_tracer.add(target_device.type, self.get_payload_space())
+        if ret_flag is False:
+            self.memory_tracer.delete(src_device.type, self.get_payload_space())
 
         if self._time_profile:
             if target_device.type == "cuda":
