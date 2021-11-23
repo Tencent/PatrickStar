@@ -74,6 +74,7 @@ class PatrickStarClient(object):
 
         self.mem_tracer = RuntimeMemTracer(self.local_rank, tracer_config)
         self.hook_config = hook_conifg
+        self.use_nvme = "nvme_base_dir" in config
 
         self.chunk_eviction_strategy = LatestAccessChunkEvictionPolicy(
             self.mem_tracer.metronome
@@ -82,7 +83,10 @@ class PatrickStarClient(object):
         self.default_chunk_size = default_chunk_size
         self.chunk_tensor_index = ChunkTensorIndex(self.default_chunk_size)
         self.chunk_list = ChunkList(
-            self.local_rank, self.mem_tracer, self.chunk_eviction_strategy
+            self.local_rank,
+            self.mem_tracer,
+            self.chunk_eviction_strategy,
+            nvme_base_dir=config.get("nvme_base_dir", None),
         )
 
         self._time_profile = True
@@ -269,6 +273,8 @@ class PatrickStarClient(object):
         )
         if chunk_id is None:
             chunk_id, _ = self.append_chunk(data_type, chunk_type)
+            if self.use_nvme:
+                self.chunk_list.nvme_chunk_ids.add(chunk_id)
         if not self.chunk_tensor_index.try_insert_tensor(chunk_id, param, access_type):
             raise RuntimeError("Failed to insert optimizer param w.r.t its ref_param.")
         self.chunk_tensor_index.register_optimizer_state_chunk_id(

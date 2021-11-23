@@ -26,7 +26,7 @@
 # ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 # SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-
+import os
 from typing import List
 
 import torch
@@ -57,6 +57,7 @@ class ChunkList(object):
         local_rank: int,
         memory_tracer: RuntimeMemTracer,
         chunk_eviction_policy: ChunkEvictionPolicyBase,
+        nvme_base_dir=None,
     ):
         """
         Args:
@@ -73,6 +74,31 @@ class ChunkList(object):
         self.device = torch.device(f"cuda:{local_rank}")
         self.chunk_eviction_policy = chunk_eviction_policy
         self.memory_tracer = memory_tracer
+
+        self.use_nvme = nvme_base_dir is not None
+        self.nvme_base_dir = nvme_base_dir
+        if self.use_nvme:
+            self.nvme_chunk_ids = set()
+            self.nvme_chunk_id_to_filename_map = {}
+            self.nvme_loaded_chunk_ids = []
+            # TODO(zilinzhu) Find our own way to do aio.
+            from deepspeed.ops.aio import AsyncIOBuilder
+
+            aio_op = AsyncIOBuilder().load()
+            aio_config = {
+                "block_size": 64 * 1024 * 1024,
+                "queue_depth": 8,
+                "thread_count": 1,
+                "single_submit": False,
+                "overlap_events": True,
+            }
+            self.aio_handle = aio_op.aio_handle(
+                aio_config["block_size"],
+                aio_config["queue_depth"],
+                aio_config["single_submit"],
+                aio_config["overlap_events"],
+                aio_config["thread_count"],
+            )
 
     def chunk_ids_generator(self, chunk_type: ChunkType):
         r"""Return the chunk_id of all chunks with type `chunk_type`
@@ -129,15 +155,41 @@ class ChunkList(object):
         If it dose not work, we second free up all chunks not in used on the target device.
         """
         payload_space = chunk.get_chunk_space()
+        chunk_id = chunk.chunk_id
+        # Only allow 2 nvme chunk to be uploaded at the same time,
+        # one momentum and one variance
+        if self.use_nvme and chunk_id in self.nvme_chunk_ids:
+            if len(self.nvme_loaded_chunk_ids) == 2:
+                old_chunk_id = self.nvme_loaded_chunk_ids.pop(0)
+                assert old_chunk_id in self.nvme_chunk_id_to_filename_map
+                old_chunk = self.id_to_chunk_map[old_chunk_id]
+                filename = self.nvme_chunk_id_to_filename_map[old_chunk_id]
+                self.aio_handle.async_pwrite(old_chunk.payload, filename)
+                self.aio_handle.wait()
+                old_chunk.release_payload()
+                logger.info(f"Offload chunk {old_chunk_id} back to NVMe")
         self.prepare_device(compute_device, payload_space)
-        if chunk.allocate_payload(compute_device):
-            return
-        else:
+        if not chunk.allocate_payload(compute_device):
             self.clear_useless_chunks(compute_device)
             if chunk.allocate_payload(compute_device) is False:
                 raise RuntimeError(
                     f"Allocation chunk payload fails on {compute_device}, even if we try our best."
                 )
+        if self.use_nvme and chunk_id in self.nvme_chunk_ids:
+            assert compute_device.type == "cpu"
+            chunk.payload = chunk.payload.pin_memory()
+            if chunk_id in self.nvme_chunk_id_to_filename_map:
+                filename = self.nvme_chunk_id_to_filename_map[chunk_id]
+                self.aio_handle.async_pread(chunk.payload, filename)
+            else:
+                filename = os.path.join(self.nvme_base_dir, f"chunk_{chunk_id}")
+                with open(filename, "wb") as f:
+                    f.write(os.urandom(payload_space))
+                self.aio_handle.async_pwrite(chunk.payload, filename)
+                self.nvme_chunk_id_to_filename_map[chunk_id] = filename
+            self.aio_handle.wait()
+            self.nvme_loaded_chunk_ids.append(chunk_id)
+            logger.info(f"Load chunk {chunk_id} from NVMe")
 
     def access_chunk(self, chunk_id: int, compute_device: torch.device):
         r"""Prepare the memory of chunk to `compute_device` with `chunk_id`.
