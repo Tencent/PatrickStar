@@ -118,7 +118,10 @@ SP_FLAG="--with_static_partition"
 fi
 
 
-python -m torch.distributed.launch --nproc_per_node=${GPU_NUM} \
+wc=`cat /proc/cpuinfo | grep "processor"| wc -l`
+let TNUM=wc/${GPU_NUM}
+echo "CPU core number " $wc "THREAD NUM " ${TNUM}
+env OMP_NUM_THREADS=${TNUM} timeout -s SIGKILL 30m python -m torch.distributed.launch --nproc_per_node=${GPU_NUM} \
     pretrain_bert_demo.py \
     --use_fp16 \
     ${RES_CHECK_FLAG} \
