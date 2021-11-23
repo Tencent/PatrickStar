@@ -27,6 +27,14 @@ export SP=${SP:-0}
 export MEM_PROF=${MEM_PROF:-0}
 # asyn memory monitor for mem sampler
 export AMM=${AMM:-1}
+# mem saving comm
+export MSC=${MSC:-0}
+
+if [[ ${MSC} == 1 ]];  then
+MSC_FLAG="--with_mem_saving_com"
+else
+export MSC_FLAG=""
+fi
 
 if [[ ${AMM} == 1 ]];  then
 AMM_FLAG="--with_async_mem_monitor"
@@ -87,7 +95,7 @@ export HYBRID_ADAM_FLAG="--use_hybrid_adam"
 LOG_DIR="./logs_${MODEL_NAME}"
 mkdir -p ${LOG_DIR}
 
-LOG_FILE="log.${MODEL_NAME}_gpu_${GPU_NUM}_cs_${CS}_bs_${BS}_cpueb_${CPU_EBD}_lightseq_${LIGHTSEQ}_offload_${ACT_OFFLOAD}_SP_${SP}_AMM_${AMM}"
+LOG_FILE="log.${MODEL_NAME}_gpu_${GPU_NUM}_cs_${CS}_bs_${BS}_cpueb_${CPU_EBD}_lightseq_${LIGHTSEQ}_offload_${ACT_OFFLOAD}_SP_${SP}_AMM_${AMM}_MSC_${MSC}"
 
 is_run_flag=`python ./benchmark/is_run_this_file.py --path "${LOG_DIR}" --file "${LOG_FILE}"`
 echo is_run_flag $is_run_flag
@@ -129,4 +137,5 @@ python -m torch.distributed.launch --nproc_per_node=${GPU_NUM} \
     ${SP_FLAG} \
     ${MEM_PROF_FLAG} \
     ${AMM_FLAG} \
+    ${MSC_FLAG} \
     2>&1 | tee ${LOG_DIR}/${LOG_FILE}
