@@ -163,12 +163,15 @@ class Chunk(object):
 
         NOTE() Please make sure all tensors are in the `FREE` state.
         """
-        self.memory_tracer.delete(self.get_device().type, self.get_payload_space())
-
-        # Remove the memory of the chunk.
-        del self.payload
-        self.payload = None
-
+        ret_flag = self.memory_cache.recycle(self.payload)
+        # recycle not success
+        if ret_flag is False:
+            self.memory_tracer.delete(self.get_device().type, self.get_payload_space())
+            # Remove the memory of the chunk.
+            del self.payload
+            self.payload = None
+        else:
+            print("not release payload")
         if profiler.started():
             profiler.chunk_life_cycle[self.chunk_id]["life_cycle"].append(
                 (time.time(), "release", None)
