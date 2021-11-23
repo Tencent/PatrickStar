@@ -397,7 +397,9 @@ def test_bert_model_helper(
         logger.info(f"Start Step {n} with {dist_plan}...")
 
         step_start_time = time.time()
-
+        # Only collect running time of the last iteration.
+        if n == num_steps - 1:
+            global_timer.my_timer.start()
         optimizer.zero_grad()
         if args.with_mem_profiler:
             if n == 1:
