@@ -397,7 +397,9 @@ def test_bert_model_helper(
         logger.info(f"Start Step {n} with {dist_plan}...")
 
         step_start_time = time.time()
-
+        # Only collect running time of the last iteration.
+        if n == num_steps - 1:
+            global_timer.my_timer.start()
         optimizer.zero_grad()
         if args.with_mem_profiler:
             if n == 1:
@@ -432,16 +434,17 @@ def test_bert_model_helper(
                 f"After step {n}. using {dist_plan}, gradient checkpoint: {is_ckp}, fp16 {is_fp16}",
                 force=True,
             )
-            if dist_plan == "patrickstar" and n == num_steps - 1:
+            if dist_plan == "patrickstar":
                 print(
                     f'{"[WARM UP] " if n == 0 else ""}'
                     f"Step {n} elaspe {step_elapse} s, {total_macs / 1e12 / step_elapse} Tflops"
                 )
-                global_timer.my_timer.print()
-                global_timer.data_move_cnter.print()
+                if n == num_steps - 1:
+                    global_timer.my_timer.print()
+                    global_timer.data_move_cnter.print()
 
-                global_timer.my_timer.reset()
-                global_timer.data_move_cnter.reset()
+                    global_timer.my_timer.reset()
+                    global_timer.data_move_cnter.reset()
             else:
                 print(
                     f"Step {n} elaspe {step_elapse} s, {total_macs / 1e12 / step_elapse} Tflops"

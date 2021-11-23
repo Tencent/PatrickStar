@@ -42,13 +42,21 @@ class GlobalTimer(metaclass=SingletonMeta):
         """
         self.elapse_stat = {}
         self.start_time = {}
+        self.start_flag = False
+
+    def start(self):
+        self.start_flag = True
 
     def start_profile(self, key):
+        if not self.start_flag:
+            return
         if key in self.start_time:
             assert self.start_time[key] == 0, f"Please Check {key} profiling function"
         self.start_time[key] = time.time()
 
     def finish_profile(self, key):
+        if not self.start_flag:
+            return
         if key in self.elapse_stat:
             self.elapse_stat[key] += time.time() - self.start_time[key]
         else:
@@ -56,10 +64,14 @@ class GlobalTimer(metaclass=SingletonMeta):
         self.start_time[key] = 0
 
     def reset(self):
+        if not self.start_flag:
+            return
         for k, _ in self.elapse_stat.items():
             self.elapse_stat[k] = 0
 
     def print(self):
+        if not self.start_flag:
+            return
         logger.info("------------- PROFILE RESULTS ----------------")
         dot_length = 20
         for k in self.elapse_stat:
