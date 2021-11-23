@@ -33,13 +33,13 @@ import torch
 class MemoryCache(object):
     def __init__(self, capacity=2):
         r""" "
-        A cache of chunk to avoid too much cuda allocation and free.
+        A cache of chunk to avoid too much memory allocation and free.
         `capacity` chunks always stay in the GPU memory.
-        If we have allocate one on GPU, just reuse the cached one.
+        If we have allocated a chunk on the target device, just reuse the cached one.
         Params:
             `capacity` : the capacity size of each type of tensor cache list.
         Returns:
-            None or a tensor.
+            None or a `torch.Tensor`.
         """
         self.capacity_ = capacity
         self.cached_tensors = {}
@@ -62,6 +62,7 @@ class MemoryCache(object):
         if i == -1:
             return None
         new_tensor_ref = tensors[i]
+        # delete the reference to tensors[i] in MemoryCache
         tensors.pop(i)
         return new_tensor_ref
 
@@ -74,12 +75,15 @@ class MemoryCache(object):
         data_type = payload.dtype
         if (device_type, data_type) not in self.cached_tensors and self.capacity_ > 0:
             self.cached_tensors[(device_type, data_type)] = [payload.zero_()]
+            # print('first recycle payload')
+            payload = None
         else:
             if len(self.cached_tensors[(device_type, data_type)]) == self.capacity_:
-                print("delete payload in MemoryCache")
+                # print("delete payload in MemoryCache")
                 return False
             else:
                 self.cached_tensors[(device_type, data_type)].append(payload.zero_())
+                payload = None
         return True
 
     def delete(self, device_type):

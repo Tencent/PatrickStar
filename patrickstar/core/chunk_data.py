@@ -46,6 +46,7 @@ class Chunk(object):
         data_type: torch.dtype,
         chunk_id: int,
         memory_tracer: RuntimeMemTracer,
+        memory_cache: MemoryCache,
         local_rank: int = 0,
         is_dummy: bool = False,
     ):
@@ -85,7 +86,7 @@ class Chunk(object):
         self.payload = None
         self._time_profile = True
         self._pin_flag = False
-        self.memory_cache = MemoryCache()
+        self.memory_cache = memory_cache
 
     def is_dummy(self):
         return self._is_dummy

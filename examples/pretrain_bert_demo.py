@@ -432,16 +432,17 @@ def test_bert_model_helper(
                 f"After step {n}. using {dist_plan}, gradient checkpoint: {is_ckp}, fp16 {is_fp16}",
                 force=True,
             )
-            if dist_plan == "patrickstar" and n == num_steps - 1:
+            if dist_plan == "patrickstar":
                 print(
                     f'{"[WARM UP] " if n == 0 else ""}'
                     f"Step {n} elaspe {step_elapse} s, {total_macs / 1e12 / step_elapse} Tflops"
                 )
-                global_timer.my_timer.print()
-                global_timer.data_move_cnter.print()
+                if n == num_steps - 1:
+                    global_timer.my_timer.print()
+                    global_timer.data_move_cnter.print()
 
-                global_timer.my_timer.reset()
-                global_timer.data_move_cnter.reset()
+                    global_timer.my_timer.reset()
+                    global_timer.data_move_cnter.reset()
             else:
                 print(
                     f"Step {n} elaspe {step_elapse} s, {total_macs / 1e12 / step_elapse} Tflops"
@@ -470,7 +471,7 @@ if __name__ == "__main__":
 
     # You could set the logger level to INFO to view more runtime
     # information.
-    logger.setLevel(logging.INFO)
+    logger.setLevel(logging.WARNING)
     if not torch.distributed.is_initialized():
         torch.distributed.init_process_group(
             backend="gloo" if args.use_fake_dist else "nccl"
