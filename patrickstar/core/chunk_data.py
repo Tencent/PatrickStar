@@ -118,7 +118,7 @@ class Chunk(object):
             device: :class:`torch.device`.
         """
         if self._time_profile:
-            global_timer.my_timer.start_profile("CHUNK_allocate_payload")
+            global_timer.my_timer.start_profile(f"CHUNK_allocate_payload_{device.type}")
 
         payload_size = self.capacity
         try:
@@ -133,7 +133,9 @@ class Chunk(object):
             self.memory_tracer.add(device.type, self.get_payload_space())
         except RuntimeError:
             if self._time_profile:
-                global_timer.my_timer.finish_profile("CHUNK_allocate_payload")
+                global_timer.my_timer.finish_profile(
+                    f"CHUNK_allocate_payload_{device.type}"
+                )
             return False
         if profiler.started():
             profiler.chunk_life_cycle[self.chunk_id]["life_cycle"].append(
@@ -141,7 +143,9 @@ class Chunk(object):
             )
 
         if self._time_profile:
-            global_timer.my_timer.finish_profile("CHUNK_allocate_payload")
+            global_timer.my_timer.finish_profile(
+                f"CHUNK_allocate_payload_{device.type}"
+            )
         return True
 
     def release_payload(self):
