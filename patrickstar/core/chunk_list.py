@@ -78,9 +78,9 @@ class ChunkList(object):
         self.use_nvme = nvme_base_dir is not None
         self.nvme_base_dir = nvme_base_dir
         if self.use_nvme:
-            self.nvme_chunk_ids = set()
+            if not os.path.exists(self.nvme_base_dir):
+                os.mkdir(self.nvme_base_dir)
             self.nvme_chunk_id_to_filename_map = {}
-            self.nvme_loaded_chunk_ids = []
             # TODO(zilinzhu) Find our own way to do aio.
             from deepspeed.ops.aio import AsyncIOBuilder
 
@@ -155,19 +155,6 @@ class ChunkList(object):
         If it dose not work, we second free up all chunks not in used on the target device.
         """
         payload_space = chunk.get_chunk_space()
-        chunk_id = chunk.chunk_id
-        # Only allow 2 nvme chunk to be uploaded at the same time,
-        # one momentum and one variance
-        if self.use_nvme and chunk_id in self.nvme_chunk_ids:
-            if len(self.nvme_loaded_chunk_ids) == 2:
-                old_chunk_id = self.nvme_loaded_chunk_ids.pop(0)
-                assert old_chunk_id in self.nvme_chunk_id_to_filename_map
-                old_chunk = self.id_to_chunk_map[old_chunk_id]
-                filename = self.nvme_chunk_id_to_filename_map[old_chunk_id]
-                self.aio_handle.async_pwrite(old_chunk.payload, filename)
-                self.aio_handle.wait()
-                old_chunk.release_payload()
-                logger.info(f"Offload chunk {old_chunk_id} back to NVMe")
         self.prepare_device(compute_device, payload_space)
         if not chunk.allocate_payload(compute_device):
             self.clear_useless_chunks(compute_device)
@@ -175,21 +162,41 @@ class ChunkList(object):
                 raise RuntimeError(
                     f"Allocation chunk payload fails on {compute_device}, even if we try our best."
                 )
-        if self.use_nvme and chunk_id in self.nvme_chunk_ids:
-            assert compute_device.type == "cpu"
-            chunk.payload = chunk.payload.pin_memory()
-            if chunk_id in self.nvme_chunk_id_to_filename_map:
-                filename = self.nvme_chunk_id_to_filename_map[chunk_id]
-                self.aio_handle.async_pread(chunk.payload, filename)
-            else:
-                filename = os.path.join(self.nvme_base_dir, f"chunk_{chunk_id}")
-                with open(filename, "wb") as f:
-                    f.write(os.urandom(payload_space))
-                self.aio_handle.async_pwrite(chunk.payload, filename)
-                self.nvme_chunk_id_to_filename_map[chunk_id] = filename
+
+    def offload_chunk(self, chunk, nonblocking=False):
+        if not self.use_nvme:
+            logger.warning("Offloading chunk when nvme config is not enabled.")
+            return
+        chunk_id = chunk.chunk_id
+        if chunk.payload is None:
+            logger.warning(f"Trying to offload already offloaded chunk {chunk_id}")
+            return
+
+        if chunk_id not in self.nvme_chunk_id_to_filename_map:
+            filename = os.path.join(self.nvme_base_dir, f"chunk_{chunk_id}")
+            with open(filename, "wb") as f:
+                f.write(os.urandom(chunk.get_chunk_space()))
+            self.nvme_chunk_id_to_filename_map[chunk_id] = filename
+        else:
+            filename = self.nvme_chunk_id_to_filename_map[chunk_id]
+        logger.info(f"Offload chunk {chunk_id} back to NVMe")
+        buffer = chunk.payload
+        chunk.payload = None
+        self.aio_handle.async_pwrite(buffer, filename)
+        if not nonblocking:
             self.aio_handle.wait()
-            self.nvme_loaded_chunk_ids.append(chunk_id)
-            logger.info(f"Load chunk {chunk_id} from NVMe")
+
+    def load_chunk(self, chunk, buffer, nonblocking=False):
+        if not self.use_nvme:
+            logger.warning("Offloading chunk when nvme config is not enabled.")
+            return
+        chunk_id = chunk.chunk_id
+        assert chunk_id in self.nvme_chunk_id_to_filename_map
+        filename = self.nvme_chunk_id_to_filename_map[chunk_id]
+        chunk.payload = buffer
+        self.aio_handle.async_pread(chunk.payload, filename)
+        if not nonblocking:
+            self.aio_handle.wait()
 
     def access_chunk(self, chunk_id: int, compute_device: torch.device):
         r"""Prepare the memory of chunk to `compute_device` with `chunk_id`.

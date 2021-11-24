@@ -31,13 +31,14 @@ from typing import List
 import torch
 
 import patrickstar.utils.global_timer as global_timer
-from patrickstar.utils import logger, get_world_size, get_rank
+from patrickstar.utils import logger, get_world_size, get_rank, getsizeof
 from .chunk_list import ChunkList, ChunkType
 from .chunk_tensor_index import ChunkTensorIndex
-from .const import AccessType, ChunkState, TensorState, TrainingStage
+from .const import AccessType, ChunkState, OSChunkType, TensorState, TrainingStage
 from .hook import setup_patrickstar_hooks
 from .parameter import register_param, is_param_registered, ParamType
 from .eviction_policy import LatestAccessChunkEvictionPolicy
+from .nvme_shared_buffer import NVMeSharedBuffer
 from patrickstar.core.memtracer import RuntimeMemTracer
 
 
@@ -104,6 +105,13 @@ class PatrickStarClient(object):
 
         # for post backward hook
         self.grad_accs = []
+
+        if self.use_nvme:
+            # optimizer state relevant variables
+            self.unmarked_optimizer_chunk_ids = []
+            self.chunk_id_to_opt_type_map = {}
+
+            self.nvme_shared_buffer = NVMeSharedBuffer(2)
 
     # expose APIs from metrome ti client
     def training_stage(self):
@@ -273,8 +281,7 @@ class PatrickStarClient(object):
         )
         if chunk_id is None:
             chunk_id, _ = self.append_chunk(data_type, chunk_type)
-            if self.use_nvme:
-                self.chunk_list.nvme_chunk_ids.add(chunk_id)
+            self.unmarked_optimizer_chunk_ids.append(chunk_id)
         if not self.chunk_tensor_index.try_insert_tensor(chunk_id, param, access_type):
             raise RuntimeError("Failed to insert optimizer param w.r.t its ref_param.")
         self.chunk_tensor_index.register_optimizer_state_chunk_id(
@@ -610,6 +617,67 @@ class PatrickStarClient(object):
         NOTE() The device of grad should be determined by the device of param.data.
         """
         return self.access(param, AccessType.GRAD, compute_device)
+
+    def mark_and_allocate_optimizer_chunks(self):
+        if len(self.unmarked_optimizer_chunk_ids) == 0:
+            return
+        cpu_device = torch.device("cpu")
+        available_cpu_chunk_mem = (
+            self.mem_tracer.available_chunk_mem("cpu")
+            - self.default_chunk_size * self.nvme_shared_buffer.num_buffer * 2
+        )
+        # here we assume the GPU is alway full. Therefore, the maximum activation memory
+        # can be obtained by subtract the max cpu memory by current cpu memory.
+        max_activation_mem = (
+            max(self.mem_tracer.cpu_used_list) - self.mem_tracer.cpu_used_list[-1]
+        )
+        for chunk_id in self.unmarked_optimizer_chunk_ids:
+            assert chunk_id not in self.chunk_id_to_opt_type_map
+            chunk = self.chunk_list[chunk_id]
+            # Should be allocating the payload for the first time.
+            assert chunk.payload is None
+            chunk_mem_size = chunk.capacity * getsizeof(chunk.data_type)
+            if chunk_mem_size < available_cpu_chunk_mem - max_activation_mem:
+                chunk.allocate_payload(cpu_device)
+                available_cpu_chunk_mem -= chunk_mem_size
+                self.chunk_id_to_opt_type_map[chunk_id] = OSChunkType.CPU
+            elif chunk_mem_size < available_cpu_chunk_mem:
+                chunk.allocate_payload(cpu_device)
+                available_cpu_chunk_mem -= chunk_mem_size
+                self.chunk_id_to_opt_type_map[chunk_id] = OSChunkType.MOVABLE
+            else:
+                # During initialization, all nvme chunks can share the same zero buffer.
+                chunk.payload, _ = self.nvme_shared_buffer.get(chunk)
+                self.chunk_list.offload_chunk(chunk)
+                assert chunk.payload is None
+                self.chunk_id_to_opt_type_map[chunk_id] = OSChunkType.NVME
+
+        self.unmarked_optimizer_chunk_ids = []
+
+    def access_optimizer_state(
+        self, param: torch.nn.Parameter, compute_device: torch.device
+    ):
+        r"""Access the optimizer state (m, v in adam).
+
+        Note that this function should only be used in `step()`.
+        """
+        if not self.use_nvme:
+            return self.access_data(param, compute_device)
+        assert is_param_registered(param)
+        if param.ps_attr.param_type == ParamType.TORCH_BASED:
+            return self.access_data(param, compute_device)
+        chunk_id = self.chunk_tensor_index.get_chunk_id(param, AccessType.DATA)
+
+        opt_chunk_type = self.chunk_id_to_opt_type_map[chunk_id]
+        chunk = self.chunk_list[chunk_id]
+        if chunk.payload is None:
+            assert opt_chunk_type == OSChunkType.NVME
+
+            buffer, old_chunk = self.nvme_shared_buffer.get(chunk)
+            if old_chunk is not None:
+                self.chunk_list.offload_chunk(old_chunk)
+            self.chunk_list.load_chunk(chunk, buffer)
+        return self.access_data(param, compute_device)
 
     def release_dist(
         self,

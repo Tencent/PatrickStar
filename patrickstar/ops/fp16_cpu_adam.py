@@ -333,6 +333,9 @@ class FP16Adam(torch.optim.Optimizer):
             f"local_rank {local_rank} margin_chunk_num_for_gpu_adam {margin_chunk_num_for_gpu_adam}, "
             f"param cnt {len(fp32_param_list)}"
         )
+
+        self.client.mark_and_allocate_optimizer_chunks()
+
         for i, fp32_param in enumerate(fp32_param_list):
             # 1. prepare data for Adam
             fp16_param = fp16_param_with_grad_list[i]
@@ -392,8 +395,8 @@ class FP16Adam(torch.optim.Optimizer):
             exp_avg_param = exp_avg_list[i]
             exp_avg_sq_param = exp_avg_sq_list[i]
 
-            client.access_data(exp_avg_param, compute_device)
-            client.access_data(exp_avg_sq_param, compute_device)
+            client.access_optimizer_state(exp_avg_param, compute_device)
+            client.access_optimizer_state(exp_avg_sq_param, compute_device)
 
             exp_avg = get_real_data_tensor(exp_avg_param)
             exp_avg_sq = get_real_data_tensor(exp_avg_sq_param)
@@ -615,6 +618,7 @@ class FP16Adam(torch.optim.Optimizer):
             self.loss_scaler.update_scale(False)
 
         global_timer.my_timer.finish_profile("ADAM")
+
         return loss
 
     def state_dict(self):

@@ -27,67 +27,31 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 # SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-from enum import Enum
+import torch
+
+from patrickstar.core.chunk_data import Chunk
 
 
-class AccessType(Enum):
-    DATA = 1
-    GRAD = 2
+class NVMeSharedBuffer:
+    def __init__(self, num_buffer=2):
+        self.buffers = []
+        self.num_buffer = num_buffer
+        self.next_buffer = 0
+        self.buffer_id_to_chunk_id_map = {}
 
-
-class ChunkState(Enum):
-    r"""Chunk state during training."""
-    FREE = 0
-    # Chunk memory is allocated.
-    # Tensors are used for computing.
-    COMPUTE = 1
-    # Holding meaningful data.
-    HOLD = 2
-    # Holding meaningless data.
-    HOLD_AFTER_FWD = 3
-    HOLD_AFTER_BWD = 4
-
-    # Chunk memory is not allocated.
-    RELEASED = 5
-
-
-class TensorState(Enum):
-    r"""Tensor state during training
-
-    Notice that this is the state of the tensor in the chunk,
-    while `ChunkState` is the state of the whole state.
-    """
-    # Can be released.
-    FREE = 0
-    # In computation, cannot be moved.
-    COMPUTE = 1
-    # Can be moved, cannot be released.
-    HOLD = 2
-    HOLD_AFTER_FWD = 3
-    HOLD_AFTER_BWD = 4
-
-
-class TrainingStage(Enum):
-    UNSTART = 0
-    FWD = 1
-    BWD = 2
-    ADAM = 3
-
-
-class ChunkType(Enum):
-    PARAM_FP16 = 0
-    PARAM_FP32 = 1
-    MOMENTUM = 2
-    VARIANCE = 3
-    UNDEF = 4
-
-
-class ParamType(Enum):
-    CHUNK_BASED = 0
-    TORCH_BASED = 1
-
-
-class OSChunkType(Enum):
-    CPU = 0
-    MOVABLE = 1
-    NVME = 2
+    def get(self, chunk: Chunk):
+        if len(self.buffers) == self.next_buffer:
+            self.buffers.append(
+                torch.zeros(
+                    chunk.capacity,
+                    dtype=chunk.data_type,
+                    device=torch.device("cpu"),
+                    pin_memory=True,
+                )
+            )
+        buffer = self.buffers[self.next_buffer]
+        assert buffer.numel() == chunk.capacity and buffer.dtype == chunk.data_type
+        old_chunk = self.buffer_id_to_chunk_id_map.get(self.next_buffer, None)
+        self.buffer_id_to_chunk_id_map[self.next_buffer] = chunk
+        self.next_buffer = (self.next_buffer + 1) % self.num_buffer
+        return buffer, old_chunk
