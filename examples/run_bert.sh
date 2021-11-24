@@ -6,7 +6,7 @@ export CS=${CS:-64}
 # Batch Size
 export BS=${BS:-16}
 # Embedding on CPU
-export CPU_EBD=${CPU_EBD:-1}
+export CPU_EBD=${CPU_EBD:-0}
 # Release remote chunks after init
 export RELEASE_AFTER_INIT=${RELEASE_AFTER_INIT:-0}
 export MODEL_NAME=${MODEL_NAME:-"GPT2small"}

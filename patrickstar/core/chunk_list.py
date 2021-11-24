@@ -74,7 +74,7 @@ class ChunkList(object):
         self.device = torch.device(f"cuda:{local_rank}")
         self.chunk_eviction_policy = chunk_eviction_policy
         self.memory_tracer = memory_tracer
-        self.memory_cache = MemoryCache()
+        self.memory_cache = MemoryCache(2, self.memory_tracer)
 
     def chunk_ids_generator(self, chunk_type: ChunkType):
         r"""Return the chunk_id of all chunks with type `chunk_type`
