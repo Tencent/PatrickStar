@@ -91,7 +91,7 @@ class MemoryCache(object):
         tensors.pop(i)
         return new_tensor_ref
 
-    def recycle(self, payload) -> bool:
+    def recycle(self, payload):
         """
         NOTE() must set payload to None outside of this function.
         Recycle a payload tensor.
@@ -117,13 +117,3 @@ class MemoryCache(object):
                 self.memtracer.delete(device_type.type, space_size)
             else:
                 self.cached_tensors[(device_type, data_type)].append(payload.zero_())
-        return True
-
-    def delete(self, device_type):
-        """
-        Delete cached tensors on `device_type`
-        """
-        if (device_type, torch.float) in self.cached_tensors:
-            del self.cached_tensors[(device_type, torch.float)]
-        if (device_type, torch.float16) in self.cached_tensors:
-            del self.cached_tensors[(device_type, torch.float)]
