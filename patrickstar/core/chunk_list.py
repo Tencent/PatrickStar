@@ -58,6 +58,7 @@ class ChunkList(object):
         local_rank: int,
         memory_tracer: RuntimeMemTracer,
         chunk_eviction_policy: ChunkEvictionPolicyBase,
+        with_mem_cache: bool = False,
     ):
         """
         Args:
@@ -75,6 +76,7 @@ class ChunkList(object):
         self.chunk_eviction_policy = chunk_eviction_policy
         self.memory_tracer = memory_tracer
         self.memory_cache = MemoryCache(2, self.memory_tracer)
+        self.with_mem_cache = with_mem_cache
 
     def chunk_ids_generator(self, chunk_type: ChunkType):
         r"""Return the chunk_id of all chunks with type `chunk_type`
@@ -356,7 +358,8 @@ class ChunkList(object):
             data_type=data_type,
             chunk_id=chunk_id,
             memory_tracer=self.memory_tracer,
-            memory_cache=self.memory_cache,
+            with_mem_cache=self.with_mem_cache,
+            memory_cache=self.memory_cache if self.with_mem_cache else None,
             local_rank=self.local_rank,
             is_dummy=is_dummy,
         )

@@ -500,7 +500,7 @@ class FP16Adam(torch.optim.Optimizer):
                         TensorState.HOLD_AFTER_BWD,
                         training_stage=TrainingStage.BWD,
                         do_allreduce=True,
-                        with_mem_saving_comm=self.client.hook_config[
+                        with_mem_saving_comm=self.client.opt_config[
                             "with_mem_saving_comm"
                         ],
                     )

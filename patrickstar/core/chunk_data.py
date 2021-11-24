@@ -38,8 +38,6 @@ import patrickstar.utils.global_timer as global_timer
 from .const import TensorState, ChunkState
 from patrickstar.core.memory_cache import MemoryCache
 
-USE_MEM_CACHE = True
-
 
 class Chunk(object):
     def __init__(
@@ -48,6 +46,7 @@ class Chunk(object):
         data_type: torch.dtype,
         chunk_id: int,
         memory_tracer: RuntimeMemTracer,
+        with_mem_cache: bool,
         memory_cache: MemoryCache,
         local_rank: int = 0,
         is_dummy: bool = False,
@@ -88,7 +87,9 @@ class Chunk(object):
         self.payload = None
         self._time_profile = True
         self._pin_flag = False
-        self.memory_cache = memory_cache
+        self.with_mem_cache = with_mem_cache
+        if self.with_mem_cache:
+            self.memory_cache = memory_cache
 
     def is_dummy(self):
         return self._is_dummy
@@ -127,7 +128,7 @@ class Chunk(object):
         if self._time_profile:
             global_timer.my_timer.start_profile(f"CHUNK_allocate_payload_{device.type}")
         # reuse the chunk in cache if possible
-        if USE_MEM_CACHE:
+        if self.with_mem_cache:
             self.payload = self.memory_cache.allocate(
                 device, payload_numel, self.data_type, device.type == "cpu"
             )
@@ -160,7 +161,7 @@ class Chunk(object):
 
     def release_payload(self):
         r"""Release the payload."""
-        if USE_MEM_CACHE:
+        if self.with_mem_cache:
             self.memory_cache.recycle(self.payload)
             # must delete reference of `Chunk` to self.payload
             self.payload = None
@@ -258,7 +259,7 @@ class Chunk(object):
         )
         cuda_ctx = CUDAContext()
 
-        if USE_MEM_CACHE:
+        if self.with_mem_cache:
             payload_numel = self.payload.numel()
             # TODO(jiaruifang) asyc copy.
             if target_device.type == "cpu":
@@ -281,7 +282,6 @@ class Chunk(object):
                 self.memory_cache.recycle(self.payload)
                 self.payload = cuda_tmp_payload
         else:
-            # TODO(jiaruifang) asyc copy.
             if target_device.type == "cpu":
                 pinned_payload_cpu = torch.empty(
                     self.payload.shape,
@@ -289,6 +289,7 @@ class Chunk(object):
                     device="cpu:0",
                     pin_memory=True,
                 )
+                # TODO(jiaruifang) this context is wrong?
                 with torch.cuda.stream(cuda_ctx.copy_stream):
                     pinned_payload_cpu.copy_(self.payload)
                 self.payload = pinned_payload_cpu

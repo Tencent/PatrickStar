@@ -59,21 +59,22 @@ class PatrickStarClient(object):
             "use_fake_dist": False,
             "with_static_partition": False,
         }
-        default_hook_config = {
+        default_opt_config = {
             "with_mem_saving_comm": False,
+            "with_mem_cache": False,
         }
         if config is not None:
             tracer_config = config.get("mem_tracer", None)
             for k, v in default_tracer_config.items():
                 if k not in tracer_config:
                     tracer_config[k] = v
-            hook_conifg = config.get("hooks", None)
+            opt_config = config.get("opts", None)
         else:
             tracer_config = default_tracer_config
-            hook_conifg = default_hook_config
+            opt_config = default_opt_config
 
         self.mem_tracer = RuntimeMemTracer(self.local_rank, tracer_config)
-        self.hook_config = hook_conifg
+        self.opt_config = opt_config
 
         self.chunk_eviction_strategy = LatestAccessChunkEvictionPolicy(
             self.mem_tracer.metronome
@@ -82,9 +83,13 @@ class PatrickStarClient(object):
         self.default_chunk_size = default_chunk_size
         self.chunk_tensor_index = ChunkTensorIndex(self.default_chunk_size)
         self.chunk_list = ChunkList(
-            self.local_rank, self.mem_tracer, self.chunk_eviction_strategy
+            self.local_rank,
+            self.mem_tracer,
+            self.chunk_eviction_strategy,
+            self.opt_config["with_mem_cache"],
         )
-
+        if self.opt_config["with_mem_cache"]:
+            print("[CONFIG] USING MEM CACHE")
         self._time_profile = True
 
         if torch.distributed.is_initialized():
