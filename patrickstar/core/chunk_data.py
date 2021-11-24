@@ -323,6 +323,12 @@ class Chunk(object):
                 (time.time(), "move", target_device)
             )
 
+    def is_no_payload(self):
+        if self.payload is None:
+            return False
+        else:
+            return True
+
     def get_device(self):
         r"""Get device of the payload of chunk, return None if not allocated."""
         if self.payload is not None:
