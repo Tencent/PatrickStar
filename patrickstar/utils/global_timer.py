@@ -42,13 +42,21 @@ class GlobalTimer(metaclass=SingletonMeta):
         """
         self.elapse_stat = {}
         self.start_time = {}
+        self.start_flag = False
+
+    def start(self):
+        self.start_flag = True
 
     def start_profile(self, key):
+        if not self.start_flag:
+            return
         if key in self.start_time:
             assert self.start_time[key] == 0, f"Please Check {key} profiling function"
         self.start_time[key] = time.time()
 
     def finish_profile(self, key):
+        if not self.start_flag:
+            return
         if key in self.elapse_stat:
             self.elapse_stat[key] += time.time() - self.start_time[key]
         else:
@@ -56,10 +64,14 @@ class GlobalTimer(metaclass=SingletonMeta):
         self.start_time[key] = 0
 
     def reset(self):
+        if not self.start_flag:
+            return
         for k, _ in self.elapse_stat.items():
             self.elapse_stat[k] = 0
 
     def print(self):
+        if not self.start_flag:
+            return
         logger.info("------------- PROFILE RESULTS ----------------")
         dot_length = 20
         for k in self.elapse_stat:
@@ -68,10 +80,10 @@ class GlobalTimer(metaclass=SingletonMeta):
             self.elapse_stat["FWD"] + self.elapse_stat["BWD"] + self.elapse_stat["ADAM"]
         )
         for k, v in self.elapse_stat.items():
-            logger.info(
+            print(
                 f'{k} {"." * (dot_length - len(k))} {v}, {v / overall_elapse * 100} %'
             )
-        logger.info(f'TOTAL {"." * (dot_length - len("TOTAL"))} {overall_elapse}')
+        print(f'TOTAL {"." * (dot_length - len("TOTAL"))} {overall_elapse}')
 
 
 my_timer = GlobalTimer()
@@ -96,17 +108,17 @@ class DataMoveCnter(metaclass=SingletonMeta):
             self.amount_dict[k] = 0
 
     def print(self):
-        logger.info("------------- DATA MOVE RESULTS --------------")
+        print("------------- DATA MOVE RESULTS --------------")
         my_timer = GlobalTimer()
         for k, v in self.times_dict.items():
             bwd = 0
             if k in my_timer.elapse_stat and self.amount_dict[k] != 0:
                 bwd = self.amount_dict[k] / my_timer.elapse_stat[k]
-                logger.info(
+                print(
                     f"{k}: {self.amount_dict[k] / 1024 / 1024} MB, {v} times, {bwd / 1024 / 1024} MB/s"
                 )
             else:
-                logger.info(f"{k}: {self.amount_dict[k] / 1024 / 1024} MB")
+                print(f"{k}: {self.amount_dict[k] / 1024 / 1024} MB")
 
 
 data_move_cnter = DataMoveCnter()

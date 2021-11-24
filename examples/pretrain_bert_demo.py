@@ -105,6 +105,11 @@ def _add_patrick_star_args(parser):
         action="store_true",
         help="Use async memory monitor.",
     )
+    group.add_argument(
+        "--with_mem_saving_comm",
+        action="store_true",
+        help="Use communication saving memory.",
+    )
     return parser
 
 
@@ -152,6 +157,7 @@ def _add_test_bert_args(parser):
         action="store_true",
         help="Use activation offloading.",
     )
+
     return parser
 
 
@@ -304,7 +310,10 @@ def test_bert_model_helper(
                     "margin_use_ratio": 0.8,
                     "use_fake_dist": False,
                     "with_static_partition": args.with_static_partition,
-                }
+                },
+                "hooks": {
+                    "with_mem_saving_comm": args.with_mem_saving_comm,
+                },
             },
         }
 
@@ -388,7 +397,9 @@ def test_bert_model_helper(
         logger.info(f"Start Step {n} with {dist_plan}...")
 
         step_start_time = time.time()
-
+        # Only collect running time of the last iteration.
+        if n == num_steps - 1:
+            global_timer.my_timer.start()
         optimizer.zero_grad()
         if args.with_mem_profiler:
             if n == 1:
@@ -428,11 +439,12 @@ def test_bert_model_helper(
                     f'{"[WARM UP] " if n == 0 else ""}'
                     f"Step {n} elaspe {step_elapse} s, {total_macs / 1e12 / step_elapse} Tflops"
                 )
-                global_timer.my_timer.print()
-                global_timer.data_move_cnter.print()
+                if n == num_steps - 1:
+                    global_timer.my_timer.print()
+                    global_timer.data_move_cnter.print()
 
-                global_timer.my_timer.reset()
-                global_timer.data_move_cnter.reset()
+                    global_timer.my_timer.reset()
+                    global_timer.data_move_cnter.reset()
             else:
                 print(
                     f"Step {n} elaspe {step_elapse} s, {total_macs / 1e12 / step_elapse} Tflops"
@@ -458,9 +470,6 @@ if __name__ == "__main__":
     use_fp16 = args.use_fp16
     dist_plan = args.dist_plan
     res_check = args.res_check
-
-    # HIDDEN_DIM 1024, batch 16, seqence_len 1024, ckp True.
-    # PatrickStar is able to run the training, while PyTorch failed.
 
     # You could set the logger level to INFO to view more runtime
     # information.

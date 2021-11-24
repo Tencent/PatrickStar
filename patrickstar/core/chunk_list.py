@@ -122,7 +122,7 @@ class ChunkList(object):
             max_size = max(chunk.capacity, max_size)
         return max_size
 
-    def try_best_allocate_payload(self, chunk, compute_device):
+    def try_best_allocate_payload(self, chunk: Chunk, compute_device):
         """
         Try our best to allocate payload for chunk.
         First free up chunk size space on the target device.
@@ -195,6 +195,8 @@ class ChunkList(object):
                 and chunk.get_state() != ChunkState.COMPUTE
                 and not chunk.is_pin()
             ):
+                if not self.prepare_device(new_device, chunk.get_payload_space()):
+                    break
                 self.chunk_move(chunk_id, new_device)
 
     def prepare_device(self, target_device: torch.device, need_bytes: int):
@@ -227,12 +229,18 @@ class ChunkList(object):
             logger.error(
                 f"{target_device} has not enough space for {need_bytes} elements"
             )
-            # TODO(jiaruifang) We can catch the error and the release or move the chunks here.
-            raise RuntimeError(
+            logger.error(
                 f"{target_device} has not enough space for {need_bytes / 1e6} MB. "
                 f"Device used Chunk Memory is {self.get_chunk_memory_used(target_device) / 1e6} MB. "
                 f"Avaibale Chunk Memory is {ava_chunk_mem_size / 1e6} MB"
             )
+            return False
+            # TODO(jiaruifang) We can catch the error and the release or move the chunks here.
+            # raise RuntimeError(
+            #     f"{target_device} has not enough space for {need_bytes / 1e6} MB. "
+            #     f"Device used Chunk Memory is {self.get_chunk_memory_used(target_device) / 1e6} MB. "
+            #     f"Avaibale Chunk Memory is {ava_chunk_mem_size / 1e6} MB"
+            # )
 
         extra_need_bytes = need_bytes - remaining_chunk_mem_size
 
@@ -269,6 +277,7 @@ class ChunkList(object):
 
         if self._time_profile:
             global_timer.my_timer.finish_profile("CHUNK_LIST_prepare_device")
+        return True
 
     def make_room(self, offload_size_in_bytes, target_device):
         r"""Move `offload_size_in_bytes` size of chunks away from `target_device`.
