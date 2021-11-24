@@ -334,7 +334,8 @@ class FP16Adam(torch.optim.Optimizer):
             f"param cnt {len(fp32_param_list)}"
         )
 
-        self.client.mark_and_allocate_optimizer_chunks()
+        if self.client.use_nvme:
+            self.client.mark_and_allocate_optimizer_chunks()
 
         for i, fp32_param in enumerate(fp32_param_list):
             # 1. prepare data for Adam

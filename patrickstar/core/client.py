@@ -281,7 +281,8 @@ class PatrickStarClient(object):
         )
         if chunk_id is None:
             chunk_id, _ = self.append_chunk(data_type, chunk_type)
-            self.unmarked_optimizer_chunk_ids.append(chunk_id)
+            if self.use_nvme:
+                self.unmarked_optimizer_chunk_ids.append(chunk_id)
         if not self.chunk_tensor_index.try_insert_tensor(chunk_id, param, access_type):
             raise RuntimeError("Failed to insert optimizer param w.r.t its ref_param.")
         self.chunk_tensor_index.register_optimizer_state_chunk_id(
