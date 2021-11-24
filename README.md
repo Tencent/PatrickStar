@@ -2,8 +2,10 @@
 
 ![logo](./logo.png)
 ### News
-1. Nov. 2021, v0.4.0 released. With a better memory tracer, PatrickStar further improves the max model scale than v0.3.0 (15B vs 12B).
-2. Oct. 2021, v0.3.0 released. Our initial version significantly surpasses DeepSpeed.
+1. Nov. 2021, v0.4.3 releaed. PatrickStar is evaluated on A100 SuperPod. Some execution options are provided as an runtime optio
+Memory saving communication technique, memory allocation cache.
+2. Nov. 2021, v0.4.0 released. With a better memory tracer, PatrickStar further improves the max model scale than v0.3.0 (15B vs 12B).
+3. Oct. 2021, v0.3.0 released. Our initial version significantly surpasses DeepSpeed.
 
 ### Meeting PatrickStar
 Pre-Trained Models (PTM) are becoming the hotspot of both NLP research and industry application. However, the training of PTMs requires enormous hardware resources, which makes it only accessible to small portion of people in the AI community. Now, **PatrickStar will make PTM training available to everyone!**
