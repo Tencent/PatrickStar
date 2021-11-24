@@ -257,6 +257,7 @@ class Chunk(object):
             f"from {src_device} to {target_device}, "
             f"used mem {self.memory_tracer.used_chunk_mem(target_device.type) / 1e6} MB"
         )
+
         if self.with_mem_cache:
             payload_numel = self.payload.numel()
             # TODO(jiaruifang) asyc copy.
