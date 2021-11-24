@@ -108,7 +108,8 @@ class LatestAccessChunkEvictionPolicy(ChunkEvictionPolicyBase):
         q = PriorityQueue()
         for chunk_id, chunk in id_to_chunk_map.items():
             if (
-                chunk.get_device() is not None
+                not chunk.is_no_payload()
+                and chunk.get_device() is not None
                 and chunk.get_device().type == target_device.type
                 and chunk.get_state() != ChunkState.COMPUTE
                 and not chunk.is_pin()
