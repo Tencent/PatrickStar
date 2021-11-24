@@ -166,9 +166,9 @@ class Chunk(object):
             self.memory_tracer.delete(self.get_device().type, self.get_payload_space())
             # Remove the memory of the chunk.
             del self.payload
-            self.payload = None
-        else:
-            print("not release payload")
+        # must delete reference of `Chunk` to self.payload
+        self.payload = None
+
         if profiler.started():
             profiler.chunk_life_cycle[self.chunk_id]["life_cycle"].append(
                 (time.time(), "release", None)
