@@ -129,24 +129,26 @@ class Chunk(object):
         self.payload = self.memory_cache.allocate(
             device.type, payload_size, self.data_type, device.type == "cpu"
         )
-        if self.payload is not None:
-            return True
-        try:
-            if device.type == "cpu":
-                self.payload = torch.zeros(
-                    payload_size, dtype=self.data_type, device=device, pin_memory=True
-                )
-            else:
-                self.payload = torch.zeros(
-                    payload_size, dtype=self.data_type, device=device
-                )
-            self.memory_tracer.add(device.type, self.get_payload_space())
-        except RuntimeError:
-            if self._time_profile:
-                global_timer.my_timer.finish_profile(
-                    f"CHUNK_allocate_payload_{device.type}"
-                )
-            return False
+        if self.payload is None:
+            try:
+                if device.type == "cpu":
+                    self.payload = torch.zeros(
+                        payload_size,
+                        dtype=self.data_type,
+                        device=device,
+                        pin_memory=True,
+                    )
+                else:
+                    self.payload = torch.zeros(
+                        payload_size, dtype=self.data_type, device=device
+                    )
+                self.memory_tracer.add(device.type, self.get_payload_space())
+            except RuntimeError:
+                if self._time_profile:
+                    global_timer.my_timer.finish_profile(
+                        f"CHUNK_allocate_payload_{device.type}"
+                    )
+                return False
         if profiler.started():
             profiler.chunk_life_cycle[self.chunk_id]["life_cycle"].append(
                 (time.time(), "allocate", device)
