@@ -186,6 +186,7 @@ class FP32ChunkReadBuffer(object):
         if with_mem_cache:
             self.memory_cache = mem_cache
 
+        self.gpu_payload = None
         if margin_chunk_num_for_gpu_adam > 0:
             # When `margin_chunk_num_for_gpu_adam` > 0, it means there will be optimizer
             # state resides on GPU. So we need to allocate a GPU buffer for those.
@@ -255,5 +256,6 @@ class FP32ChunkReadBuffer(object):
         self.ret_payload = None
         self.cached_chunk_id = None
         if self.with_mem_cache:
-            self.memory_cache.recycle(self.gpu_payload)
-            self.gpu_payload = None
+            if self.gpu_payload is not None:
+                self.memory_cache.recycle(self.gpu_payload)
+                self.gpu_payload = None
