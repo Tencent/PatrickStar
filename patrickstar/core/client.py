@@ -106,6 +106,8 @@ class PatrickStarClient(object):
         # for post backward hook
         self.grad_accs = []
 
+        self.visited_chunk = {}
+
     # expose APIs from metrome ti client
     def training_stage(self):
         return self.mem_tracer.metronome.training_stage()
@@ -350,10 +352,10 @@ class PatrickStarClient(object):
             # local chunk as HOLD, remote chunk as RELEASED
             if not (
                 self.chunk_list[chunk_id].is_dummy()
-                or self.chunk_list[chunk_id].get_state() == ChunkState.HOLD
-                or self.chunk_list[chunk_id].get_state() == ChunkState.RELEASED
+                or chunk_id not in self.visited_chunk
             ):
                 return
+            self.visited_chunk[chunk_id] = 1
             if rank == 0:
                 print(f"reduce chunk_id {chunk_id} on rank {rank} {training_stage}")
             # Find the source rank to bcast its local chunk, which owned by the gpu.
