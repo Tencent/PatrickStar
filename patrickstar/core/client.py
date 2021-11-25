@@ -741,19 +741,11 @@ class PatrickStarClient(object):
                                 "CLIENT_release_dist_reduce"
                             )
                         # release chunk payload, only its belonging gpu owns it.
-                        if rank != target_rank:
-                            self.chunk_list[chunk_id].release_payload()
-                            self.set_all_tensors_state_in_chunk(
-                                chunk_id, TensorState.FREE
-                            )
-                        else:
+                        if rank == target_rank:
                             self.chunk_list[chunk_id].payload /= world_size
-                    else:
-                        if target_rank != rank:
-                            self.chunk_list[chunk_id].release_payload()
-                            self.set_all_tensors_state_in_chunk(
-                                chunk_id, TensorState.FREE
-                            )
+                    if target_rank != rank:
+                        self.chunk_list[chunk_id].release_payload()
+                        self.set_all_tensors_state_in_chunk(chunk_id, TensorState.FREE)
             else:
                 all_chunks_ready = True
                 for i in chunk_id_list:
