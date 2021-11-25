@@ -351,9 +351,9 @@ class PatrickStarClient(object):
                 self.chunk_list[chunk_id].get_state() == ChunkState.HOLD
                 or self.chunk_list[chunk_id].get_state() == ChunkState.RELEASED
             ):
-                has_released_chunk = True
                 return
 
+            print(f"reduce chunk_id {chunk_id} on rank {rank}")
             # Find the source rank to bcast its local chunk, which owned by the gpu.
             src_rank = -1
             for cur_rank, cur_chunk_id in enumerate(chunk_id_list):
