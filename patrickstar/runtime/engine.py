@@ -196,7 +196,7 @@ class PatrickStarEngine(torch.nn.Module):
         loss = self.module(*inputs, **kwargs)
         self._set_state_after_forward()
         global_timer.my_timer.finish_profile("FWD")
-        self.client.self.visited_chunk = {}
+        self.client.visited_chunk = {}
         return loss
 
     def backward(self, loss):
@@ -217,7 +217,7 @@ class PatrickStarEngine(torch.nn.Module):
             self.loss_scaler.backward(loss)
         else:
             loss.backward()
-        self.client.self.visited_chunk = {}
+        self.client.visited_chunk = {}
         self.client.mem_tracer.update_margin_mem()
         self.iteration_cnt_ += 1
         global_timer.my_timer.finish_profile("BWD")

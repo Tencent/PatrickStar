@@ -352,7 +352,7 @@ class PatrickStarClient(object):
             # local chunk as HOLD, remote chunk as RELEASED
             if not (
                 self.chunk_list[chunk_id].is_dummy()
-                or chunk_id not in self.visited_chunk
+                or (chunk_id not in self.visited_chunk)
             ):
                 return
             self.visited_chunk[chunk_id] = 1
@@ -388,7 +388,7 @@ class PatrickStarClient(object):
                     "CLIENT_fetch_remote_chunks_broadcast"
                 )
             # set the chunk as HOLD_AND_TOUCHED, therefore it can be offloaded to CPU.
-            self.set_all_tensors_state_in_chunk(chunk_id, TensorState.HOLD_AND_TOUCHED)
+            self.set_all_tensors_state_in_chunk(chunk_id, TensorState.HOLD)
             if rank == 0:
                 print(
                     f"state of chunk id {chunk_id} {self.chunk_list[chunk_id].get_state()}"
