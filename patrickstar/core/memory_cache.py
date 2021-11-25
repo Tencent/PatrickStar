@@ -48,7 +48,7 @@ class MemoryCache(object):
         self._memtracer = memtracer
 
     def _new_mem(self, size, data_type, device_type, pin_memory):
-        space_size = getsizeof(data_type)
+        space_size = getsizeof(data_type) * size
         ret = torch.zeros(
             size,
             dtype=data_type,
