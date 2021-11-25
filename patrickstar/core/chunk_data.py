@@ -78,6 +78,7 @@ class Chunk(object):
             TensorState.HOLD: 0,
             TensorState.HOLD_AFTER_FWD: 0,
             TensorState.HOLD_AFTER_BWD: 0,
+            TensorState.HOLD_AND_TOUCHED: 0,
             TensorState.FREE: 0,
         }
         # the number of tensors that are not used in the forward calculation
