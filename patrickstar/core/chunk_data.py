@@ -128,17 +128,31 @@ class Chunk(object):
             global_timer.my_timer.start_profile(f"CHUNK_allocate_payload_{device.type}")
         # reuse the chunk in cache if possible
         if self.with_mem_cache:
-            self.payload = self.memory_cache.pop_or_allocate(
-                device, payload_numel, self.data_type, device.type == "cpu"
-            )
+            try:
+                self.payload = self.memory_cache.pop_or_allocate(
+                    device, payload_numel, self.data_type, device.type == "cpu"
+                )
+            except RuntimeError:
+                if self._time_profile:
+                    global_timer.my_timer.finish_profile(
+                        f"CHUNK_allocate_payload_{device.type}"
+                    )
+                return False
         else:
-            self.payload = torch.zeros(
-                payload_numel,
-                dtype=self.data_type,
-                device=device,
-                pin_memory=(device.type == "cpu"),
-            )
-            self.memory_tracer.add(device.type, self.get_payload_space())
+            try:
+                self.payload = torch.zeros(
+                    payload_numel,
+                    dtype=self.data_type,
+                    device=device,
+                    pin_memory=(device.type == "cpu"),
+                )
+                self.memory_tracer.add(device.type, self.get_payload_space())
+            except RuntimeError:
+                if self._time_profile:
+                    global_timer.my_timer.finish_profile(
+                        f"CHUNK_allocate_payload_{device.type}"
+                    )
+                return False
 
         if profiler.started():
             profiler.chunk_life_cycle[self.chunk_id]["life_cycle"].append(
