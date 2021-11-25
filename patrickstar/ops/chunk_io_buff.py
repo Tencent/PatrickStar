@@ -68,11 +68,10 @@ class FP16ChunkWriteBuffer(object):
         self.with_mem_cache = with_mem_cache
         if self.with_mem_cache:
             self.memory_cache = mem_cache
-            self.gpu_fp32_buff = self.memory_cache.allocate(
+            self.gpu_fp32_buff = self.memory_cache.pop_or_allocate(
                 torch.device(f"cuda:{torch.cuda.current_device()}"),
                 chunk_size,
                 torch.float,
-                False,
             )
         else:
             self.gpu_fp32_buff = torch.zeros(
@@ -146,7 +145,7 @@ class FP16ChunkWriteBuffer(object):
         self.cached_src_chunk_id = None
         self.cached_target_chunk_id = None
         if self.with_mem_cache:
-            self.memory_cache.recycle(self.gpu_fp32_buff)
+            self.memory_cache.push(self.gpu_fp32_buff)
             self.gpu_fp32_buff = None
 
 
@@ -193,8 +192,8 @@ class FP32ChunkReadBuffer(object):
             gpu_device = torch.device(f"cuda:{self.local_rank}")
 
             if self.with_mem_cache:
-                self.gpu_payload = self.memory_cache.allocate(
-                    gpu_device, chunk_size, torch.half, False
+                self.gpu_payload = self.memory_cache.pop_or_allocate(
+                    gpu_device, chunk_size, torch.half
                 )
             else:
                 self.gpu_payload = torch.empty(
@@ -257,5 +256,5 @@ class FP32ChunkReadBuffer(object):
         self.cached_chunk_id = None
         if self.with_mem_cache:
             if self.gpu_payload is not None:
-                self.memory_cache.recycle(self.gpu_payload)
+                self.memory_cache.push(self.gpu_payload)
                 self.gpu_payload = None

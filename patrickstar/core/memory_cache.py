@@ -29,6 +29,7 @@
 
 import torch
 from patrickstar.core.memtracer.memtracer import RuntimeMemTracer
+from patrickstar.utils.helper import getsizeof
 
 
 class MemoryCache(object):
@@ -42,31 +43,23 @@ class MemoryCache(object):
         Returns:
             None or a `torch.Tensor`.
         """
-        self.capacity_ = capacity
-        self.cached_tensors = {}
-        self.memtracer = memtracer
+        self._capacity = capacity
+        self._cached_tensors = {}
+        self._memtracer = memtracer
 
     def _new_mem(self, size, data_type, device_type, pin_memory):
-        if data_type == torch.float:
-            space_size = 4 * size
-        elif data_type == torch.half:
-            space_size = 2 * size
-        else:
-            raise RuntimeError
-        self.memtracer.add(device_type.type, space_size)
-        return torch.zeros(
+        space_size = getsizeof(data_type)
+        ret = torch.zeros(
             size,
             dtype=data_type,
             device=device_type,
             pin_memory=pin_memory,
         )
+        self._memtracer.add(device_type.type, space_size)
+        return ret
 
-    def allocate(
-        self,
-        device_type: torch.device,
-        size: int,
-        data_type: torch.dtype,
-        pin_memory: bool,
+    def pop_or_allocate(
+        self, device_type: torch.device, size: int, data_type: torch.dtype
     ) -> torch.Tensor:
         """
         Return a tensor including `size` `device_type` elements on `device_type`.
@@ -77,43 +70,41 @@ class MemoryCache(object):
         assert isinstance(
             device_type, torch.device
         ), "device_type must be type of torch.device"
-        if (device_type, data_type) not in self.cached_tensors:
-            return self._new_mem(size, data_type, device_type, pin_memory)
-        tensors = self.cached_tensors[(device_type, data_type)]
+        if (device_type, data_type) not in self._cached_tensors:
+            return self._new_mem(
+                size, data_type, device_type, device_type.type == "cpu"
+            )
+        tensors = self._cached_tensors[(device_type, data_type)]
         i = -1
         for i in range(len(tensors)):
             if tensors[i].numel() == size:
                 break
         if i == -1:
-            return self._new_mem(size, data_type, device_type, pin_memory)
+            return self._new_mem(
+                size, data_type, device_type, device_type.type == "cpu"
+            )
         new_tensor_ref = tensors[i]
         # delete the reference to tensors[i] in MemoryCache
         tensors.pop(i)
         return new_tensor_ref
 
-    def recycle(self, payload):
+    def push(self, payload):
         """
         NOTE() must set payload to None outside of this function.
         Recycle a payload tensor.
         If the cache is fulled, delete the payload.
         Returns:
-            success recycle or not.
+            success pushed or not.
         """
         device_type = payload.device
         data_type = payload.dtype
-        size = payload.numel()
-        if (device_type, data_type) not in self.cached_tensors and self.capacity_ > 0:
-            self.cached_tensors[(device_type, data_type)] = [payload.zero_()]
+        if (device_type, data_type) not in self._cached_tensors and self._capacity > 0:
+            self._cached_tensors[(device_type, data_type)] = [payload.zero_()]
         else:
             # the cache is fulled
-            if len(self.cached_tensors[(device_type, data_type)]) == self.capacity_:
+            if len(self._cached_tensors[(device_type, data_type)]) == self._capacity:
                 del payload
-                if data_type == torch.float:
-                    space_size = 4 * size
-                elif data_type == torch.half:
-                    space_size = 2 * size
-                else:
-                    raise RuntimeError
-                self.memtracer.delete(device_type.type, space_size)
+                space_size = getsizeof(data_type)
+                self._memtracer.delete(device_type.type, space_size)
             else:
-                self.cached_tensors[(device_type, data_type)].append(payload.zero_())
+                self._cached_tensors[(device_type, data_type)].append(payload.zero_())

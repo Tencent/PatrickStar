@@ -36,6 +36,7 @@ from patrickstar.utils import logger, getsizeof
 import patrickstar.utils.global_timer as global_timer
 from .const import TensorState, ChunkState
 from patrickstar.core.memory_cache import MemoryCache
+from typing import Optional
 
 
 class Chunk(object):
@@ -45,8 +46,7 @@ class Chunk(object):
         data_type: torch.dtype,
         chunk_id: int,
         memory_tracer: RuntimeMemTracer,
-        with_mem_cache: bool,
-        memory_cache: MemoryCache,
+        memory_cache: Optional[MemoryCache],
         local_rank: int = 0,
         is_dummy: bool = False,
     ):
@@ -86,7 +86,7 @@ class Chunk(object):
         self.payload = None
         self._time_profile = True
         self._pin_flag = False
-        self.with_mem_cache = with_mem_cache
+        self.with_mem_cache = memory_cache is not None
         if self.with_mem_cache:
             self.memory_cache = memory_cache
 
@@ -128,16 +128,20 @@ class Chunk(object):
             global_timer.my_timer.start_profile(f"CHUNK_allocate_payload_{device.type}")
         # reuse the chunk in cache if possible
         if self.with_mem_cache:
-            self.payload = self.memory_cache.allocate(
-                device, payload_numel, self.data_type, device.type == "cpu"
-            )
+            try:
+                self.payload = self.memory_cache.pop_or_allocate(
+                    device, payload_numel, self.data_type
+                )
+            except RuntimeError:
+                if self._time_profile:
+                    global_timer.my_timer.finish_profile(
+                        f"CHUNK_allocate_payload_{device.type}"
+                    )
+                return False
         else:
             try:
                 self.payload = torch.zeros(
-                    payload_numel,
-                    dtype=self.data_type,
-                    device=device,
-                    pin_memory=(device.type == "cpu"),
+                    payload_numel, dtype=self.data_type, device=device
                 )
                 self.memory_tracer.add(device.type, self.get_payload_space())
             except RuntimeError:
@@ -161,7 +165,7 @@ class Chunk(object):
     def release_payload(self):
         r"""Release the payload."""
         if self.with_mem_cache:
-            self.memory_cache.recycle(self.payload)
+            self.memory_cache.push(self.payload)
             # must delete reference of `Chunk` to self.payload
             self.payload = None
         else:
@@ -262,21 +266,21 @@ class Chunk(object):
             payload_numel = self.payload.numel()
             # TODO(jiaruifang) asyc copy.
             if target_device.type == "cpu":
-                pinned_payload_cpu = self.memory_cache.allocate(
-                    target_device, payload_numel, self.payload.dtype, True
+                pinned_payload_cpu = self.memory_cache.pop_or_allocate(
+                    target_device, payload_numel, self.payload.dtype
                 )
                 pinned_payload_cpu.reshape(self.payload.shape)
                 pinned_payload_cpu.copy_(self.payload)
-                self.memory_cache.recycle(self.payload)
+                self.memory_cache.push(self.payload)
                 self.payload = pinned_payload_cpu
             elif target_device.type == "cuda":
                 self.payload = self.payload.pin_memory()
-                cuda_tmp_payload = self.memory_cache.allocate(
-                    target_device, payload_numel, self.payload.dtype, False
+                cuda_tmp_payload = self.memory_cache.pop_or_allocate(
+                    target_device, payload_numel, self.payload.dtype
                 )
                 cuda_tmp_payload.reshape(self.payload.shape)
                 cuda_tmp_payload.copy_(self.payload)
-                self.memory_cache.recycle(self.payload)
+                self.memory_cache.push(self.payload)
                 self.payload = cuda_tmp_payload
         else:
             if target_device.type == "cpu":

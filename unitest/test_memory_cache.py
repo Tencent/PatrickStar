@@ -46,21 +46,25 @@ class TestMemoryCache(unittest.TestCase):
         memtracer = RuntimeMemTracer()
         memory_cache = MemoryCache(2, memtracer)
 
-        payload1 = memory_cache.allocate(self.compute_device, 10, torch.float, False)
+        payload1 = memory_cache.pop_or_allocate(self.compute_device, 10, torch.float)
         payload1_addr = payload1.data_ptr()
-        memory_cache.recycle(payload1)
-        payload2 = memory_cache.allocate(self.compute_device, 10, torch.float, False)
+        memory_cache.push(payload1)
+        payload2 = memory_cache.pop_or_allocate(self.compute_device, 10, torch.float)
         self.assertTrue(payload1_addr == payload2.data_ptr())
 
-        payload3 = memory_cache.allocate(self.compute_device, 10, torch.float, False)
+        payload3 = memory_cache.pop_or_allocate(self.compute_device, 10, torch.float)
         self.assertTrue(payload1_addr != payload3.data_ptr())
         print("payload3 ", payload3.data_ptr())
 
         payload2_addr = payload2.data_ptr()
-        memory_cache.recycle(payload2)
-        memory_cache.recycle(payload3)
+        memory_cache.push(payload2)
+        memory_cache.push(payload3)
 
-        payload4 = memory_cache.allocate(self.compute_device, 10, torch.float, False)
+        payload4 = memory_cache.pop_or_allocate(
+            self.compute_device,
+            10,
+            torch.float,
+        )
         self.assertTrue(payload2_addr == payload4.data_ptr())
 
 

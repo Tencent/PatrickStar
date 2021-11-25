@@ -358,7 +358,6 @@ class ChunkList(object):
             data_type=data_type,
             chunk_id=chunk_id,
             memory_tracer=self.memory_tracer,
-            with_mem_cache=self.with_mem_cache,
             memory_cache=self.memory_cache if self.with_mem_cache else None,
             local_rank=self.local_rank,
             is_dummy=is_dummy,

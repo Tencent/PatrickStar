@@ -45,9 +45,9 @@ class TestEvictionPolicy(unittest.TestCase):
         mem_tracer = RuntimeMemTracer(
             local_rank=0, config={"use_async_mem_monitor": True}
         )
-        id_to_chunk_list[0] = Chunk(10, torch.float, 0, mem_tracer, 0, False)
+        id_to_chunk_list[0] = Chunk(10, torch.float, 0, mem_tracer, None, 0, False)
         id_to_chunk_list[0].allocate_payload(dev)
-        id_to_chunk_list[1] = Chunk(10, torch.float, 1, mem_tracer, 0, False)
+        id_to_chunk_list[1] = Chunk(10, torch.float, 1, mem_tracer, None, 0, False)
         id_to_chunk_list[1].allocate_payload(dev)
         metronome = mem_tracer.metronome
         metronome.set_warmup(True)
