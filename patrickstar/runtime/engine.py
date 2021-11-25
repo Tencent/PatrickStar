@@ -158,7 +158,7 @@ class PatrickStarEngine(torch.nn.Module):
         for _, chunk in self.client.chunk_list.generate_chunk():
             chunk.unused = 0
 
-        self.visited_chunk = {}
+        self.visited_chunk = {{}}
 
     def _set_state_after_forward(self):
         """
@@ -198,7 +198,7 @@ class PatrickStarEngine(torch.nn.Module):
         loss = self.module(*inputs, **kwargs)
         self._set_state_after_forward()
         global_timer.my_timer.finish_profile("FWD")
-        self.client.visited_chunk = {}
+        self.client.visited_chunk = {{}}
         return loss
 
     def backward(self, loss):
