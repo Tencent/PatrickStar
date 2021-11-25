@@ -43,12 +43,12 @@ class ChunkState(Enum):
     COMPUTE = 1
     # Holding meaningful data.
     HOLD = 2
-    # Holding meaningless data.
     HOLD_AFTER_FWD = 3
     HOLD_AFTER_BWD = 4
 
     # Chunk memory is not allocated.
     RELEASED = 5
+    HOLD_AND_TOUCHED = 6
 
 
 class TensorState(Enum):
@@ -65,6 +65,8 @@ class TensorState(Enum):
     HOLD = 2
     HOLD_AFTER_FWD = 3
     HOLD_AFTER_BWD = 4
+
+    HOLD_AND_TOUCHED = 5
 
 
 class TrainingStage(Enum):

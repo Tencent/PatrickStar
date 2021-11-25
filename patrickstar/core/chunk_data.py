@@ -204,6 +204,8 @@ class Chunk(object):
         # Distributed training need to fix the chunk on the compute device.
         if self._state_dict[TensorState.COMPUTE] > 0:
             return ChunkState.COMPUTE
+        elif self._state_dict[TensorState.HOLD_AND_TOUCHED]:
+            return ChunkState.HOHOLD_AND_TOUCHEDLD
         elif self._state_dict[TensorState.HOLD] > 0:
             return ChunkState.HOLD
         elif self._state_dict[TensorState.HOLD_AFTER_FWD] > 0:

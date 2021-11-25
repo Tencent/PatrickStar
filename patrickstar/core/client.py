@@ -345,6 +345,15 @@ class PatrickStarClient(object):
             # Use memory saving communication pattern.
             # Bcast chunk from the src gpu to the others.
 
+            # check the chunk_id is the first to be visited.
+            # local chunk as HOLD, remote chunk as RELEASED
+            if (
+                self.chunk_list[chunk_id].get_state() == ChunkState.HOLD
+                or self.chunk_list[chunk_id].get_state() == ChunkState.RELEASED
+            ):
+                has_released_chunk = True
+                return
+
             # Find the source rank to bcast its local chunk, which owned by the gpu.
             src_rank = -1
             for cur_rank, cur_chunk_id in enumerate(chunk_id_list):
@@ -375,7 +384,7 @@ class PatrickStarClient(object):
                     "CLIENT_fetch_remote_chunks_broadcast"
                 )
             # set the chunk as HOLD, therefore it can be offloaded to CPU.
-            self.set_all_tensors_state_in_chunk(chunk_id, TensorState.HOLD)
+            self.set_all_tensors_state_in_chunk(chunk_id, TensorState.HOLD_AND_TOUCHED)
         else:
             # During FWD, when there are param in the chunk group being visited for
             # the first time, collect the chunk group to local.
@@ -711,6 +720,7 @@ class PatrickStarClient(object):
                         or self.chunk_list[chunk_id].is_dummy()
                     ):
                         chunk_ready = True
+
                 if chunk_ready:
                     target_rank = -1
                     for cur_rank, cur_chunk_id in enumerate(chunk_id_list):
@@ -718,6 +728,7 @@ class PatrickStarClient(object):
                             target_rank = cur_rank
                             break
                     if do_allreduce:
+                        # move the chunk_id to GPU
                         self.chunk_list.access_chunk(chunk_id, self.device)
                         if self._time_profile:
                             global_timer.my_timer.start_profile(
@@ -733,6 +744,7 @@ class PatrickStarClient(object):
                             global_timer.my_timer.finish_profile(
                                 "CLIENT_release_dist_reduce"
                             )
+                        # release chunk payload, only its belonging gpu owns it.
                         if rank != target_rank:
                             self.chunk_list[chunk_id].release_payload()
                             self.set_all_tensors_state_in_chunk(
