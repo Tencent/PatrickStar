@@ -179,7 +179,7 @@ class ChunkList(object):
             self.nvme_chunk_id_to_filename_map[chunk_id] = filename
         else:
             filename = self.nvme_chunk_id_to_filename_map[chunk_id]
-        logger.info(f"Offload chunk {chunk_id} back to NVMe")
+        logger.info(f"Offload chunk {chunk_id} to NVMe")
         buffer = chunk.payload
         chunk.payload = None
         self.aio_handle.async_pwrite(buffer, filename)
@@ -188,10 +188,11 @@ class ChunkList(object):
 
     def load_chunk(self, chunk, buffer, nonblocking=False):
         if not self.use_nvme:
-            logger.warning("Offloading chunk when nvme config is not enabled.")
+            logger.warning("Loading chunk when nvme config is not enabled.")
             return
         chunk_id = chunk.chunk_id
         assert chunk_id in self.nvme_chunk_id_to_filename_map
+        logger.info(f"Load chunk {chunk_id} from NVMe")
         filename = self.nvme_chunk_id_to_filename_map[chunk_id]
         chunk.payload = buffer
         self.aio_handle.async_pread(chunk.payload, filename)

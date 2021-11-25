@@ -625,6 +625,11 @@ class PatrickStarClient(object):
         cpu_device = torch.device("cpu")
         available_cpu_chunk_mem = (
             self.mem_tracer.available_chunk_mem("cpu")
+            - self.mem_tracer.cpu_chunk_used_mem
+            # All GPU param chunks may be moved to CPU during Adam.
+            # Therefore we need to subtract the gpu chunk mem.
+            - self.mem_tracer.gpu_chunk_used_mem
+            # Substract the memory for NVMe shared buffer.
             - self.default_chunk_size * self.nvme_shared_buffer.num_buffer * 2
         )
         # here we assume the GPU is alway full. Therefore, the maximum activation memory

@@ -293,7 +293,7 @@ class RuntimeMemTracer(object):
         elif device_type == "cuda":
             self.gpu_chunk_used_mem += size_in_bytes
         else:
-            raise f"device type {device_type} is not supported"
+            raise RuntimeError(f"device type {device_type} is not supported")
 
     def delete(self, device_type, size_in_bytes):
         if device_type == "cpu":
@@ -301,7 +301,7 @@ class RuntimeMemTracer(object):
         elif device_type == "cuda":
             self.gpu_chunk_used_mem -= size_in_bytes
         else:
-            raise f"device type {device_type} is not supported"
+            raise RuntimeError(f"device type {device_type} is not supported")
 
     def remaining_chunk_mem(self, device_type):
         """
@@ -327,7 +327,7 @@ class RuntimeMemTracer(object):
 
     def available_chunk_mem(self, device_type):
         r"""The amount of memory on device_type that can be used for chunks.
-        A.k.a chunkale memory.
+        A.k.a chunkable memory.
         This includes the used memory that has been allocated for chunks
         and the remaining memory.
 
