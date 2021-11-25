@@ -78,7 +78,6 @@ class Chunk(object):
             TensorState.HOLD: 0,
             TensorState.HOLD_AFTER_FWD: 0,
             TensorState.HOLD_AFTER_BWD: 0,
-            TensorState.HOLD_AND_TOUCHED: 0,
             TensorState.FREE: 0,
         }
         # the number of tensors that are not used in the forward calculation
@@ -205,8 +204,6 @@ class Chunk(object):
         # Distributed training need to fix the chunk on the compute device.
         if self._state_dict[TensorState.COMPUTE] > 0:
             return ChunkState.COMPUTE
-        elif self._state_dict[TensorState.HOLD_AND_TOUCHED] > 0:
-            return ChunkState.HOLD_AND_TOUCHED
         elif self._state_dict[TensorState.HOLD] > 0:
             return ChunkState.HOLD
         elif self._state_dict[TensorState.HOLD_AFTER_FWD] > 0:

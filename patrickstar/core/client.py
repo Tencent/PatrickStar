@@ -356,8 +356,6 @@ class PatrickStarClient(object):
             ):
                 return
             self.visited_chunk[chunk_id] = 1
-            if rank == 0:
-                print(f"reduce chunk_id {chunk_id} on rank {rank} {training_stage}")
             # Find the source rank to bcast its local chunk, which owned by the gpu.
             src_rank = -1
             for cur_rank, cur_chunk_id in enumerate(chunk_id_list):
@@ -387,12 +385,8 @@ class PatrickStarClient(object):
                 global_timer.my_timer.finish_profile(
                     "CLIENT_fetch_remote_chunks_broadcast"
                 )
-            # set the chunk as HOLD_AND_TOUCHED, therefore it can be offloaded to CPU.
+            # set the chunk as HOLD, therefore it can be offloaded to CPU.
             self.set_all_tensors_state_in_chunk(chunk_id, TensorState.HOLD)
-            if rank == 0:
-                print(
-                    f"state of chunk id {chunk_id} {self.chunk_list[chunk_id].get_state()}"
-                )
         else:
             # During FWD, when there are param in the chunk group being visited for
             # the first time, collect the chunk group to local.

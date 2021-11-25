@@ -217,7 +217,6 @@ class PatrickStarEngine(torch.nn.Module):
             self.loss_scaler.backward(loss)
         else:
             loss.backward()
-        self.client.visited_chunk = {}
         self.client.mem_tracer.update_margin_mem()
         self.iteration_cnt_ += 1
         global_timer.my_timer.finish_profile("BWD")
