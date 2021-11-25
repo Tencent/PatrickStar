@@ -323,6 +323,7 @@ class PatrickStarClient(object):
 
     def _fetch_remote_chunks(
         self,
+        chunk_id,
         chunk_id_list,
         local_chunk_id,
         compute_device,
@@ -332,59 +333,72 @@ class PatrickStarClient(object):
         r"""Fetch the remote chunks to local.
 
         Args:
+            chunk_id: the id of accessed chunk
             chunk_id_list: list of int. The id of the chunks in a same comm group.
             local_chunk_id: int. The id of the local chunk in the comm group.
             compute_device: :class:`torch.device`.
+            with_mem_saving_comm: using the memory saving communication pattern or not.
             param_name: str.
         """
         rank = get_rank()
-        # During FWD, when there are param in the chunk group being visited for
-        # the first time, collect the chunk group to local.
-        # How can we determine if a chunk group is being visited for the first time,
-        # so that we can trigger the correct allgather?
-        # When the first param is visited, the remote chunk should be of state
-        # RELEASED, therefore, we do the allgather when the state of chunks are
-        # changing form HOLD_AFTER_FWD(HOLD_ADFTER_BWD) to RELEASED.
-        has_released_chunk = False
-        for i in chunk_id_list:
-            if self.chunk_list[i].get_state() == ChunkState.RELEASED:
-                has_released_chunk = True
-                break
-        if not has_released_chunk:
-            return
-
-        if self._time_profile:
-            global_timer.my_timer.start_profile("CLIENT_fetch_remote_chunks")
-
-        logger.debug(
-            f"rank {rank} fetch {param_name} remote chunks {chunk_id_list} local chunk {local_chunk_id}"
-        )
-
         if with_mem_saving_comm:
             # Use memory saving communication pattern.
-            # Bcast chunk one by one, so that the bcasted chunks can be moved to CPU
-            for cur_rank, chunk_id in enumerate(chunk_id_list):
-                if chunk_id == local_chunk_id:
-                    self.chunk_list.access_chunk(local_chunk_id, compute_device)
-                else:
-                    self.chunk_list.try_best_allocate_payload(
-                        self.chunk_list[chunk_id], compute_device
-                    )
-                if self._time_profile:
-                    global_timer.my_timer.start_profile(
-                        "CLIENT_fetch_remote_chunks_broadcast"
-                    )
-                torch.distributed.broadcast(
-                    self.chunk_list[chunk_id].payload,
-                    src=cur_rank,
-                    async_op=False,
+            # Bcast chunk from the src gpu to the others.
+
+            # Find the source rank to bcast its local chunk, which owned by the gpu.
+            src_rank = -1
+            for cur_rank, cur_chunk_id in enumerate(chunk_id_list):
+                if chunk_id == cur_chunk_id:
+                    src_rank = cur_rank
+
+            # If the gpu owns the chunk (local rank), access it.
+            # If the gpu do not own the chunk (remote chunk), allocate memory.
+            if src_rank == rank:
+                self.chunk_list.access_chunk(chunk_id, compute_device)
+            else:
+                self.chunk_list.try_best_allocate_payload(
+                    self.chunk_list[chunk_id], compute_device
                 )
-                if self._time_profile:
-                    global_timer.my_timer.finish_profile(
-                        "CLIENT_fetch_remote_chunks_broadcast"
-                    )
-                self.set_all_tensors_state_in_chunk(chunk_id, TensorState.HOLD)
+            if self._time_profile:
+                global_timer.my_timer.start_profile(
+                    "CLIENT_fetch_remote_chunks_broadcast"
+                )
+
+            # Do Bcast from gpu owns chunk to gpu do not own it.
+            torch.distributed.broadcast(
+                self.chunk_list[chunk_id].payload,
+                src=src_rank,
+                async_op=False,
+            )
+            if self._time_profile:
+                global_timer.my_timer.finish_profile(
+                    "CLIENT_fetch_remote_chunks_broadcast"
+                )
+            # set the chunk as HOLD, therefore it can be offloaded to CPU.
+            self.set_all_tensors_state_in_chunk(chunk_id, TensorState.HOLD)
         else:
+            # During FWD, when there are param in the chunk group being visited for
+            # the first time, collect the chunk group to local.
+            # How can we determine if a chunk group is being visited for the first time,
+            # so that we can trigger the correct allgather?
+            # When the first param is visited, the remote chunk should be of state
+            # RELEASED, therefore, we do the allgather when the state of chunks are
+            # changing form HOLD_AFTER_FWD(HOLD_ADFTER_BWD) to RELEASED.
+            has_released_chunk = False
+            for i in chunk_id_list:
+                if self.chunk_list[i].get_state() == ChunkState.RELEASED:
+                    has_released_chunk = True
+                    break
+            if not has_released_chunk:
+                return
+
+            if self._time_profile:
+                global_timer.my_timer.start_profile("CLIENT_fetch_remote_chunks")
+
+            logger.debug(
+                f"rank {rank} fetch {param_name} remote chunks {chunk_id_list} local chunk {local_chunk_id}"
+            )
+
             # Use collective communication to achieve the most efficient communication.
             # However, it is memory consumping. world_size chunks on GPU simutaneously.
             self.chunk_list.access_chunk(local_chunk_id, compute_device)
@@ -430,7 +444,7 @@ class PatrickStarClient(object):
                 global_timer.data_move_cnter.update(
                     "CLIENT_fetch_remote_chunks_allgather", comm_data_amount
                 )
-        global_timer.my_timer.finish_profile("CLIENT_fetch_remote_chunks")
+            global_timer.my_timer.finish_profile("CLIENT_fetch_remote_chunks")
 
     def _access_tensor_in_chunk(self, param, access_type, compute_device, chunk_id):
         self.chunk_list.access_chunk(chunk_id, compute_device)
@@ -509,22 +523,15 @@ class PatrickStarClient(object):
                 f"local_chunk_id {local_chunk_id} chunk_id_list {chunk_id_list}"
             )
 
-            # # 1.1 Move the local chunk to compute device.
-            # self.chunk_list.access_chunk(local_chunk_id, compute_device)
-
-            # # Prevent the local chunk being moved to other devices during _fetch_remote_chunks.
-            # # Because its state is HOLD, pin.
-            # self.chunk_list[local_chunk_id].pin()
-
             # 1.2 Fetch the remote chunks to local.
             self._fetch_remote_chunks(
+                chunk_id,
                 chunk_id_list,
                 local_chunk_id,
                 compute_device,
                 with_mem_saving_comm,
                 param.ps_attr.name,
             )
-            # self.chunk_list[local_chunk_id].unpin()
         else:
             local_chunk_id = chunk_id
 
@@ -685,59 +692,81 @@ class PatrickStarClient(object):
         #     BWD: All non-dummy chunks are of state HOLD_AFTER_BWD.
         world_size = get_world_size()
         if world_size > 1:
-            all_chunks_ready = True
-            for i in chunk_id_list:
+            if with_mem_saving_comm:
+                # Check if the chunk_id is ready to reduced or removed.
+                chunk_ready = False
                 if training_stage == TrainingStage.FWD:
                     if (
-                        not self.chunk_list[i].all_tensor_state(
+                        self.chunk_list[chunk_id].all_tensor_state(
                             TensorState.HOLD_AFTER_FWD
                         )
-                        and not self.chunk_list[i].is_dummy()
+                        or self.chunk_list[chunk_id].is_dummy()
                     ):
-                        all_chunks_ready = False
+                        chunk_ready = True
                 elif training_stage == TrainingStage.BWD:
                     if (
-                        not self.chunk_list[i].all_tensor_state(
+                        self.chunk_list[chunk_id].all_tensor_state(
                             TensorState.HOLD_AFTER_BWD
                         )
-                        and not self.chunk_list[i].is_dummy()
+                        or self.chunk_list[chunk_id].is_dummy()
                     ):
-                        all_chunks_ready = False
-
-            if all_chunks_ready:
-                if with_mem_saving_comm:
+                        chunk_ready = True
+                if chunk_ready:
+                    target_rank = -1
+                    for cur_rank, cur_chunk_id in enumerate(chunk_id_list):
+                        if cur_chunk_id == chunk_id:
+                            target_rank = cur_rank
+                            break
                     if do_allreduce:
-                        for cur_rank, cur_chunk_id in enumerate(chunk_id_list):
-                            self.chunk_list.access_chunk(cur_chunk_id, self.device)
-                            if self._time_profile:
-                                global_timer.my_timer.start_profile(
-                                    "CLIENT_release_dist_reduce"
-                                )
-                            torch.distributed.reduce(
-                                self.chunk_list[cur_chunk_id].payload,
-                                cur_rank,
-                                op=torch.distributed.ReduceOp.SUM,
-                                async_op=False,
+                        self.chunk_list.access_chunk(chunk_id, self.device)
+                        if self._time_profile:
+                            global_timer.my_timer.start_profile(
+                                "CLIENT_release_dist_reduce"
                             )
-                            if self._time_profile:
-                                global_timer.my_timer.finish_profile(
-                                    "CLIENT_release_dist_reduce"
-                                )
-                            if cur_chunk_id != local_chunk_id:
-                                self.chunk_list[cur_chunk_id].release_payload()
-                                self.set_all_tensors_state_in_chunk(
-                                    cur_chunk_id, TensorState.FREE
-                                )
-                            else:
-                                self.chunk_list[local_chunk_id].payload /= world_size
+                        torch.distributed.reduce(
+                            self.chunk_list[chunk_id].payload,
+                            target_rank,
+                            op=torch.distributed.ReduceOp.SUM,
+                            async_op=False,
+                        )
+                        if self._time_profile:
+                            global_timer.my_timer.finish_profile(
+                                "CLIENT_release_dist_reduce"
+                            )
+                        if rank != target_rank:
+                            self.chunk_list[chunk_id].release_payload()
+                            self.set_all_tensors_state_in_chunk(
+                                cur_chunk_id, TensorState.FREE
+                            )
+                        else:
+                            self.chunk_list[chunk_id].payload /= world_size
                     else:
-                        for cur_rank, cur_chunk_id in enumerate(chunk_id_list):
-                            if cur_chunk_id != local_chunk_id:
-                                self.chunk_list[cur_chunk_id].release_payload()
-                                self.set_all_tensors_state_in_chunk(
-                                    cur_chunk_id, TensorState.FREE
-                                )
-                else:
+                        if target_rank != rank:
+                            self.chunk_list[chunk_id].release_payload()
+                            self.set_all_tensors_state_in_chunk(
+                                cur_chunk_id, TensorState.FREE
+                            )
+            else:
+                all_chunks_ready = True
+                for i in chunk_id_list:
+                    if training_stage == TrainingStage.FWD:
+                        if (
+                            not self.chunk_list[i].all_tensor_state(
+                                TensorState.HOLD_AFTER_FWD
+                            )
+                            and not self.chunk_list[i].is_dummy()
+                        ):
+                            all_chunks_ready = False
+                    elif training_stage == TrainingStage.BWD:
+                        if (
+                            not self.chunk_list[i].all_tensor_state(
+                                TensorState.HOLD_AFTER_BWD
+                            )
+                            and not self.chunk_list[i].is_dummy()
+                        ):
+                            all_chunks_ready = False
+
+                if all_chunks_ready:
                     if do_allreduce:
                         if self._time_profile:
                             global_timer.my_timer.start_profile(
