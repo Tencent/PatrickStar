@@ -268,49 +268,43 @@ class Chunk(object):
         )
 
         cuda_ctx = CUDAContext()
-        if self.with_mem_cache:
-            payload_numel = self.payload.numel()
-            if target_device.type == "cpu":
-                pinned_payload_cpu = self.memory_cache.pop_or_allocate(
-                    target_device, payload_numel, self.payload.dtype, True
-                )
-                pinned_payload_cpu.reshape(self.payload.shape)
-                self.compute_finish_event.synchronize()
-                with torch.cuda.stream(cuda_ctx.copy_stream):
+        self.compute_finish_event.synchronize()
+        with torch.cuda.stream(cuda_ctx.copy_stream):
+            if self.with_mem_cache:
+                payload_numel = self.payload.numel()
+                if target_device.type == "cpu":
+                    pinned_payload_cpu = self.memory_cache.pop_or_allocate(
+                        target_device, payload_numel, self.payload.dtype, True
+                    )
+                    pinned_payload_cpu.reshape(self.payload.shape)
                     pinned_payload_cpu.copy_(self.payload)
-                self.memory_cache.push(self.payload)
-                self.payload = pinned_payload_cpu
-            elif target_device.type == "cuda":
-                self.payload = self.payload.pin_memory()
-                cuda_tmp_payload = self.memory_cache.pop_or_allocate(
-                    target_device, payload_numel, self.payload.dtype, False
-                )
-                cuda_tmp_payload.reshape(self.payload.shape)
-                self.compute_finish_event.synchronize()
-                with torch.cuda.stream(cuda_ctx.copy_stream):
+                    self.memory_cache.push(self.payload)
+                    self.payload = pinned_payload_cpu
+                elif target_device.type == "cuda":
+                    self.payload = self.payload.pin_memory()
+                    cuda_tmp_payload = self.memory_cache.pop_or_allocate(
+                        target_device, payload_numel, self.payload.dtype, False
+                    )
+                    cuda_tmp_payload.reshape(self.payload.shape)
                     cuda_tmp_payload.copy_(self.payload)
-                self.memory_cache.push(self.payload)
-                self.payload = cuda_tmp_payload
-        else:
-            if target_device.type == "cpu":
-                pinned_payload_cpu = torch.empty(
-                    self.payload.shape,
-                    dtype=self.payload.dtype,
-                    device="cpu:0",
-                    pin_memory=True,
-                )
-                self.compute_finish_event.synchronize()
-                with torch.cuda.stream(cuda_ctx.copy_stream):
+                    self.memory_cache.push(self.payload)
+                    self.payload = cuda_tmp_payload
+            else:
+                if target_device.type == "cpu":
+                    pinned_payload_cpu = torch.empty(
+                        self.payload.shape,
+                        dtype=self.payload.dtype,
+                        device="cpu:0",
+                        pin_memory=True,
+                    )
                     pinned_payload_cpu.copy_(self.payload)
-                self.payload = pinned_payload_cpu
-            elif target_device.type == "cuda":
-                self.payload = self.payload.pin_memory()
-                self.compute_finish_event.synchronize()
-                with torch.cuda.stream(cuda_ctx.copy_stream):
+                    self.payload = pinned_payload_cpu
+                elif target_device.type == "cuda":
+                    self.payload = self.payload.pin_memory()
                     self.payload = self.payload.to(target_device)
 
-            self.memory_tracer.delete(src_device.type, self.get_payload_space())
-            self.memory_tracer.add(target_device.type, self.get_payload_space())
+                self.memory_tracer.delete(src_device.type, self.get_payload_space())
+                self.memory_tracer.add(target_device.type, self.get_payload_space())
 
         if self._time_profile:
             if target_device.type == "cuda":
