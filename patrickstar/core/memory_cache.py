@@ -59,7 +59,11 @@ class MemoryCache(object):
         return ret
 
     def pop_or_allocate(
-        self, device_type: torch.device, size: int, data_type: torch.dtype
+        self,
+        device_type: torch.device,
+        size: int,
+        data_type: torch.dtype,
+        pin_memory: bool,
     ) -> torch.Tensor:
         """
         Return a tensor including `size` `device_type` elements on `device_type`.
@@ -71,18 +75,14 @@ class MemoryCache(object):
             device_type, torch.device
         ), "device_type must be type of torch.device"
         if (device_type, data_type) not in self._cached_tensors:
-            return self._new_mem(
-                size, data_type, device_type, device_type.type == "cpu"
-            )
+            return self._new_mem(size, data_type, device_type, pin_memory)
         tensors = self._cached_tensors[(device_type, data_type)]
         i = -1
         for i in range(len(tensors)):
             if tensors[i].numel() == size:
                 break
         if i == -1:
-            return self._new_mem(
-                size, data_type, device_type, device_type.type == "cpu"
-            )
+            return self._new_mem(size, data_type, device_type, pin_memory)
         new_tensor_ref = tensors[i]
         # delete the reference to tensors[i] in MemoryCache
         tensors.pop(i)

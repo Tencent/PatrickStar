@@ -73,6 +73,7 @@ class FP16ChunkWriteBuffer(object):
                 torch.device(f"cuda:{torch.cuda.current_device()}"),
                 chunk_size,
                 torch.float,
+                False,
             )
         else:
             self.gpu_fp32_buff = torch.zeros(
@@ -193,7 +194,7 @@ class FP32ChunkReadBuffer(object):
 
             if self.with_mem_cache:
                 self.gpu_payload = self.memory_cache.pop_or_allocate(
-                    gpu_device, chunk_size, torch.half
+                    gpu_device, chunk_size, torch.half, False
                 )
             else:
                 self.gpu_payload = torch.empty(

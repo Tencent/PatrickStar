@@ -130,7 +130,7 @@ class Chunk(object):
         if self.with_mem_cache:
             try:
                 self.payload = self.memory_cache.pop_or_allocate(
-                    device, payload_numel, self.data_type
+                    device, payload_numel, self.data_type, device.type == "cpu"
                 )
             except RuntimeError:
                 if self._time_profile:
@@ -141,7 +141,10 @@ class Chunk(object):
         else:
             try:
                 self.payload = torch.zeros(
-                    payload_numel, dtype=self.data_type, device=device
+                    payload_numel,
+                    dtype=self.data_type,
+                    device=device,
+                    pin_memory=(device.type == "cpu"),
                 )
                 self.memory_tracer.add(device.type, self.get_payload_space())
             except RuntimeError:
@@ -267,7 +270,7 @@ class Chunk(object):
             # TODO(jiaruifang) asyc copy.
             if target_device.type == "cpu":
                 pinned_payload_cpu = self.memory_cache.pop_or_allocate(
-                    target_device, payload_numel, self.payload.dtype
+                    target_device, payload_numel, self.payload.dtype, True
                 )
                 pinned_payload_cpu.reshape(self.payload.shape)
                 pinned_payload_cpu.copy_(self.payload)
@@ -276,7 +279,7 @@ class Chunk(object):
             elif target_device.type == "cuda":
                 self.payload = self.payload.pin_memory()
                 cuda_tmp_payload = self.memory_cache.pop_or_allocate(
-                    target_device, payload_numel, self.payload.dtype
+                    target_device, payload_numel, self.payload.dtype, False
                 )
                 cuda_tmp_payload.reshape(self.payload.shape)
                 cuda_tmp_payload.copy_(self.payload)
