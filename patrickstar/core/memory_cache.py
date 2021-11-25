@@ -104,7 +104,8 @@ class MemoryCache(object):
             # the cache is fulled
             if len(self._cached_tensors[(device_type, data_type)]) == self._capacity:
                 del payload
-                space_size = getsizeof(data_type)
+                size = payload.numel()
+                space_size = getsizeof(data_type) * size
                 self._memtracer.delete(device_type.type, space_size)
             else:
                 self._cached_tensors[(device_type, data_type)].append(payload.zero_())
