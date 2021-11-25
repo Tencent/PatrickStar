@@ -31,6 +31,7 @@ import time
 import torch
 
 from patrickstar.core.memtracer import RuntimeMemTracer
+from patrickstar.manager.cuda_context import CUDAContext
 from patrickstar.profiler import profiler
 from patrickstar.utils import logger, getsizeof
 import patrickstar.utils.global_timer as global_timer
@@ -83,6 +84,8 @@ class Chunk(object):
         self.payload = None
         self._time_profile = True
         self._pin_flag = False
+
+        self.compute_finish_event = torch.cuda.Event()
 
     def is_dummy(self):
         return self._is_dummy
@@ -172,6 +175,12 @@ class Chunk(object):
         """
         self._state_dict[old_state] -= 1
         self._state_dict[new_state] += 1
+        if (
+            old_state == ChunkState.COMPUTE
+            and self._state_dict[TensorState.COMPUTE] == 0
+        ):
+            cuda_ctx = CUDAContext()
+            self.compute_finish_event.record(cuda_ctx.compute_stream)
 
     def get_state(self):
         """
@@ -248,6 +257,7 @@ class Chunk(object):
             f"used mem {self.memory_tracer.used_chunk_mem(target_device.type) / 1e6} MB"
         )
 
+        cuda_ctx = CUDAContext()
         # TODO(jiaruifang) asyc copy.
         if target_device.type == "cpu":
             pinned_payload_cpu = torch.empty(
@@ -256,11 +266,15 @@ class Chunk(object):
                 device="cpu:0",
                 pin_memory=True,
             )
-            pinned_payload_cpu.copy_(self.payload)
+            self.compute_finish_event.synchronize()
+            with torch.cuda.stream(cuda_ctx.copy_stream):
+                pinned_payload_cpu.copy_(self.payload)
             self.payload = pinned_payload_cpu
         elif target_device.type == "cuda":
             self.payload = self.payload.pin_memory()
-            self.payload = self.payload.to(target_device)
+            self.compute_finish_event.synchronize()
+            with torch.cuda.stream(cuda_ctx.copy_stream):
+                self.payload = self.payload.to(target_device)
 
         self.memory_tracer.delete(src_device.type, self.get_payload_space())
         self.memory_tracer.add(target_device.type, self.get_payload_space())
