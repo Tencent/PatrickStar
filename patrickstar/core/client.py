@@ -106,7 +106,10 @@ class PatrickStarClient(object):
         # for post backward hook
         self.grad_accs = []
 
-        self.visited_chunk = {{}}
+        self.visited_chunk = {TrainingStage.FWD: {}, TrainingStage.BWD: {}}
+
+    def reset_visited_chunk(self):
+        self.visited_chunk = {TrainingStage.FWD: {}, TrainingStage.BWD: {}}
 
     # expose APIs from metrome ti client
     def training_stage(self):
