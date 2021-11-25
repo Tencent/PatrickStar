@@ -33,4 +33,5 @@ import torch
 
 class CUDAContext(metaclass=SingletonMeta):
     def __init__(self):
+        self.compute_stream = torch.cuda.current_stream()
         self.copy_stream = torch.cuda.Stream()
