@@ -531,15 +531,17 @@ class FP16Adam(torch.optim.Optimizer):
             self.client.chunk_tensor_index,
             max_chunk_size,
             margin_chunk_num_for_gpu_adam,
-            self.client.opt_config["with_mem_cache"],
-            self.client.chunk_list.memory_cache,
+            self.client.chunk_list.memory_cache
+            if self.client.opt_config["with_mem_cache"]
+            else None,
         )
         self.write_chunk_buff = FP16ChunkWriteBuffer(
             self.client.chunk_list,
             self.client.chunk_tensor_index,
             max_chunk_size,
-            self.client.opt_config["with_mem_cache"],
-            self.client.chunk_list.memory_cache,
+            self.client.chunk_list.memory_cache
+            if self.client.opt_config["with_mem_cache"]
+            else None,
         )
 
         if self.has_overflow_and_reset_param(write_chunk_buff=self.write_chunk_buff):

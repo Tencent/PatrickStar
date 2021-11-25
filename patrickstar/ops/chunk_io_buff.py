@@ -31,6 +31,8 @@ import torch
 
 from patrickstar.core import ChunkList, ChunkTensorIndex, ParamType
 from patrickstar.utils import logger, get_rank
+from patrickstar.core.memory_cache import MemoryCache
+from typing import Optional
 
 
 class FP16ChunkWriteBuffer(object):
@@ -48,8 +50,7 @@ class FP16ChunkWriteBuffer(object):
         chunk_list: ChunkList,
         chunk_tensor_index: ChunkTensorIndex,
         chunk_size: int,
-        with_mem_cache: bool = False,
-        mem_cache=None,
+        mem_cache: Optional[MemoryCache] = None,
     ):
         """
         Args:
@@ -65,7 +66,7 @@ class FP16ChunkWriteBuffer(object):
         # 2) GPU fp32 -> GPU fp16 is faster than one single copy_. And the
         # gpu_fp32_buff member is the itermediate buffer.
 
-        self.with_mem_cache = with_mem_cache
+        self.with_mem_cache = mem_cache is not None
         if self.with_mem_cache:
             self.memory_cache = mem_cache
             self.gpu_fp32_buff = self.memory_cache.pop_or_allocate(
@@ -164,8 +165,7 @@ class FP32ChunkReadBuffer(object):
         chunk_tensor_index: ChunkTensorIndex,
         chunk_size: int,
         margin_chunk_num_for_gpu_adam: int,
-        with_mem_cache: bool = False,
-        mem_cache=None,
+        mem_cache: Optional[MemoryCache] = None,
     ):
         """
         Args:
@@ -181,8 +181,8 @@ class FP32ChunkReadBuffer(object):
         )
         self.local_rank = chunk_list.local_rank
         logger.info(f"Allocate fp32 Chunk Buffer of size {chunk_size / 1e6} MB on CPU.")
-        self.with_mem_cache = with_mem_cache
-        if with_mem_cache:
+        self.with_mem_cache = mem_cache is not None
+        if self.with_mem_cache:
             self.memory_cache = mem_cache
 
         self.gpu_payload = None
