@@ -350,10 +350,7 @@ class PatrickStarClient(object):
 
             # check the chunk_id is the first to be visited.
             # local chunk as HOLD, remote chunk as RELEASED
-            if not (
-                self.chunk_list[chunk_id].is_dummy()
-                or (chunk_id not in self.visited_chunk)
-            ):
+            if chunk_id in self.visited_chunk:
                 return
             self.visited_chunk[chunk_id] = 1
             # Find the source rank to bcast its local chunk, which owned by the gpu.
@@ -707,6 +704,7 @@ class PatrickStarClient(object):
         if world_size > 1:
             if with_mem_saving_comm:
                 # Check if the chunk_id is ready to reduced or removed.
+                # Chunks of diff GPU are in state of HOLD_AFTER_FWD/BWD
                 chunk_ready = False
                 if training_stage == TrainingStage.FWD:
                     if (
