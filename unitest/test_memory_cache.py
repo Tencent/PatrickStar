@@ -32,6 +32,7 @@ import unittest
 import torch
 
 from patrickstar.core.memory_cache import MemoryCache
+from patrickstar.core.memtracer import RuntimeMemTracer
 
 
 class TestMemoryCache(unittest.TestCase):
@@ -42,38 +43,25 @@ class TestMemoryCache(unittest.TestCase):
         self.compute_device = (
             torch.device("cuda:0") if torch.cuda.is_available() else torch.device("cpu")
         )
+        memtracer = RuntimeMemTracer()
+        memory_cache = MemoryCache(2, memtracer)
 
-        memory_cache = MemoryCache(2)
-
-        payload1 = memory_cache.allocate(
-            self.compute_device.type, 10, torch.float, False
-        )
-        if payload1 is None:
-            payload1 = torch.randn(10, dtype=torch.float, device=self.compute_device)
-        else:
-            self.assertTrue(False)
-        print(payload1)
+        payload1 = memory_cache.allocate(self.compute_device, 10, torch.float, False)
         payload1_addr = payload1.data_ptr()
-        self.assertTrue(memory_cache.recycle(payload1))
-        # explicit delete refer to payload in main
-        payload1 = None
-        print(payload1)
-        self.assertTrue(payload1 is None)
-
-        payload2 = memory_cache.allocate(
-            self.compute_device.type, 10, torch.float, False
-        )
-        print("payload2 ", payload2.data_ptr())
+        memory_cache.recycle(payload1)
+        payload2 = memory_cache.allocate(self.compute_device, 10, torch.float, False)
         self.assertTrue(payload1_addr == payload2.data_ptr())
 
-        payload3 = memory_cache.allocate(
-            self.compute_device.type, 10, torch.float, False
-        )
-        if payload3 is None:
-            payload3 = torch.zeros(10, dtype=torch.float, device=self.compute_device)
-        else:
-            self.assertTrue(False)
+        payload3 = memory_cache.allocate(self.compute_device, 10, torch.float, False)
+        self.assertTrue(payload1_addr != payload3.data_ptr())
         print("payload3 ", payload3.data_ptr())
+
+        payload2_addr = payload2.data_ptr()
+        memory_cache.recycle(payload2)
+        memory_cache.recycle(payload3)
+
+        payload4 = memory_cache.allocate(self.compute_device, 10, torch.float, False)
+        self.assertTrue(payload2_addr == payload4.data_ptr())
 
 
 if __name__ == "__main__":
