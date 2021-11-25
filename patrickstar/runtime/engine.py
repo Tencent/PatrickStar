@@ -158,6 +158,8 @@ class PatrickStarEngine(torch.nn.Module):
         for _, chunk in self.client.chunk_list.generate_chunk():
             chunk.unused = 0
 
+        self.visited_chunk = {}
+
     def _set_state_after_forward(self):
         """
         After forward calculation, we need to reset the state of

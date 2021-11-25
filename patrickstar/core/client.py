@@ -707,19 +707,13 @@ class PatrickStarClient(object):
                 # Chunks of diff GPU are in state of HOLD_AFTER_FWD/BWD
                 chunk_ready = False
                 if training_stage == TrainingStage.FWD:
-                    if (
-                        self.chunk_list[chunk_id].all_tensor_state(
-                            TensorState.HOLD_AFTER_FWD
-                        )
-                        or self.chunk_list[chunk_id].is_dummy()
+                    if self.chunk_list[chunk_id].all_tensor_state(
+                        TensorState.HOLD_AFTER_FWD
                     ):
                         chunk_ready = True
                 elif training_stage == TrainingStage.BWD:
-                    if (
-                        self.chunk_list[chunk_id].all_tensor_state(
-                            TensorState.HOLD_AFTER_BWD
-                        )
-                        or self.chunk_list[chunk_id].is_dummy()
+                    if self.chunk_list[chunk_id].all_tensor_state(
+                        TensorState.HOLD_AFTER_BWD
                     ):
                         chunk_ready = True
 
@@ -750,7 +744,7 @@ class PatrickStarClient(object):
                         if rank != target_rank:
                             self.chunk_list[chunk_id].release_payload()
                             self.set_all_tensors_state_in_chunk(
-                                cur_chunk_id, TensorState.FREE
+                                chunk_id, TensorState.FREE
                             )
                         else:
                             self.chunk_list[chunk_id].payload /= world_size
@@ -758,7 +752,7 @@ class PatrickStarClient(object):
                         if target_rank != rank:
                             self.chunk_list[chunk_id].release_payload()
                             self.set_all_tensors_state_in_chunk(
-                                cur_chunk_id, TensorState.FREE
+                                chunk_id, TensorState.FREE
                             )
             else:
                 all_chunks_ready = True
