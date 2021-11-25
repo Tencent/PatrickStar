@@ -329,6 +329,7 @@ class PatrickStarClient(object):
         compute_device,
         with_mem_saving_comm: bool,
         param_name,
+        training_stage,
     ):
         r"""Fetch the remote chunks to local.
 
@@ -348,12 +349,13 @@ class PatrickStarClient(object):
             # check the chunk_id is the first to be visited.
             # local chunk as HOLD, remote chunk as RELEASED
             if not (
-                self.chunk_list[chunk_id].get_state() == ChunkState.HOLD
+                self.chunk_list[chunk_id].is_dummy()
+                or self.chunk_list[chunk_id].get_state() == ChunkState.HOLD
                 or self.chunk_list[chunk_id].get_state() == ChunkState.RELEASED
             ):
                 return
-
-            print(f"reduce chunk_id {chunk_id} on rank {rank}")
+            if rank == 0:
+                print(f"reduce chunk_id {chunk_id} on rank {rank} {training_stage}")
             # Find the source rank to bcast its local chunk, which owned by the gpu.
             src_rank = -1
             for cur_rank, cur_chunk_id in enumerate(chunk_id_list):
@@ -383,8 +385,12 @@ class PatrickStarClient(object):
                 global_timer.my_timer.finish_profile(
                     "CLIENT_fetch_remote_chunks_broadcast"
                 )
-            # set the chunk as HOLD, therefore it can be offloaded to CPU.
+            # set the chunk as HOLD_AND_TOUCHED, therefore it can be offloaded to CPU.
             self.set_all_tensors_state_in_chunk(chunk_id, TensorState.HOLD_AND_TOUCHED)
+            if rank == 0:
+                print(
+                    f"state of chunk id {chunk_id} {self.chunk_list[chunk_id].get_state()}"
+                )
         else:
             # During FWD, when there are param in the chunk group being visited for
             # the first time, collect the chunk group to local.
@@ -488,7 +494,8 @@ class PatrickStarClient(object):
         param: torch.nn.Parameter,
         access_type: AccessType,
         compute_device: torch.device,
-        with_mem_saving_comm: bool = False,
+        with_mem_saving_comm: bool,
+        training_stage: TrainingStage,
     ) -> torch.Tensor:
         r"""Visit tensor of param in distributed environment.
 
@@ -540,6 +547,7 @@ class PatrickStarClient(object):
                 compute_device,
                 with_mem_saving_comm,
                 param.ps_attr.name,
+                training_stage,
             )
         else:
             local_chunk_id = chunk_id
