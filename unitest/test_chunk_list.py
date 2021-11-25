@@ -34,18 +34,18 @@ import torch
 from common import distributed_test
 from patrickstar.core import ChunkList, ChunkState, ChunkType
 from patrickstar.core.eviction_policy import LatestAccessChunkEvictionPolicy
-from patrickstar.core.memtracer import Metronome
+from patrickstar.core.memtracer import RuntimeMemTracer
 
 
 class TestChunkData(unittest.TestCase):
     def setUp(self):
-        self.met = Metronome()
-        self.policy = LatestAccessChunkEvictionPolicy(self.met)
+        self.memtracer = RuntimeMemTracer()
+        self.policy = LatestAccessChunkEvictionPolicy(self.memtracer.metronome)
 
     @distributed_test(world_size=[1])
     def test_add_chunk(self):
-        self.met.set_warmup(False)
-        chunk_list = ChunkList(0, self.policy)
+        self.memtracer.metronome.set_warmup(False)
+        chunk_list = ChunkList(0, self.memtracer, self.policy)
         assert chunk_list.size() == 0
 
         chunk_list.new_chunk(
@@ -66,8 +66,8 @@ class TestChunkData(unittest.TestCase):
             if torch.cuda.is_available()
             else torch.device("cpu:0")
         )
-        self.met.set_warmup(False)
-        chunk_list = ChunkList(0, self.policy)
+        self.memtracer.metronome.set_warmup(False)
+        chunk_list = ChunkList(0, self.memtracer, self.policy)
 
         new_chunk_id = 123
         chunk_list.new_chunk(
@@ -103,5 +103,4 @@ class TestChunkData(unittest.TestCase):
 
 
 if __name__ == "__main__":
-
     unittest.main()

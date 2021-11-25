@@ -6,7 +6,7 @@ export CS=${CS:-64}
 # Batch Size
 export BS=${BS:-16}
 # Embedding on CPU
-export CPU_EBD=${CPU_EBD:-1}
+export CPU_EBD=${CPU_EBD:-0}
 # Release remote chunks after init
 export RELEASE_AFTER_INIT=${RELEASE_AFTER_INIT:-0}
 export MODEL_NAME=${MODEL_NAME:-"GPT2small"}
@@ -29,6 +29,14 @@ export MEM_PROF=${MEM_PROF:-0}
 export AMM=${AMM:-1}
 # mem saving comm
 export MSC=${MSC:-0}
+# mem caching comm
+export CACHE=${CACHE:-1}
+
+if [[ ${CACHE} == 1 ]];  then
+CACHE_FLAG="--with_mem_cache"
+else
+export CACHE_FLAG=""
+fi
 
 if [[ ${MSC} == 1 ]];  then
 MSC_FLAG="--with_mem_saving_com"
@@ -95,7 +103,7 @@ export HYBRID_ADAM_FLAG="--use_hybrid_adam"
 LOG_DIR="./logs_${MODEL_NAME}"
 mkdir -p ${LOG_DIR}
 
-LOG_FILE="log.${MODEL_NAME}_gpu_${GPU_NUM}_cs_${CS}_bs_${BS}_cpueb_${CPU_EBD}_lightseq_${LIGHTSEQ}_offload_${ACT_OFFLOAD}_SP_${SP}_AMM_${AMM}_MSC_${MSC}"
+LOG_FILE="log.${MODEL_NAME}_gpu_${GPU_NUM}_cs_${CS}_bs_${BS}_cpueb_${CPU_EBD}_lightseq_${LIGHTSEQ}_offload_${ACT_OFFLOAD}_SP_${SP}_AMM_${AMM}_MSC_${MSC}_CACHE_${CACHE}"
 
 is_run_flag=`python ./benchmark/is_run_this_file.py --path "${LOG_DIR}" --file "${LOG_FILE}"`
 echo is_run_flag $is_run_flag
@@ -141,4 +149,5 @@ env OMP_NUM_THREADS=${TNUM} timeout -s SIGKILL 30m python -m torch.distributed.l
     ${MEM_PROF_FLAG} \
     ${AMM_FLAG} \
     ${MSC_FLAG} \
+    ${CACHE_FLAG} \
     2>&1 | tee ${LOG_DIR}/${LOG_FILE}

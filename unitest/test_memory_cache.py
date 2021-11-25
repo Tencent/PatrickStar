@@ -30,46 +30,49 @@
 import unittest
 
 import torch
-from patrickstar.core.eviction_policy import LatestAccessChunkEvictionPolicy
-from patrickstar.core.chunk_data import Chunk
+
+from patrickstar.core.memory_cache import MemoryCache
 from patrickstar.core.memtracer import RuntimeMemTracer
 
 
-class TestEvictionPolicy(unittest.TestCase):
+class TestMemoryCache(unittest.TestCase):
     def setUp(self):
-        pass
+        self.default_chunk_size = 40
 
-    def test_chunk_eviction(self):
-        id_to_chunk_list = {}
-        dev = torch.device("cpu:0")
-        mem_tracer = RuntimeMemTracer(
-            local_rank=0, config={"use_async_mem_monitor": True}
+    def test_case1(self):
+        self.compute_device = (
+            torch.device("cuda:0") if torch.cuda.is_available() else torch.device("cpu")
         )
-        id_to_chunk_list[0] = Chunk(10, torch.float, 0, mem_tracer, None, 0, False)
-        id_to_chunk_list[0].allocate_payload(dev)
-        id_to_chunk_list[1] = Chunk(10, torch.float, 1, mem_tracer, None, 0, False)
-        id_to_chunk_list[1].allocate_payload(dev)
-        metronome = mem_tracer.metronome
-        metronome.set_warmup(True)
-        policy = LatestAccessChunkEvictionPolicy(metronome)
+        memtracer = RuntimeMemTracer()
+        memory_cache = MemoryCache(2, memtracer)
 
-        # trace chunk access
-        policy.trace_access(0, dev)
-        metronome.tiktac()
-        policy.trace_access(1, dev)
-        print(policy.chunk_access_dict)
+        payload1 = memory_cache.pop_or_allocate(
+            self.compute_device, 10, torch.float, False
+        )
+        payload1_addr = payload1.data_ptr()
+        memory_cache.push(payload1)
+        payload2 = memory_cache.pop_or_allocate(
+            self.compute_device, 10, torch.float, False
+        )
+        self.assertTrue(payload1_addr == payload2.data_ptr())
 
-        # Finish warmup
-        metronome.set_warmup(False)
-        metronome.reset()
+        payload3 = memory_cache.pop_or_allocate(
+            self.compute_device, 10, torch.float, False
+        )
+        self.assertTrue(payload1_addr != payload3.data_ptr())
+        print("payload3 ", payload3.data_ptr())
 
-        # Test eviction strategy
-        ret_list = policy.derive_eviction_list(id_to_chunk_list, 10, dev)
-        self.assertTrue(ret_list == [0])
+        payload2_addr = payload2.data_ptr()
+        memory_cache.push(payload2)
+        memory_cache.push(payload3)
 
-        metronome.tiktac()
-        ret_list = policy.derive_eviction_list(id_to_chunk_list, 10, dev)
-        self.assertTrue(ret_list == [1])
+        payload4 = memory_cache.pop_or_allocate(
+            self.compute_device,
+            10,
+            torch.float,
+            False,
+        )
+        self.assertTrue(payload2_addr == payload4.data_ptr())
 
 
 if __name__ == "__main__":
