@@ -347,7 +347,7 @@ class PatrickStarClient(object):
 
             # check the chunk_id is the first to be visited.
             # local chunk as HOLD, remote chunk as RELEASED
-            if (
+            if not (
                 self.chunk_list[chunk_id].get_state() == ChunkState.HOLD
                 or self.chunk_list[chunk_id].get_state() == ChunkState.RELEASED
             ):
