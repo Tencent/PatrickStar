@@ -92,7 +92,7 @@ For some detail explanation of the above example, please check the guide [here](
 
 For more examples, please check [here](./examples).
 
-For more optimization tricks using PatrickStar see [Optimization Options](./doc/optimization_options.md).
+A quick-start benchmark script is [here](./examples/run_bert.sh). It involves some optimization techniques for patricksatr. For more optimization tricks using PatrickStar see [Optimization Options](./doc/optimization_options.md).
 ### Inside PatrickStar
 
 See [this doc](./INSIDE.md) for the idea behind PatrickStar.
