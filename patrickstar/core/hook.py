@@ -134,6 +134,7 @@ def pre_sub_module_forward_function(sub_module, client, name):
             AccessType.DATA,
             client.device,
             client.opt_config["with_mem_saving_comm"],
+            training_stage=TrainingStage.FWD,
         )
         flag = True
     if flag:
@@ -180,6 +181,7 @@ def pre_sub_module_backward_function(sub_module, client, name):
                 AccessType.DATA,
                 client.device,
                 client.opt_config["with_mem_saving_comm"],
+                training_stage=TrainingStage.BWD,
             )
             param.data = tmp_tensor
 
