@@ -509,7 +509,7 @@ class FP16Adam(torch.optim.Optimizer):
         if profiler.started():
             profiler.stage_convert_time.append((time.time(), TrainingStage.ADAM))
 
-        self.client.visited_chunk.reset_visited_chunk()
+        self.client.reset_visited_chunk()
         self.client.set_training_phase(TrainingStage.ADAM)
 
         self.client.trigger_memory_tracing()

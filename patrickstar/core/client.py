@@ -106,10 +106,20 @@ class PatrickStarClient(object):
         # for post backward hook
         self.grad_accs = []
 
-        self.visited_chunk = {TrainingStage.FWD: {}, TrainingStage.BWD: {}}
+        self.visited_chunk = {}
+
+    def visiting_finish(self, chunk_id):
+        assert chunk_id in self.visited_chunk
+        self.visited_chunk.pop(chunk_id)
+
+    def visiting_start(self, chunk_id):
+        self.visited_chunk[chunk_id] = 1
+
+    def is_visited(self, chunk_id):
+        return chunk_id in self.visited_chunk
 
     def reset_visited_chunk(self):
-        self.visited_chunk = {TrainingStage.FWD: {}, TrainingStage.BWD: {}}
+        self.visited_chunk = {}
 
     # expose APIs from metrome ti client
     def training_stage(self):
@@ -353,9 +363,10 @@ class PatrickStarClient(object):
 
             # check the chunk_id is the first to be visited.
             # local chunk as HOLD, remote chunk as RELEASED
-            if chunk_id in self.visited_chunk[training_stage]:
+            if self.is_visited(chunk_id):
                 return
-            self.visited_chunk[training_stage][chunk_id] = 1
+
+            self.visiting_start(chunk_id)
             # Find the source rank to bcast its local chunk, which owned by the gpu.
             src_rank = -1
             for cur_rank, cur_chunk_id in enumerate(chunk_id_list):
@@ -749,6 +760,7 @@ class PatrickStarClient(object):
                     if target_rank != rank:
                         self.chunk_list[chunk_id].release_payload()
                         self.set_all_tensors_state_in_chunk(chunk_id, TensorState.FREE)
+                    self.visiting_finish(chunk_id)
             else:
                 all_chunks_ready = True
                 for i in chunk_id_list:
