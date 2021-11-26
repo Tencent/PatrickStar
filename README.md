@@ -96,6 +96,10 @@ For more examples, please check [here](./examples).
 
 See [this doc](./INSIDE.md) for the idea behind PatrickStar.
 
+### Limitations
+
+1. PatrickStar currently is not evaluated on DNN with parameters shared in different layers. For example, be careful to use it with tie-weight. But you can still label the tied weight to be managed by PyTorch, and make the remaining layers managed by PatrickStar chunk-based memory management.
+
 ### License
 BSD 3-Clause License
 

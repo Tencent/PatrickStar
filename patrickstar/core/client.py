@@ -106,20 +106,29 @@ class PatrickStarClient(object):
         # for post backward hook
         self.grad_accs = []
 
-        self.visited_chunk = {}
+        # A set to record chunks that are being visited.
+        self.visiting_chunk = {}
 
     def visiting_finish(self, chunk_id):
-        assert chunk_id in self.visited_chunk
-        self.visited_chunk.pop(chunk_id)
+        r"""
+        Used for memory saving comm.
+        Finish visiting of chunk_id.
+        The remote chunk is released.
+        """
+        assert chunk_id in self.visiting_chunk
+        self.visiting_chunk.pop(chunk_id)
 
     def visiting_start(self, chunk_id):
-        self.visited_chunk[chunk_id] = 1
+        r"""
+        Start visiting of chunk_id.
+        """
+        self.visiting_chunk[chunk_id] = 1
 
-    def is_visited(self, chunk_id):
-        return chunk_id in self.visited_chunk
+    def is_visiting(self, chunk_id):
+        return chunk_id in self.visiting_chunk
 
     def reset_visited_chunk(self):
-        self.visited_chunk = {}
+        self.visiting_chunk = {}
 
     # expose APIs from metrome ti client
     def training_stage(self):
@@ -363,7 +372,7 @@ class PatrickStarClient(object):
 
             # check the chunk_id is the first to be visited.
             # local chunk as HOLD, remote chunk as RELEASED
-            if self.is_visited(chunk_id):
+            if self.is_visiting(chunk_id):
                 return
 
             self.visiting_start(chunk_id)
