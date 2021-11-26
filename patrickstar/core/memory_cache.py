@@ -83,9 +83,8 @@ class MemoryCache(object):
                 break
         if i == -1:
             return self._new_mem(size, data_type, device_type, pin_memory)
-        new_tensor_ref = tensors[i]
         # delete the reference to tensors[i] in MemoryCache
-        tensors.pop(i)
+        new_tensor_ref = tensors.pop(i)
         return new_tensor_ref
 
     def push(self, payload):
