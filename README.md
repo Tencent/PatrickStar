@@ -2,8 +2,10 @@
 
 ![logo](./logo.png)
 ### News
-1. Nov. 2021, v0.4.0 released. With a better memory tracer, PatrickStar further improves the max model scale than v0.3.0 (15B vs 12B).
-2. Oct. 2021, v0.3.0 released. Our initial version significantly surpasses DeepSpeed.
+1. Nov. 2021, v0.4.3 releaed. PatrickStar is evaluated on A100 SuperPod. Some execution options are provided, including memory saving communication,
+Memory saving communication technique, memory allocation cache.
+2. Nov. 2021, v0.4.0 released. With a better memory tracer, PatrickStar further improves the max model scale than v0.3.0 (15B vs 12B).
+3. Oct. 2021, v0.3.0 released. Our initial version significantly surpasses DeepSpeed.
 
 ### Meeting PatrickStar
 Pre-Trained Models (PTM) are becoming the hotspot of both NLP research and industry application. However, the training of PTMs requires enormous hardware resources, which makes it only accessible to small portion of people in the AI community. Now, **PatrickStar will make PTM training available to everyone!**
@@ -90,9 +92,15 @@ For some detail explanation of the above example, please check the guide [here](
 
 For more examples, please check [here](./examples).
 
+A quick-start benchmark script is [here](./examples/run_bert.sh). It is executed with random generated data, therefore you do not need to prepare the real data. It also demostrated all of the optimization techniques for patricksatr. For more optimization tricks using PatrickStar see [Optimization Options](./doc/optimization_options.md).
+
 ### Inside PatrickStar
 
 See [this doc](./INSIDE.md) for the idea behind PatrickStar.
+
+### Limitations
+
+1. PatrickStar currently is not evaluated on DNN with parameters shared in different layers. For example, be careful to use it with tie-weight. But you can still label the tied weight to be managed by PyTorch, and make the remaining layers managed by PatrickStar chunk-based memory management.
 
 ### License
 BSD 3-Clause License

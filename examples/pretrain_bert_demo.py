@@ -110,6 +110,11 @@ def _add_patrick_star_args(parser):
         action="store_true",
         help="Use communication saving memory.",
     )
+    group.add_argument(
+        "--with_mem_cache",
+        action="store_true",
+        help="Use caching to allocate chunk payload.",
+    )
     return parser
 
 
@@ -311,8 +316,9 @@ def test_bert_model_helper(
                     "use_fake_dist": False,
                     "with_static_partition": args.with_static_partition,
                 },
-                "hooks": {
+                "opts": {
                     "with_mem_saving_comm": args.with_mem_saving_comm,
+                    "with_mem_cache": args.with_mem_cache,
                 },
             },
         }

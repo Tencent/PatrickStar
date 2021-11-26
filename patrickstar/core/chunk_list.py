@@ -40,6 +40,7 @@ from .chunk_data import Chunk
 from .comm import CommInfo
 from .const import ChunkState
 from patrickstar.core.eviction_policy import ChunkEvictionPolicyBase
+from patrickstar.core.memory_cache import MemoryCache
 
 
 class ChunkList(object):
@@ -57,6 +58,7 @@ class ChunkList(object):
         local_rank: int,
         memory_tracer: RuntimeMemTracer,
         chunk_eviction_policy: ChunkEvictionPolicyBase,
+        with_mem_cache: bool = False,
     ):
         """
         Args:
@@ -73,10 +75,14 @@ class ChunkList(object):
         self.device = torch.device(f"cuda:{local_rank}")
         self.chunk_eviction_policy = chunk_eviction_policy
         self.memory_tracer = memory_tracer
+        self.with_mem_cache = with_mem_cache
+        if self.with_mem_cache:
+            self.memory_cache = MemoryCache(2, self.memory_tracer)
+        else:
+            self.memory_cache = None
 
     def chunk_ids_generator(self, chunk_type: ChunkType):
         r"""Return the chunk_id of all chunks with type `chunk_type`
-
         Args:
             chunk_type: :class:`ChunkType`.
         """
@@ -142,32 +148,24 @@ class ChunkList(object):
     def access_chunk(self, chunk_id: int, compute_device: torch.device):
         r"""Prepare the memory of chunk to `compute_device` with `chunk_id`.
 
-        1. standalone mode
-        In standalone mode, we need to move the chunk when it is on other devices.
+        We need to move the chunk when it is on other devices.
             TODO(jiaruifang) Add async copy and record the lifecycle of chunks during
             the first iteration, so that we can prefetch the next chunk after sync
             the memcopy of the first chunk.
-        2. distributed mode
-        Use allgather to fetch chunks from other processes.
-
         Args:
             chunk_id: int.
             compute_device: :class:`torch.device`.
         """
-
         chunk = self.id_to_chunk_map[chunk_id]
-
         chunk_state = chunk.get_state()
-
         payload_space = chunk.get_chunk_space()
-
         # If chunk was released, we need to reallocate it.
-        # In distributed mode, we need a global payload.
         if chunk_state == ChunkState.RELEASED:
             logger.debug(
                 f"rank {get_rank()} access_chunk chunk {chunk_id}, "
                 f"need to allocate {payload_space} B memory on {compute_device}"
             )
+            # Allocating a chunk on compute_device.
             self.try_best_allocate_payload(chunk, compute_device)
             return
         elif chunk.get_device().type != compute_device.type:
@@ -363,6 +361,7 @@ class ChunkList(object):
             data_type=data_type,
             chunk_id=chunk_id,
             memory_tracer=self.memory_tracer,
+            memory_cache=self.memory_cache if self.with_mem_cache else None,
             local_rank=self.local_rank,
             is_dummy=is_dummy,
         )

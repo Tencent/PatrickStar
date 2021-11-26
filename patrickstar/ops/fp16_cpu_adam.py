@@ -500,7 +500,7 @@ class FP16Adam(torch.optim.Optimizer):
                         TensorState.HOLD_AFTER_BWD,
                         training_stage=TrainingStage.BWD,
                         do_allreduce=True,
-                        with_mem_saving_comm=self.client.hook_config[
+                        with_mem_saving_comm=self.client.opt_config[
                             "with_mem_saving_comm"
                         ],
                     )
@@ -508,6 +508,8 @@ class FP16Adam(torch.optim.Optimizer):
                     self.client.release_data(param, TensorState.HOLD_AFTER_BWD)
         if profiler.started():
             profiler.stage_convert_time.append((time.time(), TrainingStage.ADAM))
+
+        self.client.reset_visited_chunk()
         self.client.set_training_phase(TrainingStage.ADAM)
 
         self.client.trigger_memory_tracing()
@@ -531,9 +533,17 @@ class FP16Adam(torch.optim.Optimizer):
             self.client.chunk_tensor_index,
             max_chunk_size,
             margin_chunk_num_for_gpu_adam,
+            self.client.chunk_list.memory_cache
+            if self.client.opt_config["with_mem_cache"]
+            else None,
         )
         self.write_chunk_buff = FP16ChunkWriteBuffer(
-            self.client.chunk_list, self.client.chunk_tensor_index, max_chunk_size
+            self.client.chunk_list,
+            self.client.chunk_tensor_index,
+            max_chunk_size,
+            self.client.chunk_list.memory_cache
+            if self.client.opt_config["with_mem_cache"]
+            else None,
         )
 
         if self.has_overflow_and_reset_param(write_chunk_buff=self.write_chunk_buff):
