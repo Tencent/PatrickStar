@@ -269,7 +269,7 @@ class Chunk(object):
 
         cuda_ctx = CUDAContext()
         self.compute_finish_event.synchronize()
-        with torch.cuda.stream(cuda_ctx.copy_stream):
+        with torch.cuda.stream(cuda_ctx.compute_stream):
             if self.with_mem_cache:
                 payload_numel = self.payload.numel()
                 if target_device.type == "cpu":
