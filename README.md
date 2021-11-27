@@ -21,7 +21,7 @@ In experiment, Patrickstar v0.4.1 is able to train a **15 Billion**(15B) param m
 
 We also evaluated PatrickStar v0.4.3 on a node of 8xA100 SuperPod. It is able to train 40B model on 8xA100 with 1TB CPU memory, which is 4x larger than DeepSpeed v0.5.7. Besides the model scale, PatrickStar is way more efficient than DeepSpeed, which makes us unbelievable, and we have to check it with DeepSpeed Team before presenting the DeepSpeed results. The benchmark scripts are in [./examples/benchmark](here).
 
-![alt perf](./doc/mgpu_perf_a100.png "performance testing result on SuperNode")
+![alt perf](./doc/one_node_perf_a100.png "performance testing result on SuperNode")
 
 
 We've also trained the [CLUE-GPT2](https://huggingface.co/uer/gpt2-chinese-cluecorpussmall) model with PatrickStar, the loss and accuracy curve is shown below:
