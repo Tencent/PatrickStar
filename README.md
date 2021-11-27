@@ -2,7 +2,7 @@
 
 ![logo](./logo.png)
 ### News
-1. Nov. 2021, v0.4.3 releaed. PatrickStar is evaluated on A100 SuperPod. Some execution options are provided, including memory saving communication technique, memory allocation cache.
+1. Nov. 2021, v0.4.3 releaed. PatrickStar is evaluated on A100 SuperPod. Some execution options are provided, including memory saving communication technique, memory allocation cache. It trains 40B model on a SuperPod node.
 2. Nov. 2021, v0.4.0 released. With a better memory tracer, PatrickStar further improves the max model scale than v0.3.0 (15B vs 12B).
 3. Oct. 2021, v0.3.0 released. Our initial version significantly surpasses DeepSpeed.
 
@@ -18,6 +18,10 @@ The idea of Patrick is like this. The non-model data (mainly activations) varies
 In experiment, Patrickstar v0.4.1 is able to train a **15 Billion**(15B) param model with 8 Tesla V100 GPU and 240GB GPU memory, which is twice as large as the state of art. And the performance of PatrickStar is better for models of the same size as well. The pstar is PatrickStar v0.3.0. The deeps indicates performance of DeepSpeed v0.4.3 using the official example [DeepSpeed example](https://github.com/microsoft/DeepSpeedExamples/blob/master/Megatron-LM-v1.1.5-ZeRO3/examples/ds_pretrain_gpt2-zero3.sh) zero3 stage with activation optimzations openinig by default.
 
 ![alt perf](./doc/mgpu_scalability.png "performance testing result")
+
+We also evaluated PatrickStar v0.4.3 on a node of 8xA100 SuperPod. It is able to train 40B model on 8xA100 with 1TB CPU memory, which is 4x larger than DeepSpeed v0.5.7. Besides the model scale, PatrickStar is way more efficient than DeepSpeed, which makes us unbelievable, and we have to check it with DeepSpeed Team before presenting the DeepSpeed results. The benchmark scripts are in [./examples/benchmark](here).
++![alt perf](./doc/mgpu_perf_a100.png "performance testing result on SuperNode")
+
 
 We've also trained the [CLUE-GPT2](https://huggingface.co/uer/gpt2-chinese-cluecorpussmall) model with PatrickStar, the loss and accuracy curve is shown below:
 
