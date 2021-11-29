@@ -27,7 +27,7 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 # SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-from .distributed import get_world_size, get_rank
+from .distributed import get_world_size, get_rank, get_local_world_size
 from .helper import getsizeof, get_space_of
 from .logging import log_dist, logger, print_rank
 from .memory import get_memory_info

@@ -31,7 +31,7 @@ import gc
 
 import psutil
 import torch
-from .distributed import get_rank, get_world_size
+from .distributed import get_rank, get_local_world_size
 from .memory import get_memory_info
 
 
@@ -48,7 +48,7 @@ def get_sys_memory_used(device):
             torch.cuda.reset_peak_memory_stats()
     elif device.type == "cpu":
         mem_info = get_memory_info()
-        ret = mem_info.used / get_world_size()
+        ret = mem_info.used / get_local_world_size()
     return ret
 
 
