@@ -26,7 +26,7 @@
 # ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 # SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-
+import os
 import torch
 
 
@@ -39,4 +39,10 @@ def get_rank():
 def get_world_size():
     if torch.distributed.is_initialized():
         return torch.distributed.get_world_size()
+    return 1
+
+
+def get_local_world_size():
+    if torch.distributed.is_initialized():
+        return int(os.environ["LOCAL_WORLD_SIZE"])
     return 1

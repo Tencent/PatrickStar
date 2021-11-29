@@ -37,6 +37,7 @@ from patrickstar.utils import (
     get_memory_info,
     get_sys_memory_used,
     get_world_size,
+    get_local_world_size,
     logger,
 )
 from patrickstar.core.memtracer.metronome import Metronome
@@ -129,15 +130,16 @@ class RuntimeMemTracer(object):
         )
 
         mem_info = get_memory_info()
+        local_world_size = get_local_world_size()
         if self.use_fake_dist:
             # Fake distribtued mode: all processes share the same GPU.
             self._overall_gpu_mem = (
                 torch.cuda.get_device_properties(0).total_memory
                 * self._overall_gpu_mem_ratio
-                / get_world_size()
+                / local_world_size
             )
             self._overall_cpu_mem = (
-                mem_info.total * self._overall_cpu_mem_ratio / get_world_size()
+                mem_info.total * self._overall_cpu_mem_ratio / local_world_size
             )
         else:
             self._overall_gpu_mem = (
@@ -145,7 +147,7 @@ class RuntimeMemTracer(object):
                 * self._overall_gpu_mem_ratio
             )
             self._overall_cpu_mem = (
-                mem_info.total * self._overall_cpu_mem_ratio / get_world_size()
+                mem_info.total * self._overall_cpu_mem_ratio / local_world_size
             )
 
         logger.info(
