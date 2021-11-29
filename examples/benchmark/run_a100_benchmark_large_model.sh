@@ -25,7 +25,7 @@ for SP in 0
 do
 for ACT_OFFLOAD in 0
 do
-for MSC in 0
+for MSC in 1
 do
 for CACHE in 0 1
 do
