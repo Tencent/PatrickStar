@@ -402,6 +402,10 @@ class PatrickStarClient(object):
                 async_op=False,
             )
             if self._time_profile:
+                global_timer.data_move_cnter.update(
+                    "CLIENT_fetch_remote_chunks_broadcast",
+                    self.chunk_list[chunk_id].payload.numel() * 2,
+                )
                 global_timer.my_timer.finish_profile(
                     "CLIENT_fetch_remote_chunks_broadcast"
                 )
@@ -760,6 +764,12 @@ class PatrickStarClient(object):
                             async_op=False,
                         )
                         if self._time_profile:
+                            global_timer.data_move_cnter.update(
+                                "CLIENT_release_dist_reduce",
+                                self.chunk_list[chunk_id].payload.numel()
+                                * 2
+                                * world_size,
+                            )
                             global_timer.my_timer.finish_profile(
                                 "CLIENT_release_dist_reduce"
                             )
