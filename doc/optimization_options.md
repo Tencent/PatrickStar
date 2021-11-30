@@ -2,7 +2,7 @@ This page explains the optimization options for PatrickStar.
 
 1. Memory Saving Communication.
 `--with_mem_saving_com`
-Use one-to-all communication to replace the original collective communication. More specifically, reduce scatter is replaced with Nx reduce. all gather is replaced with Nx bcast. In this way, we do not need to keep a Nx chunk buffer for distributed training, therefore save the GPU memory. Details in MR #250. It is suitable for training extremely large model with computing cluster with high-quality intra-GPU communication bandwidth, i.e. 40B model on a node of SuperPod.
+Use one-to-all communication to replace the original collective communication. More specifically, reduce scatter is replaced with Nx reduce. all gather is replaced with Nx bcast. In this way, we do not need to keep a Nx chunk buffer for distributed training, therefore saving the GPU memory. This method also changes the CPU-GPU and intra-GPU communication volume. In general, it reduces CPU-GPU comm volume at a cost of increasing intra-GPU bcast comm volume and also lower the intra-GPU bcast bandwidth. However, for some cases, it can improve the overall performance of the system from such tradeoff. It is suitable for training an extremely large model with a computing cluster with high-quality intra-GPU communication bandwidth, i.e. 50B model on a node of SuperPod. Details in Merge Request #250.
 
 2. Memory Allocation Caching.
 `--with_mem_cache`
