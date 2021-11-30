@@ -766,9 +766,7 @@ class PatrickStarClient(object):
                         if self._time_profile:
                             global_timer.data_move_cnter.update(
                                 "CLIENT_release_dist_reduce",
-                                self.chunk_list[chunk_id].payload.numel()
-                                * 2
-                                * world_size,
+                                self.chunk_list[chunk_id].payload.numel() * 2,
                             )
                             global_timer.my_timer.finish_profile(
                                 "CLIENT_release_dist_reduce"
