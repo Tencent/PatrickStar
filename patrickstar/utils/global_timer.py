@@ -95,6 +95,9 @@ class DataMoveCnter(metaclass=SingletonMeta):
         self.times_dict = {}
 
     def update(self, key_name, tensor_size):
+        my_timer = GlobalTimer()
+        if not my_timer.start_flag:
+            return
         if key_name in self.times_dict:
             self.times_dict[key_name] += 1
             self.amount_dict[key_name] += tensor_size

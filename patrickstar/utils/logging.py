@@ -31,8 +31,6 @@ import sys
 
 import torch.distributed as dist
 
-from .distributed import get_rank
-
 
 class LoggerFactory:
     @staticmethod
@@ -87,5 +85,5 @@ def log_dist(message, ranks=None, level=logging.INFO):
 
 
 def print_rank(message, rank=0, debug=False, force=False):
-    if get_rank() == rank and (debug or force):
+    if (not dist.is_initialized() or dist.get_rank() == rank) and (debug or force):
         logger.info(message)
