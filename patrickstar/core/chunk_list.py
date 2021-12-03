@@ -232,6 +232,8 @@ class ChunkList(object):
                 f"Device used Chunk Memory is {self.get_chunk_memory_used(target_device) / 1e6} MB. "
                 f"Avaibale Chunk Memory is {ava_chunk_mem_size / 1e6} MB"
             )
+            if self._time_profile:
+                global_timer.my_timer.finish_profile("CHUNK_LIST_prepare_device")
             return False
             # TODO(jiaruifang) We can catch the error and the release or move the chunks here.
             # raise RuntimeError(
