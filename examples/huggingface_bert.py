@@ -47,7 +47,10 @@ device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cp
 
 
 def model_func():
-    return BertForSequenceClassification.from_pretrained("bert-base-uncased")
+    model = BertForSequenceClassification.from_pretrained("bert-base-uncased")
+    # For large models, please uncomment the following lines to utilize gradient checkpointing
+    # model.gradient_checkpointing_enable()
+    return model
 
 
 config = {
