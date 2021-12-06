@@ -400,6 +400,8 @@ def test_bert_model_helper(
     for n, batch in enumerate(data_loader):
         if n == num_steps:
             break
+        # You may need to empty_cache for really large models.
+        torch.cuda.empty_cache()
         logger.info(f"Start Step {n} with {dist_plan}...")
 
         step_start_time = time.time()
