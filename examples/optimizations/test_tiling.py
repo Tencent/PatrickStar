@@ -1,0 +1,54 @@
+# BSD 3-Clause License
+#
+# Copyright (C) 2021 THL A29 Limited, a Tencent company.  All rights reserved.
+#
+# Redistribution and use in source and binary forms, with or without modification,
+# are permitted provided that the following conditions are met:
+#
+#  * Redistributions of source code must retain the above copyright notice, this
+#    list of conditions and the following disclaimer.
+#
+#  * Redistributions in binary form must reproduce the above copyright notice,
+#    this list of conditions and the following disclaimer in the documentation
+#    and/or other materials provided with the distribution.
+#
+#  * Neither the name of the psutil authors nor the names of its contributors
+#    may be used to endorse or promote products derived from this software without
+#    specific prior written permission.
+#
+# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
+# ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+# WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+# DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR
+# ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+# (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+# LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON
+# ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+# (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+# SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+import torch
+import pytest
+import copy
+from tiling import TiledLinear
+
+
+@pytest.mark.parametrize("in_splits,out_splits", [(1, 1), (2, 2)])
+@pytest.mark.parametrize("in_f,out_f", [(32, 32), (23, 29), (29, 23)])
+def test_tiled_forward(in_splits, out_splits, in_f, out_f):
+    base = torch.nn.Linear(in_f, out_f)
+    test = TiledLinear(
+        in_f,
+        out_f,
+        bias=True,
+        init_linear=copy.deepcopy(base),
+        out_splits=out_splits,
+        in_splits=in_splits,
+    )
+
+    inp = torch.rand(in_f)
+
+    base_out = base(copy.deepcopy(inp))
+    test_out = test(copy.deepcopy(inp))
+
+    assert torch.allclose(base_out, test_out, rtol=1e-4)
