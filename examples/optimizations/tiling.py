@@ -27,8 +27,11 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 # SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-# Copy write DeepSpeed Team
+# Copywright DeepSpeed Team
 # DeepSpeed/deepspeed/runtime/zero/tiling.py
+# NOTE: This is not the core function of PatrickStar, we just use
+# this file for benchmarking. The code is not integrated into the wheel package.
+
 import torch
 from math import floor as floor
 

@@ -115,6 +115,11 @@ def _add_patrick_star_args(parser):
         action="store_true",
         help="Use caching to allocate chunk payload.",
     )
+    group.add_argument(
+        "--with_tiling_linear",
+        action="store_true",
+        help="Use linear tiling.",
+    )
     return parser
 
 
@@ -239,7 +244,9 @@ def test_bert_model_helper(
     else:
         rank = args.local_rank
 
-    if not args.with_activation_offload:
+    if args.with_tiling_linear:
+        from ps_tile_modeling_bert import BertForSequenceClassification
+    elif not args.with_activation_offload:
         from transformers import BertForSequenceClassification
     else:
         from ps_modeling_bert import BertForSequenceClassification
