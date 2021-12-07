@@ -116,7 +116,11 @@ def _add_patrick_star_args(parser):
         action="store_true",
         help="Use caching to allocate chunk payload.",
     )
-
+    group.add_argument(
+        "--with_async_move",
+        action="store_true",
+        help="Use asynchronize move.",
+    )
     return parser
 
 
@@ -334,6 +338,7 @@ def test_bert_model_helper(
                 "opts": {
                     "with_mem_saving_comm": args.with_mem_saving_comm,
                     "with_mem_cache": args.with_mem_cache,
+                    "with_async_move": args.with_async_move,
                 },
             },
         }

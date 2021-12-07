@@ -31,6 +31,8 @@ export AMM=${AMM:-1}
 export MSC=${MSC:-0}
 # mem caching comm
 export CACHE=${CACHE:-1}
+# async move
+export ASYNC_MOVE=${ASYNC_MOVE:-0}
 # linear tiling comm
 export TILING=${TILING:-0}
 
@@ -47,6 +49,12 @@ if [[ ${CACHE} == 1 ]];  then
 CACHE_FLAG="--with_mem_cache"
 else
 export CACHE_FLAG=""
+fi
+
+if [[ ${ASYNC_MOVE} == 1 ]];  then
+ASYNC_MOVE_FLAG="--with_async_move"
+else
+export ASYNC_MOVE_FLAG=""
 fi
 
 if [[ ${MSC} == 1 ]];  then
@@ -162,5 +170,6 @@ env OMP_NUM_THREADS=${TNUM} timeout -s SIGKILL 30m python -m torch.distributed.l
     ${AMM_FLAG} \
     ${MSC_FLAG} \
     ${CACHE_FLAG} \
+    ${ASYNC_MOVE_FLAG} \
     ${TILING_FLAG} \
     2>&1 | tee ${LOG_DIR}/${LOG_FILE}

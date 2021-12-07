@@ -28,9 +28,20 @@
 # SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 from patrickstar.utils import SingletonMeta
+from patrickstar.utils import logger, get_world_size
 import torch
 
 
 class CUDAContext(metaclass=SingletonMeta):
     def __init__(self):
-        self.copy_stream = torch.cuda.Stream()
+        self.compute_stream = torch.cuda.current_stream()
+        if get_world_size() == 1:
+            self.copy_stream = torch.cuda.Stream()
+        else:
+            # TODO(zilinzhu) The async copy mechanism has some
+            # weird numeric bugs in multi-process setting.
+            # Turn it off before fixing that.
+            logger.warning(
+                "Asynchronized move will not be enabled for world size larger than 1"
+            )
+            self.copy_stream = self.compute_stream
