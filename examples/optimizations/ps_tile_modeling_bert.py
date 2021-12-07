@@ -64,10 +64,9 @@ from transformers import BertPreTrainedModel
 from transformers.models.bert.modeling_bert import BertEmbeddings, BertPooler
 from transformers.activations import ACT2FN
 
-from patrickstar.core.checkpoint import checkpoint as ckp
-from optimizations.tiling import TiledLinear
 
-USE_TILE = True
+from .tiling import TiledLinear
+from . import global_opt_flags as global_opt_flags
 
 
 class BertSelfAttention(nn.Module):
@@ -305,13 +304,13 @@ class BertAttention(nn.Module):
 class BertIntermediate(nn.Module):
     def __init__(self, config):
         super().__init__()
-        if USE_TILE:
+        if global_opt_flags.USE_TILE:
             self.dense = TiledLinear(
                 in_features=config.hidden_size,
                 out_features=config.intermediate_size,
                 linear_cls=nn.Linear,
-                in_splits=2,
-                out_splits=2,
+                in_splits=1,
+                out_splits=4,
             )
         else:
             self.dense = nn.Linear(config.hidden_size, config.intermediate_size)
@@ -329,13 +328,13 @@ class BertIntermediate(nn.Module):
 class BertOutput(nn.Module):
     def __init__(self, config):
         super().__init__()
-        if USE_TILE:
+        if global_opt_flags.USE_TILE:
             self.dense = TiledLinear(
                 in_features=config.intermediate_size,
                 out_features=config.hidden_size,
                 linear_cls=nn.Linear,
-                in_splits=2,
-                out_splits=2,
+                in_splits=4,
+                out_splits=1,
             )
         else:
             self.dense = nn.Linear(config.intermediate_size, config.hidden_size)
@@ -488,7 +487,10 @@ class BertEncoder(nn.Module):
             past_key_value = past_key_values[i] if past_key_values is not None else None
 
             if self.gradient_checkpointing and self.training:
-
+                if global_opt_flags.USE_ACT_OFFLOAD:
+                    from optimizations.checkpoint import checkpoint as ckp
+                else:
+                    from torch.utils.checkpoint import checkpoint as ckp
                 if use_cache:
                     use_cache = False
 
@@ -498,16 +500,26 @@ class BertEncoder(nn.Module):
 
                     return custom_forward
 
-                layer_outputs = ckp(
-                    create_custom_forward(layer_module),
-                    hidden_states,
-                    attention_mask,
-                    layer_head_mask,
-                    encoder_hidden_states,
-                    encoder_attention_mask,
-                    past_key_value,
-                    output_attentions,
-                )
+                if global_opt_flags.USE_ACT_OFFLOAD:
+                    layer_outputs = ckp(
+                        create_custom_forward(layer_module),
+                        hidden_states,
+                        attention_mask,
+                        layer_head_mask,
+                        encoder_hidden_states,
+                        encoder_attention_mask,
+                        past_key_value,
+                        output_attentions,
+                    )
+                else:
+                    layer_outputs = torch.utils.checkpoint.checkpoint(
+                        create_custom_forward(layer_module),
+                        hidden_states,
+                        attention_mask,
+                        layer_head_mask,
+                        encoder_hidden_states,
+                        encoder_attention_mask,
+                    )
             else:
                 layer_outputs = layer_module(
                     hidden_states,

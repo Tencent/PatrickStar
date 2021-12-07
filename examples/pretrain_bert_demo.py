@@ -46,6 +46,7 @@ from patrickstar.runtime import initialize_engine
 from patrickstar.utils import see_memory_usage
 from patrickstar.utils.logging import logger
 from patrickstar.utils.model_size_calculator import get_ps_model_size, estimate_bert_mac
+import optimizations.global_opt_flags as global_opt_flags
 
 
 def _add_patrick_star_args(parser):
@@ -115,6 +116,24 @@ def _add_patrick_star_args(parser):
         action="store_true",
         help="Use caching to allocate chunk payload.",
     )
+
+    return parser
+
+
+def _add_general_opt_args(parser):
+    group = parser.add_argument_group(title="test_bert")
+    group.add_argument(
+        "--use_ckp",
+        dest="use_ckp",
+        action="store_true",
+        help="using gradient checkpointing for memory saveing.",
+    )
+    group.add_argument(
+        "--with_activation_offload",
+        dest="with_activation_offload",
+        action="store_true",
+        help="Use activation offloading.",
+    )
     group.add_argument(
         "--with_tiling_linear",
         action="store_true",
@@ -123,8 +142,8 @@ def _add_patrick_star_args(parser):
     return parser
 
 
-def _add_test_bert_args(parser):
-    group = parser.add_argument_group(title="test_bert")
+def _add_test_config_args(parser):
+    group = parser.add_argument_group(title="test_config")
     group.add_argument(
         "--batch_size", type=int, default=32, help="Batch size of input."
     )
@@ -134,12 +153,7 @@ def _add_test_bert_args(parser):
         default=None,
         help="local rank passed from distributed launcher.",
     )
-    group.add_argument(
-        "--use_ckp",
-        dest="use_ckp",
-        action="store_true",
-        help="using gradient checkpointing for memory saveing.",
-    )
+
     group.add_argument(
         "--res_check",
         dest="res_check",
@@ -161,18 +175,6 @@ def _add_test_bert_args(parser):
     group.add_argument(
         "--model_name", type=str, default="GPTsmall", help="The model name."
     )
-    group.add_argument(
-        "--with_activation_offload",
-        dest="with_activation_offload",
-        action="store_true",
-        help="Use activation offloading.",
-    )
-
-    return parser
-
-
-def _add_lightseq_args(parser):
-    group = parser.add_argument_group(title="test_light_seq")
     group.add_argument("--with_lightseq", action="store_true", help="use lightseq")
     return parser
 
@@ -194,8 +196,8 @@ def parse_args():
     """Parse all arguments."""
     parser = argparse.ArgumentParser(description="PatrickStar Arguments")
     parser = _add_patrick_star_args(parser)
-    parser = _add_test_bert_args(parser)
-    parser = _add_lightseq_args(parser)
+    parser = _add_test_config_args(parser)
+    parser = _add_general_opt_args(parser)
     args = parser.parse_args()
     args.rank = int(os.getenv("RANK", "0"))
     args.world_size = int(os.getenv("WORLD_SIZE", "1"))
@@ -244,12 +246,18 @@ def test_bert_model_helper(
     else:
         rank = args.local_rank
 
-    if args.with_tiling_linear:
-        from ps_tile_modeling_bert import BertForSequenceClassification
-    elif not args.with_activation_offload:
-        from transformers import BertForSequenceClassification
+    if args.with_tiling_linear or args.with_activation_offload:
+        if args.with_tiling_linear:
+            global_opt_flags.USE_TILE = True
+        else:
+            global_opt_flags.USE_TILE = False
+        if args.with_activation_offload:
+            global_opt_flags.USE_ACT_OFFLOAD = True
+        else:
+            global_opt_flags.USE_ACT_OFFLOAD = False
+        from optimizations.ps_tile_modeling_bert import BertForSequenceClassification
     else:
-        from ps_modeling_bert import BertForSequenceClassification
+        from transformers import BertForSequenceClassification
 
     # Avoid gpu0 use more memory.
     # https://discuss.pytorch.org/t/extra-10gb-memory-on-gpu-0-in-ddp-tutorial/118113
@@ -348,7 +356,9 @@ def test_bert_model_helper(
         model.cuda(rank)
         model.train()
         if args.with_lightseq:
-            from ls_hf_transformer_encoder_layer import inject_ls_enc_layer
+            from optimizations.ls_hf_transformer_encoder_layer import (
+                inject_ls_enc_layer,
+            )
 
             inject_ls_enc_layer(model, args, bert_config)
             print("Using Lightseq Kernels, all submodules includes:")

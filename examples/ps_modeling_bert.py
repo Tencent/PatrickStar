@@ -55,7 +55,7 @@ from transformers.modeling_outputs import (
 from transformers import BertLayer, BertPreTrainedModel
 from transformers.models.bert.modeling_bert import BertEmbeddings, BertPooler
 
-from patrickstar.core.checkpoint import checkpoint as ckp
+from optimizations.checkpoint import checkpoint as ckp
 
 
 class BertEncoder(nn.Module):
