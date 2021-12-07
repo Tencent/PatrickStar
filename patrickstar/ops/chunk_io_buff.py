@@ -181,7 +181,7 @@ class FP32ChunkReadBuffer(object):
             chunk_size, dtype=torch.half, device=torch.device("cpu:0"), pin_memory=True
         )
         self.local_rank = chunk_list.local_rank
-        logger.info(f"Allocate fp32 Chunk Buffer of size {chunk_size / 1e6} MB on CPU.")
+
         self.with_mem_cache = mem_cache is not None
         if self.with_mem_cache:
             self.memory_cache = mem_cache
@@ -197,6 +197,9 @@ class FP32ChunkReadBuffer(object):
                     gpu_device, chunk_size, torch.half, False
                 )
             else:
+                logger.info(
+                    f"Allocate fp32 Chunk Buffer of size {chunk_size / 1e6} MB on CPU."
+                )
                 self.gpu_payload = torch.empty(
                     chunk_size, dtype=torch.half, device=gpu_device
                 )

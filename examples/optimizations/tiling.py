@@ -149,7 +149,6 @@ class TiledLinear(torch.nn.Module):
         self.linears = torch.nn.ModuleList()
         for out_id in range(out_splits):
             self.linears.append(torch.nn.ModuleList())
-
             local_out_dim = self.out_parts[out_id + 1] - self.out_parts[out_id]
 
             for in_id in range(in_splits):

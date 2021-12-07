@@ -458,7 +458,7 @@ class BertEncoder(nn.Module):
         self.layer = nn.ModuleList(
             [BertLayer(config) for _ in range(config.num_hidden_layers)]
         )
-        self.gradient_checkpointing = False
+        self.gradient_checkpointing = True
 
     def forward(
         self,
