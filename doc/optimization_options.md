@@ -10,6 +10,7 @@ Make sure this option is open for large model training. It can largely save acti
 2. Activation Offloading
 `--with_activation_offload`
 Offload the checkpoints activation from GPU to CPU. Further Save GPU memory.
+Note you have to use activation checkpoing first.
 
 3. CPU Embedding
 `--use_cpu_embedding`
