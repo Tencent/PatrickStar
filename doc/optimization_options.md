@@ -18,7 +18,7 @@ nn.Embedding is conducted on CPU, save GPU memory. More importantly, it shrinks 
 
 4. Tiling Linear (a.k.a Memory-centric tiling in [DeepSpeed](https://deepspeed.readthedocs.io/en/stable/zero3.html#memory-centric-tiling))
 `--with_tiling_linear`
-Memory-centric tiling (MCT) is able to split a model data tensor into pieces, and they do not need to be stored in contiguous memory space. This will help reduce chunk size.
+Memory-centric tiling (MCT) is able to split a param tensor of linear into pieces, and they do not need to be stored in contiguous memory space. This will help reduce chunk size. To achieve the best performance you have to tune the in_splits/out_splits of the parameters of the function.
 
 ## PatrickStar-related Optmizations
 
