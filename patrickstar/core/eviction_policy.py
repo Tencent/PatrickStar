@@ -32,6 +32,7 @@ from abc import ABC, abstractmethod
 from queue import PriorityQueue
 from patrickstar.core.memtracer import Metronome
 from patrickstar.core.const import ChunkState
+from patrickstar.utils import logger
 
 
 class ChunkEvictionPolicyBase(ABC):
@@ -132,7 +133,7 @@ class LatestAccessChunkEvictionPolicy(ChunkEvictionPolicyBase):
 
         # Raise error when failed to make enough room.
         if moved_bytes < need_bytes:
-            raise RuntimeError(
+            logger.warning(
                 f"device {target_device} still needs {need_bytes / 1e6} MB, "
                 f"but there is not enough space on it, only {moved_bytes / 1e6} MB available. "
                 f"movable_chunk_info {movable_chunk_info}"

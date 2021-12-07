@@ -27,11 +27,28 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 # SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-from .chunk_data import Chunk
-from .chunk_list import ChunkList
-from .chunk_tensor_index import ChunkTensorIndex
-from .client import PatrickStarClient
-from .const import AccessType, ChunkState, TensorState, TrainingStage, ChunkType
-from .hook import setup_patrickstar_hooks
-from .parameter import PSParameter, register_param, is_param_registered, ParamType
-from .preprocess import PSPreProcessCtx, torch_scope
+import torch
+import pytest
+import copy
+from tiling import TiledLinear
+
+
+@pytest.mark.parametrize("in_splits,out_splits", [(1, 1), (2, 2)])
+@pytest.mark.parametrize("in_f,out_f", [(32, 32), (23, 29), (29, 23)])
+def test_tiled_forward(in_splits, out_splits, in_f, out_f):
+    base = torch.nn.Linear(in_f, out_f)
+    test = TiledLinear(
+        in_f,
+        out_f,
+        bias=True,
+        init_linear=copy.deepcopy(base),
+        out_splits=out_splits,
+        in_splits=in_splits,
+    )
+
+    inp = torch.rand(in_f)
+
+    base_out = base(copy.deepcopy(inp))
+    test_out = test(copy.deepcopy(inp))
+
+    assert torch.allclose(base_out, test_out, rtol=1e-4)

@@ -13,6 +13,7 @@ Out of memory error (OOM) is the nightmare of every engineer training PTMs. To p
 
 ### System Design
 The idea of Patrick is like this. The non-model data (mainly activations) varies during training, but the current heterogenous training solutions are **statically** spliting the model data to CPU and GPU. To make better use of the GPU, PatrickStar proposes a **dynamic** memory scheduling with the help of a chunk-based memory management module. The memory management of PatrickStar supports offloading everything but the current computing part of the model to CPU to save GPU. In addition, chunk-based memory management is efficient for collective communication when scaling to multiple GPU.
+See [this doc](./INSIDE.md) for the idea behind PatrickStar.
 
 ### Results
 In experiment, Patrickstar v0.4.3 is able to train a **15 Billion**(15B) param model with 8xTesla V100 GPU and 240GB GPU memory, which is twice as large as the state of art. And the performance of PatrickStar is better for models of the same size as well. The pstar is PatrickStar v0.4.3. The deeps indicates performance of DeepSpeed v0.4.3 using the official example [DeepSpeed example](https://github.com/microsoft/DeepSpeedExamples/blob/master/Megatron-LM-v1.1.5-ZeRO3/examples/ds_pretrain_gpt2-zero3.sh) zero3 stage with activation optimzations openning by default.
@@ -23,7 +24,7 @@ We also evaluated PatrickStar v0.4.3 on a single node of A100 SuperPod. It is ab
 
 ![alt perf](./doc/one_node_perf_a100.png "performance testing result on SuperNode")
 
-Detail benchmark results are posted on [Online Doc](https://docs.google.com/spreadsheets/d/136CWc_jA_2zC4h1r-6dzD4PrOvp6aw6uCDchEyQv6sE/edit?usp=sharing).
+Detail benchmark results on WeChat AI data center as well as NVIDIA SuperPod are posted on this [Google Doc](https://docs.google.com/spreadsheets/d/136CWc_jA_2zC4h1r-6dzD4PrOvp6aw6uCDchEyQv6sE/edit?usp=sharing).
 
 We've also trained the [CLUE-GPT2](https://huggingface.co/uer/gpt2-chinese-cluecorpussmall) model with PatrickStar, the loss and accuracy curve is shown below:
 
@@ -97,11 +98,8 @@ For some detail explanation of the above example, please check the guide [here](
 
 For more examples, please check [here](./examples).
 
-A quick-start benchmark script is [here](./examples/run_bert.sh). It is executed with random generated data, therefore you do not need to prepare the real data. It also demostrated all of the optimization techniques for patricksatr. For more optimization tricks using PatrickStar see [Optimization Options](./doc/optimization_options.md).
+A quick-start benchmark script is [here](./examples/run_bert.sh). It is executed with random generated data, therefore you do not need to prepare the real data. It also demostrated all of the optimization techniques for patricksatr. For more optimization tricks runing the benchmark see [Optimization Options](./doc/optimization_options.md).
 
-### Inside PatrickStar
-
-See [this doc](./INSIDE.md) for the idea behind PatrickStar.
 
 ### Limitations
 

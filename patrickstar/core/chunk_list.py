@@ -224,14 +224,16 @@ class ChunkList(object):
         # This condition is not good enough, we need to check if botn CPU and GPU
         # don't have enough space.
         if ava_chunk_mem_size < need_bytes:
-            logger.error(
+            logger.warning(
                 f"{target_device} has not enough space for {need_bytes} elements"
             )
-            logger.error(
+            logger.warning(
                 f"{target_device} has not enough space for {need_bytes / 1e6} MB. "
                 f"Device used Chunk Memory is {self.get_chunk_memory_used(target_device) / 1e6} MB. "
                 f"Avaibale Chunk Memory is {ava_chunk_mem_size / 1e6} MB"
             )
+            if self._time_profile:
+                global_timer.my_timer.finish_profile("CHUNK_LIST_prepare_device")
             return False
             # TODO(jiaruifang) We can catch the error and the release or move the chunks here.
             # raise RuntimeError(

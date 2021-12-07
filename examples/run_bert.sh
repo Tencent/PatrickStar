@@ -31,8 +31,17 @@ export AMM=${AMM:-1}
 export MSC=${MSC:-0}
 # mem caching comm
 export CACHE=${CACHE:-1}
+# linear tiling comm
+export TILING=${TILING:-0}
 
 export LOCAL_WORLD_SIZE=${LOCAL_WORLD_SIZE:-1}
+
+if [[ ${TILING} == 1 ]];  then
+TILING_FLAG="--with_tiling_linear"
+else
+export TILING_FLAG=""
+fi
+
 
 if [[ ${CACHE} == 1 ]];  then
 CACHE_FLAG="--with_mem_cache"
@@ -153,4 +162,5 @@ env OMP_NUM_THREADS=${TNUM} timeout -s SIGKILL 30m python -m torch.distributed.l
     ${AMM_FLAG} \
     ${MSC_FLAG} \
     ${CACHE_FLAG} \
+    ${TILING_FLAG} \
     2>&1 | tee ${LOG_DIR}/${LOG_FILE}
