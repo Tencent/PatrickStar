@@ -62,6 +62,7 @@ class PatrickStarClient(object):
         default_opt_config = {
             "with_mem_saving_comm": False,
             "with_mem_cache": False,
+            "with_async_move": False,
         }
         if config is not None:
             tracer_config = config.get("mem_tracer", None)
@@ -87,6 +88,7 @@ class PatrickStarClient(object):
             self.mem_tracer,
             self.chunk_eviction_strategy,
             self.opt_config["with_mem_cache"],
+            self.opt_config["with_async_move"],
         )
         if self.opt_config["with_mem_cache"]:
             print("[CONFIG] USING MEM CACHE")
