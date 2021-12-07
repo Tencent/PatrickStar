@@ -1,4 +1,26 @@
-This page explains the optimization options for PatrickStar.
+This page explains the optimization options for benchmarking.
+Optimizations is divided into PatrickStar-related ones and general ones.
+General Optimizations can be applied to any PyTorch-based frameworks.
+
+## General Optimizations
+1. Activation Checkpoing (a.k.a gradient checkpointing in [PyTorch](https://pytorch.org/docs/stable/checkpoint.html))
+`--use_ckp`
+Make sure this option is open for large model training. It can largely save activation memory footprint at cost of recomputing.
+
+2. Activation Offloading
+`--with_activation_offload`
+Offload the checkpoints activation from GPU to CPU. Further Save GPU memory.
+Note you have to use activation checkpoing first.
+
+3. CPU Embedding
+`--use_cpu_embedding`
+nn.Embedding is conducted on CPU, save GPU memory. More importantly, it shrinks the chunk size. For some small model, the biggest layer is Embedding. Therefore, the chunk size has to larger than the embedding numel.
+
+4. Tiling Linear (a.k.a Memory-centric tiling in [DeepSpeed](https://deepspeed.readthedocs.io/en/stable/zero3.html#memory-centric-tiling))
+`--with_tiling_linear`
+Memory-centric tiling (MCT) is able to split a param tensor of linear into pieces, and they do not need to be stored in contiguous memory space. This will help reduce chunk size. To achieve the best performance you have to tune the in_splits/out_splits of the parameters of the function.
+
+## PatrickStar-related Optmizations
 
 1. Memory Saving Communication.
 `--with_mem_saving_com`

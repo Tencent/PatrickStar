@@ -928,15 +928,21 @@ class PatrickStarClient(object):
                     f"capacity {chunk.capacity / 1024 / 1024} M elems, "
                     f"dtype {chunk.data_type} device {chunk.get_device()}"
                 )
+                last_used_pos = 0
                 for info in self.chunk_tensor_index.generate_tensor_info_in_order(
                     chunk_id
                 ):
                     assert info.chunk_id == chunk_id, f"{info.chunk_id} vs {chunk_id}"
-                    logger.debug(
+                    logger.info(
                         f"** tensor: chunk_id {chunk_id}, start {info.start_offset}, "
                         f"end {info.start_offset + info.numel}, size {info.numel}, "
                         f"tensor_id {info.tensor_id}, state {info.state()}, name {info.tensor_name}"
                     )
+                    last_used_pos = max(last_used_pos, info.start_offset + info.numel)
+                logger.info(
+                    f"chunk used {last_used_pos/1024/1024} M elem, "
+                    f"{last_used_pos/chunk.capacity * 100} %"
+                )
                 overall_size += chunk.get_chunk_space()
 
         logger.info(f"OVERALL CHUNK SIZE {overall_size / 1024 / 1024 / 1024} GB")

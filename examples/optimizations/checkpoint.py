@@ -31,9 +31,7 @@ import warnings
 from typing import Any, Iterable, List, Tuple
 import torch
 from patrickstar.utils import see_memory_usage
-
-
-CPU_CHECKPOINT = True
+from . import global_opt_flags as global_opt_flags
 
 
 def move_to_device(item, device, criterion_func):
@@ -235,7 +233,7 @@ class CheckpointFunction(torch.autograd.Function):
                 ctx.had_cuda_in_fwd = True
                 ctx.fwd_gpu_devices, ctx.fwd_gpu_states = get_device_states(*args)
 
-        if CPU_CHECKPOINT:
+        if global_opt_flags.USE_ACT_OFFLOAD:
             inputs = copy_to_device(
                 args,
                 device=torch.device("cpu"),
@@ -267,7 +265,7 @@ class CheckpointFunction(torch.autograd.Function):
             outputs = run_function(*inputs_cuda)
 
         del inputs_cuda
-        if CPU_CHECKPOINT:
+        if global_opt_flags.USE_ACT_OFFLOAD:
             new_args = get_cpu_activations_for_backward(args, inputs)
             save_args_for_backward(*new_args)
         else:
@@ -308,7 +306,7 @@ class CheckpointFunction(torch.autograd.Function):
         #     inputs[idx] = tensors[i]
 
         cuda_device = torch.cuda.current_device()
-        if CPU_CHECKPOINT:
+        if global_opt_flags.USE_ACT_OFFLOAD:
             inputs = move_to_device(
                 ctx.saved_tensors, cuda_device, is_activation_to_checkpoint
             )
