@@ -592,6 +592,11 @@ if __name__ == "__main__":
         SEQ_LEN = 1024
         NUM_LAYER = 78
         NUM_HEAD = 16
+    elif MODEL_NAME == "GPT3_17B":
+        HIDDEN_DIM = 4096
+        SEQ_LEN = 1024
+        NUM_LAYER = 90
+        NUM_HEAD = 16
     # The following configs comes from paper
     # Efficient Large-Scale Language Model Training on GPU Clusters
     # NV model is wider in hidden-size
@@ -621,6 +626,11 @@ if __name__ == "__main__":
         HIDDEN_DIM = 8192
         SEQ_LEN = 1024
         NUM_LAYER = 50
+        NUM_HEAD = 16
+    elif MODEL_NAME == "GPT_DS_50B":
+        HIDDEN_DIM = 8192
+        SEQ_LEN = 1024
+        NUM_LAYER = 62
         NUM_HEAD = 16
     elif MODEL_NAME == "GPT_DS_60B":
         HIDDEN_DIM = 8192

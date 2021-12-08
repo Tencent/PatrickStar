@@ -2,7 +2,7 @@
 
 ![logo](./logo.png)
 ### News
-1. Nov. 2021, v0.4.3 releaed. PatrickStar is evaluated on A100 SuperPod. Some execution options are provided, including memory saving communication technique, memory allocation cache. It trains 40B model on a SuperPod node.
+1. Nov. 2021, v0.4.3 releaed. PatrickStar is evaluated on A100 SuperPod. Some execution options are provided, including memory saving communication technique, memory allocation cache. It trains 50B model on a SuperPod node.
 2. Nov. 2021, v0.4.0 released. With a better memory tracer, PatrickStar further improves the max model scale than v0.3.0 (15B vs 12B).
 3. Oct. 2021, v0.3.0 released. Our initial version significantly surpasses DeepSpeed.
 
