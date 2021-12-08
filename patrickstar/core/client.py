@@ -914,6 +914,8 @@ class PatrickStarClient(object):
         logger.info("Print chunk list info.")
 
         overall_size = 0
+        overall_chunk_num = 0
+        overall_utilization_ratio = 0.0
         for (
             type,
             type_chunk_list,
@@ -935,7 +937,7 @@ class PatrickStarClient(object):
                     chunk_id
                 ):
                     assert info.chunk_id == chunk_id, f"{info.chunk_id} vs {chunk_id}"
-                    logger.info(
+                    logger.debug(
                         f"** tensor: chunk_id {chunk_id}, start {info.start_offset}, "
                         f"end {info.start_offset + info.numel}, size {info.numel}, "
                         f"tensor_id {info.tensor_id}, state {info.state()}, name {info.tensor_name}"
@@ -945,6 +947,11 @@ class PatrickStarClient(object):
                     f"chunk used {last_used_pos/1024/1024} M elem, "
                     f"{last_used_pos/chunk.capacity * 100} %"
                 )
+                overall_utilization_ratio += last_used_pos / chunk.capacity
                 overall_size += chunk.get_chunk_space()
+                overall_chunk_num += 1
 
         logger.info(f"OVERALL CHUNK SIZE {overall_size / 1024 / 1024 / 1024} GB")
+        logger.info(
+            f"OVERALL UTILIZATION {overall_utilization_ratio / overall_chunk_num} %"
+        )

@@ -48,6 +48,8 @@ from patrickstar.utils.logging import logger
 from patrickstar.utils.model_size_calculator import get_ps_model_size, estimate_bert_mac
 import optimizations.global_opt_flags as global_opt_flags
 
+USE_CHUNK_SIZE_SEARCH = True
+
 
 def _add_patrick_star_args(parser):
     group = parser.add_argument_group(title="patrickstar")
@@ -239,6 +241,8 @@ def test_bert_model_helper(
     num_head=12,
     num_steps=5,
 ):
+    if USE_CHUNK_SIZE_SEARCH:
+        logger.setLevel(logging.INFO)
     logger.info(
         f'test a bert {"fp16" if is_fp16 else "fp32"} model '
         f'{"with checkpoint" if is_ckp else ""}'
@@ -405,6 +409,12 @@ def test_bert_model_helper(
         f"After model init. using {dist_plan}, gradient checkpoint: {is_ckp}, fp16 {is_fp16}",
         force=True,
     )
+    if USE_CHUNK_SIZE_SEARCH:
+        logger.setLevel(logging.WARNING)
+        model.client.mem_tracer.close_tracer()
+        if args.with_mem_profiler:
+            profiler.end()
+        return []
 
     data_loader = get_bert_data_loader(
         batch_size=batch_size,
@@ -489,7 +499,6 @@ def test_bert_model_helper(
                 f"{dist_plan}_{args.model_name}_bs_{batch_size}_"
                 f"ckp_{is_ckp}_offload_{args.with_activation_offload}_profile.pkl"
             )
-    logging.info("*" * 20)
     return loss_res
 
 
