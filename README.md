@@ -1,6 +1,8 @@
 ## PatrickStar: Parallel Training of Large Language Models via a Chunk-based Memory Management
 
 ![logo](./logo.png)
+
+### Recent Progress
 See [CHANGE_LOG.md](./CHANGE_LOG.md).
 
 ### Meeting PatrickStar
@@ -10,7 +12,7 @@ Out of memory error (OOM) is the nightmare of every engineer training PTMs. To p
 
 ### System Design
 The idea of Patrick is like this. The non-model data (mainly activations) varies during training, but the current heterogenous training solutions are **statically** spliting the model data to CPU and GPU. To make better use of the GPU, PatrickStar proposes a **dynamic** memory scheduling with the help of a chunk-based memory management module. The memory management of PatrickStar supports offloading everything but the current computing part of the model to CPU to save GPU. In addition, chunk-based memory management is efficient for collective communication when scaling to multiple GPU.
-See [this doc](./INSIDE.md) for the idea behind PatrickStar.
+See the paper and [this doc](./INSIDE.md) for the idea behind PatrickStar.
 
 ### Results
 In experiment, Patrickstar v0.4.3 is able to train a **18 Billion**(18B) param model with 8xTesla V100 GPU and 240GB GPU memory, which is over twice as large as the state of art. And the performance of PatrickStar is better for models of the same size as well. The pstar is PatrickStar v0.4.3. The deeps indicates performance of DeepSpeed v0.4.3 using the official example [DeepSpeed example](https://github.com/microsoft/DeepSpeedExamples/blob/master/Megatron-LM-v1.1.5-ZeRO3/examples/ds_pretrain_gpt2-zero3.sh) zero3 stage with activation optimzations openning by default.
