@@ -51,3 +51,29 @@ PatirckStar is famous for dynamic partition model data. With help of this flag y
 6. Release Remote Chunk After Initialization.
 `release_after_init`
 The is a computing efficient irrelevant option used for distributed training. It allocates memory for remote chunks but release it immediately. In this way, we can make sure the model parameter is randomly initialized the same as a serial version. Solve the problem with random seed. It is used in combination with the `--res_check` option to check the correctness of distributed training.
+
+7. Adjusting the quota of CPU and GPU memory of memory tracer.
+We did not expose this optimization as parameter passed through command line.
+As shown in the pretrain_bert_demo.py, there is a json config for memory tracer setting. You can adjust the 4 ratio suffix values.
+
+`warmup_gpu_chunk_mem_ratio`: the max gpu memory of a GPU can be used for chunks during the warmup iteration.
+
+`overall_gpu_mem_ratio`: the available gpu mem size / real gpu mem capacity. Turn up the value if you meet cpu or gpu OOM during iteration.
+
+`overall_cpu_mem_ratio`: the available cpu mem size / real cpu mem capacity. Turn up the value if you meet cpu or gpu OOM during iteration.
+
+`margin_use_ratio`: Space to host optimizer states in GPU / the rest GPU space excluding the peak chunk-used space after warmup FWD+BWD.
+
+`use_fake_dist`: a debug flag, to simulate multiple-GPU on one GPU. It is used when we are poor. After we have multi-GPU we deprecated this flag.
+
+```
+"mem_tracer": {
+                    "use_async_mem_monitor": args.with_async_mem_monitor,
+                    "warmup_gpu_chunk_mem_ratio": 0.1,
+                    "overall_gpu_mem_ratio": 0.8,
+                    "overall_cpu_mem_ratio": 0.8,
+                    "margin_use_ratio": 0.8,
+                    "use_fake_dist": False,
+                    "with_static_partition": args.with_static_partition,
+                },
+```
