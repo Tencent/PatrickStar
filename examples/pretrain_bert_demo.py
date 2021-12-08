@@ -241,8 +241,6 @@ def test_bert_model_helper(
     num_head=12,
     num_steps=5,
 ):
-    if USE_CHUNK_SIZE_SEARCH:
-        logger.setLevel(logging.INFO)
     logger.info(
         f'test a bert {"fp16" if is_fp16 else "fp32"} model '
         f'{"with checkpoint" if is_ckp else ""}'
@@ -410,8 +408,9 @@ def test_bert_model_helper(
         force=True,
     )
     if USE_CHUNK_SIZE_SEARCH:
-        logger.setLevel(logging.WARNING)
         model.client.mem_tracer.close_tracer()
+        overall_chunk_size, utilization = model.client.get_overall_chunk_size()
+        print(f"overall_chunk_size {overall_chunk_size}, utilization {utilization}")
         if args.with_mem_profiler:
             profiler.end()
         return []

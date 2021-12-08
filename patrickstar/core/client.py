@@ -910,6 +910,33 @@ class PatrickStarClient(object):
     def reset(self):
         raise NotImplementedError
 
+    def get_overall_chunk_size(self):
+        """
+        return the overall size of all chunks and
+        the overall chunk utilization excluding fragments.
+        """
+        overall_size = 0
+        overall_chunk_num = 0
+        overall_utilization_ratio = 0.0
+        for (
+            type,
+            type_chunk_list,
+        ) in self.chunk_tensor_index.chunk_type_to_chunk_id_list_map.items():
+            logger.info(f"Chunk list {type}")
+            for chunk_id in type_chunk_list:
+                chunk = self.chunk_list[chunk_id]
+                comm_info = self.chunk_tensor_index.chunk_id_to_comm_info_map[chunk_id]
+                assert comm_info is not None
+                last_used_pos = 0
+                for info in self.chunk_tensor_index.generate_tensor_info_in_order(
+                    chunk_id
+                ):
+                    last_used_pos = max(last_used_pos, info.start_offset + info.numel)
+                overall_utilization_ratio += last_used_pos / chunk.capacity
+                overall_size += chunk.get_chunk_space()
+                overall_chunk_num += 1
+            return overall_size, overall_utilization_ratio
+
     def display_chunk_info(self):
         logger.info("Print chunk list info.")
 
