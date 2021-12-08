@@ -592,12 +592,12 @@ if __name__ == "__main__":
         SEQ_LEN = 1024
         NUM_LAYER = 65
         NUM_HEAD = 16
-    elif MODEL_NAME == "GPT3_18B":
+    elif MODEL_NAME == "GPT3_15B":
         HIDDEN_DIM = 4096
         SEQ_LEN = 1024
         NUM_LAYER = 78
         NUM_HEAD = 16
-    elif MODEL_NAME == "GPT3_17B":
+    elif MODEL_NAME == "GPT3_18B":
         HIDDEN_DIM = 4096
         SEQ_LEN = 1024
         NUM_LAYER = 90
