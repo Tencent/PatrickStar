@@ -1,7 +1,6 @@
 ## PatrickStar: Parallel Training of Large Language Models via a Chunk-based Memory Management
 
 ![logo](./logo.png)
-### Recent Progress
 See [CHANGE_LOG.md](./CHANGE_LOG.md).
 
 ### Meeting PatrickStar
