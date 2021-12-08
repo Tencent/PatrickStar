@@ -1,10 +1,7 @@
 ## PatrickStar: Parallel Training of Large Language Models via a Chunk-based Memory Management
 
 ![logo](./logo.png)
-### News
-1. Nov. 2021, v0.4.3 releaed. PatrickStar is evaluated on A100 SuperPod. Some execution options are provided, including memory saving communication technique, memory allocation cache. It trains 50B model on a SuperPod node.
-2. Nov. 2021, v0.4.0 released. With a better memory tracer, PatrickStar further improves the max model scale than v0.3.0 (15B vs 12B).
-3. Oct. 2021, v0.3.0 released. Our initial version significantly surpasses DeepSpeed.
+See [CHANGE_LOG.md](./CHANGE_LOG.md).
 
 ### Meeting PatrickStar
 Pre-Trained Models (PTM) are becoming the hotspot of both NLP research and industry application. However, the training of PTMs requires enormous hardware resources, which makes it only accessible to small portion of people in the AI community. Now, **PatrickStar will make PTM training available to everyone!**
@@ -16,7 +13,7 @@ The idea of Patrick is like this. The non-model data (mainly activations) varies
 See [this doc](./INSIDE.md) for the idea behind PatrickStar.
 
 ### Results
-In experiment, Patrickstar v0.4.3 is able to train a **15 Billion**(15B) param model with 8xTesla V100 GPU and 240GB GPU memory, which is twice as large as the state of art. And the performance of PatrickStar is better for models of the same size as well. The pstar is PatrickStar v0.4.3. The deeps indicates performance of DeepSpeed v0.4.3 using the official example [DeepSpeed example](https://github.com/microsoft/DeepSpeedExamples/blob/master/Megatron-LM-v1.1.5-ZeRO3/examples/ds_pretrain_gpt2-zero3.sh) zero3 stage with activation optimzations openning by default.
+In experiment, Patrickstar v0.4.3 is able to train a **18 Billion**(18B) param model with 8xTesla V100 GPU and 240GB GPU memory, which is over twice as large as the state of art. And the performance of PatrickStar is better for models of the same size as well. The pstar is PatrickStar v0.4.3. The deeps indicates performance of DeepSpeed v0.4.3 using the official example [DeepSpeed example](https://github.com/microsoft/DeepSpeedExamples/blob/master/Megatron-LM-v1.1.5-ZeRO3/examples/ds_pretrain_gpt2-zero3.sh) zero3 stage with activation optimzations openning by default.
 
 ![alt perf](./doc/mgpu_scalability.png "performance testing result")
 
