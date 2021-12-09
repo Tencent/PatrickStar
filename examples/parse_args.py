@@ -193,5 +193,5 @@ def parse_args():
     args = parser.parse_args()
     args.rank = int(os.getenv("RANK", "0"))
     args.world_size = int(os.getenv("WORLD_SIZE", "1"))
-    _print_args(args)
+    # _print_args(args)
     return args

@@ -65,21 +65,26 @@ def chunk_schema_valid_check(args, config, chunk_size, overall_chunk_size):
         "warmup_gpu_chunk_mem_ratio", 0.1
     )
 
-    logger.info(
-        f"warmup_used_gpu_mem {warmup_used_gpu_mem}, "
-        f"overall_cpu_mem {overall_cpu_mem}, "
-        f"overall_chunk_size {overall_chunk_size}"
-    )
     if warmup_used_gpu_mem < chunk_size * 2:
-        logger.info("chunk is unable to be fitted in GPU during warmup")
+        logger.error(
+            "chunk is unable to be fitted in GPU during warmup!\n"
+            f"GPU Mem {warmup_used_gpu_mem/1024/1024} MB vs. Chunk {chunk_size * 2/1024/1024} MB"
+        )
         return False
 
-    if (
-        warmup_used_gpu_mem + overall_cpu_mem
-        < overall_chunk_size / get_world_size() / 6 * 14
-    ):
-        logger.info("overall chunks is not able to fit in CPU + GPU")
+    cpu_gpu_mem = warmup_used_gpu_mem + overall_cpu_mem
+    need_mem = overall_chunk_size / get_world_size() / 6 * 14
+    if cpu_gpu_mem < need_mem:
+        logger.error(
+            f"overall chunks is not able to fit in CPU + GPU "
+            f"{cpu_gpu_mem/1024/1024} MB vs. {need_mem/1024/1024} MB"
+        )
         return False
+    print(
+        f"warmup_used_gpu_mem {warmup_used_gpu_mem / 1024/1024} MB\n"
+        f"overall_cpu_mem {overall_cpu_mem/ 1024/1024} MB\n"
+        f"need_mem {need_mem/ 1024/1024} MB\n"
+    )
     return True
 
 
@@ -104,6 +109,7 @@ def get_param_used_chunk_size(args, config, model_func):
         ):
             model = model_func()
     except Exception:
+        logger.error("PSPreProcessCtx failed")
         return -1, -1
 
     del model
@@ -115,8 +121,10 @@ def get_param_used_chunk_size(args, config, model_func):
         args.default_chunk_size,
         overall_chunk_size,
     ):
+
         return overall_chunk_size, util
     else:
+        logger.error("chunk_schema_valid_check failed")
         return -1, -1
 
 
@@ -191,7 +199,7 @@ if __name__ == "__main__":
 
     # You could set the logger level to INFO to view more runtime
     # information.
-    logger.setLevel(logging.INFO)
+    logger.setLevel(logging.WARNING)
     if not torch.distributed.is_initialized():
         torch.distributed.init_process_group(
             backend="gloo" if args.use_fake_dist else "nccl"

@@ -179,7 +179,7 @@ SLOG_FILE="./search_res/slog_file.${MODEL_NAME}_gpu_${GPU_NUM}_bs_${BS}_cpueb_${
 rm -rf ${SLOG_FILE}
 
 
-for((i=64;i<=512;i+=32));
+for((i=512;i>=64;i-=32));
 do
 let CUR_CHUNK_SIZE=${i}*1024*1024
 echo "searching ${CUR_CHUNK_SIZE}"
