@@ -28,16 +28,11 @@
 # SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 
-import argparse
 import logging
-import os
 import time
-from packaging import version
 
 import torch
 import numpy as np
-import transformers
-from transformers import BertConfig
 
 import patrickstar.utils.global_timer as global_timer
 from data_loader import get_bert_data_loader
@@ -45,200 +40,17 @@ from patrickstar.profiler import profiler
 from patrickstar.runtime import initialize_engine
 from patrickstar.utils import see_memory_usage
 from patrickstar.utils.logging import logger
-from patrickstar.utils.model_size_calculator import get_ps_model_size, estimate_bert_mac
-import optimizations.global_opt_flags as global_opt_flags
-
-USE_CHUNK_SIZE_SEARCH = True
-
-
-def _add_patrick_star_args(parser):
-    group = parser.add_argument_group(title="patrickstar")
-    group.add_argument(
-        "--use_fake_dist",
-        dest="use_fake_dist",
-        action="store_true",
-        help="Using one GPU to stimulate multiple card.",
-    )
-    group.add_argument(
-        "--default_chunk_size",
-        type=int,
-        default=32 * 1024 * 1024,
-        help="Default Chunk Size in elements.",
-    )
-    group.add_argument(
-        "--use_cpu_embedding",
-        dest="use_cpu_embedding",
-        action="store_true",
-        help="Using CPU to perform Embedding and do not assign "
-        "embedding params to chunks",
-    )
-    group.add_argument(
-        "--release_after_init",
-        action="store_true",
-        help="Release the remote chunk after the whole initialization."
-        "This would use more CPU memory during initialization, "
-        "but may fix some errors relate to checkpoint loading or"
-        "weight intialization.",
-    )
-    group.add_argument(
-        "--use_hybrid_adam",
-        action="store_true",
-        help="Use hybrid adam optimization. "
-        "By default ADAM is on CPU and run ADAM on GPU if possible.",
-    )
-    # Some hyperparams to tune when you failed to run a model.
-    group.add_argument(
-        "--with_static_partition",
-        action="store_true",
-        help="Use static partition for model data on CPU and GPU.",
-    )
-    group.add_argument(
-        "--with_mem_profiler",
-        action="store_true",
-        help="Profiling memory usage.",
-    )
-    group.add_argument(
-        "--init_loss_scale_power",
-        type=float,
-        default=10,
-        help="initial loss scale power",
-    )
-    group.add_argument(
-        "--with_async_mem_monitor",
-        action="store_true",
-        help="Use async memory monitor.",
-    )
-    group.add_argument(
-        "--with_mem_saving_comm",
-        action="store_true",
-        help="Use communication saving memory.",
-    )
-    group.add_argument(
-        "--with_mem_cache",
-        action="store_true",
-        help="Use caching to allocate chunk payload.",
-    )
-    group.add_argument(
-        "--with_async_move",
-        action="store_true",
-        help="Use asynchronize move.",
-    )
-    return parser
+from patrickstar.utils.model_size_calculator import get_ps_model_size
+from model_builder import build_transformer_model
+from parse_args import parse_args
+from ps_config import get_patrickstar_config
 
 
-def _add_general_opt_args(parser):
-    group = parser.add_argument_group(title="test_bert")
-    group.add_argument(
-        "--use_ckp",
-        dest="use_ckp",
-        action="store_true",
-        help="using gradient checkpointing for memory saveing.",
-    )
-    group.add_argument(
-        "--with_activation_offload",
-        dest="with_activation_offload",
-        action="store_true",
-        help="Use activation offloading.",
-    )
-    group.add_argument(
-        "--with_tiling_linear",
-        action="store_true",
-        help="Use linear tiling.",
-    )
-    return parser
-
-
-def _add_test_config_args(parser):
-    group = parser.add_argument_group(title="test_config")
-    group.add_argument(
-        "--batch_size", type=int, default=32, help="Batch size of input."
-    )
-    group.add_argument(
-        "--local_rank",
-        type=int,
-        default=None,
-        help="local rank passed from distributed launcher.",
-    )
-
-    group.add_argument(
-        "--res_check",
-        dest="res_check",
-        action="store_true",
-        help="check results correctness of checkpointing.",
-    )
-    group.add_argument(
-        "--use_fp16",
-        dest="use_fp16",
-        action="store_true",
-        help="using FP16 for training.",
-    )
-    group.add_argument(
-        "--dist_plan",
-        type=str,
-        default="torch",
-        help="Distributed Plan [torch, patrickstar]",
-    )
-    group.add_argument(
-        "--model_name", type=str, default="GPTsmall", help="The model name."
-    )
-    group.add_argument("--with_lightseq", action="store_true", help="use lightseq")
-    return parser
-
-
-def _print_args(args):
-    """Print arguments."""
-    if args.rank == 0:
-        print("------------------- arguments -------------------", flush=True)
-        str_list = []
-        for arg in vars(args):
-            dots = "." * (32 - len(arg))
-            str_list.append("  {} {} {}".format(arg, dots, getattr(args, arg)))
-        for arg in sorted(str_list, key=lambda x: x.lower()):
-            print(arg, flush=True)
-        print("---------------- end of arguments ----------------", flush=True)
-
-
-def parse_args():
-    """Parse all arguments."""
-    parser = argparse.ArgumentParser(description="PatrickStar Arguments")
-    parser = _add_patrick_star_args(parser)
-    parser = _add_test_config_args(parser)
-    parser = _add_general_opt_args(parser)
-    args = parser.parse_args()
-    args.rank = int(os.getenv("RANK", "0"))
-    args.world_size = int(os.getenv("WORLD_SIZE", "1"))
-    _print_args(args)
-    return args
-
-
-def print_model_config(hidden_dim, sequence_len, num_layer, num_head):
-    if args.rank == 0:
-        config_dict = {
-            "hidden_dim": hidden_dim,
-            "sequence_len": sequence_len,
-            "num_layer": num_layer,
-            "num_head": num_head,
-        }
-        print("------------------ model config ------------------", flush=True)
-        str_list = []
-        for key, value in config_dict.items():
-            dots = "." * (32 - len(key))
-            str_list.append("  {} {} {}".format(key, dots, value))
-        for arg in sorted(str_list, key=lambda x: x.lower()):
-            print(arg, flush=True)
-        print("-------------- end of model config --------------", flush=True)
-
-
-def test_bert_model_helper(
+def test_transformer_model_helper(
     args,
     is_ckp: bool = False,
     is_fp16: bool = False,
     dist_plan: str = "torch",
-    batch_size=32,
-    hidden_dim=768,
-    sequence_length=256,
-    num_layer=12,
-    num_head=12,
     num_steps=5,
 ):
     logger.info(
@@ -246,139 +58,49 @@ def test_bert_model_helper(
         f'{"with checkpoint" if is_ckp else ""}'
     )
 
-    # Use single card to imitate multicard.
+    # Use single card to simulate multicard. Used when you are poor and
+    # no more GPU avaiable.
     if args.use_fake_dist:
         rank = 0
     else:
         rank = args.local_rank
 
-    if args.with_tiling_linear or args.with_activation_offload:
-        if args.with_tiling_linear:
-            global_opt_flags.USE_TILE = True
-        else:
-            global_opt_flags.USE_TILE = False
-        if args.with_activation_offload:
-            global_opt_flags.USE_ACT_OFFLOAD = True
-        else:
-            global_opt_flags.USE_ACT_OFFLOAD = False
-        from optimizations.ps_tile_modeling_bert import BertForSequenceClassification
-    else:
-        from transformers import BertForSequenceClassification
-
     # Avoid gpu0 use more memory.
     # https://discuss.pytorch.org/t/extra-10gb-memory-on-gpu-0-in-ddp-tutorial/118113
     torch.cuda.set_device(rank)
     torch.cuda.empty_cache()
-
     device = torch.device(f"cuda:{rank}")
 
-    bert_config = BertConfig(
-        gradient_checkpointing=is_ckp,
-        hidden_size=hidden_dim,
-        intermediate_size=hidden_dim * 4,
-        num_attention_heads=num_head,
-        max_position_embeddings=sequence_length,
-        num_hidden_layers=num_layer,
-    )
+    if args.with_mem_profiler:
+        print("start memory profiler")
+        profiler.start()
 
     lr = 0.001
     betas = (0.9, 0.999)
     eps = 1e-6
     weight_decay = 0
 
-    if args.with_mem_profiler:
-        print("start memory profiler")
-        profiler.start()
+    model_func, sequence_length = build_transformer_model(args)
     if dist_plan == "patrickstar":
         if not is_fp16:
             logger.warning("PatrickStar will always use mixed precision training.")
-
-        def model_func():
-            model = BertForSequenceClassification(bert_config)
-            if is_ckp and version.parse(transformers.__version__) >= version.parse(
-                "4.11.0"
-            ):
-                model.gradient_checkpointing_enable()
-            return model
-
-        config = {
-            # The same format as optimizer config of DeepSpeed
-            # https://www.deepspeed.ai/docs/config-json/#optimizer-parameters
-            "optimizer": {
-                "type": "Adam",
-                "params": {
-                    "lr": lr,
-                    "betas": betas,
-                    "eps": eps,
-                    "weight_decay": weight_decay,
-                    "use_hybrid_adam": args.use_hybrid_adam,
-                },
-            },
-            "fp16": {
-                "enabled": True,
-                # Set "loss_scale" to 0 to use DynamicLossScaler.
-                "loss_scale": 0,
-                "initial_scale_power": args.init_loss_scale_power,
-                "loss_scale_window": 1000,
-                "hysteresis": 2,
-                "min_loss_scale": 1,
-            },
-            "default_chunk_size": args.default_chunk_size,
-            "release_after_init": args.release_after_init,
-            "use_fake_dist": args.use_fake_dist,
-            "use_cpu_embedding": args.use_cpu_embedding,
-            "client": {
-                "mem_tracer": {
-                    "use_async_mem_monitor": args.with_async_mem_monitor,
-                    "warmup_gpu_chunk_mem_ratio": 0.1,
-                    "overall_gpu_mem_ratio": 0.8,
-                    "overall_cpu_mem_ratio": 0.8,
-                    "margin_use_ratio": 0.8,
-                    "use_fake_dist": False,
-                    "with_static_partition": args.with_static_partition,
-                },
-                "opts": {
-                    "with_mem_saving_comm": args.with_mem_saving_comm,
-                    "with_mem_cache": args.with_mem_cache,
-                    "with_async_move": args.with_async_move,
-                },
-            },
-        }
-
+        config = get_patrickstar_config(
+            args, lr=lr, betas=betas, eps=eps, weight_decay=weight_decay
+        )
         model, optimizer = initialize_engine(
             model_func=model_func, local_rank=rank, config=config
         )
     else:
-        model = BertForSequenceClassification(bert_config)
+        model = model_func()
         if args.with_mem_profiler:
             from patrickstar.core.torch_profiler_hook import (
                 register_torch_profiler_hook,
             )
 
             register_torch_profiler_hook(model)
-        if is_ckp and version.parse(transformers.__version__) >= version.parse(
-            "4.11.0"
-        ):
-            model.gradient_checkpointing_enable()
+
         model.cuda(rank)
         model.train()
-        if args.with_lightseq:
-            from optimizations.ls_hf_transformer_encoder_layer import (
-                inject_ls_enc_layer,
-            )
-
-            inject_ls_enc_layer(model, args, bert_config)
-            print("Using Lightseq Kernels, all submodules includes:")
-
-            def visit_and_register_hooks(module):
-                is_child_node = True
-                for _, submodule in module.named_children():
-                    visit_and_register_hooks(submodule)
-                    is_child_node = False
-                if is_child_node:
-                    print(f"module name {module.__class__.__name__}")
-
-            visit_and_register_hooks(model)
 
         optimizer = torch.optim.Adam(
             model.parameters(), lr=lr, betas=betas, eps=eps, weight_decay=weight_decay
@@ -396,27 +118,17 @@ def test_bert_model_helper(
 
     model_numel, model_num_param = get_ps_model_size(model)
     logger.info(f"Model size {model_numel / 1e9} B, total params: {model_num_param}")
-    total_macs, nvidia_total_macs = estimate_bert_mac(
-        bert_config, batch_size, sequence_length, model_numel
-    )
-    logger.info(f"Total MACs: {total_macs} TFlops")
-    logger.info(f"NVIDIA total MACs: {nvidia_total_macs}")
-    logger.debug(f"Diff csig/nvidia {total_macs / nvidia_total_macs}")
+    total_macs = model_numel * args.batch_size * sequence_length * 2 * 4
+    logger.info(f"Total MACs: {total_macs/1024/1024/1024/1024} TFlops")
 
     see_memory_usage(
         f"After model init. using {dist_plan}, gradient checkpoint: {is_ckp}, fp16 {is_fp16}",
         force=True,
     )
-    if USE_CHUNK_SIZE_SEARCH:
-        model.client.mem_tracer.close_tracer()
-        overall_chunk_size, utilization = model.client.get_overall_chunk_size()
-        print(f"overall_chunk_size {overall_chunk_size}, utilization {utilization}")
-        if args.with_mem_profiler:
-            profiler.end()
-        return []
 
+    # load data, here we generate random data for benchmarking.
     data_loader = get_bert_data_loader(
-        batch_size=batch_size,
+        batch_size=args.batch_size,
         total_samples=10000,
         sequence_length=sequence_length,
         device=device,
@@ -426,7 +138,7 @@ def test_bert_model_helper(
 
     loss_res = []
 
-    print(f"MAC {total_macs / 1e9} GFlop, model param size: {model_numel / 1e9} B")
+    print(f"model param size: {model_numel / 1e9} B")
 
     for n, batch in enumerate(data_loader):
         if n == num_steps:
@@ -495,7 +207,7 @@ def test_bert_model_helper(
         profiler.end()
         if rank == 0:
             profiler.save(
-                f"{dist_plan}_{args.model_name}_bs_{batch_size}_"
+                f"{dist_plan}_{args.model_name}_bs_{args.batch_size}_"
                 f"ckp_{is_ckp}_offload_{args.with_activation_offload}_profile.pkl"
             )
     return loss_res
@@ -519,171 +231,17 @@ if __name__ == "__main__":
 
     world_size = torch.distributed.get_world_size()
 
-    MODEL_NAME = args.model_name
     if res_check:
-        MODEL_NAME = "Bert"
-    if MODEL_NAME == "Bert":
-        # 0.11B
-        HIDDEN_DIM = 768
-        SEQ_LEN = 512
-        NUM_LAYER = 6
-        NUM_HEAD = 12
-    elif MODEL_NAME == "Bertlarge":
-        # 0.35B
-        HIDDEN_DIM = 1024
-        SEQ_LEN = 512
-        NUM_LAYER = 24
-        NUM_HEAD = 16
-    elif MODEL_NAME == "GPT2small":
-        # 0.7B
-        HIDDEN_DIM = 1536
-        SEQ_LEN = 128
-        NUM_LAYER = 24
-        NUM_HEAD = 16
-    elif MODEL_NAME == "GPT2_1B":
-        # 0.9B
-        HIDDEN_DIM = 2048
-        SEQ_LEN = 1024
-        NUM_LAYER = 20
-        NUM_HEAD = 16
-    elif MODEL_NAME == "megatron_1.3B":
-        HIDDEN_DIM = 2048
-        SEQ_LEN = 1024
-        NUM_LAYER = 24
-        NUM_HEAD = 32
-    elif MODEL_NAME == "GPT2_2B":
-        # zero-offload
-        HIDDEN_DIM = 2048
-        SEQ_LEN = 1024
-        NUM_LAYER = 40
-        NUM_HEAD = 16
-    elif MODEL_NAME == "megatron_3.9B":
-        # Table 4 in Megatron Paper
-        HIDDEN_DIM = 2560
-        SEQ_LEN = 1024
-        NUM_LAYER = 24
-        NUM_HEAD = 40
-    elif MODEL_NAME == "GPT2_4B":
-        HIDDEN_DIM = 2304  # 2048
-        SEQ_LEN = 1024
-        NUM_LAYER = 64
-        NUM_HEAD = 16
-    elif MODEL_NAME == "GPT3_6B":
-        # 6.7B model
-        HIDDEN_DIM = 3072
-        SEQ_LEN = 1024
-        NUM_LAYER = 53
-        NUM_HEAD = 16
-    elif MODEL_NAME == "GPT3_8B":
-        # 6.7B model
-        HIDDEN_DIM = 3072
-        SEQ_LEN = 1024
-        NUM_LAYER = 72
-        NUM_HEAD = 16
-    elif MODEL_NAME == "GPT3_10B":
-        HIDDEN_DIM = 4096
-        SEQ_LEN = 1024
-        NUM_LAYER = 50
-        NUM_HEAD = 16
-    elif MODEL_NAME == "GPT3_11B":
-        HIDDEN_DIM = 4096
-        SEQ_LEN = 1024
-        NUM_LAYER = 55
-        NUM_HEAD = 16
-    elif MODEL_NAME == "GPT3_12B":
-        HIDDEN_DIM = 4096
-        SEQ_LEN = 1024
-        NUM_LAYER = 60
-        NUM_HEAD = 16
-    elif MODEL_NAME == "GPT3_13B":
-        HIDDEN_DIM = 4096
-        SEQ_LEN = 1024
-        NUM_LAYER = 65
-        NUM_HEAD = 16
-    elif MODEL_NAME == "GPT3_15B":
-        HIDDEN_DIM = 4096
-        SEQ_LEN = 1024
-        NUM_LAYER = 78
-        NUM_HEAD = 16
-    elif MODEL_NAME == "GPT3_18B":
-        HIDDEN_DIM = 4096
-        SEQ_LEN = 1024
-        NUM_LAYER = 90
-        NUM_HEAD = 16
-    # The following configs comes from paper
-    # Efficient Large-Scale Language Model Training on GPU Clusters
-    # NV model is wider in hidden-size
-    elif MODEL_NAME == "GPT_NV_18B":
-        HIDDEN_DIM = 6144
-        SEQ_LEN = 1024
-        NUM_LAYER = 40
-        NUM_HEAD = 16
-    elif MODEL_NAME == "GPT_NV_39B":
-        HIDDEN_DIM = 8192
-        SEQ_LEN = 1024
-        NUM_LAYER = 48
-        NUM_HEAD = 16
-    elif MODEL_NAME == "GPT_NV_76B":
-        HIDDEN_DIM = 10240
-        SEQ_LEN = 1024
-        NUM_LAYER = 60
-        NUM_HEAD = 16
-    # The following configs comes from Deep-Offload
-    # http://pasalabs.org/papers/2021/ATC21_zero-offload.pdf
-    elif MODEL_NAME == "GPT_DS_20B":
-        HIDDEN_DIM = 8192
-        SEQ_LEN = 1024
-        NUM_LAYER = 25
-        NUM_HEAD = 16
-    elif MODEL_NAME == "GPT_DS_40B":
-        HIDDEN_DIM = 8192
-        SEQ_LEN = 1024
-        NUM_LAYER = 50
-        NUM_HEAD = 16
-    elif MODEL_NAME == "GPT_DS_50B":
-        HIDDEN_DIM = 8192
-        SEQ_LEN = 1024
-        NUM_LAYER = 62
-        NUM_HEAD = 16
-    elif MODEL_NAME == "GPT_DS_60B":
-        HIDDEN_DIM = 8192
-        SEQ_LEN = 1024
-        NUM_LAYER = 75
-        NUM_HEAD = 16
-    elif MODEL_NAME == "GPT_DS_70B":
-        HIDDEN_DIM = 9216
-        SEQ_LEN = 1024
-        NUM_LAYER = 69
-        NUM_HEAD = 16
-    else:
-        raise RuntimeError(f"The model name {MODEL_NAME} is not valid!")
-    if res_check:
-        BATCH_SIZE = 2
-    else:
-        BATCH_SIZE = args.batch_size
-
-    assert HIDDEN_DIM % NUM_HEAD == 0
-    logging.info(f"Benchmarking {MODEL_NAME}")
-
-    print_model_config(
-        hidden_dim=HIDDEN_DIM,
-        sequence_len=SEQ_LEN,
-        num_layer=NUM_LAYER,
-        num_head=NUM_HEAD,
-    )
+        args.model_name = "Bert"
+        args.batch_size = 2
 
     if not res_check:
         torch.manual_seed(0)
-        loss_list = test_bert_model_helper(
+        loss_list = test_transformer_model_helper(
             args=args,
             is_ckp=use_ckp,
             is_fp16=use_fp16,
             dist_plan=dist_plan,
-            batch_size=BATCH_SIZE,
-            hidden_dim=HIDDEN_DIM,
-            sequence_length=SEQ_LEN,
-            num_layer=NUM_LAYER,
-            num_head=NUM_HEAD,
             num_steps=5,
         )
         print("*" * 20 + " LOSS " + "*" * 20)
@@ -697,16 +255,11 @@ if __name__ == "__main__":
         NUM_STEPS = 5
 
         torch.manual_seed(0)
-        torch_res_list = test_bert_model_helper(
+        torch_res_list = test_transformer_model_helper(
             args=args,
             is_ckp=use_ckp,
             is_fp16=False,
             dist_plan="torch",
-            hidden_dim=HIDDEN_DIM,
-            batch_size=BATCH_SIZE,
-            sequence_length=SEQ_LEN,
-            num_layer=NUM_LAYER,
-            num_head=NUM_HEAD,
             num_steps=NUM_STEPS,
         )
 
@@ -714,16 +267,11 @@ if __name__ == "__main__":
         logging.info("-" * 50)
 
         torch.manual_seed(0)
-        autocast_res_list = test_bert_model_helper(
+        autocast_res_list = test_transformer_model_helper(
             args=args,
             is_ckp=use_ckp,
             is_fp16=True,
             dist_plan="torch",
-            hidden_dim=HIDDEN_DIM,
-            batch_size=BATCH_SIZE,
-            sequence_length=SEQ_LEN,
-            num_layer=NUM_LAYER,
-            num_head=NUM_HEAD,
             num_steps=NUM_STEPS,
         )
 
@@ -731,17 +279,11 @@ if __name__ == "__main__":
         logging.info("-" * 50)
 
         torch.manual_seed(0)
-        ps_res_list = test_bert_model_helper(
+        ps_res_list = test_transformer_model_helper(
             args=args,
             is_ckp=use_ckp,
             is_fp16=use_fp16,
             dist_plan="patrickstar",
-            hidden_dim=HIDDEN_DIM,
-            batch_size=BATCH_SIZE,
-            sequence_length=SEQ_LEN,
-            num_layer=NUM_LAYER,
-            num_head=NUM_HEAD,
-            num_steps=NUM_STEPS,
         )
 
         print("-" * 20 + " LOSS " + "-" * 20)

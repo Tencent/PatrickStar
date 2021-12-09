@@ -24,7 +24,7 @@ do
 echo "****************** Begin ***************************"
 echo "* benchmarking CS ${CS} BS ${BS} MODEL ${MODEL_NAME} "
 echo "* CPU_EBD ${CPU_EBD} SP ${SP} ACT_OFFLOAD ${ACT_OFFLOAD}"
-bash ../run_bert.sh
+bash ../run_transformers.sh
 echo "****************** Finished ***************************"
 echo ""
 echo ""

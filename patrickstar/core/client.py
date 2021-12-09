@@ -272,7 +272,7 @@ class PatrickStarClient(object):
             chunk_id, param_list, access_type
         ):
             raise RuntimeError(
-                f"Can not append a tensor to chunk_tensor_index."
+                f"Can not append a tensor to chunk_tensor_index. "
                 f"Overall size of param list is larger than the default chunk size {self.default_chunk_size}."
             )
         return
@@ -935,7 +935,8 @@ class PatrickStarClient(object):
                 overall_utilization_ratio += last_used_pos / chunk.capacity
                 overall_size += chunk.get_chunk_space()
                 overall_chunk_num += 1
-            return overall_size, overall_utilization_ratio
+        overall_utilization_ratio /= overall_chunk_num
+        return overall_size, overall_utilization_ratio
 
     def display_chunk_info(self):
         logger.info("Print chunk list info.")
