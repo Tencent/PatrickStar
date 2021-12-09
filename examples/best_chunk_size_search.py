@@ -38,7 +38,7 @@ from parse_args import parse_args
 from patrickstar.core import PatrickStarClient
 from patrickstar.core import PSPreProcessCtx
 
-from patrickstar.utils.distributed import get_local_world_size, get_rank
+from patrickstar.utils.distributed import get_local_world_size, get_rank, get_world_size
 from patrickstar.utils.memory import get_memory_info
 
 
@@ -74,7 +74,10 @@ def chunk_schema_valid_check(args, config, chunk_size, overall_chunk_size):
         logger.info("chunk is unable to be fitted in GPU during warmup")
         return False
 
-    if warmup_used_gpu_mem + overall_cpu_mem < overall_chunk_size / 6 * 14:
+    if (
+        warmup_used_gpu_mem + overall_cpu_mem
+        < overall_chunk_size / get_world_size() / 6 * 14
+    ):
         logger.info("overall chunks is not able to fit in CPU + GPU")
         return False
     return True
