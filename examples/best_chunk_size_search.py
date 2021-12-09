@@ -38,7 +38,7 @@ from parse_args import parse_args
 from patrickstar.core import PatrickStarClient
 from patrickstar.core import PSPreProcessCtx
 
-from patrickstar.utils.distributed import get_local_world_size
+from patrickstar.utils.distributed import get_local_world_size, get_rank
 from patrickstar.utils.memory import get_memory_info
 
 
@@ -97,6 +97,7 @@ def get_param_used_chunk_size(args, config, model_func):
             dtype=torch.float,
             release_after_init=args.release_after_init,
             use_cpu_embedding=args.use_cpu_embedding,
+            not_init=True,
         ):
             model = model_func()
     except Exception:
@@ -171,10 +172,11 @@ def evaluate_chunk_size(
     logger.info(f"{overall_chunk_size}, {utils}\n")
     logger.info(f"writing to {args.slog_file}\n")
 
-    with open(f"{args.slog_file}", "a+") as fh:
-        fh.write(
-            f"{args.default_chunk_size/1024/1024} {overall_chunk_size/1024/1024}, {utils}\n"
-        )
+    if get_rank() == 0:
+        with open(f"{args.slog_file}", "a+") as fh:
+            fh.write(
+                f"{args.default_chunk_size/1024/1024} {overall_chunk_size/1024/1024}, {utils}\n"
+            )
 
 
 if __name__ == "__main__":
