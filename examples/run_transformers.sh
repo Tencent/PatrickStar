@@ -174,20 +174,20 @@ cmd_opts="
 "
 
 if [[ ${CS_SEARCH} == 1 ]];  then
-for((i=64;i<=512;i+=32));
-do
-let CUR_CHUNK_SIZE=${i}*1024*1024
-echo "searching ${CUR_CHUNK_SIZE}"
 mkdir -p ./search_res
 SLOG_FILE="./search_res/slog_file.${MODEL_NAME}_gpu_${GPU_NUM}_bs_${BS}_cpueb_${CPU_EBD}_lightseq_${LIGHTSEQ}_offload_${ACT_OFFLOAD}_SP_${SP}_AMM_${AMM}_MSC_${MSC}_CACHE_${CACHE}_TILING_${TILING}_${GIT_VER}"
 rm -rf ${SLOG_FILE}
 
+
+for((i=64;i<=512;i+=32));
+do
+let CUR_CHUNK_SIZE=${i}*1024*1024
+echo "searching ${CUR_CHUNK_SIZE}"
 python -m torch.distributed.launch --nproc_per_node=${GPU_NUM} \
     best_chunk_size_search.py \
     --default_chunk_size=${CUR_CHUNK_SIZE} \
     --slog_file=${SLOG_FILE} \
     ${cmd_opts}
-
 done
 else
 env OMP_NUM_THREADS=${TNUM} timeout -s SIGKILL 30m python -m torch.distributed.launch --nproc_per_node=${GPU_NUM} \
