@@ -914,6 +914,7 @@ class PatrickStarClient(object):
         """
         return the overall size of all chunks and
         the overall chunk utilization excluding fragments.
+        Excepting the dummy chunk if using MSC.
         """
         overall_size = 0
         overall_chunk_num = 0
@@ -922,9 +923,12 @@ class PatrickStarClient(object):
             type,
             type_chunk_list,
         ) in self.chunk_tensor_index.chunk_type_to_chunk_id_list_map.items():
+
             logger.info(f"Chunk list {type}")
             for chunk_id in type_chunk_list:
                 chunk = self.chunk_list[chunk_id]
+                if self.opt_config["with_mem_saving_comm"] and chunk.is_dummy():
+                    continue
                 comm_info = self.chunk_tensor_index.chunk_id_to_comm_info_map[chunk_id]
                 assert comm_info is not None
                 last_used_pos = 0
