@@ -31,26 +31,21 @@
 import logging
 import torch
 
-# from patrickstar.utils.logging import logger
+from patrickstar.utils.logging import logger, log_dist
 from model_builder import build_transformer_model
 from ps_config import get_patrickstar_config
 from parse_args import parse_args
 from patrickstar.core import PatrickStarClient
 from patrickstar.core import PSPreProcessCtx
-
+import time
 from patrickstar.utils.distributed import get_rank
-
-from rich.logging import RichHandler
-
-logger = logging.getLogger(__name__)
-logger.addHandler(RichHandler())
 
 MB_NUM = 1024 * 1024
 GB_NUM = 1024 * MB_NUM
 
 HARDWARE_SETTING_JSON = {
-    "per_cpu_mem": 16 * GB_NUM,
-    "per_gpu_mem": 8 * GB_NUM,
+    "per_cpu_mem": 240 * GB_NUM,
+    "per_gpu_mem": 32 * GB_NUM,
     "global_gpu_num": 1,
     "gloabl_cpu_num": 1,
     "local_gpu_num": 1,
@@ -127,7 +122,7 @@ def get_param_used_chunk_size(args, config, model_func):
         default_chunk_size=args.default_chunk_size,
         config=config.get("client", None),
     )
-
+    start_time = time.time()
     try:
         with PSPreProcessCtx(
             client=client,
@@ -140,7 +135,8 @@ def get_param_used_chunk_size(args, config, model_func):
     except Exception:
         logger.error("PSPreProcessCtx failed")
         return -1, -1
-
+    end_time = time.time()
+    log_dist(f"PSPreProcessCtx Model Constructing elapse {end_time - start_time}")
     del model
 
     overall_chunk_size, util = client.get_overall_chunk_size()

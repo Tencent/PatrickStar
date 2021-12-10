@@ -65,7 +65,7 @@ class LoggerFactory:
 logger = LoggerFactory.create_logger(name="PatrickStar", level=logging.WARNING)
 
 
-def log_dist(message, ranks=None, level=logging.INFO):
+def log_dist(message, ranks=[0], level=logging.INFO):
     """Log message when one of following condition meets
     + not dist.is_initialized()
     + dist.get_rank() in ranks if ranks is not None or ranks = [-1]
