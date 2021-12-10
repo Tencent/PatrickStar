@@ -31,7 +31,7 @@ from typing import List
 import torch
 
 import patrickstar.utils.global_timer as global_timer
-from patrickstar.utils import logger, get_world_size, get_rank
+from patrickstar.utils import logger, get_world_size, get_rank, log_dist
 from .chunk_list import ChunkList, ChunkType
 from .chunk_tensor_index import ChunkTensorIndex
 from .const import AccessType, ChunkState, TensorState, TrainingStage
@@ -91,7 +91,7 @@ class PatrickStarClient(object):
             self.opt_config["with_async_move"],
         )
         if self.opt_config["with_mem_cache"]:
-            print("[CONFIG] USING MEM CACHE")
+            logger.debug("[CONFIG] USING MEM CACHE")
         self._time_profile = True
 
         if torch.distributed.is_initialized():
@@ -229,7 +229,7 @@ class PatrickStarClient(object):
             AccessType.DATA,
         )
 
-        logger.info(
+        log_dist(
             f"Append a dummy chunk to the Chunk List {chunk_type} "
             f"comm info {comm_info}"
         )
@@ -983,7 +983,7 @@ class PatrickStarClient(object):
                 overall_size += chunk.get_chunk_space()
                 overall_chunk_num += 1
 
-        logger.info(f"OVERALL CHUNK SIZE {overall_size / 1024 / 1024 / 1024} GB")
-        logger.info(
+        log_dist(f"OVERALL CHUNK SIZE {overall_size / 1024 / 1024 / 1024} GB")
+        log_dist(
             f"OVERALL UTILIZATION {overall_utilization_ratio / overall_chunk_num} %"
         )
