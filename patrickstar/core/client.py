@@ -990,5 +990,6 @@ class PatrickStarClient(object):
 
         log_dist(f"OVERALL CHUNK SIZE {overall_size / 1024 / 1024 / 1024} GB")
         log_dist(
-            f"OVERALL UTILIZATION {overall_utilization_ratio / overall_chunk_num} %"
+            f"OVERALL UTILIZATION {overall_utilization_ratio / overall_chunk_num * 100} %"
         )
+        log_dist(f"MAX UTILIZATION {max_utilization_ratio * 100} %")
