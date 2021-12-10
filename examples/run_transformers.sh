@@ -185,6 +185,6 @@ else
 env OMP_NUM_THREADS=${TNUM} timeout -s SIGKILL 30m python -m torch.distributed.launch --nproc_per_node=${GPU_NUM} \
     pretrain_bert_demo.py \
     --default_chunk_size=${CHUNK_SIZE} \
-    ${cmd_opts}
+    ${cmd_opts} \
     2>&1 | tee ${LOG_DIR}/${LOG_FILE}
 fi
