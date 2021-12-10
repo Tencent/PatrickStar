@@ -223,7 +223,7 @@ if __name__ == "__main__":
 
     # You could set the logger level to INFO to view more runtime
     # information.
-    logger.setLevel(logging.WARNING)
+    logger.setLevel(logging.INFO)
     if not torch.distributed.is_initialized():
         torch.distributed.init_process_group(
             backend="gloo" if args.use_fake_dist else "nccl"

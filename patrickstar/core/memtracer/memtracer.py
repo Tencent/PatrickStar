@@ -208,7 +208,8 @@ class RuntimeMemTracer(object):
             f"Margin Mem Size {margin_mem_size / 1e6} MB, "
             f"available chunk num for Optimizer States {self._margin_chunk_num_for_gpu_adam}"
         )
-        logger.info(f"OVERALL GPU MEM {self._overall_gpu_mem}")
+        logger.info("--------------- GPU INFO AFTER BWD ----------------")
+        logger.debug(f"OVERALL GPU MEM {self._overall_gpu_mem/1024/1024} MB")
 
     def reset_memory_stats(self):
         """

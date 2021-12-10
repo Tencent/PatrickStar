@@ -464,7 +464,7 @@ class PatrickStarClient(object):
                     "CLIENT_fetch_remote_chunks_allgather"
                 )
 
-            logger.info(f"rank {rank} allgather {chunk_id_list}")
+            logger.debug(f"rank {rank} allgather {chunk_id_list}")
             torch.distributed.all_gather(
                 allgather_payload_buff,
                 self.chunk_list[local_chunk_id].payload,
@@ -924,7 +924,7 @@ class PatrickStarClient(object):
             type_chunk_list,
         ) in self.chunk_tensor_index.chunk_type_to_chunk_id_list_map.items():
 
-            logger.info(f"Chunk list {type}")
+            logger.debug(f"Chunk list {type}")
             for chunk_id in type_chunk_list:
                 chunk = self.chunk_list[chunk_id]
                 if self.opt_config["with_mem_saving_comm"] and chunk.is_dummy():
@@ -943,7 +943,7 @@ class PatrickStarClient(object):
         return overall_size, overall_utilization_ratio
 
     def display_chunk_info(self):
-        logger.info("Print chunk list info.")
+        logger.debug("Print chunk list info.")
 
         overall_size = 0
         overall_chunk_num = 0
@@ -952,13 +952,13 @@ class PatrickStarClient(object):
             type,
             type_chunk_list,
         ) in self.chunk_tensor_index.chunk_type_to_chunk_id_list_map.items():
-            logger.info(f"Chunk list {type}")
+            logger.debug(f"Chunk list {type}")
             for chunk_id in type_chunk_list:
                 chunk = self.chunk_list[chunk_id]
                 comm_info = self.chunk_tensor_index.chunk_id_to_comm_info_map[chunk_id]
                 assert comm_info is not None
 
-                logger.info(
+                logger.debug(
                     f"Chunk id {chunk.chunk_id}, state {chunk.get_state()}, "
                     f"comm info {comm_info}, "
                     f"capacity {chunk.capacity / 1024 / 1024} M elems, "
@@ -975,7 +975,7 @@ class PatrickStarClient(object):
                         f"tensor_id {info.tensor_id}, state {info.state()}, name {info.tensor_name}"
                     )
                     last_used_pos = max(last_used_pos, info.start_offset + info.numel)
-                logger.info(
+                logger.debug(
                     f"chunk used {last_used_pos/1024/1024} M elem, "
                     f"{last_used_pos/chunk.capacity * 100} %"
                 )
