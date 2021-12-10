@@ -29,7 +29,7 @@
 
 import time
 
-from .logging import logger
+# from .logging import logger
 from .singleton_meta import SingletonMeta
 
 
@@ -72,7 +72,7 @@ class GlobalTimer(metaclass=SingletonMeta):
     def print(self):
         if not self.start_flag:
             return
-        logger.info("------------- PROFILE RESULTS ----------------")
+        print("------------- PROFILE RESULTS ----------------")
         dot_length = 20
         for k in self.elapse_stat:
             dot_length = max(dot_length, len(k) + 2)

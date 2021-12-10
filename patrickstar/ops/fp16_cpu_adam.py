@@ -329,7 +329,7 @@ class FP16Adam(torch.optim.Optimizer):
         Copy the chunk into a tmp buffer to speed up the memcpy between devices.
         """
         local_rank = client.local_rank
-        logger.info(
+        logger.debug(
             f"local_rank {local_rank} margin_chunk_num_for_gpu_adam {margin_chunk_num_for_gpu_adam}, "
             f"param cnt {len(fp32_param_list)}"
         )

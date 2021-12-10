@@ -28,6 +28,7 @@
 # SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 import logging
 import sys
+from rich.logging import RichHandler
 
 import torch.distributed as dist
 
@@ -57,7 +58,7 @@ class LoggerFactory:
         logger_.propagate = False
         ch = logging.StreamHandler(stream=sys.stdout)
         ch.setFormatter(formatter)
-        logger_.addHandler(ch)
+        logger_.addHandler(RichHandler())
         return logger_
 
 
