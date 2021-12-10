@@ -61,8 +61,8 @@ def get_patrickstar_config(
             "mem_tracer": {
                 "use_async_mem_monitor": args.with_async_mem_monitor,
                 "warmup_gpu_chunk_mem_ratio": 0.1,
-                "overall_gpu_mem_ratio": 0.8,
-                "overall_cpu_mem_ratio": 0.8,
+                "overall_gpu_mem_ratio": 0.9,
+                "overall_cpu_mem_ratio": 0.9,
                 "margin_use_ratio": 0.8,
                 "use_fake_dist": False,
                 "with_static_partition": args.with_static_partition,

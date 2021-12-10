@@ -145,7 +145,6 @@ def _add_test_config_args(parser):
         default=None,
         help="local rank passed from distributed launcher.",
     )
-
     group.add_argument(
         "--res_check",
         dest="res_check",
@@ -193,5 +192,5 @@ def parse_args():
     args = parser.parse_args()
     args.rank = int(os.getenv("RANK", "0"))
     args.world_size = int(os.getenv("WORLD_SIZE", "1"))
-    # _print_args(args)
+    _print_args(args)
     return args

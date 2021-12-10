@@ -102,14 +102,6 @@ else
 export RELEASE_AFTER_INIT_FLAG=""
 fi
 
-export LIGHTSEQ=0
-if [[ ${LIGHTSEQ} == 1 ]]; then
-export LIGHTSEQ_FLAG="--with_lightseq"
-else
-export LIGHTSEQ_FLAG=""
-fi
-
-
 if [[ ${CKP} == 1 ]]; then
     export CKP_FLAG="--use_ckp"
 else
@@ -175,16 +167,16 @@ cmd_opts="
 
 if [[ ${CS_SEARCH} == 1 ]];  then
 mkdir -p ./search_res
-SLOG_FILE="./search_res/slog_file.${MODEL_NAME}_gpu_${GPU_NUM}_bs_${BS}_cpueb_${CPU_EBD}_lightseq_${LIGHTSEQ}_offload_${ACT_OFFLOAD}_SP_${SP}_AMM_${AMM}_MSC_${MSC}_CACHE_${CACHE}_TILING_${TILING}_${GIT_VER}"
+SLOG_FILE="./search_res/slog_file.${MODEL_NAME}_bs_${BS}_cpueb_${CPU_EBD}_lightseq_${LIGHTSEQ}_offload_${ACT_OFFLOAD}_SP_${SP}_AMM_${AMM}_MSC_${MSC}_CACHE_${CACHE}_TILING_${TILING}_${GIT_VER}"
 rm -rf ${SLOG_FILE}
 
-
-for((i=512;i>=64;i-=32));
+for((i=312;i>=64;i-=32));
 do
 let CUR_CHUNK_SIZE=${i}*1024*1024
-echo "searching ${CUR_CHUNK_SIZE}"
-python -m torch.distributed.launch --nproc_per_node=${GPU_NUM} \
-    best_chunk_size_search.py \
+echo "searching CHUNK_SIZE ${i} M elem"
+
+python -m torch.distributed.launch --nproc_per_node=1 \
+    eval_chunk_size.py \
     --default_chunk_size=${CUR_CHUNK_SIZE} \
     --slog_file=${SLOG_FILE} \
     ${cmd_opts}

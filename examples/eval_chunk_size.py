@@ -30,16 +30,32 @@
 
 import logging
 import torch
-from patrickstar.utils import see_memory_usage
-from patrickstar.utils.logging import logger
+
+# from patrickstar.utils.logging import logger
 from model_builder import build_transformer_model
 from ps_config import get_patrickstar_config
 from parse_args import parse_args
 from patrickstar.core import PatrickStarClient
 from patrickstar.core import PSPreProcessCtx
 
-from patrickstar.utils.distributed import get_local_world_size, get_rank, get_world_size
-from patrickstar.utils.memory import get_memory_info
+from patrickstar.utils.distributed import get_rank
+
+from rich.logging import RichHandler
+
+logger = logging.getLogger(__name__)
+logger.addHandler(RichHandler())
+
+MB_NUM = 1024 * 1024
+GB_NUM = 1024 * MB_NUM
+
+HARDWARE_SETTING_JSON = {
+    "per_cpu_mem": 16 * GB_NUM,
+    "per_gpu_mem": 8 * GB_NUM,
+    "global_gpu_num": 1,
+    "gloabl_cpu_num": 1,
+    "local_gpu_num": 1,
+    "local_cpu_num": 1,
+}
 
 
 def chunk_schema_valid_check(args, config, chunk_size, overall_chunk_size):
@@ -53,37 +69,50 @@ def chunk_schema_valid_check(args, config, chunk_size, overall_chunk_size):
     returns:
         bool: is the chunk schema valid
     """
-    mem_info = get_memory_info()
-    local_world_size = get_local_world_size()
-    overall_gpu_mem = torch.cuda.get_device_properties(
-        args.local_rank
-    ).total_memory * config.get("overall_gpu_mem_ratio", 0.8)
-    overall_cpu_mem = (
-        mem_info.total * config.get("overall_cpu_mem_ratio", 0.8) / local_world_size
-    )
-    warmup_used_gpu_mem = overall_gpu_mem * config.get(
-        "warmup_gpu_chunk_mem_ratio", 0.1
+    per_gpu_mem = HARDWARE_SETTING_JSON.get("per_gpu_mem")
+    per_cpu_mem = HARDWARE_SETTING_JSON.get("per_cpu_mem")
+    global_gpu_num = HARDWARE_SETTING_JSON.get("global_gpu_num")
+    global_cpu_num = HARDWARE_SETTING_JSON.get("gloabl_cpu_num")
+    ava_per_gpu_mem = (
+        per_gpu_mem
+        * config.get("overall_gpu_mem_ratio", 0.8)
+        * config.get("warmup_gpu_chunk_mem_ratio", 0.1)
     )
 
-    if warmup_used_gpu_mem < chunk_size * 2:
+    ava_per_cpu_mem = per_cpu_mem * config.get("overall_cpu_mem_ratio", 0.8)
+
+    # GPU mem has to host at least two chunks.
+    if ava_per_gpu_mem < chunk_size * 2:
         logger.error(
             "chunk is unable to be fitted in GPU during warmup!\n"
-            f"GPU Mem {warmup_used_gpu_mem/1024/1024} MB vs. Chunk {chunk_size * 2/1024/1024} MB"
+            "GPU Mem %.2f MB vs. Two Chunks %.2f MB",
+            ava_per_gpu_mem / MB_NUM,
+            chunk_size * 2 / MB_NUM,
         )
         return False
 
-    cpu_gpu_mem = warmup_used_gpu_mem + overall_cpu_mem
-    need_mem = overall_chunk_size / get_world_size() / 6 * 14
-    if cpu_gpu_mem < need_mem:
+    # CPU + GPU shall not exceed the 14M (M numel of param)
+    overall_cpu_gpu_mem = (
+        ava_per_gpu_mem * global_gpu_num + ava_per_cpu_mem * global_cpu_num
+    )
+    need_mem = overall_chunk_size / 6 * 14
+    if overall_cpu_gpu_mem < need_mem:
         logger.error(
-            f"overall chunks is not able to fit in CPU + GPU "
-            f"{cpu_gpu_mem/1024/1024} MB vs. {need_mem/1024/1024} MB"
+            "Overall chunks can't fit in memory of CPU+GPU " "%.2f MB vs. %.2f MB",
+            overall_cpu_gpu_mem / MB_NUM,
+            need_mem / MB_NUM,
         )
         return False
-    print(
-        f"warmup_used_gpu_mem {warmup_used_gpu_mem / 1024/1024} MB\n"
-        f"overall_cpu_mem {overall_cpu_mem/ 1024/1024} MB\n"
-        f"need_mem {need_mem/ 1024/1024} MB\n"
+
+    logger.info(
+        "Evaluated chunk size %d Melem"
+        "ava_per_gpu_mem %.2f MB, "
+        "ava_per_cpu_mem %.2f MB, "
+        "need_mem %.2f MB\n",
+        args.default_chunk_size / MB_NUM,
+        ava_per_gpu_mem / MB_NUM,
+        ava_per_cpu_mem / MB_NUM,
+        need_mem / MB_NUM,
     )
     return True
 
@@ -124,36 +153,18 @@ def get_param_used_chunk_size(args, config, model_func):
 
         return overall_chunk_size, util
     else:
-        logger.error("chunk_schema_valid_check failed")
+        logger.error("Chunk schema validation check failed!")
         return -1, -1
 
 
-def evaluate_chunk_size(
-    args,
-    is_ckp: bool = False,
-    is_fp16: bool = False,
-    dist_plan: str = "torch",
-    num_steps=5,
-):
+def evaluate_chunk_size(args):
     """
     Evaluate the current training task defined by the args.
     write the chunk memory usage to the file.
     """
-    logger.info(
-        f'test a bert {"fp16" if is_fp16 else "fp32"} model '
-        f'{"with checkpoint" if is_ckp else ""}'
-    )
-
-    # Use single card to simulate multicard. Used when you are poor and
-    # no more GPU avaiable.
-    if args.use_fake_dist:
-        rank = 0
-    else:
-        rank = args.local_rank
-
     # Avoid gpu0 use more memory.
     # https://discuss.pytorch.org/t/extra-10gb-memory-on-gpu-0-in-ddp-tutorial/118113
-    torch.cuda.set_device(rank)
+    torch.cuda.set_device(args.local_rank)
     torch.cuda.empty_cache()
 
     lr = 0.001
@@ -166,21 +177,11 @@ def evaluate_chunk_size(
         args, lr=lr, betas=betas, eps=eps, weight_decay=weight_decay
     )
 
-    see_memory_usage(
-        f"before get_param_used_chunk_size for {args.default_chunk_size/1024/1024} MB",
-        True,
-        "MB",
-    )
-
     overall_chunk_size, utils = get_param_used_chunk_size(args, config, model_func)
 
-    see_memory_usage(
-        f"after get_param_used_chunk_size for {args.default_chunk_size/1024/1024} MB",
-        True,
-        "MB",
+    logger.info(
+        "chunk uses %.2f MB, utilization %.2f \n", overall_chunk_size / MB_NUM, utils
     )
-
-    logger.info(f"{overall_chunk_size}, {utils}\n")
     logger.info(f"writing to {args.slog_file}\n")
 
     if get_rank() == 0:
@@ -192,24 +193,6 @@ def evaluate_chunk_size(
 
 if __name__ == "__main__":
     args = parse_args()
-    use_ckp = args.use_ckp
-    use_fp16 = args.use_fp16
-    dist_plan = args.dist_plan
-    res_check = args.res_check
-
-    # You could set the logger level to INFO to view more runtime
-    # information.
-    logger.setLevel(logging.WARNING)
-    if not torch.distributed.is_initialized():
-        torch.distributed.init_process_group(
-            backend="gloo" if args.use_fake_dist else "nccl"
-        )
-
+    logger.setLevel(logging.INFO)
     torch.manual_seed(0)
-    loss_list = evaluate_chunk_size(
-        args=args,
-        is_ckp=use_ckp,
-        is_fp16=use_fp16,
-        dist_plan=dist_plan,
-        num_steps=5,
-    )
+    evaluate_chunk_size(args=args)
