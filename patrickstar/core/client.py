@@ -956,7 +956,7 @@ class PatrickStarClient(object):
             logger.debug(f"Chunk list {type}")
             for chunk_id in type_chunk_list:
                 chunk = self.chunk_list[chunk_id]
-                if chunk.is_dummy():
+                if self.opt_config["with_mem_saving_comm"] and chunk.is_dummy():
                     continue
                 comm_info = self.chunk_tensor_index.chunk_id_to_comm_info_map[chunk_id]
                 assert comm_info is not None
