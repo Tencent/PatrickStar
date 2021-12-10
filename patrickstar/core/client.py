@@ -229,7 +229,7 @@ class PatrickStarClient(object):
             AccessType.DATA,
         )
 
-        log_dist(
+        logger.debug(
             f"Append a dummy chunk to the Chunk List {chunk_type} "
             f"comm info {comm_info}"
         )
