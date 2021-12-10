@@ -126,10 +126,6 @@ class RuntimeMemTracer(object):
         if self.use_async_mem_monitor:
             self.async_mem_monitor = AsyncMemoryMonitor()
 
-        print(
-            f"[Mem Tracer] Using Asyn Mem Monitor Flag : {self.use_async_mem_monitor}"
-        )
-
         mem_info = get_memory_info()
         local_world_size = get_local_world_size()
         if self.use_fake_dist:

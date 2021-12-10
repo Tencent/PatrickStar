@@ -39,7 +39,7 @@ from data_loader import get_bert_data_loader
 from patrickstar.profiler import profiler
 from patrickstar.runtime import initialize_engine
 from patrickstar.utils import see_memory_usage
-from patrickstar.utils.logging import logger
+from patrickstar.utils.logging import log_dist, logger
 from patrickstar.utils.model_size_calculator import get_ps_model_size
 from model_builder import build_transformer_model
 from parse_args import parse_args
@@ -53,11 +53,6 @@ def test_transformer_model_helper(
     dist_plan: str = "torch",
     num_steps=5,
 ):
-    logger.info(
-        f'test a bert {"fp16" if is_fp16 else "fp32"} model '
-        f'{"with checkpoint" if is_ckp else ""}'
-    )
-
     # Use single card to simulate multicard. Used when you are poor and
     # no more GPU avaiable.
     if args.use_fake_dist:
@@ -117,9 +112,9 @@ def test_transformer_model_helper(
         model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[rank])
 
     model_numel, model_num_param = get_ps_model_size(model)
-    logger.info(f"Model size {model_numel / 1e9} B, total params: {model_num_param}")
+    log_dist(f"Model size {model_numel / 1e9} B, total params: {model_num_param}")
     total_macs = model_numel * args.batch_size * sequence_length * 2 * 4
-    logger.info(f"Total MACs: {total_macs/1024/1024/1024/1024} TFlops")
+    log_dist(f"Total MACs: {total_macs/1024/1024/1024/1024} TFlops")
 
     see_memory_usage(
         f"After model init. using {dist_plan}, gradient checkpoint: {is_ckp}, fp16 {is_fp16}",
@@ -145,7 +140,7 @@ def test_transformer_model_helper(
             break
         # You may need to empty_cache for really large models.
         torch.cuda.empty_cache()
-        logger.info(f"Start Step {n} with {dist_plan}...")
+        log_dist(f"Start Step {n} with {dist_plan}...")
 
         step_start_time = time.time()
         # Only collect running time of the last iteration.
@@ -201,7 +196,7 @@ def test_transformer_model_helper(
                     f"Step {n} elaspe {step_elapse} s, {total_macs / 1e12 / step_elapse} Tflops"
                 )
 
-        logger.info(f"End Step {n} with {dist_plan}.\n")
+        log_dist(f"End Step {n} with {dist_plan}.\n")
 
     if args.with_mem_profiler:
         profiler.end()
