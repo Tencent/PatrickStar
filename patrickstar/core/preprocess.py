@@ -219,6 +219,7 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
         release_after_init=False,
         use_cpu_embedding=False,
         dtype=None,
+        not_init=False,
     ):
         super().__init__(config=None, dtype=dtype)
         self.rank = get_rank()
@@ -231,6 +232,7 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
         self.use_cpu_embedding = use_cpu_embedding
 
         self.submodule_id = -1
+        self.not_init = not_init
 
     def _pre_context_exec(self):
         Embedding.use_cpu = self.use_cpu_embedding
@@ -297,24 +299,25 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
                         param_fp32_chunk_id
                     ),
                 ):
-                    if is_param_registered(param_fp32) and is_param_registered(
-                        param_fp16
-                    ):
-                        ps_data_fp16 = self.client.access_data(
-                            param_fp16, torch.device("cpu:0")
-                        )
+                    if not self.not_init:
+                        if is_param_registered(param_fp32) and is_param_registered(
+                            param_fp16
+                        ):
+                            ps_data_fp16 = self.client.access_data(
+                                param_fp16, torch.device("cpu:0")
+                            )
 
-                        ps_data_fp32 = self.client.access_data(
-                            param_fp32, torch.device("cpu:0")
-                        )
+                            ps_data_fp32 = self.client.access_data(
+                                param_fp32, torch.device("cpu:0")
+                            )
 
-                        # Here the dtype of param_fp16 is actually fp32.
-                        ps_data_fp16.copy_(param_fp16.data)
-                        ps_data_fp32.copy_(param_fp16.data)
+                            # Here the dtype of param_fp16 is actually fp32.
+                            ps_data_fp16.copy_(param_fp16.data)
+                            ps_data_fp32.copy_(param_fp16.data)
 
-                        self.client.release_data(param_fp16)
-                        self.client.release_data(param_fp32)
-                        param_fp16 = param_fp16.to(torch.half)
+                            self.client.release_data(param_fp16)
+                            self.client.release_data(param_fp32)
+                            param_fp16 = param_fp16.to(torch.half)
             else:
                 for param_fp16 in self.client.chunk_tensor_index.params_generator(
                     param_fp16_chunk_id

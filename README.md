@@ -97,7 +97,7 @@ For some detail explanation of the above example, please check the guide [here](
 
 For more examples, please check [here](./examples).
 
-A quick-start benchmark script is [here](./examples/run_bert.sh). It is executed with random generated data, therefore you do not need to prepare the real data. It also demostrated all of the optimization techniques for patricksatr. For more optimization tricks runing the benchmark see [Optimization Options](./doc/optimization_options.md).
+A quick-start benchmark script is [here](./examples/run_transformers.sh). It is executed with random generated data, therefore you do not need to prepare the real data. It also demostrated all of the optimization techniques for patricksatr. For more optimization tricks runing the benchmark see [Optimization Options](./doc/optimization_options.md).
 
 
 ### Limitations

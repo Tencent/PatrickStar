@@ -35,8 +35,8 @@ export CACHE=${CACHE:-1}
 export ASYNC_MOVE=${ASYNC_MOVE:-0}
 # linear tiling comm
 export TILING=${TILING:-0}
-
 export LOCAL_WORLD_SIZE=${LOCAL_WORLD_SIZE:-1}
+export CS_SEARCH=${CS_SEARCH:-0}
 
 if [[ ${TILING} == 1 ]];  then
 TILING_FLAG="--with_tiling_linear"
@@ -102,14 +102,6 @@ else
 export RELEASE_AFTER_INIT_FLAG=""
 fi
 
-export LIGHTSEQ=0
-if [[ ${LIGHTSEQ} == 1 ]]; then
-export LIGHTSEQ_FLAG="--with_lightseq"
-else
-export LIGHTSEQ_FLAG=""
-fi
-
-
 if [[ ${CKP} == 1 ]]; then
     export CKP_FLAG="--use_ckp"
 else
@@ -149,8 +141,8 @@ fi
 wc=`cat /proc/cpuinfo | grep "processor"| wc -l`
 let TNUM=wc/${GPU_NUM}
 echo "CPU core number " $wc "THREAD NUM " ${TNUM}
-env OMP_NUM_THREADS=${TNUM} timeout -s SIGKILL 30m python -m torch.distributed.launch --nproc_per_node=${GPU_NUM} \
-    pretrain_bert_demo.py \
+
+cmd_opts="
     --use_fp16 \
     ${RES_CHECK_FLAG} \
     ${NO_RETRY_FLAG} \
@@ -162,7 +154,6 @@ env OMP_NUM_THREADS=${TNUM} timeout -s SIGKILL 30m python -m torch.distributed.l
     ${CPU_EBD_FLAG} \
     ${HYBRID_ADAM_FLAG} \
     ${RELEASE_AFTER_INIT_FLAG} \
-    --default_chunk_size=${CHUNK_SIZE} \
     ${LIGHTSEQ_FLAG} \
     ${ACT_OFFLOAD_FLAG} \
     ${SP_FLAG} \
@@ -172,4 +163,28 @@ env OMP_NUM_THREADS=${TNUM} timeout -s SIGKILL 30m python -m torch.distributed.l
     ${CACHE_FLAG} \
     ${ASYNC_MOVE_FLAG} \
     ${TILING_FLAG} \
+"
+
+if [[ ${CS_SEARCH} == 1 ]];  then
+mkdir -p ./search_res
+SLOG_FILE="./search_res/slog_file.${MODEL_NAME}_bs_${BS}_cpueb_${CPU_EBD}_lightseq_${LIGHTSEQ}_offload_${ACT_OFFLOAD}_SP_${SP}_AMM_${AMM}_MSC_${MSC}_CACHE_${CACHE}_TILING_${TILING}_${GIT_VER}"
+rm -rf ${SLOG_FILE}
+
+for((i=312;i>=64;i-=32));
+do
+let CUR_CHUNK_SIZE=${i}*1024*1024
+echo "searching CHUNK_SIZE ${i} M elem"
+
+python -m torch.distributed.launch --nproc_per_node=1 \
+    eval_chunk_size.py \
+    --default_chunk_size=${CUR_CHUNK_SIZE} \
+    --slog_file=${SLOG_FILE} \
+    ${cmd_opts}
+done
+else
+env OMP_NUM_THREADS=${TNUM} timeout -s SIGKILL 30m python -m torch.distributed.launch --nproc_per_node=${GPU_NUM} \
+    pretrain_bert_demo.py \
+    --default_chunk_size=${CHUNK_SIZE} \
+    ${cmd_opts}
     2>&1 | tee ${LOG_DIR}/${LOG_FILE}
+fi
