@@ -948,6 +948,7 @@ class PatrickStarClient(object):
         overall_size = 0
         overall_chunk_num = 0
         overall_utilization_ratio = 0.0
+        max_utilization_ratio = 0
         for (
             type,
             type_chunk_list,
@@ -955,6 +956,8 @@ class PatrickStarClient(object):
             logger.debug(f"Chunk list {type}")
             for chunk_id in type_chunk_list:
                 chunk = self.chunk_list[chunk_id]
+                if chunk.is_dummy():
+                    continue
                 comm_info = self.chunk_tensor_index.chunk_id_to_comm_info_map[chunk_id]
                 assert comm_info is not None
 
@@ -979,7 +982,9 @@ class PatrickStarClient(object):
                     f"chunk used {last_used_pos/1024/1024} M elem, "
                     f"{last_used_pos/chunk.capacity * 100} %"
                 )
-                overall_utilization_ratio += last_used_pos / chunk.capacity
+                cur_util = last_used_pos / chunk.capacity
+                max_utilization_ratio = max(cur_util, max_utilization_ratio)
+                overall_utilization_ratio += cur_util
                 overall_size += chunk.get_chunk_space()
                 overall_chunk_num += 1
 

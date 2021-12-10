@@ -584,7 +584,7 @@ class BertModel(BertPreTrainedModel):
 
         self.pooler = BertPooler(config) if add_pooling_layer else None
 
-        self.init_weights()
+        # self.init_weights()
 
     def get_input_embeddings(self):
         return self.embeddings.word_embeddings
@@ -771,7 +771,7 @@ class BertForSequenceClassification(BertPreTrainedModel):
         self.dropout = nn.Dropout(classifier_dropout)
         self.classifier = nn.Linear(config.hidden_size, config.num_labels)
 
-        self.init_weights()
+        # self.init_weights()
 
     def forward(
         self,
