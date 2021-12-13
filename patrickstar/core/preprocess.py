@@ -35,7 +35,7 @@ from patrickstar.core import PatrickStarClient, AccessType, ChunkType
 from patrickstar.core import register_param, is_param_registered, ParamType
 from patrickstar.manager import _runtime_config
 from patrickstar.ops import Embedding
-from patrickstar.utils import logger, print_rank, get_rank, get_world_size
+from patrickstar.utils import logger, log_dist, print_rank, get_rank, get_world_size
 from patrickstar.utils import see_memory_usage
 
 _orig_torch_empty = torch.empty
@@ -219,6 +219,7 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
         release_after_init=False,
         use_cpu_embedding=False,
         dtype=None,
+        not_init=False,
     ):
         super().__init__(config=None, dtype=dtype)
         self.rank = get_rank()
@@ -231,6 +232,7 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
         self.use_cpu_embedding = use_cpu_embedding
 
         self.submodule_id = -1
+        self.not_init = not_init
 
     def _pre_context_exec(self):
         Embedding.use_cpu = self.use_cpu_embedding
@@ -249,7 +251,7 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
             number of processes.
         3. Add a dummy param at the start of CPU Embedding for huggingface.
         """
-        logger.info("Post Model Init Context")
+        log_dist("Post Model Init Context")
 
         def _origin_new(cls, *arg, **kwargs):
             return object.__new__(cls)
@@ -297,24 +299,25 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
                         param_fp32_chunk_id
                     ),
                 ):
-                    if is_param_registered(param_fp32) and is_param_registered(
-                        param_fp16
-                    ):
-                        ps_data_fp16 = self.client.access_data(
-                            param_fp16, torch.device("cpu:0")
-                        )
+                    if not self.not_init:
+                        if is_param_registered(param_fp32) and is_param_registered(
+                            param_fp16
+                        ):
+                            ps_data_fp16 = self.client.access_data(
+                                param_fp16, torch.device("cpu:0")
+                            )
 
-                        ps_data_fp32 = self.client.access_data(
-                            param_fp32, torch.device("cpu:0")
-                        )
+                            ps_data_fp32 = self.client.access_data(
+                                param_fp32, torch.device("cpu:0")
+                            )
 
-                        # Here the dtype of param_fp16 is actually fp32.
-                        ps_data_fp16.copy_(param_fp16.data)
-                        ps_data_fp32.copy_(param_fp16.data)
+                            # Here the dtype of param_fp16 is actually fp32.
+                            ps_data_fp16.copy_(param_fp16.data)
+                            ps_data_fp32.copy_(param_fp16.data)
 
-                        self.client.release_data(param_fp16)
-                        self.client.release_data(param_fp32)
-                        param_fp16 = param_fp16.to(torch.half)
+                            self.client.release_data(param_fp16)
+                            self.client.release_data(param_fp32)
+                            param_fp16 = param_fp16.to(torch.half)
             else:
                 for param_fp16 in self.client.chunk_tensor_index.params_generator(
                     param_fp16_chunk_id
@@ -330,7 +333,7 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
             chunk_num += 1
 
         world_size = get_world_size()
-        logger.info(f"param fp16 chunk num {chunk_num}")
+        log_dist(f"Param fp16 chunk num {chunk_num}")
         while chunk_num % world_size != 0:
             self.client.append_dummy_chunk(torch.half, ChunkType.PARAM_FP16)
             chunk_num += 1
@@ -359,8 +362,6 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
                     )
                     self.client.torch_param_allreduce_list.append(param)
                 return
-
-        print_rank(f"Converting Params in {module.__class__.__name__}", force=False)
 
         if not _runtime_config.use_chunk:
             for name, param in module.named_parameters(recurse=False):

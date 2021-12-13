@@ -31,7 +31,7 @@ from typing import List
 import torch
 
 import patrickstar.utils.global_timer as global_timer
-from patrickstar.utils import logger, get_world_size, get_rank
+from patrickstar.utils import logger, get_world_size, get_rank, log_dist
 from .chunk_list import ChunkList, ChunkType
 from .chunk_tensor_index import ChunkTensorIndex
 from .const import AccessType, ChunkState, TensorState, TrainingStage
@@ -91,7 +91,7 @@ class PatrickStarClient(object):
             self.opt_config["with_async_move"],
         )
         if self.opt_config["with_mem_cache"]:
-            print("[CONFIG] USING MEM CACHE")
+            logger.debug("[CONFIG] USING MEM CACHE")
         self._time_profile = True
 
         if torch.distributed.is_initialized():
@@ -229,7 +229,7 @@ class PatrickStarClient(object):
             AccessType.DATA,
         )
 
-        logger.info(
+        logger.debug(
             f"Append a dummy chunk to the Chunk List {chunk_type} "
             f"comm info {comm_info}"
         )
@@ -272,7 +272,7 @@ class PatrickStarClient(object):
             chunk_id, param_list, access_type
         ):
             raise RuntimeError(
-                f"Can not append a tensor to chunk_tensor_index."
+                f"Can not append a tensor to chunk_tensor_index. "
                 f"Overall size of param list is larger than the default chunk size {self.default_chunk_size}."
             )
         return
@@ -464,7 +464,7 @@ class PatrickStarClient(object):
                     "CLIENT_fetch_remote_chunks_allgather"
                 )
 
-            logger.info(f"rank {rank} allgather {chunk_id_list}")
+            logger.debug(f"rank {rank} allgather {chunk_id_list}")
             torch.distributed.all_gather(
                 allgather_payload_buff,
                 self.chunk_list[local_chunk_id].payload,
@@ -910,21 +910,58 @@ class PatrickStarClient(object):
     def reset(self):
         raise NotImplementedError
 
-    def display_chunk_info(self):
-        logger.info("Print chunk list info.")
-
+    def get_overall_chunk_size(self):
+        """
+        return the overall size of all chunks and
+        the overall chunk utilization excluding fragments.
+        Excepting the dummy chunk if using MSC.
+        """
         overall_size = 0
+        overall_chunk_num = 0
+        overall_utilization_ratio = 0.0
         for (
             type,
             type_chunk_list,
         ) in self.chunk_tensor_index.chunk_type_to_chunk_id_list_map.items():
-            logger.info(f"Chunk list {type}")
+
+            logger.debug(f"Chunk list {type}")
             for chunk_id in type_chunk_list:
                 chunk = self.chunk_list[chunk_id]
+                if self.opt_config["with_mem_saving_comm"] and chunk.is_dummy():
+                    continue
+                comm_info = self.chunk_tensor_index.chunk_id_to_comm_info_map[chunk_id]
+                assert comm_info is not None
+                last_used_pos = 0
+                for info in self.chunk_tensor_index.generate_tensor_info_in_order(
+                    chunk_id
+                ):
+                    last_used_pos = max(last_used_pos, info.start_offset + info.numel)
+                overall_utilization_ratio += last_used_pos / chunk.capacity
+                overall_size += chunk.get_chunk_space()
+                overall_chunk_num += 1
+        overall_utilization_ratio /= overall_chunk_num
+        return overall_size, overall_utilization_ratio
+
+    def display_chunk_info(self):
+        logger.debug("Print chunk list info.")
+
+        overall_size = 0
+        overall_chunk_num = 0
+        overall_utilization_ratio = 0.0
+        max_utilization_ratio = 0
+        for (
+            type,
+            type_chunk_list,
+        ) in self.chunk_tensor_index.chunk_type_to_chunk_id_list_map.items():
+            logger.debug(f"Chunk list {type}")
+            for chunk_id in type_chunk_list:
+                chunk = self.chunk_list[chunk_id]
+                if self.opt_config["with_mem_saving_comm"] and chunk.is_dummy():
+                    continue
                 comm_info = self.chunk_tensor_index.chunk_id_to_comm_info_map[chunk_id]
                 assert comm_info is not None
 
-                logger.info(
+                logger.debug(
                     f"Chunk id {chunk.chunk_id}, state {chunk.get_state()}, "
                     f"comm info {comm_info}, "
                     f"capacity {chunk.capacity / 1024 / 1024} M elems, "
@@ -935,16 +972,24 @@ class PatrickStarClient(object):
                     chunk_id
                 ):
                     assert info.chunk_id == chunk_id, f"{info.chunk_id} vs {chunk_id}"
-                    logger.info(
+                    logger.debug(
                         f"** tensor: chunk_id {chunk_id}, start {info.start_offset}, "
                         f"end {info.start_offset + info.numel}, size {info.numel}, "
                         f"tensor_id {info.tensor_id}, state {info.state()}, name {info.tensor_name}"
                     )
                     last_used_pos = max(last_used_pos, info.start_offset + info.numel)
-                logger.info(
+                logger.debug(
                     f"chunk used {last_used_pos/1024/1024} M elem, "
                     f"{last_used_pos/chunk.capacity * 100} %"
                 )
+                cur_util = last_used_pos / chunk.capacity
+                max_utilization_ratio = max(cur_util, max_utilization_ratio)
+                overall_utilization_ratio += cur_util
                 overall_size += chunk.get_chunk_space()
+                overall_chunk_num += 1
 
-        logger.info(f"OVERALL CHUNK SIZE {overall_size / 1024 / 1024 / 1024} GB")
+        log_dist(f"OVERALL CHUNK SIZE {overall_size / 1024 / 1024 / 1024} GB")
+        log_dist(
+            f"OVERALL UTILIZATION {overall_utilization_ratio / overall_chunk_num * 100} %"
+        )
+        log_dist(f"MAX UTILIZATION {max_utilization_ratio * 100} %")

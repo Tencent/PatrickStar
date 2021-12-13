@@ -135,7 +135,7 @@ class FP16ChunkWriteBuffer(object):
         if self.cached_src_chunk_id is None:
             return
         global_rank = get_rank()
-        logger.info(
+        logger.debug(
             f"global_rank {global_rank} finally, write chunk {self.cached_target_chunk_id}"
         )
         # It's possible that the chunk is empty (no payload), e.g. the process only possesses
@@ -197,13 +197,13 @@ class FP32ChunkReadBuffer(object):
                     gpu_device, chunk_size, torch.half, False
                 )
             else:
-                logger.info(
+                logger.debug(
                     f"Allocate fp32 Chunk Buffer of size {chunk_size / 1e6} MB on CPU."
                 )
                 self.gpu_payload = torch.empty(
                     chunk_size, dtype=torch.half, device=gpu_device
                 )
-            logger.info(
+            logger.debug(
                 f"Allocate fp32 Chunk Buffer of size {chunk_size / 1e6} MB on {gpu_device}."
             )
         self.cached_chunk_id = None
