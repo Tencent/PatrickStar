@@ -15,11 +15,11 @@ The idea of Patrick is like this. The non-model data (mainly activations) varies
 See the paper and [this doc](./INSIDE.md) for the idea behind PatrickStar.
 
 ### Results
-In experiment, Patrickstar v0.4.3 is able to train a **18 Billion**(18B) param model with 8xTesla V100 GPU and 240GB GPU memory, which is over twice as large as the state of art. And the performance of PatrickStar is better for models of the same size as well. The pstar is PatrickStar v0.4.3. The deeps indicates performance of DeepSpeed v0.4.3 using the official example [DeepSpeed example](https://github.com/microsoft/DeepSpeedExamples/blob/master/Megatron-LM-v1.1.5-ZeRO3/examples/ds_pretrain_gpt2-zero3.sh) zero3 stage with activation optimzations openning by default.
+In experiment, Patrickstar v0.4.3 is able to train a **18 Billion**(18B) param model with 8xTesla V100 GPU and 240GB GPU memory in WeChat datacenter node, whose network topology is like [this](./doc/yard_network_fabric.md). PatrickStar is over twice as large as the DeepSpeed. And the performance of PatrickStar is better for models of the same size as well. The pstar is PatrickStar v0.4.3. The deeps indicates performance of DeepSpeed v0.4.3 using the official example [DeepSpeed example](https://github.com/microsoft/DeepSpeedExamples/blob/master/Megatron-LM-v1.1.5-ZeRO3/examples/ds_pretrain_gpt2-zero3.sh) zero3 stage with activation optimzations openning by default.
 
 ![alt perf](./doc/mgpu_scalability.png "performance testing result")
 
-We also evaluated PatrickStar v0.4.3 on a single node of A100 SuperPod. It is able to train 50B model on 8xA100 with 1TB CPU memory, which is 4x larger than DeepSpeed v0.5.7. Besides the model scale, PatrickStar is way more efficient than DeepSpeed. This is far beyond our expectations and we have to check it with DeepSpeed before presenting the comparison results. The benchmark scripts are in [here](./examples/benchmark).
+We also evaluated PatrickStar v0.4.3 on a single node of A100 SuperPod. It is able to train 68B model on 8xA100 with 1TB CPU memory, which is 4x larger than DeepSpeed v0.5.7. Besides the model scale, PatrickStar is way more efficient than DeepSpeed. This is far beyond our expectations and we have to check it with DeepSpeed before presenting the comparison results. The benchmark scripts are in [here](./examples/benchmark).
 
 ![alt perf](./doc/one_node_perf_a100.png "performance testing result on SuperNode")
 
@@ -103,6 +103,10 @@ A quick-start benchmark script is [here](./examples/run_transformers.sh). It is 
 ### Limitations
 
 1. PatrickStar currently is not evaluated on DNN with parameters shared in different layers. For example, be careful to use it with tie-weight. But you can still label the tied weight to be managed by PyTorch, and make the remaining layers managed by PatrickStar chunk-based memory management.
+
+2. PatrickStar currently does not support gradient accumulation since it reuses grad and param chunks by default, although it could be implemented as a no chunk reuse version.
+In our opinion, GA is a patch for CUDA OOM, and lower the computing efficiency is extremely low with batch size as 1,2.
+PatrickStar has solved it very well; it surpasses DeepSpeed with GA significantly.
 
 ### License
 BSD 3-Clause License
