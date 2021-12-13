@@ -165,11 +165,17 @@ def model_config(model_name):
         SEQ_LEN = 1024
         NUM_LAYER = 75
         NUM_HEAD = 16
-    elif model_name == "GPT_DS_70B":
+    elif model_name == "GPT_DS_68B":
         HIDDEN_DIM = 9216
         SEQ_LEN = 1024
-        NUM_LAYER = 69
+        NUM_LAYER = 66
         NUM_HEAD = 16
+    # OpenAI GPT3
+    elif model_name == "GPT_DS_175B":
+        HIDDEN_DIM = 12288
+        SEQ_LEN = 1024
+        NUM_LAYER = 96
+        NUM_HEAD = 96
     else:
         raise RuntimeError(f"The model name {model_name} is not valid!")
     assert HIDDEN_DIM % NUM_HEAD == 0
