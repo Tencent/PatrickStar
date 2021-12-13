@@ -34,6 +34,7 @@ import torch
 from patrickstar.core.const import TrainingStage
 from patrickstar.profiler import profiler
 from patrickstar.utils import (
+    log_dist,
     get_memory_info,
     get_sys_memory_used,
     get_world_size,
@@ -125,10 +126,6 @@ class RuntimeMemTracer(object):
         if self.use_async_mem_monitor:
             self.async_mem_monitor = AsyncMemoryMonitor()
 
-        print(
-            f"[Mem Tracer] Using Asyn Mem Monitor Flag : {self.use_async_mem_monitor}"
-        )
-
         mem_info = get_memory_info()
         local_world_size = get_local_world_size()
         if self.use_fake_dist:
@@ -150,7 +147,7 @@ class RuntimeMemTracer(object):
                 mem_info.total * self._overall_cpu_mem_ratio / local_world_size
             )
 
-        logger.info(
+        log_dist(
             f"Init Manager over all gpu mem {self._overall_gpu_mem / 1e6} MB, "
             f"cpu mem {self._overall_cpu_mem / 1e6} MB"
         )
@@ -175,14 +172,14 @@ class RuntimeMemTracer(object):
         """
         if self.use_async_mem_monitor:
             self.async_mem_monitor.finish()
-        print("**** Memory Tracer is closed! ****")
+        log_dist("**** Memory Tracer is closed! ****")
 
     def start_train(self, param_fp16_chunk_size, chunk_size):
         self._param_fp16_chunk_size = param_fp16_chunk_size
         self._default_chunk_size = chunk_size
         if self.use_async_mem_monitor:
             self.async_mem_monitor.start()
-        print("**** Memory Tracer is stared! ****")
+        log_dist("**** Memory Tracer is stared! ****")
 
     def update_margin_mem(self):
         r"""Update the number of GPU free chunks for optimizer."""
@@ -193,6 +190,15 @@ class RuntimeMemTracer(object):
             max_gpu_sys_used = 0
         else:
             max_gpu_sys_used = max(self.gpu_sys_used_list)
+
+        if len(self.cpu_sys_used_list) == 0:
+            logger.warning(
+                "No gpu info collected. Maybe there are no chunk based tensors."
+            )
+            max_cpu_sys_used = 0
+        else:
+            max_cpu_sys_used = max(self.cpu_sys_used_list)
+
         margin_mem_size = (
             self._overall_gpu_mem - max_gpu_sys_used - self._param_fp16_chunk_size
         )
@@ -201,14 +207,16 @@ class RuntimeMemTracer(object):
             (margin_mem_size) / (self._default_chunk_size * 12) * self._margin_use_ratio
         )
 
-        logger.info("--------------- GPU INFO AFTER BWD ----------------")
-        logger.info(f"Max GPU System Mem (non-chunk) Used {max_gpu_sys_used / 1e6} MB")
-        logger.info(f"Param FP16 Chunk Size {self._param_fp16_chunk_size / 1e6} MB")
-        logger.info(
+        log_dist("--------------- GPU INFO AFTER BWD ----------------")
+        log_dist(f"Max GPU System Mem (non-chunk) Used {max_gpu_sys_used / 1e6} MB")
+        log_dist(f"Max CPU System Mem (non-chunk) Used {max_cpu_sys_used / 1e6} MB")
+        log_dist(f"Param FP16 Chunk Size {self._param_fp16_chunk_size / 1e6} MB")
+        log_dist(
             f"Margin Mem Size {margin_mem_size / 1e6} MB, "
             f"available chunk num for Optimizer States {self._margin_chunk_num_for_gpu_adam}"
         )
-        logger.info(f"OVERALL GPU MEM {self._overall_gpu_mem}")
+        log_dist("--------------- GPU INFO AFTER BWD ----------------")
+        logger.debug(f"OVERALL GPU MEM {self._overall_gpu_mem/1024/1024} MB")
 
     def reset_memory_stats(self):
         """
@@ -228,7 +236,7 @@ class RuntimeMemTracer(object):
             self.gpu_used_list = []
             self.gpu_chunk_used_list = []
             self.gpu_sys_used_list = []
-        logger.info("Reset Memory Statistics")
+        log_dist("Reset Memory Statistics")
 
     def get_margin_chunk_num_for_gpu_adam(self):
         return self._margin_chunk_num_for_gpu_adam

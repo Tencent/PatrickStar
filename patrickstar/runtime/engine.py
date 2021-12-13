@@ -32,7 +32,7 @@ import torch
 from patrickstar.core import ChunkState, TensorState, TrainingStage, ParamType
 from patrickstar.fp16 import LossScaler, DynamicLossScaler
 from patrickstar.ops import FP16Adam
-from patrickstar.utils import logger, global_timer
+from patrickstar.utils import log_dist, global_timer
 
 from .checkpoint import state_dict, load_state_dict
 from patrickstar.profiler import profiler
@@ -86,7 +86,7 @@ class PatrickStarEngine(torch.nn.Module):
                 ), "Must have `loss_scale` field set."
                 loss_scale = loss_scale_config["loss_scale"]
                 if loss_scale == 0:
-                    logger.info("Use DynamicLossScaler")
+                    log_dist("Use DynamicLossScaler")
                     self.loss_scaler = DynamicLossScaler(
                         init_scale=(
                             2 ** loss_scale_config.get("initial_scale_power", 16)
@@ -129,7 +129,7 @@ class PatrickStarEngine(torch.nn.Module):
         self.iteration_cnt_ = 0
         # TODO(jiaruifang) pass in via config.
         self.warmup_times = 1
-        logger.info("PatrickStarEngine initialized.")
+        log_dist("PatrickStarEngine initialized.")
 
     def _move_torch_parts_to_gpu(self, model):
         # TODO(zilinzhu) Currently we move all buffers to GPU as the buffer size is

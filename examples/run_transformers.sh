@@ -115,7 +115,7 @@ LOG_DIR="./logs_${MODEL_NAME}"
 mkdir -p ${LOG_DIR}
 
 GIT_VER=`git rev-parse --short=5 HEAD`
-LOG_FILE="log.${MODEL_NAME}_gpu_${GPU_NUM}_cs_${CS}_bs_${BS}_cpueb_${CPU_EBD}_lightseq_${LIGHTSEQ}_offload_${ACT_OFFLOAD}_SP_${SP}_AMM_${AMM}_MSC_${MSC}_CACHE_${CACHE}_TILING_${TILING}_${GIT_VER}"
+LOG_FILE="log.${MODEL_NAME}_gpu_${GPU_NUM}_cs_${CS}_bs_${BS}_cpueb_${CPU_EBD}_offload_${ACT_OFFLOAD}_SP_${SP}_AMM_${AMM}_MSC_${MSC}_CACHE_${CACHE}_TILING_${TILING}_${GIT_VER}"
 
 is_run_flag=`python ./benchmark/is_run_this_file.py --path "${LOG_DIR}" --file "${LOG_FILE}"`
 echo is_run_flag $is_run_flag
@@ -167,7 +167,7 @@ cmd_opts="
 
 if [[ ${CS_SEARCH} == 1 ]];  then
 mkdir -p ./search_res
-SLOG_FILE="./search_res/slog_file.${MODEL_NAME}_bs_${BS}_cpueb_${CPU_EBD}_lightseq_${LIGHTSEQ}_offload_${ACT_OFFLOAD}_SP_${SP}_AMM_${AMM}_MSC_${MSC}_CACHE_${CACHE}_TILING_${TILING}_${GIT_VER}"
+SLOG_FILE="./search_res/slog_file.${MODEL_NAME}_bs_${BS}_cpueb_${CPU_EBD}_offload_${ACT_OFFLOAD}_SP_${SP}_AMM_${AMM}_MSC_${MSC}_CACHE_${CACHE}_TILING_${TILING}_${GIT_VER}"
 rm -rf ${SLOG_FILE}
 
 for((i=312;i>=64;i-=32));
@@ -185,6 +185,6 @@ else
 env OMP_NUM_THREADS=${TNUM} timeout -s SIGKILL 30m python -m torch.distributed.launch --nproc_per_node=${GPU_NUM} \
     pretrain_bert_demo.py \
     --default_chunk_size=${CHUNK_SIZE} \
-    ${cmd_opts}
+    ${cmd_opts} \
     2>&1 | tee ${LOG_DIR}/${LOG_FILE}
 fi

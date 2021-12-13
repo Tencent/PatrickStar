@@ -30,8 +30,9 @@
 import torch
 from patrickstar.core import PSPreProcessCtx, PatrickStarClient
 from patrickstar.core.memtracer import RuntimeMemTracer
-from patrickstar.utils import logger
+from patrickstar.utils import logger, log_dist
 from .engine import PatrickStarEngine
+import time
 
 DEFAULT_CHUNK_SIZE = 32 * 1024 * 1024
 
@@ -73,6 +74,8 @@ def initialize_engine(model_func, local_rank, config=None, client=None):
             config=config.get("client", None),
         )
 
+        start_time = time.time()
+        log_dist("begin initialize the model parameters...")
         with PSPreProcessCtx(
             client=client,
             dtype=torch.float,
@@ -80,6 +83,10 @@ def initialize_engine(model_func, local_rank, config=None, client=None):
             use_cpu_embedding=use_cpu_embedding,
         ):
             model = model_func()
+        end_time = time.time()
+        log_dist(
+            f"finished initialized the model parameters... {end_time  - start_time} s"
+        )
 
     engine = PatrickStarEngine(model=model, client=client, config=config)
     client.start_mem_tracer()

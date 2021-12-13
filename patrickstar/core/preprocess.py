@@ -35,7 +35,7 @@ from patrickstar.core import PatrickStarClient, AccessType, ChunkType
 from patrickstar.core import register_param, is_param_registered, ParamType
 from patrickstar.manager import _runtime_config
 from patrickstar.ops import Embedding
-from patrickstar.utils import logger, print_rank, get_rank, get_world_size
+from patrickstar.utils import logger, log_dist, print_rank, get_rank, get_world_size
 from patrickstar.utils import see_memory_usage
 
 _orig_torch_empty = torch.empty
@@ -251,7 +251,7 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
             number of processes.
         3. Add a dummy param at the start of CPU Embedding for huggingface.
         """
-        logger.info("Post Model Init Context")
+        log_dist("Post Model Init Context")
 
         def _origin_new(cls, *arg, **kwargs):
             return object.__new__(cls)
@@ -333,7 +333,7 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
             chunk_num += 1
 
         world_size = get_world_size()
-        logger.info(f"param fp16 chunk num {chunk_num}")
+        log_dist(f"Param fp16 chunk num {chunk_num}")
         while chunk_num % world_size != 0:
             self.client.append_dummy_chunk(torch.half, ChunkType.PARAM_FP16)
             chunk_num += 1
@@ -362,8 +362,6 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
                     )
                     self.client.torch_param_allreduce_list.append(param)
                 return
-
-        print_rank(f"Converting Params in {module.__class__.__name__}", force=False)
 
         if not _runtime_config.use_chunk:
             for name, param in module.named_parameters(recurse=False):
