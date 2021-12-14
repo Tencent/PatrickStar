@@ -180,7 +180,7 @@ def model_config(model_name):
         HIDDEN_DIM = 16384
         SEQ_LEN = 1024
         NUM_LAYER = 128
-        NUM_HEAD = 96
+        NUM_HEAD = 128
     elif model_name == "GPT_454B":
         HIDDEN_DIM = 20480
         SEQ_LEN = 1024
