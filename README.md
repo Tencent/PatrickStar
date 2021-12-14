@@ -21,6 +21,7 @@ In experiment, Patrickstar v0.4.3 is able to train a **18 Billion**(18B) param m
 
 We also evaluated PatrickStar v0.4.3 on a single node of A100 SuperPod. It is able to train 50B model on 8xA100 with 1TB CPU memory, which is over 6x larger than DeepSpeed v0.5.7. Besides the model scale, PatrickStar is way more efficient than DeepSpeed. The benchmark scripts are in [here](./examples/benchmark).
 
+
 ![alt perf](./doc/one_node_perf_a100.png "performance testing result on SuperNode")
 
 Detail benchmark results on WeChat AI data center as well as NVIDIA SuperPod are posted on this [Google Doc](https://docs.google.com/spreadsheets/d/136CWc_jA_2zC4h1r-6dzD4PrOvp6aw6uCDchEyQv6sE/edit?usp=sharing).
