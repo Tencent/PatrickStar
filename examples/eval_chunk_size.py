@@ -181,7 +181,8 @@ def evaluate_chunk_size(args):
     logger.info(f"writing to {args.slog_file}\n")
 
     if get_rank() == 0:
-        with open(f"{args.slog_file}", "a+") as fh:
+        global_gpu_num = HARDWARE_SETTING_JSON.get("global_gpu_num")
+        with open(f"{args.slog_file}_gpu_{global_gpu_num}", "a+") as fh:
             fh.write(
                 f"{args.default_chunk_size/1024/1024} {overall_chunk_size/1024/1024}, {utils}\n"
             )
