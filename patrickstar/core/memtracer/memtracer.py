@@ -103,6 +103,7 @@ class RuntimeMemTracer(object):
 
         self.gpu_chunk_used_mem = 0
         self.cpu_chunk_used_mem = 0
+        self.cpu_chunk_used_mem_pinned = 0
 
         if config is not None:
             self._overall_gpu_mem_ratio = config.get("overall_gpu_mem_ratio", 0.8)
@@ -165,6 +166,7 @@ class RuntimeMemTracer(object):
         # from peak system memory.
         self._margin_chunk_num_for_gpu_adam = 0
         self._default_chunk_size = 0
+        self.max_cpu_sys_used = 0
 
     def close_tracer(self):
         """
@@ -195,21 +197,23 @@ class RuntimeMemTracer(object):
             logger.warning(
                 "No gpu info collected. Maybe there are no chunk based tensors."
             )
-            max_cpu_sys_used = 0
+            self.max_cpu_sys_used = 0
         else:
-            max_cpu_sys_used = max(self.cpu_sys_used_list)
+            self.max_cpu_sys_used = max(self.cpu_sys_used_list)
 
         margin_mem_size = (
             self._overall_gpu_mem - max_gpu_sys_used - self._param_fp16_chunk_size
         )
-        # 12 = 4 + 4 + 4 fp32 + m + v
+        # 12 = 4 + 4 + 4 (fp32 + m + v)
         self._margin_chunk_num_for_gpu_adam = (
             (margin_mem_size) / (self._default_chunk_size * 12) * self._margin_use_ratio
         )
 
         log_dist("--------------- GPU INFO AFTER BWD ----------------")
         log_dist(f"Max GPU System Mem (non-chunk) Used {max_gpu_sys_used / 1e6} MB")
-        log_dist(f"Max CPU System Mem (non-chunk) Used {max_cpu_sys_used / 1e6} MB")
+        log_dist(
+            f"Max CPU System Mem (non-chunk) Used {self.max_cpu_sys_used / 1e6} MB"
+        )
         log_dist(f"Param FP16 Chunk Size {self._param_fp16_chunk_size / 1e6} MB")
         log_dist(
             f"Margin Mem Size {margin_mem_size / 1e6} MB, "
@@ -280,7 +284,11 @@ class RuntimeMemTracer(object):
             cpu_used = get_sys_memory_used(cpu_device)
             self.cpu_used_list.append(cpu_used)
             self.cpu_chunk_used_list.append(self.cpu_chunk_used_mem)
-            self.cpu_sys_used_list.append((cpu_used - self.cpu_chunk_used_mem))
+            # detected cpu memory usage (already excluded pinned memory) - chunk non
+            # pinned memory usage = system cpu usage (non-chunk cpu memory)
+            self.cpu_sys_used_list.append(
+                cpu_used - (self.cpu_chunk_used_mem - self.cpu_chunk_used_mem_pinned)
+            )
 
             # For non-warmup iter, we update the mem of index cur_mom,
             # and for warmup iter, we append the gpu mem to the end of the list.
@@ -297,17 +305,21 @@ class RuntimeMemTracer(object):
 
         self.metronome.tiktac()
 
-    def add(self, device_type: str, size_in_bytes: int):
+    def add(self, device_type: str, size_in_bytes: int, is_pinned: bool = False):
         if device_type == "cpu":
             self.cpu_chunk_used_mem += size_in_bytes
+            if is_pinned:
+                self.cpu_chunk_used_mem_pinned += size_in_bytes
         elif device_type == "cuda":
             self.gpu_chunk_used_mem += size_in_bytes
         else:
             raise f"device type {device_type} is not supported"
 
-    def delete(self, device_type, size_in_bytes):
+    def delete(self, device_type, size_in_bytes, is_pinned: bool = False):
         if device_type == "cpu":
             self.cpu_chunk_used_mem -= size_in_bytes
+            if is_pinned:
+                self.cpu_chunk_used_mem_pinned -= size_in_bytes
         elif device_type == "cuda":
             self.gpu_chunk_used_mem -= size_in_bytes
         else:
@@ -377,7 +389,11 @@ class RuntimeMemTracer(object):
                     return self._overall_gpu_mem * self.warmup_gpu_chunk_mem_ratio
 
         if device_type == "cpu":
-            return self._overall_cpu_mem
+            local_world_size = get_local_world_size()
+            if self.metronome.training_stage() != TrainingStage.ADAM:
+                return self._overall_cpu_mem - self.max_cpu_sys_used / local_world_size
+            else:
+                return self._overall_cpu_mem
         elif device_type == "cuda":
             world_size = get_world_size()
             if self.metronome.training_stage() == TrainingStage.ADAM:

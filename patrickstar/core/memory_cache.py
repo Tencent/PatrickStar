@@ -55,7 +55,7 @@ class MemoryCache(object):
             device=device_type,
             pin_memory=pin_memory,
         )
-        self._memtracer.add(device_type.type, space_size)
+        self._memtracer.add(device_type.type, space_size, pin_memory)
         return ret
 
     def pop_or_allocate(
@@ -104,8 +104,9 @@ class MemoryCache(object):
             size = payload.numel()
             # the cache is fulled
             if len(self._cached_tensors[(device_type, data_type)]) == self._capacity:
+                is_pinned_flag = payload.is_pinned()
                 del payload
                 space_size = getsizeof(data_type) * size
-                self._memtracer.delete(device_type.type, space_size)
+                self._memtracer.delete(device_type.type, space_size, is_pinned_flag)
             else:
                 self._cached_tensors[(device_type, data_type)].append(payload.zero_())

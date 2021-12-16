@@ -319,6 +319,7 @@ class PatrickStarClient(object):
                 * self.default_chunk_size
                 * 2
                 / world_size
+                + self.default_chunk_size * 2
             )
         else:
             # non MSC has to cache work_size - 1 buffer.
