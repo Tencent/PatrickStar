@@ -178,7 +178,11 @@ class Chunk(object):
             # must delete reference of `Chunk` to self.payload
             self.payload = None
         else:
-            self.memory_tracer.delete(self.get_device().type, self.get_payload_space())
+            self.memory_tracer.delete(
+                self.get_device().type,
+                self.get_payload_space(),
+                self.get_payload_space().is_pinned(),
+            )
             del self.payload
             self.payload = None
         if profiler.started():
@@ -324,7 +328,11 @@ class Chunk(object):
                 self.payload = self.payload.pin_memory()
                 self.payload = self.payload.to(target_device)
 
-            self.memory_tracer.delete(src_device.type, self.get_payload_space())
+            self.memory_tracer.delete(
+                src_device.type,
+                self.get_payload_space(),
+                self.get_payload_space().is_pinned(),
+            )
             self.memory_tracer.add(target_device.type, self.get_payload_space())
 
         if self._time_profile:

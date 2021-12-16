@@ -103,6 +103,7 @@ class RuntimeMemTracer(object):
 
         self.gpu_chunk_used_mem = 0
         self.cpu_chunk_used_mem = 0
+        self.cpu_chunk_used_mem_pinned = 0
 
         if config is not None:
             self._overall_gpu_mem_ratio = config.get("overall_gpu_mem_ratio", 0.8)
@@ -280,7 +281,8 @@ class RuntimeMemTracer(object):
             cpu_used = get_sys_memory_used(cpu_device)
             self.cpu_used_list.append(cpu_used)
             self.cpu_chunk_used_list.append(self.cpu_chunk_used_mem)
-            self.cpu_sys_used_list.append((cpu_used - self.cpu_chunk_used_mem))
+            # TODO(jiaruifang) due to pinned-memory, the sys used list is not correct.
+            self.cpu_sys_used_list.append(cpu_used - self.cpu_chunk_used_mem_pinned)
 
             # For non-warmup iter, we update the mem of index cur_mom,
             # and for warmup iter, we append the gpu mem to the end of the list.
@@ -297,17 +299,21 @@ class RuntimeMemTracer(object):
 
         self.metronome.tiktac()
 
-    def add(self, device_type: str, size_in_bytes: int):
+    def add(self, device_type: str, size_in_bytes: int, is_pinned: bool = False):
         if device_type == "cpu":
             self.cpu_chunk_used_mem += size_in_bytes
+            if is_pinned:
+                self.cpu_chunk_used_mem_pinned += size_in_bytes
         elif device_type == "cuda":
             self.gpu_chunk_used_mem += size_in_bytes
         else:
             raise f"device type {device_type} is not supported"
 
-    def delete(self, device_type, size_in_bytes):
+    def delete(self, device_type, size_in_bytes, is_pinned: bool = False):
         if device_type == "cpu":
             self.cpu_chunk_used_mem -= size_in_bytes
+            if is_pinned:
+                self.cpu_chunk_used_mem_pinned -= size_in_bytes
         elif device_type == "cuda":
             self.gpu_chunk_used_mem -= size_in_bytes
         else:
