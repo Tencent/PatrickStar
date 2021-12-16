@@ -55,7 +55,7 @@ class MemoryCache(object):
             device=device_type,
             pin_memory=pin_memory,
         )
-        self._memtracer.add(device_type.type, space_size)
+        self._memtracer.add(device_type.type, space_size, pin_memory)
         return ret
 
     def pop_or_allocate(
