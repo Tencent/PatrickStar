@@ -155,7 +155,7 @@ class Chunk(object):
                 self.memory_tracer.add(
                     device.type,
                     self.get_payload_space(),
-                    self.get_payload_space().is_pinned(),
+                    self.payload.is_pinned(),
                 )
             except RuntimeError:
                 if self._time_profile:
@@ -185,7 +185,7 @@ class Chunk(object):
             self.memory_tracer.delete(
                 self.get_device().type,
                 self.get_payload_space(),
-                self.get_payload_space().is_pinned(),
+                self.payload.is_pinned(),
             )
             del self.payload
             self.payload = None
@@ -335,12 +335,12 @@ class Chunk(object):
             self.memory_tracer.delete(
                 src_device.type,
                 self.get_payload_space(),
-                self.get_payload_space().is_pinned(),
+                self.payload.is_pinned(),
             )
             self.memory_tracer.add(
                 target_device.type,
                 self.get_payload_space(),
-                self.get_payload_space().is_pinned(),
+                self.payload.is_pinned(),
             )
 
         if self._time_profile:
