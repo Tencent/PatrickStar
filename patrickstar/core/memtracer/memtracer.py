@@ -204,7 +204,7 @@ class RuntimeMemTracer(object):
         margin_mem_size = (
             self._overall_gpu_mem - max_gpu_sys_used - self._param_fp16_chunk_size
         )
-        # 12 = 4 + 4 + 4 fp32 + m + v
+        # 12 = 4 + 4 + 4 (fp32 + m + v)
         self._margin_chunk_num_for_gpu_adam = (
             (margin_mem_size) / (self._default_chunk_size * 12) * self._margin_use_ratio
         )
@@ -389,8 +389,9 @@ class RuntimeMemTracer(object):
                     return self._overall_gpu_mem * self.warmup_gpu_chunk_mem_ratio
 
         if device_type == "cpu":
+            local_world_size = get_local_world_size()
             if self.metronome.training_stage() != TrainingStage.ADAM:
-                self._overall_cpu_mem - self.max_cpu_sys_used
+                return self._overall_cpu_mem - self.max_cpu_sys_used / local_world_size
             else:
                 return self._overall_cpu_mem
         elif device_type == "cuda":
