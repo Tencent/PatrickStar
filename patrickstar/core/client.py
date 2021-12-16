@@ -313,14 +313,22 @@ class PatrickStarClient(object):
         from allgather.
         """
         world_size = get_world_size()
-        # 本进程自己管理的Chunk，和Group Chunk Buff会分配的Chunk
-        return (
-            self.chunk_tensor_index.chunk_num(ChunkType.PARAM_FP16)
-            * self.default_chunk_size
-            * 2
-            / world_size
-            + (world_size - 1) * self.default_chunk_size * 2
-        )
+        if self.opt_config["with_mem_saving_comm"]:
+            return (
+                self.chunk_tensor_index.chunk_num(ChunkType.PARAM_FP16)
+                * self.default_chunk_size
+                * 2
+                / world_size
+            )
+        else:
+            # non MSC has to cache work_size - 1 buffer.
+            return (
+                self.chunk_tensor_index.chunk_num(ChunkType.PARAM_FP16)
+                * self.default_chunk_size
+                * 2
+                / world_size
+                + (world_size - 1) * self.default_chunk_size * 2
+            )
 
     def set_all_tensors_state_in_chunk(self, chunk_id, new_state):
         r"""Set the state of all tensors in a chunk.
