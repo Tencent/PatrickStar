@@ -37,7 +37,6 @@ from patrickstar.utils import (
     log_dist,
     get_memory_info,
     get_sys_memory_used,
-    get_world_size,
     get_local_world_size,
     logger,
 )
@@ -395,7 +394,6 @@ class RuntimeMemTracer(object):
             else:
                 return self._overall_cpu_mem
         elif device_type == "cuda":
-            world_size = get_world_size()
             if self.metronome.training_stage() == TrainingStage.ADAM:
                 return self._overall_gpu_mem - 4 * self._default_chunk_size * 4
             elif self.metronome.training_stage() == TrainingStage.FWD:
@@ -409,7 +407,7 @@ class RuntimeMemTracer(object):
                 )
                 return (
                     min(next_mom_ava_mem, cur_mom_ava_mem)
-                    - world_size * 2 * self._default_chunk_size
+                    - 2 * self._default_chunk_size
                 )
             elif self.metronome.training_stage() == TrainingStage.BWD:
                 next_mom = self.metronome.next_moment()
@@ -422,5 +420,5 @@ class RuntimeMemTracer(object):
                 )
                 return (
                     min(next_mom_ava_mem, cur_mom_ava_mem)
-                    - world_size * 2 * self._default_chunk_size
+                    - 2 * self._default_chunk_size
                 )
