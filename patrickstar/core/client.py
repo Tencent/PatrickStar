@@ -396,6 +396,7 @@ class PatrickStarClient(object):
             # If the gpu owns the chunk (local rank), access it.
             # If the gpu do not own the chunk (remote chunk), allocate memory.
             if src_rank == rank:
+                self.chunk_eviction_strategy.trace_access(chunk_id, compute_device)
                 self.chunk_list.access_chunk(chunk_id, compute_device)
             else:
                 self.chunk_list.try_best_allocate_payload(
@@ -447,6 +448,7 @@ class PatrickStarClient(object):
 
             # Use collective communication to achieve the most efficient communication.
             # However, it is memory consumping. world_size chunks on GPU simutaneously.
+            self.chunk_eviction_strategy.trace_access(local_chunk_id, compute_device)
             self.chunk_list.access_chunk(local_chunk_id, compute_device)
             self.chunk_list[local_chunk_id].pin()
             allgather_payload_buff = []
@@ -493,6 +495,7 @@ class PatrickStarClient(object):
             global_timer.my_timer.finish_profile("CLIENT_fetch_remote_chunks")
 
     def _access_tensor_in_chunk(self, param, access_type, compute_device, chunk_id):
+        self.chunk_eviction_strategy.trace_access(chunk_id, compute_device)
         self.chunk_list.access_chunk(chunk_id, compute_device)
         # 2. Locate the param on the chunk.
         tensor_id = param.ps_attr.get_tensor_id(access_type)
@@ -584,7 +587,7 @@ class PatrickStarClient(object):
             local_chunk_id = chunk_id
 
         # collect the time a chunk has to be placed on compute-device
-        self.chunk_eviction_strategy.trace_access(local_chunk_id, compute_device)
+        # self.chunk_eviction_strategy.trace_access(local_chunk_id, compute_device)
 
         ret = self._access_tensor_in_chunk(param, access_type, compute_device, chunk_id)
         if self._time_profile:
@@ -640,7 +643,7 @@ class PatrickStarClient(object):
         chunk_id = self.chunk_tensor_index.get_chunk_id(param, access_type)
 
         # collect the time a chunk has to be placed on compute-device
-        self.chunk_eviction_strategy.trace_access(chunk_id, compute_device)
+        # self.chunk_eviction_strategy.trace_access(chunk_id, compute_device)
 
         if chunk_id is None:
             raise RuntimeError(
@@ -763,6 +766,7 @@ class PatrickStarClient(object):
                             break
                     if do_allreduce:
                         # move the chunk_id to GPU
+                        self.chunk_eviction_strategy.trace_access(chunk_id, self.device)
                         self.chunk_list.access_chunk(chunk_id, self.device)
                         if self._time_profile:
                             global_timer.my_timer.start_profile(
@@ -818,6 +822,7 @@ class PatrickStarClient(object):
                         assert self.chunk_list[local_chunk_id].payload is not None
                         input_list = []
                         for i in chunk_id_list:
+                            self.chunk_eviction_strategy.trace_access(i, self.device)
                             self.chunk_list.access_chunk(i, self.device)
                             self.chunk_list[i].pin()
                             input_list.append(self.chunk_list[i].payload)
