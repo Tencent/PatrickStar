@@ -32,7 +32,8 @@ from abc import ABC, abstractmethod
 from queue import PriorityQueue
 from patrickstar.core.memtracer import Metronome
 from patrickstar.core.const import ChunkState
-from patrickstar.utils import logger
+from patrickstar.utils import log_dist
+import logging
 
 
 class ChunkEvictionPolicyBase(ABC):
@@ -112,6 +113,8 @@ class LatestAccessChunkEvictionPolicy(ChunkEvictionPolicyBase):
                 chunk.get_device() is not None
                 and chunk.get_device().type == target_device.type
                 and chunk.get_state() != ChunkState.COMPUTE
+                and chunk.get_state() != ChunkState.RELEASED
+                and chunk.get_state() != ChunkState.FREE
                 and not chunk.is_pin()
             ):
                 # The next moment when this chunk was accessed.
@@ -133,10 +136,12 @@ class LatestAccessChunkEvictionPolicy(ChunkEvictionPolicyBase):
 
         # Raise error when failed to make enough room.
         if moved_bytes < need_bytes:
-            logger.warning(
+            log_dist(
                 f"device {target_device} still needs {need_bytes / 1e6} MB, "
                 f"but there is not enough space on it, only {moved_bytes / 1e6} MB available. "
-                f"movable_chunk_info {movable_chunk_info}"
+                f"movable_chunk_info {movable_chunk_info}",
+                [0],
+                logging.WARNING,
             )
         return moved_list
 
