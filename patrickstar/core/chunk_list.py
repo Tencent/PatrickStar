@@ -221,7 +221,7 @@ class ChunkList(object):
             f"prepare_target: device {target_device} need_bytes {need_bytes / 1e6} MB, "
             f"ava_chunk_mem_size {ava_chunk_mem_size / 1e6} MB, "
             f"remaining_chunk_mem_size {remaining_chunk_mem_size / 1e6} MB.",
-            level=logging.WARNING,
+            level=logging.INFO,
         )
 
         # TODO(jiaruifang) Situation where there is no space.

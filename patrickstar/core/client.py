@@ -74,7 +74,9 @@ class PatrickStarClient(object):
             tracer_config = default_tracer_config
             opt_config = default_opt_config
 
-        self.mem_tracer = RuntimeMemTracer(self.local_rank, tracer_config)
+        self.mem_tracer = RuntimeMemTracer(
+            self.local_rank, tracer_config, opt_config["with_mem_saving_comm"]
+        )
         self.opt_config = opt_config
 
         self.chunk_eviction_strategy = LatestAccessChunkEvictionPolicy(
