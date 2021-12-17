@@ -34,7 +34,7 @@ import torch
 from patrickstar.core.const import ChunkType
 from patrickstar.core.memtracer import RuntimeMemTracer
 from patrickstar.profiler import profiler
-from patrickstar.utils import logger, get_rank, get_world_size
+from patrickstar.utils import logger, get_rank, get_world_size, log_dist, logging
 import patrickstar.utils.global_timer as global_timer
 from .chunk_data import Chunk
 from .comm import CommInfo
@@ -216,23 +216,26 @@ class ChunkList(object):
             target_device.type
         )
 
-        logger.debug(
+        log_dist(
             f"prepare_target: device {target_device} need_bytes {need_bytes / 1e6} MB, "
             f"ava_chunk_mem_size {ava_chunk_mem_size / 1e6} MB, "
-            f"remaining_chunk_mem_size {remaining_chunk_mem_size / 1e6} MB."
+            f"remaining_chunk_mem_size {remaining_chunk_mem_size / 1e6} MB.",
+            level=logging.WARNING,
         )
 
         # TODO(jiaruifang) Situation where there is no space.
         # This condition is not good enough, we need to check if botn CPU and GPU
         # don't have enough space.
         if ava_chunk_mem_size < need_bytes:
-            logger.warning(
-                f"{target_device} has not enough space for {need_bytes} elements"
+            log_dist(
+                f"{target_device} has not enough space for {need_bytes} elements",
+                level=logging.WARNING,
             )
-            logger.warning(
+            log_dist(
                 f"{target_device} has not enough space for {need_bytes / 1e6} MB. "
                 f"Device used Chunk Memory is {self.get_chunk_memory_used(target_device) / 1e6} MB. "
-                f"Avaibale Chunk Memory is {ava_chunk_mem_size / 1e6} MB"
+                f"Avaibale Chunk Memory is {ava_chunk_mem_size / 1e6} MB",
+                level=logging.WARNING,
             )
             if self._time_profile:
                 global_timer.my_timer.finish_profile("CHUNK_LIST_prepare_device")
