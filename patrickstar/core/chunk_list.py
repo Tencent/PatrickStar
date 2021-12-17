@@ -34,7 +34,8 @@ import torch
 from patrickstar.core.const import ChunkType
 from patrickstar.core.memtracer import RuntimeMemTracer
 from patrickstar.profiler import profiler
-from patrickstar.utils import logger, get_rank, get_world_size, log_dist, logging
+from patrickstar.utils import logger, get_rank, get_world_size, log_dist
+import logging
 import patrickstar.utils.global_timer as global_timer
 from .chunk_data import Chunk
 from .comm import CommInfo
