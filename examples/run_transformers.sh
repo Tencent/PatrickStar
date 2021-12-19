@@ -35,6 +35,9 @@ export CACHE=${CACHE:-1}
 export ASYNC_MOVE=${ASYNC_MOVE:-0}
 # linear tiling comm
 export TILING=${TILING:-0}
+# hybrid adam
+export HYB=${HYB:-1}
+
 export LOCAL_WORLD_SIZE=${LOCAL_WORLD_SIZE:-1}
 export CS_SEARCH=${CS_SEARCH:-0}
 
@@ -115,13 +118,20 @@ else
 fi
 
 let CHUNK_SIZE=${CS}*1024*1024
-export HYBRID_ADAM_FLAG="--use_hybrid_adam"
+
+if [[ ${HYB} == 1 ]]; then
+    export HYBRID_ADAM_FLAG="--use_hybrid_adam"
+else
+    export HYBRID_ADAM_FLAG=""
+fi
+
+
 
 LOG_DIR="./logs_${MODEL_NAME}"
 mkdir -p ${LOG_DIR}
 
 GIT_VER=`git rev-parse --short=5 HEAD`
-LOG_FILE="log.${MODEL_NAME}_gpu_${GPU_NUM}_cs_${CS}_bs_${BS}_cpueb_${CPU_EBD}_offload_${ACT_OFFLOAD}_SP_${SP}_AMM_${AMM}_MSC_${MSC}_CACHE_${CACHE}_TILING_${TILING}_${GIT_VER}_node_${NNODES}_${SUFFIX}"
+LOG_FILE="log.${MODEL_NAME}_gpu_${GPU_NUM}_cs_${CS}_bs_${BS}_cpueb_${CPU_EBD}_hyb_${HYB}_offload_${ACT_OFFLOAD}_SP_${SP}_AMM_${AMM}_MSC_${MSC}_CACHE_${CACHE}_TILING_${TILING}_${GIT_VER}_node_${NNODES}_${SUFFIX}"
 
 is_run_flag=`python ./benchmark/is_run_this_file.py --path "${LOG_DIR}" --file "${LOG_FILE}"`
 echo is_run_flag $is_run_flag
