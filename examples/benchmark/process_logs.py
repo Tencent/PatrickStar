@@ -81,8 +81,8 @@ def is_run_this_file(path, file, res_dict, file_dict):
     confidence = 0.95
     t_crit = np.abs(t.ppf((1 - confidence) / 2, dof))
     ic_perf = (
-        m - s * t_crit / np.sqrt(len(perf_list)),
-        m + s * t_crit / np.sqrt(len(perf_list)),
+        -s * t_crit / np.sqrt(len(perf_list)),
+        +s * t_crit / np.sqrt(len(perf_list)),
     )
 
     res_dict[key] = (*ic_perf, m)
