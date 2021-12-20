@@ -29,6 +29,8 @@
 
 import os
 import sys
+import numpy as np
+from scipy.stats import t
 
 
 def is_run_this_file(path, file, res_dict, file_dict):
@@ -48,6 +50,8 @@ def is_run_this_file(path, file, res_dict, file_dict):
 
     f = open(path + "/" + file)
     is_run = True
+
+    perf_list = np.array([])
     if not os.path.isdir(file):
         fn_list = file.split(".")[1].split("_")
         for i in range(len(fn_list)):
@@ -62,16 +66,27 @@ def is_run_this_file(path, file, res_dict, file_dict):
             if "Tflops" in line and "WARM" not in line:
                 sline = line.split()
                 perf = float(sline[-2])
-                if key not in res_dict:
-                    res_dict[key] = perf
-                    file_dict[key] = file
-                else:
-                    if res_dict[key] < perf:
-                        res_dict[key] = perf
-                        file_dict[key] = file
+
+                perf_list = np.append(perf_list, perf)
+
                 is_run = False
             if "RuntimeError" in line:
                 return False
+
+    # calculate CI of perf_list
+    perf_list = perf_list[1:-1]
+    m = perf_list.mean()
+    s = perf_list.std()
+    dof = len(perf_list) - 1
+    confidence = 0.95
+    t_crit = np.abs(t.ppf((1 - confidence) / 2, dof))
+    ic_perf = (
+        m - s * t_crit / np.sqrt(len(perf_list)),
+        m + s * t_crit / np.sqrt(len(perf_list)),
+    )
+
+    res_dict[key] = (*ic_perf, m)
+    file_dict[key] = file
 
     return is_run
 
