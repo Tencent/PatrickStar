@@ -73,6 +73,9 @@ def is_run_this_file(path, file, res_dict, file_dict):
             if "RuntimeError" in line:
                 return False
 
+    if len(perf_list) == 0:
+        return False
+
     # calculate CI of perf_list
     perf_list = perf_list[1:-1]
     m = perf_list.mean()
