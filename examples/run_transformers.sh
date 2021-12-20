@@ -35,8 +35,17 @@ export CACHE=${CACHE:-1}
 export ASYNC_MOVE=${ASYNC_MOVE:-0}
 # linear tiling comm
 export TILING=${TILING:-0}
+# hybrid adam
+export HYB=${HYB:-1}
+
 export LOCAL_WORLD_SIZE=${LOCAL_WORLD_SIZE:-1}
 export CS_SEARCH=${CS_SEARCH:-0}
+
+export NNODES=${NNODES:-1}
+export NODE_RANK=${NODE_RANK:-0}
+export MASTER_ADDR=${MASTER_ADDR:-"127.0.0.1"}
+export MASTER_PORT=${MASTER_PORT:-"12345"}
+export SUFFIX=${SUFFIX:-""}
 
 if [[ ${TILING} == 1 ]];  then
 TILING_FLAG="--with_tiling_linear"
@@ -109,13 +118,20 @@ else
 fi
 
 let CHUNK_SIZE=${CS}*1024*1024
-export HYBRID_ADAM_FLAG="--use_hybrid_adam"
+
+if [[ ${HYB} == 1 ]]; then
+    export HYBRID_ADAM_FLAG="--use_hybrid_adam"
+else
+    export HYBRID_ADAM_FLAG=""
+fi
+
+
 
 LOG_DIR="./logs_${MODEL_NAME}"
 mkdir -p ${LOG_DIR}
 
 GIT_VER=`git rev-parse --short=5 HEAD`
-LOG_FILE="log.${MODEL_NAME}_gpu_${GPU_NUM}_cs_${CS}_bs_${BS}_cpueb_${CPU_EBD}_offload_${ACT_OFFLOAD}_SP_${SP}_AMM_${AMM}_MSC_${MSC}_CACHE_${CACHE}_TILING_${TILING}_${GIT_VER}"
+LOG_FILE="log.${MODEL_NAME}_gpu_${GPU_NUM}_cs_${CS}_bs_${BS}_cpueb_${CPU_EBD}_hyb_${HYB}_offload_${ACT_OFFLOAD}_SP_${SP}_AMM_${AMM}_MSC_${MSC}_CACHE_${CACHE}_TILING_${TILING}_${GIT_VER}_node_${NNODES}_${SUFFIX}"
 
 is_run_flag=`python ./benchmark/is_run_this_file.py --path "${LOG_DIR}" --file "${LOG_FILE}"`
 echo is_run_flag $is_run_flag
@@ -183,6 +199,7 @@ python -m torch.distributed.launch --nproc_per_node=1 \
 done
 else
 env OMP_NUM_THREADS=${TNUM} timeout -s SIGKILL 30m python -m torch.distributed.launch --nproc_per_node=${GPU_NUM} \
+--nnodes=${NNODES} --node_rank=${NODE_RANK} --master_addr=${MASTER_ADDR} --master_port=${MASTER_PORT} \
     pretrain_bert_demo.py \
     --default_chunk_size=${CHUNK_SIZE} \
     ${cmd_opts} \

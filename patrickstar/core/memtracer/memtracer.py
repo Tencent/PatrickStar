@@ -37,9 +37,9 @@ from patrickstar.utils import (
     log_dist,
     get_memory_info,
     get_sys_memory_used,
-    get_world_size,
     get_local_world_size,
     logger,
+    get_world_size,
 )
 from patrickstar.core.memtracer.metronome import Metronome
 from concurrent.futures import ThreadPoolExecutor
@@ -95,7 +95,9 @@ class RuntimeMemTracer(object):
         Chunkable Memry: Memory can be used to store chunk.
     """
 
-    def __init__(self, local_rank: int = 0, config=None):
+    def __init__(
+        self, local_rank: int = 0, config=None, with_mem_saving_comm: bool = False
+    ):
         self.local_rank = local_rank
         self.metronome = Metronome()
         self.gpu_chunk_available_mem = 0
@@ -104,7 +106,7 @@ class RuntimeMemTracer(object):
         self.gpu_chunk_used_mem = 0
         self.cpu_chunk_used_mem = 0
         self.cpu_chunk_used_mem_pinned = 0
-
+        self.with_mem_saving_comm = with_mem_saving_comm
         if config is not None:
             self._overall_gpu_mem_ratio = config.get("overall_gpu_mem_ratio", 0.8)
             self._overall_cpu_mem_ratio = config.get("overall_cpu_mem_ratio", 0.8)
@@ -395,7 +397,10 @@ class RuntimeMemTracer(object):
             else:
                 return self._overall_cpu_mem
         elif device_type == "cuda":
-            world_size = get_world_size()
+            if self.with_mem_saving_comm:
+                msc_factor = 1
+            else:
+                msc_factor = get_world_size()
             if self.metronome.training_stage() == TrainingStage.ADAM:
                 return self._overall_gpu_mem - 4 * self._default_chunk_size * 4
             elif self.metronome.training_stage() == TrainingStage.FWD:
@@ -409,7 +414,7 @@ class RuntimeMemTracer(object):
                 )
                 return (
                     min(next_mom_ava_mem, cur_mom_ava_mem)
-                    - world_size * 2 * self._default_chunk_size
+                    - msc_factor * 2 * self._default_chunk_size
                 )
             elif self.metronome.training_stage() == TrainingStage.BWD:
                 next_mom = self.metronome.next_moment()
@@ -422,5 +427,5 @@ class RuntimeMemTracer(object):
                 )
                 return (
                     min(next_mom_ava_mem, cur_mom_ava_mem)
-                    - world_size * 2 * self._default_chunk_size
+                    - msc_factor * 2 * self._default_chunk_size * msc_factor
                 )

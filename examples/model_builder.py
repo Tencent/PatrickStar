@@ -176,6 +176,16 @@ def model_config(model_name):
         SEQ_LEN = 1024
         NUM_LAYER = 96
         NUM_HEAD = 96
+    elif model_name == "GPT_220B":
+        HIDDEN_DIM = 12288
+        SEQ_LEN = 1024
+        NUM_LAYER = 120
+        NUM_HEAD = 96
+    elif model_name == "GPT_250B":
+        HIDDEN_DIM = 12288
+        SEQ_LEN = 1024
+        NUM_LAYER = 137
+        NUM_HEAD = 96
     elif model_name == "GPT_310B":
         HIDDEN_DIM = 16384
         SEQ_LEN = 1024
