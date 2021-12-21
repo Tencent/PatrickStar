@@ -28,7 +28,7 @@ export MEM_PROF=${MEM_PROF:-0}
 # asyn memory monitor for mem sampler
 export AMM=${AMM:-1}
 # mem saving comm
-export MSC=${MSC:-0}
+export MSC=${MSC:-1}
 # mem caching comm
 export CACHE=${CACHE:-1}
 # async move
