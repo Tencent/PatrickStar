@@ -25,6 +25,16 @@ We also evaluated PatrickStar v0.4.3 on a single node of A100 SuperPod. It is ab
 
 Detail benchmark results on WeChat AI data center as well as NVIDIA SuperPod are posted on this [Google Doc](https://docs.google.com/spreadsheets/d/136CWc_jA_2zC4h1r-6dzD4PrOvp6aw6uCDchEyQv6sE/edit?usp=sharing).
 
+
+Scale PatrickStar to multiple machine (node) on SuperPod.
+We succeed to train a GPT3-175B on 32 GPU. As far as we known, it is the first work
+to run GPT3 on such small GPU cluster.
+Microsoft used 10,000 V100 to pertrain GPT3.
+Now you can finetune it or even pretrain your own one on 32 A100 GPU, amazing!
+
+![alt perf](./doc/m_node_superpod.png "performance testing result on multiple Node of  SuperNode")
+
+
 We've also trained the [CLUE-GPT2](https://huggingface.co/uer/gpt2-chinese-cluecorpussmall) model with PatrickStar, the loss and accuracy curve is shown below:
 
 ![CLUE-GPT2](./doc/clue-gpt2-loss-n-acc.png)
