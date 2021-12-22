@@ -28,7 +28,7 @@
 # SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import transformers
-from transformers import BertConfig
+from transformers import BertConfig, GPT2Config
 from packaging import version
 import optimizations.global_opt_flags as global_opt_flags
 
@@ -226,6 +226,11 @@ def build_transformer_model(args):
     return a function able to build the model.
     """
     if args.with_tiling_linear or args.with_activation_offload:
+        if args.model_type.upper() == "GPT":
+            raise RuntimeError(
+                "GPT models do not support with_tiling_linear or "
+                "with_activation_offload at the moment"
+            )
         if args.with_tiling_linear:
             global_opt_flags.USE_TILE = True
         else:
@@ -235,22 +240,49 @@ def build_transformer_model(args):
         else:
             global_opt_flags.USE_ACT_OFFLOAD = False
         from optimizations.ps_tile_modeling_bert import BertForSequenceClassification
+
+        Model = BertForSequenceClassification
     else:
-        from transformers import BertForSequenceClassification
+        if args.model_type.upper() == "BERT":
+            from transformers import BertForSequenceClassification
+
+            Model = BertForSequenceClassification
+        elif args.model_type.upper() == "GPT":
+            from transformers import GPT2ForSequenceClassification
+
+            Model = GPT2ForSequenceClassification
 
     hidden_dim, sequence_length, num_layer, num_head = model_config(args.model_name)
 
-    bert_config = BertConfig(
-        gradient_checkpointing=args.use_ckp,
-        hidden_size=hidden_dim,
-        intermediate_size=hidden_dim * 4,
-        num_attention_heads=num_head,
-        max_position_embeddings=sequence_length,
-        num_hidden_layers=num_layer,
-    )
+    if args.model_type.upper() == "BERT":
+        config = BertConfig(
+            gradient_checkpointing=args.use_ckp,
+            hidden_size=hidden_dim,
+            intermediate_size=hidden_dim * 4,
+            num_attention_heads=num_head,
+            max_position_embeddings=sequence_length,
+            num_hidden_layers=num_layer,
+        )
+    elif args.model_type.upper() == "GPT":
+        config = GPT2Config(
+            gradient_checkpointing=args.use_ckp,
+            hidden_size=hidden_dim,
+            intermediate_size=hidden_dim * 4,
+            num_attention_heads=num_head,
+            max_position_embeddings=sequence_length,
+            num_hidden_layers=num_layer,
+        )
+    else:
+        raise RuntimeError(
+            f"Unknown model_type {args.model_type}, possible values are 'BERT' and 'GPT'"
+        )
 
     def model_func():
-        model = BertForSequenceClassification(bert_config)
+        model = Model(config)
+        # Need to set pad_token_id for batch size > 1.
+        if args.model_type.upper() == "GPT":
+            model.config.pad_token_id = model.config.eos_token_id
+
         if args.use_ckp and version.parse(transformers.__version__) >= version.parse(
             "4.11.0"
         ):
