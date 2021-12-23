@@ -166,6 +166,12 @@ def _add_test_config_args(parser):
     group.add_argument(
         "--model_name", type=str, default="GPTsmall", help="The model name."
     )
+    group.add_argument(
+        "--model_type",
+        type=str,
+        default="BERT",
+        help="The type of the backbone of the model.",
+    )
     group.add_argument("--with_lightseq", action="store_true", help="use lightseq")
     return parser
 

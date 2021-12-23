@@ -10,6 +10,7 @@ export CPU_EBD=${CPU_EBD:-0}
 # Release remote chunks after init
 export RELEASE_AFTER_INIT=${RELEASE_AFTER_INIT:-0}
 export MODEL_NAME=${MODEL_NAME:-"GPT2small"}
+export MODEL_TYPE=${MODEL_TYPE:-"BERT"}
 # distributed plan patrickstar or torch
 export DIST_PLAN=${DIST_PLAN:-"patrickstar"}
 # check results of patrickstar and torch, which disable
@@ -131,7 +132,7 @@ LOG_DIR="./logs_${MODEL_NAME}"
 mkdir -p ${LOG_DIR}
 
 GIT_VER=`git rev-parse --short=5 HEAD`
-LOG_FILE="log.${MODEL_NAME}_gpu_${GPU_NUM}_cs_${CS}_bs_${BS}_cpueb_${CPU_EBD}_hyb_${HYB}_offload_${ACT_OFFLOAD}_SP_${SP}_AMM_${AMM}_MSC_${MSC}_CACHE_${CACHE}_TILING_${TILING}_${GIT_VER}_node_${NNODES}_${SUFFIX}"
+LOG_FILE="log.${MODEL_NAME}_type_${MODEL_TYPE}_gpu_${GPU_NUM}_cs_${CS}_bs_${BS}_cpueb_${CPU_EBD}_hyb_${HYB}_offload_${ACT_OFFLOAD}_SP_${SP}_AMM_${AMM}_MSC_${MSC}_CACHE_${CACHE}_TILING_${TILING}_${GIT_VER}_node_${NNODES}_${SUFFIX}"
 
 is_run_flag=`python ./benchmark/is_run_this_file.py --path "${LOG_DIR}" --file "${LOG_FILE}"`
 echo is_run_flag $is_run_flag
@@ -166,6 +167,7 @@ cmd_opts="
     --dist_plan=${DIST_PLAN} \
     --batch_size=${BS} \
     --model_name=${MODEL_NAME} \
+    --model_type=${MODEL_TYPE} \
     --batch_size=${BS} \
     ${CPU_EBD_FLAG} \
     ${HYBRID_ADAM_FLAG} \
