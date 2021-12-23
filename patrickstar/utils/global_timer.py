@@ -28,6 +28,7 @@
 # SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import time
+import torch
 
 # from .logging import logger
 from .singleton_meta import SingletonMeta
@@ -57,6 +58,7 @@ class GlobalTimer(metaclass=SingletonMeta):
     def finish_profile(self, key):
         if not self.start_flag:
             return
+        torch.cuda.current_stream().synchronize()
         if key in self.elapse_stat:
             self.elapse_stat[key] += time.time() - self.start_time[key]
         else:
