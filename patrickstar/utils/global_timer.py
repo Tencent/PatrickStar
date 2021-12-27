@@ -53,6 +53,7 @@ class GlobalTimer(metaclass=SingletonMeta):
             return
         if key in self.start_time:
             assert self.start_time[key] == 0, f"Please Check {key} profiling function"
+        torch.cuda.current_stream().synchronize()
         self.start_time[key] = time.time()
 
     def finish_profile(self, key):
