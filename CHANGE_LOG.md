@@ -1,5 +1,7 @@
 ## v0.4.5 Dec. 2021
-Refactory the files in example and adding chunk size searching.
+Refactor the files in example and add chunk size searching.=
+Evaluate on 8 nodes of SuperPod. Fix bugs in multi-GPU mem tracer.
+
 
 ### v0.4.4 Dec. 2021
 The system is successfully evaluated on a multi-node system.
