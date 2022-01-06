@@ -1,6 +1,5 @@
 ## v0.4.5 Dec. 2021
-refactory the files in example and adding chunk size searching.
-
+Refactory the files in example and adding chunk size searching.
 
 ### v0.4.4 Dec. 2021
 The system is successfully evaluated on a multi-node system.
