@@ -183,7 +183,8 @@ def test_transformer_model_helper(
             if dist_plan == "patrickstar":
                 print(
                     f'{"[WARM UP] " if n == 0 else ""}'
-                    f"Step {n} elaspe {step_elapse} s, {total_macs / 1e12 / step_elapse} Tflops"
+                    f"Step {n} elaspe {step_elapse} s, "
+                    f"{total_macs / 1e12 / step_elapse} Tflops {args.batch_size/step_elapse} SamplesPerSec"
                 )
                 if n == num_steps - 1:
                     global_timer.my_timer.print()
@@ -193,7 +194,8 @@ def test_transformer_model_helper(
                     global_timer.data_move_cnter.reset()
             else:
                 print(
-                    f"Step {n} elaspe {step_elapse} s, {total_macs / 1e12 / step_elapse} Tflops"
+                    f"Step {n} elaspe {step_elapse} s, "
+                    f"{total_macs / 1e12 / step_elapse} Tflops {args.batch_size/step_elapse} SamplesPerSec"
                 )
 
         log_dist(f"End Step {n} with {dist_plan}.\n")
