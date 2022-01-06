@@ -55,7 +55,7 @@ PatirckStar is famous for dynamic partition model data. With help of this flag y
 The is a computing efficient irrelevant option used for distributed training. It allocates memory for remote chunks but release it immediately. In this way, we can make sure the model parameter is randomly initialized the same as a serial version. Solve the problem with random seed. It is used in combination with the `--res_check` option to check the correctness of distributed training.
 
 7. Adjusting the quota of CPU and GPU memory of memory tracer.
-We provide ways to adjust the CPU and GPU memory usage quota for the memory tracer. We did not expose this optimization as parameters passed through the command line. As shown in the pretrain_bert_demo.py, there is a JSON config for the memory tracer setting. You can adjust the four ratio suffix values.
+We provide ways to adjust the CPU and GPU memory usage quota for the memory tracer. We did not expose this optimization as parameters passed through the command line. As shown in the pretrain_demo.py, there is a JSON config for the memory tracer setting. You can adjust the four ratio suffix values.
 
 `warmup_gpu_chunk_mem_ratio`: the max gpu memory of a GPU can be used for chunks during the warmup iteration.
 
