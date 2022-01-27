@@ -229,7 +229,7 @@ class FP32ChunkReadBuffer(object):
         else:
             info = self.chunk_tensor_index.get_tensor_info(param.ps_attr.data_id())
 
-            # visiting cached cache
+            # visiting cached chunk
             if info.chunk_id != self.cached_chunk_id:
                 self._visited_chunk_id.append(info.chunk_id)
                 self.cached_chunk_num += 1
