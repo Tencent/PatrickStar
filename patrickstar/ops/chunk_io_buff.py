@@ -229,9 +229,9 @@ class FP32ChunkReadBuffer(object):
         else:
             info = self.chunk_tensor_index.get_tensor_info(param.ps_attr.data_id())
 
-            # Trigger updation of cached chunk when param is the first tensor of
-            # its chunk.
-            if info.start_offset == 0:
+            # visiting cached cache
+            if info.chunk_id != self.cached_chunk_id:
+                self._visited_chunk_id.append(info.chunk_id)
                 self.cached_chunk_num += 1
                 if self.cached_chunk_num < self.margin_chunk_num_for_gpu_adam:
                     target_device = torch.device(f"cuda:{self.local_rank}")
@@ -251,7 +251,8 @@ class FP32ChunkReadBuffer(object):
                 )
                 self.cached_chunk_id = info.chunk_id
             else:
-                assert info.chunk_id == self.cached_chunk_id
+                pass
+
             return self.ret_payload.narrow(0, info.start_offset, info.numel)
 
     def reset(self):
