@@ -231,7 +231,6 @@ class FP32ChunkReadBuffer(object):
 
             # visiting cached chunk
             if info.chunk_id != self.cached_chunk_id:
-                self._visited_chunk_id.append(info.chunk_id)
                 self.cached_chunk_num += 1
                 if self.cached_chunk_num < self.margin_chunk_num_for_gpu_adam:
                     target_device = torch.device(f"cuda:{self.local_rank}")
