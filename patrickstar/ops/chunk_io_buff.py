@@ -229,7 +229,7 @@ class FP32ChunkReadBuffer(object):
         else:
             info = self.chunk_tensor_index.get_tensor_info(param.ps_attr.data_id())
 
-            # visiting cached chunk
+            # visiting uncached chunk
             if self.cached_chunk_id != info.chunk_id:
                 self.cached_chunk_num += 1
                 if self.cached_chunk_num < self.margin_chunk_num_for_gpu_adam:
