@@ -31,7 +31,6 @@ import time
 import torch
 
 from patrickstar.core.memtracer import RuntimeMemTracer
-from patrickstar.manager.cuda_context import CUDAContext
 from patrickstar.profiler import profiler
 from patrickstar.utils import logger, getsizeof
 import patrickstar.utils.global_timer as global_timer
@@ -48,7 +47,6 @@ class Chunk(object):
         chunk_id: int,
         memory_tracer: RuntimeMemTracer,
         memory_cache: Optional[MemoryCache],
-        with_async_move: bool,
         local_rank: int = 0,
         is_dummy: bool = False,
     ):
@@ -91,10 +89,6 @@ class Chunk(object):
         self.with_mem_cache = memory_cache is not None
         if self.with_mem_cache:
             self.memory_cache = memory_cache
-
-        self.with_async_move = with_async_move
-        if self.with_async_move:
-            self.compute_finish_event = torch.cuda.Event()
 
     def is_dummy(self):
         return self._is_dummy
@@ -203,13 +197,6 @@ class Chunk(object):
         """
         self._state_dict[old_state] -= 1
         self._state_dict[new_state] += 1
-        if (
-            self.with_async_move
-            and old_state == TensorState.COMPUTE
-            and self._state_dict[TensorState.COMPUTE] == 0
-        ):
-            cuda_ctx = CUDAContext()
-            self.compute_finish_event.record(cuda_ctx.compute_stream)
 
     def get_state(self):
         """
@@ -261,18 +248,6 @@ class Chunk(object):
         self.unused = self._state_dict[TensorState.HOLD]
 
     def move(self, target_device: torch.device):
-        r"""
-        Move the chunk to `target_device`.
-        """
-        if self.with_async_move:
-            cuda_ctx = CUDAContext()
-            self.compute_finish_event.synchronize()
-            with torch.cuda.stream(cuda_ctx.copy_stream):
-                self.move_sync(target_device)
-        else:
-            self.move_sync(target_device)
-
-    def move_sync(self, target_device: torch.device):
         r"""
         Move the chunk to `target_device` synchronizely.
         NOTE() Please check if the `target_device` has enough room before.

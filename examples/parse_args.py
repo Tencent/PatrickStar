@@ -99,11 +99,6 @@ def _add_patrick_star_args(parser):
         help="Use caching to allocate chunk payload.",
     )
     group.add_argument(
-        "--with_async_move",
-        action="store_true",
-        help="Use asynchronize move.",
-    )
-    group.add_argument(
         "--slog_file",
         type=str,
         default="./slog_file/tmp.txt",

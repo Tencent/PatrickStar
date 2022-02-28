@@ -70,7 +70,6 @@ def get_patrickstar_config(
             "opts": {
                 "with_mem_saving_comm": args.with_mem_saving_comm,
                 "with_mem_cache": args.with_mem_cache,
-                "with_async_move": args.with_async_move,
             },
         },
     }
