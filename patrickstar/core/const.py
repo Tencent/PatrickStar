@@ -30,11 +30,6 @@
 from enum import Enum
 
 
-class AccessType(Enum):
-    DATA = 1
-    GRAD = 2
-
-
 class ChunkState(Enum):
     r"""Chunk state during training."""
     FREE = 0

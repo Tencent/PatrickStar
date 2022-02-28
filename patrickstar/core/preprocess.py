@@ -31,7 +31,7 @@ import functools
 
 import torch
 
-from patrickstar.core import PatrickStarClient, AccessType, ChunkType
+from patrickstar.core import PatrickStarClient, ChunkType
 from patrickstar.core import register_param, is_param_registered, ParamType
 from patrickstar.manager import _runtime_config
 from patrickstar.ops import Embedding
@@ -315,14 +315,14 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
                             ps_data_fp16.copy_(param_fp16.data)
                             ps_data_fp32.copy_(param_fp16.data)
 
-                            self.client.release_data(param_fp16)
-                            self.client.release_data(param_fp32)
+                            self.client.release(param_fp16)
+                            self.client.release(param_fp32)
                             param_fp16 = param_fp16.to(torch.half)
             else:
                 for param_fp16 in self.client.chunk_tensor_index.params_generator(
                     param_fp16_chunk_id
                 ):
-                    assert not self.client.is_local_param(param_fp16, AccessType.DATA)
+                    assert not self.client.is_local_param(param_fp16)
                     # When release_after_init is True, we will release the remote
                     # param tensor here.
                     # When release_after_init is False, this will help cast dtype of
@@ -402,16 +402,12 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
             self.client.param_fp16_to_param_fp32_map[param] = param_fp32
             self.client.chunk_based_param_fp16.append(param)
 
-        self.client.append_tensor(
-            param_fp16_list, torch.half, AccessType.DATA, ChunkType.PARAM_FP16
-        )
-        self.client.append_tensor(
-            param_fp32_list, torch.float, AccessType.DATA, ChunkType.PARAM_FP32
-        )
+        self.client.append_tensor(param_fp16_list, torch.half, ChunkType.PARAM_FP16)
+        self.client.append_tensor(param_fp32_list, torch.float, ChunkType.PARAM_FP32)
 
         for param_fp16, param_fp32 in zip(param_fp16_list, param_fp32_list):
             # Delete the memory of non local tensors
-            if not self.client.is_local_param(param_fp16, AccessType.DATA):
+            if not self.client.is_local_param(param_fp16):
                 param_fp16.ps_attr._is_local = False
                 param_fp32.ps_attr._is_local = False
                 # TODO(jiaruifang) fix distributed init bug.

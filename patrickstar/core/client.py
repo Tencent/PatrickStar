@@ -34,7 +34,7 @@ import patrickstar.utils.global_timer as global_timer
 from patrickstar.utils import logger, get_world_size, get_rank, log_dist
 from .chunk_list import ChunkList, ChunkType
 from .chunk_tensor_index import ChunkTensorIndex
-from .const import AccessType, ChunkState, TensorState, TrainingStage
+from .const import ChunkState, TensorState, TrainingStage
 from .hook import setup_patrickstar_hooks
 from .parameter import register_param, is_param_registered, ParamType
 from .eviction_policy import LatestAccessChunkEvictionPolicy
@@ -228,7 +228,6 @@ class PatrickStarClient(object):
             0,
             dummy.numel(),
             self.dummy_param_list[-1],
-            AccessType.DATA,
         )
 
         logger.debug(
@@ -236,18 +235,17 @@ class PatrickStarClient(object):
             f"comm info {comm_info}"
         )
 
-    def delete_param(self, param, access_type):
+    def delete_param(self, param):
         """
         TODO(jiaruifang) Remove tensor of the param
         """
-        chunk_id = self.chunk_tensor_index.get_chunk_id(param, access_type)
-        self.chunk_tensor_index.delete_tensor(chunk_id, param, access_type)
+        chunk_id = self.chunk_tensor_index.get_chunk_id(param)
+        self.chunk_tensor_index.delete_tensor(chunk_id, param)
 
     def append_tensor(
         self,
         param_list: List[torch.nn.Parameter],
         data_type: torch.dtype,
-        access_type: AccessType,
         chunk_type: ChunkType,
     ):
         r"""Append params to the last chunk of type `chunk_type`.
@@ -258,30 +256,24 @@ class PatrickStarClient(object):
         Args:
             param_list: list of `torch.nn.Parameter`.
             data_type: :class:`torch.dtype`. Can be different from param.
-            access_type: :class:`AccessType`.
             chunk_type: :class:`ChunkType`.
         """
         assert isinstance(data_type, torch.dtype)
-        assert isinstance(access_type, AccessType)
         if not self.chunk_list.is_empty(chunk_type):
             last_chunk_id = self.chunk_list.last_chunk_id(chunk_type)
             if self.chunk_tensor_index.try_insert_tensor_list(
-                last_chunk_id, param_list, access_type
+                last_chunk_id, param_list
             ):
                 return
         chunk_id, _ = self.append_chunk(data_type, chunk_type)
-        if not self.chunk_tensor_index.try_insert_tensor_list(
-            chunk_id, param_list, access_type
-        ):
+        if not self.chunk_tensor_index.try_insert_tensor_list(chunk_id, param_list):
             raise RuntimeError(
                 f"Can not append a tensor to chunk_tensor_index. "
                 f"Overall size of param list is larger than the default chunk size {self.default_chunk_size}."
             )
         return
 
-    def append_tensor_as_ref(
-        self, param, data_type, access_type, chunk_type, ref_param
-    ):
+    def append_tensor_as_ref(self, param, data_type, chunk_type, ref_param):
         r"""Append param to the last chunk with regard to the ref_param's location.
 
         When adding optimizer params, e.g. the variance and momentum of adam to
@@ -293,19 +285,18 @@ class PatrickStarClient(object):
         Args:
             param: :class:`torch.nn.Parameter`.
             data_type: :class:`torch.dtype`. Can be different from param.
-            access_type: :class:`AccessType`.
             chunk_type: :class:`ChunkType`.
             ref_param: :class:`torch.nn.Parameter`.
         """
         chunk_id = self.chunk_tensor_index.get_optimizer_state_chunk_id(
-            ref_param, access_type, chunk_type
+            ref_param, chunk_type
         )
         if chunk_id is None:
             chunk_id, _ = self.append_chunk(data_type, chunk_type)
-        if not self.chunk_tensor_index.try_insert_tensor(chunk_id, param, access_type):
+        if not self.chunk_tensor_index.try_insert_tensor(chunk_id, param):
             raise RuntimeError("Failed to insert optimizer param w.r.t its ref_param.")
         self.chunk_tensor_index.register_optimizer_state_chunk_id(
-            ref_param, access_type, chunk_type, chunk_id
+            ref_param, chunk_type, chunk_id
         )
 
     def param_fp16_chunks_max_mem_usage(self):
@@ -342,10 +333,9 @@ class PatrickStarClient(object):
         """
         for info in self.chunk_tensor_index.generate_tensor_info_in_order(chunk_id):
             param = info.param
-            access_type = info.access_type
-            old_state = param.ps_attr.get_state(access_type)
+            old_state = param.ps_attr.get_state()
             self.chunk_list.update_state(chunk_id, old_state, new_state)
-            param.ps_attr.set_state(new_state, access_type)
+            param.ps_attr.set_state(new_state)
 
     def register_model_hook(self, model):
         setup_patrickstar_hooks(model, self)
@@ -353,9 +343,9 @@ class PatrickStarClient(object):
     def chunk_ids_generator(self, chunk_type: ChunkType):
         return self.chunk_list.chunk_ids_generator(chunk_type)
 
-    def is_local_param(self, param, access_type):
+    def is_local_param(self, param):
         r"""Check if param is in local chunk"""
-        chunk_id = self.chunk_tensor_index.get_chunk_id(param, access_type)
+        chunk_id = self.chunk_tensor_index.get_chunk_id(param)
         return self.chunk_tensor_index.is_local_chunk(chunk_id)
 
     def _fetch_remote_chunks(
@@ -496,39 +486,37 @@ class PatrickStarClient(object):
                 )
             global_timer.my_timer.finish_profile("CLIENT_fetch_remote_chunks")
 
-    def _access_tensor_in_chunk(self, param, access_type, compute_device, chunk_id):
+    def _access_tensor_in_chunk(self, param, compute_device, chunk_id):
         self.chunk_eviction_strategy.trace_access(chunk_id, compute_device)
         self.chunk_list.access_chunk(chunk_id, compute_device)
         # 2. Locate the param on the chunk.
-        tensor_id = param.ps_attr.get_tensor_id(access_type)
+        tensor_id = param.ps_attr.get_tensor_id()
         info = self.chunk_tensor_index.get_tensor_info(tensor_id)
         start_offset = info.start_offset
         numel = info.numel
         assert numel == param.ps_attr.numel, f"{numel} vs {param.ps_attr.numel}"
 
         param.ps_attr.set_tensor(
-            self.chunk_list[chunk_id].payload.narrow(0, start_offset, numel),
-            access_type,
+            self.chunk_list[chunk_id].payload.narrow(0, start_offset, numel)
         )
 
         # 3. Change the state of param tensor.
         # The state of chunk should be determined by the state of its tensors.
-        old_state = param.ps_attr.get_state(access_type)
+        old_state = param.ps_attr.get_state()
 
         # If the old state was FREE, we need to fill the param to zero.
         if old_state == TensorState.FREE:
-            param.ps_attr.access_tensor(access_type).zero_()
+            param.ps_attr.access_tensor().zero_()
 
         # Change the state of param to COMPUTE.
         self.chunk_list.update_state(chunk_id, old_state, TensorState.COMPUTE)
-        param.ps_attr.set_state(TensorState.COMPUTE, access_type)
+        param.ps_attr.set_state(TensorState.COMPUTE)
 
-        return param.ps_attr.access_tensor(access_type)
+        return param.ps_attr.access_tensor()
 
     def access_dist(
         self,
         param: torch.nn.Parameter,
-        access_type: AccessType,
         compute_device: torch.device,
         with_mem_saving_comm: bool,
         training_stage: TrainingStage,
@@ -539,7 +527,6 @@ class PatrickStarClient(object):
 
         Args:
             param: :class:`torch.nn.Parameter`. The param to visit.
-            access_type: :class:`AccessType`.
             compute_device: :class:`torch.device`.
             training_stage: :class:`TrainingStage`.
         Returns:
@@ -550,19 +537,14 @@ class PatrickStarClient(object):
             param
         ), "Client can only access_dist tensor registered for PatrickStar."
         if param.ps_attr.param_type == ParamType.TORCH_BASED:
-            if access_type == AccessType.DATA:
-                return param.data
-            elif access_type == AccessType.GRAD:
-                return param.grad
-            else:
-                raise RuntimeError(f"{access_type} is not supported")
+            return param.data
 
         if self._time_profile:
             global_timer.my_timer.start_profile("CLIENT_access_dist")
 
         # 1. Prepare the memory of the chunks. If the chunk is not one the
         #   compute device, then we need to move or allocate.
-        chunk_id = self.chunk_tensor_index.get_chunk_id(param, access_type)
+        chunk_id = self.chunk_tensor_index.get_chunk_id(param)
 
         rank = get_rank()
 
@@ -591,7 +573,7 @@ class PatrickStarClient(object):
         # collect the time a chunk has to be placed on compute-device
         # self.chunk_eviction_strategy.trace_access(local_chunk_id, compute_device)
 
-        ret = self._access_tensor_in_chunk(param, access_type, compute_device, chunk_id)
+        ret = self._access_tensor_in_chunk(param, compute_device, chunk_id)
         if self._time_profile:
             global_timer.my_timer.finish_profile("CLIENT_access_dist")
         return ret
@@ -599,7 +581,6 @@ class PatrickStarClient(object):
     def access(
         self,
         param: torch.nn.Parameter,
-        access_type: AccessType,
         compute_device: torch.device,
     ):
         r"""Visit the data or grad of the local `param`.
@@ -621,7 +602,6 @@ class PatrickStarClient(object):
 
         Args:
             param: :class:`torch.nn.Parameter`.
-            access_type: :class:`AccessType`.
             compute_device: :class:`torch.device`.
         Returns:
             The tensor to access.
@@ -630,19 +610,14 @@ class PatrickStarClient(object):
             param
         ), "client shall not access tensor not registered for PatrickStar"
         if param.ps_attr.param_type == ParamType.TORCH_BASED:
-            if access_type == AccessType.DATA:
-                return param.data
-            elif access_type == AccessType.GRAD:
-                return param.grad
-            else:
-                raise RuntimeError(f"{access_type} is not supported")
+            return param.data
 
         if self._time_profile:
             global_timer.my_timer.start_profile("CLIENT_access")
 
         # 1. Prepare the memory of the chunks. If the chunk is not one the
         #   compute device, then we need to move or allocate.
-        chunk_id = self.chunk_tensor_index.get_chunk_id(param, access_type)
+        chunk_id = self.chunk_tensor_index.get_chunk_id(param)
 
         # collect the time a chunk has to be placed on compute-device
         # self.chunk_eviction_strategy.trace_access(chunk_id, compute_device)
@@ -654,26 +629,18 @@ class PatrickStarClient(object):
                 "process before training."
             )
 
-        ret = self._access_tensor_in_chunk(param, access_type, compute_device, chunk_id)
+        ret = self._access_tensor_in_chunk(param, compute_device, chunk_id)
         if self._time_profile:
             global_timer.my_timer.finish_profile("CLIENT_access")
         return ret
 
     def access_data(self, param: torch.nn.Parameter, compute_device: torch.device):
         r"""move the PSTensor of param.data to `compute_device`."""
-        return self.access(param, AccessType.DATA, compute_device)
-
-    def access_grad(self, param: torch.nn.Parameter, compute_device: torch.device):
-        r"""move the PSTensor of param.data to `compute_device`.
-
-        NOTE() The device of grad should be determined by the device of param.data.
-        """
-        return self.access(param, AccessType.GRAD, compute_device)
+        return self.access(param, compute_device)
 
     def release_dist(
         self,
         param: torch.nn.Parameter,
-        access_type: AccessType,
         reset_to_state: TensorState,
         training_stage: TrainingStage,
         do_allreduce: bool,
@@ -692,7 +659,6 @@ class PatrickStarClient(object):
 
         Args:
             param: :class:`torch.nn.Parameter`.
-            access_type: :class:`AccessType`.
             reset_to_state: :class:`TensorState`. The state to reset tensor to.
             training_stage: :class:`TrainingStage`.
             do_allreduce: bool. Whether to do allreduce(reduce scatter).
@@ -714,7 +680,7 @@ class PatrickStarClient(object):
         )
         assert torch.distributed.is_initialized()
 
-        chunk_id = self.chunk_tensor_index.get_chunk_id(param, access_type)
+        chunk_id = self.chunk_tensor_index.get_chunk_id(param)
         chunk_id_list = self.chunk_tensor_index.chunk_ids_of_comm_group(chunk_id)
 
         local_chunk_id = chunk_id_list[rank]
@@ -725,18 +691,15 @@ class PatrickStarClient(object):
 
         # Update the state of tensor and chunk.
         self.chunk_list.update_state(
-            chunk_id, param.ps_attr.get_state(access_type), reset_to_state
+            chunk_id, param.ps_attr.get_state(), reset_to_state
         )
-        param.ps_attr.set_state(reset_to_state, access_type)
+        param.ps_attr.set_state(reset_to_state)
 
-        if access_type == AccessType.DATA:
-            # NOTE(jiaruifang) device must be the same as the origin param.
-            # Or it will affect hook of param.grad_fn.next_functions[0][0].
-            param.data = torch.tensor(
-                [], dtype=param.ps_attr.data_type, device=param.device
-            )
-        elif access_type == AccessType.GRAD:
-            param.grad = None
+        # NOTE(jiaruifang) device must be the same as the origin param.
+        # Or it will affect hook of param.grad_fn.next_functions[0][0].
+        param.data = torch.tensor(
+            [], dtype=param.ps_attr.data_type, device=param.device
+        )
 
         # Check if we finished using all tensors in all chunks of the chunk group,
         # then we can release the remote chunks.
@@ -861,7 +824,6 @@ class PatrickStarClient(object):
     def release(
         self,
         param: torch.nn.Parameter,
-        access_type: AccessType,
         reset_to_state: TensorState = TensorState.HOLD,
     ):
         r"""Release the param in standalone environment.
@@ -875,7 +837,6 @@ class PatrickStarClient(object):
 
         Args:
             param: :class:`torch.nn.Parameter`.
-            access_type: :class:`AccessType`.
             reset_to_state: :class:`TensorState`. The state to reset tensor to.
         """
         if param.ps_attr.param_type == ParamType.TORCH_BASED:
@@ -885,46 +846,25 @@ class PatrickStarClient(object):
         rank = self.local_rank
         assert isinstance(reset_to_state, TensorState)
 
-        chunk_id = self.chunk_tensor_index.get_chunk_id(param, access_type)
+        chunk_id = self.chunk_tensor_index.get_chunk_id(param)
         logger.debug(
-            f"rank {rank} release a tensor of {access_type} chunk_id {chunk_id} to {reset_to_state}"
+            f"rank {rank} release a tensor of chunk_id {chunk_id} to {reset_to_state}"
         )
 
         # Update the state of tensor and chunk.
         self.chunk_list.update_state(
-            chunk_id, param.ps_attr.get_state(access_type), reset_to_state
+            chunk_id, param.ps_attr.get_state(), reset_to_state
         )
-        param.ps_attr.set_state(reset_to_state, access_type)
+        param.ps_attr.set_state(reset_to_state)
 
-        if access_type == AccessType.DATA:
-            # NOTE(jiaruifang) device must be the same as the origin param.
-            # Or it will affect hook of param.grad_fn.next_functions[0][0].
-            param.data = torch.tensor(
-                [], dtype=param.ps_attr.data_type, device=param.device
-            )
-        elif access_type == AccessType.GRAD:
-            param.grad = None
+        # NOTE(jiaruifang) device must be the same as the origin param.
+        # Or it will affect hook of param.grad_fn.next_functions[0][0].
+        param.data = torch.tensor(
+            [], dtype=param.ps_attr.data_type, device=param.device
+        )
 
         if self._time_profile:
             global_timer.my_timer.finish_profile("CLIENT_release")
-
-    def release_data(
-        self,
-        param: torch.nn.Parameter,
-        reset_to_state: TensorState = TensorState.HOLD,
-    ):
-        r"""release the param tensor to FREE or HOLD"""
-        self.release(param, AccessType.DATA, reset_to_state)
-
-    def release_grad(
-        self,
-        param: torch.nn.Parameter,
-        reset_to_state: TensorState = TensorState.HOLD,
-    ):
-        self.release(param, AccessType.GRAD, reset_to_state)
-
-    def reset(self):
-        raise NotImplementedError
 
     def get_overall_chunk_size(self):
         """

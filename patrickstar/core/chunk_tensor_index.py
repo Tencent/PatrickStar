@@ -33,7 +33,7 @@ from patrickstar.core.comm import CommInfo
 import torch
 
 from patrickstar.utils import logger, get_rank
-from .const import AccessType, ChunkType
+from .const import ChunkType
 from .parameter import is_param_registered
 from .tensor_stub import TensorInfo
 
@@ -69,7 +69,6 @@ class ChunkTensorIndex(object):
     def register_optimizer_state_chunk_id(
         self,
         ref_param,
-        access_type: AccessType,
         chunk_type: ChunkType,
         chunk_id: int,
     ):
@@ -77,11 +76,10 @@ class ChunkTensorIndex(object):
 
         Args:
             ref_param: :class:`torch.nn.Parameter`.
-            access_type: :class:`AccessType`.
             chunk_type: :class:`ChunkType`.
             chunk_id: int.
         """
-        ref_chunk_id = self.get_chunk_id(ref_param, access_type)
+        ref_chunk_id = self.get_chunk_id(ref_param)
         if ref_chunk_id not in self.param_chunk_id_to_os_chunk_id_map:
             self.param_chunk_id_to_os_chunk_id_map[ref_chunk_id] = {
                 chunk_type: chunk_id
@@ -92,19 +90,17 @@ class ChunkTensorIndex(object):
     def get_optimizer_state_chunk_id(
         self,
         ref_param: torch.nn.Parameter,
-        access_type: AccessType,
         chunk_type: ChunkType,
     ) -> int:
         r"""Get the chunk id storing the optimizer state of `ref_param`.
 
         Args:
             ref_param: the ref param, usually param fp16
-            access_type: :class:`AccessType`.
             chunk_type: type of the optimizer state chunk.
         Returns:
             chunk id, None if not existed.
         """
-        ref_chunk_id = self.get_chunk_id(ref_param, access_type)
+        ref_chunk_id = self.get_chunk_id(ref_param)
         if (
             ref_chunk_id not in self.param_chunk_id_to_os_chunk_id_map
             or chunk_type not in self.param_chunk_id_to_os_chunk_id_map[ref_chunk_id]
@@ -166,7 +162,7 @@ class ChunkTensorIndex(object):
     def get_tensor_info(self, tensor_id):
         return self.tensor_id_to_info_map[tensor_id]
 
-    def add_tensor(self, chunk_id, tensor_id, start_offset, numel, param, access_type):
+    def add_tensor(self, chunk_id, tensor_id, start_offset, numel, param):
         r"""Add a tensor.
 
         Register the chunk_id of the chunk it belongs and its start_offset in the chunk.
@@ -186,14 +182,8 @@ class ChunkTensorIndex(object):
             param_name = param.ps_attr.name
 
         self.tensor_id_to_info_map[tensor_id] = TensorInfo(
-            chunk_id, tensor_id, start_offset, numel, param, access_type, param_name
+            chunk_id, tensor_id, start_offset, numel, param, param_name
         )
-
-        if is_param_registered(param):
-            if access_type == AccessType.DATA:
-                param.ps_attr.data_chunk_id = chunk_id
-            elif access_type == AccessType.GRAD:
-                param.ps_attr.grad_chunk_id = chunk_id
 
     def tensor_id_to_chunk_id(self, tensor_id) -> int:
         r"""Get the chunk id from the tensor id."""
@@ -202,9 +192,9 @@ class ChunkTensorIndex(object):
             return None
         return info.chunk_id
 
-    def get_chunk_id(self, param: torch.nn.Parameter, access_type: AccessType) -> int:
+    def get_chunk_id(self, param: torch.nn.Parameter) -> int:
         r"""Get the chunk id of the param."""
-        tensor_id = param.ps_attr.get_tensor_id(access_type)
+        tensor_id = param.ps_attr.get_tensor_id()
         return self.tensor_id_to_chunk_id(tensor_id)
 
     def chunk_ids_of_comm_group(self, chunk_id: int) -> List[int]:
@@ -220,23 +210,22 @@ class ChunkTensorIndex(object):
         for tensor_id in self.chunk_id_to_tensor_id_list_map[chunk_id]:
             yield self.tensor_id_to_info_map[tensor_id].param
 
-    def delete_tensor(self, chunk_id, param, access_type):
+    def delete_tensor(self, chunk_id, param):
         r"""Delete the tensor from the chunk.
 
         Args:
             chunk_id: int.
             param: :class:`nn.Parameter`.
-            access_type: :class:`AccessType`.
         """
         assert is_param_registered(param)
-        target_tensor_id = param.ps_attr.get_tensor_id(access_type)
+        target_tensor_id = param.ps_attr.get_tensor_id()
         if target_tensor_id not in self.tensor_id_to_info_map:
             return
         self.tensor_id_to_info_map.pop(target_tensor_id)
         tensor_id_list = self._get_tensor_id_list(chunk_id)
         tensor_id_list.remove(target_tensor_id)
 
-    def try_insert_tensor_list(self, chunk_id, param_list, access_type):
+    def try_insert_tensor_list(self, chunk_id, param_list):
         r"""Insert a list of param to chunk.
 
         Notice that this method is an atomic method: if we failed to insert
@@ -246,24 +235,23 @@ class ChunkTensorIndex(object):
         Args:
             chunk_id: int.
             param_list: list of :class:`nn.Parameter`.
-            access_type: :class:`AccessType`.
         Returns:
             Whether the insertion was successful.
         """
         visited_params = []
         success = True
         for param in param_list:
-            success = self.try_insert_tensor(chunk_id, param, access_type)
+            success = self.try_insert_tensor(chunk_id, param)
             visited_params.append(param)
             if not success:
                 break
         if not success:
             for param in visited_params:
-                self.delete_tensor(chunk_id, param, access_type)
+                self.delete_tensor(chunk_id, param)
 
         return success
 
-    def try_insert_tensor(self, chunk_id, param, access_type) -> bool:
+    def try_insert_tensor(self, chunk_id, param) -> bool:
         r"""
         Try inserting tensor to chunk, return successful or not.
         If `param` was inserted, return True.
@@ -271,7 +259,6 @@ class ChunkTensorIndex(object):
         Args:
             chunk_id: int.
             param: :class:`nn.Parameter`.
-            access_type: :class:`AccessType`.
         Returns:
             Whether the insertion was successful.
         """
@@ -280,7 +267,7 @@ class ChunkTensorIndex(object):
         assert is_param_registered(param)
         numel = param.ps_attr.numel
         tensor_name = param.ps_attr.name
-        target_tensor_id = param.ps_attr.get_tensor_id(access_type)
+        target_tensor_id = param.ps_attr.get_tensor_id()
         for idx, tensor_id in enumerate(tensor_id_list):
             if target_tensor_id == tensor_id:
                 return True
@@ -295,7 +282,6 @@ class ChunkTensorIndex(object):
                     prev_end_pos,
                     numel,
                     param,
-                    access_type,
                     tensor_name,
                 )
                 tensor_id_list.insert(idx + 1, target_tensor_id)
@@ -312,7 +298,6 @@ class ChunkTensorIndex(object):
                 prev_end_pos,
                 numel,
                 param,
-                access_type,
                 tensor_name,
             )
             tensor_id_list.insert(len(tensor_id_list), target_tensor_id)

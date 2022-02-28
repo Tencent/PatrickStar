@@ -77,7 +77,7 @@ class TestModelInitContext(unittest.TestCase):
                         1e-4,
                         f"{ps_param.ps_attr.name} ps tensor and pytorch tensor are not consist with each other",
                     )
-                client.release_data(ps_param)
+                client.release(ps_param)
 
 
 if __name__ == "__main__":

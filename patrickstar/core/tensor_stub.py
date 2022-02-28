@@ -29,7 +29,7 @@
 
 import torch
 
-from patrickstar.core.const import AccessType, ParamType
+from patrickstar.core.const import ParamType
 
 
 class TensorInfo(object):
@@ -42,7 +42,6 @@ class TensorInfo(object):
         start_offset: int,
         numel: int,
         param: torch.nn.Parameter,
-        access_type: AccessType,
         param_name="",
     ):
         self.tensor_id = tensor_id
@@ -50,12 +49,7 @@ class TensorInfo(object):
         self.start_offset = start_offset
         self.numel = numel
         self.param = param
-        self.tensor_name = (
-            f"{param_name}.data"
-            if (access_type == AccessType.DATA)
-            else f"{param_name}.grad"
-        )
-        self.access_type = access_type
+        self.tensor_name = f"{param_name}.data"
 
     def __str__(self):
         return (
@@ -68,4 +62,4 @@ class TensorInfo(object):
         if self.param.ps_attr.param_type == ParamType.TORCH_BASED:
             return None
         else:
-            return self.param.ps_attr.get_state(self.access_type)
+            return self.param.ps_attr.get_state()

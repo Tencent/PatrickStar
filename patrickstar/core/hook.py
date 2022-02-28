@@ -32,7 +32,7 @@ import torch
 import patrickstar.utils.global_timer as global_timer
 from patrickstar.core.parameter import ParamType
 from patrickstar.utils import logger, get_rank, get_world_size
-from .const import TensorState, AccessType, TrainingStage
+from .const import TensorState, TrainingStage
 
 
 # For each tensor in outputs run the forward_funciton and register backward_function as hook
@@ -131,7 +131,6 @@ def pre_sub_module_forward_function(sub_module, client, name):
             continue
         param.data = client.access_dist(
             param,
-            AccessType.DATA,
             client.device,
             client.opt_config["with_mem_saving_comm"],
             training_stage=TrainingStage.FWD,
@@ -152,14 +151,13 @@ def post_sub_module_forward_function(sub_module, client, name):
         if get_world_size() > 1:
             client.release_dist(
                 param,
-                AccessType.DATA,
                 TensorState.HOLD_AFTER_FWD,
                 training_stage=TrainingStage.FWD,
                 do_allreduce=False,
                 with_mem_saving_comm=client.opt_config["with_mem_saving_comm"],
             )
         else:
-            client.release_data(param, TensorState.HOLD_AFTER_FWD)
+            client.release(param, TensorState.HOLD_AFTER_FWD)
 
         if client.training_stage() == TrainingStage.FWD:
             param.ps_attr.fwd_used_cnt += 1
@@ -178,7 +176,6 @@ def pre_sub_module_backward_function(sub_module, client, name):
         if param.ps_attr.data_type == torch.half:
             tmp_tensor = client.access_dist(
                 param,
-                AccessType.DATA,
                 client.device,
                 client.opt_config["with_mem_saving_comm"],
                 training_stage=TrainingStage.BWD,
@@ -212,19 +209,18 @@ def post_sub_module_backward_function(sub_module, client, name):
         client.optimizer.check_overflow(param)
         # NOTE() bwd last visits this pardam
         if param.ps_attr.bwd_used_cnt == param.ps_attr.fwd_used_cnt:
-            tmp_tensor = param.ps_attr.access_tensor(AccessType.DATA)
+            tmp_tensor = param.ps_attr.access_tensor()
             tmp_tensor.copy_(param.grad)
             if torch.distributed.is_initialized():
                 client.release_dist(
                     param,
-                    AccessType.DATA,
                     TensorState.HOLD_AFTER_BWD,
                     training_stage=TrainingStage.BWD,
                     do_allreduce=True,
                     with_mem_saving_comm=client.opt_config["with_mem_saving_comm"],
                 )
             else:
-                client.release_data(param, TensorState.HOLD_AFTER_BWD)
+                client.release(param, TensorState.HOLD_AFTER_BWD)
             rank = get_rank()
             logger.debug(f"rank {rank} BWD post before release_dist {name}.{sub_name}")
             param.grad = None

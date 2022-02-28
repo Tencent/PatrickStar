@@ -34,7 +34,7 @@ import torch
 import time
 
 from patrickstar.core import ChunkType
-from patrickstar.core.const import TensorState, AccessType, TrainingStage
+from patrickstar.core.const import TensorState, TrainingStage
 from patrickstar.core.parameter import register_param, ParamType
 import patrickstar.utils.global_timer as global_timer
 from patrickstar.utils import logger, get_rank
@@ -156,7 +156,6 @@ class FP16Adam(torch.optim.Optimizer):
                     self.client.append_tensor_as_ref(
                         state["exp_avg"],
                         torch.float,
-                        AccessType.DATA,
                         ChunkType.MOMENTUM,
                         p,
                     )
@@ -164,7 +163,6 @@ class FP16Adam(torch.optim.Optimizer):
                     self.client.append_tensor_as_ref(
                         state["exp_avg_sq"],
                         torch.float,
-                        AccessType.DATA,
                         ChunkType.VARIANCE,
                         p,
                     )
@@ -459,9 +457,9 @@ class FP16Adam(torch.optim.Optimizer):
                 )
                 global_timer.my_timer.start_profile("ADAM_release_data")
 
-            client.release_data(fp32_param)
-            client.release_data(exp_avg_param)
-            client.release_data(exp_avg_sq_param)
+            client.release(fp32_param)
+            client.release(exp_avg_param)
+            client.release(exp_avg_sq_param)
 
             if time_profile:
                 global_timer.my_timer.finish_profile("ADAM_release_data")
@@ -484,19 +482,18 @@ class FP16Adam(torch.optim.Optimizer):
         for name, param in self.client.module.named_parameters():
             if param.ps_attr.param_type == ParamType.TORCH_BASED:
                 continue
-            if param.ps_attr.get_state(AccessType.DATA) == TensorState.COMPUTE:
+            if param.ps_attr.get_state() == TensorState.COMPUTE:
                 self.client.optimizer.check_overflow(param)
                 logger.debug(
                     f"adam forces rank {rank} to"
                     f"release param {self.client.module.__class__.__name__}.{name} from COMPUTE to HOLD_AFTER_BWD"
                 )
-                tmp_tensor = param.ps_attr.access_tensor(AccessType.DATA)
+                tmp_tensor = param.ps_attr.access_tensor()
                 tmp_tensor.copy_(param.grad)
                 param.grad = None
                 if torch.distributed.is_initialized():
                     self.client.release_dist(
                         param,
-                        AccessType.DATA,
                         TensorState.HOLD_AFTER_BWD,
                         training_stage=TrainingStage.BWD,
                         do_allreduce=True,
@@ -505,7 +502,7 @@ class FP16Adam(torch.optim.Optimizer):
                         ],
                     )
                 else:
-                    self.client.release_data(param, TensorState.HOLD_AFTER_BWD)
+                    self.client.release(param, TensorState.HOLD_AFTER_BWD)
         if profiler.started():
             profiler.stage_convert_time.append((time.time(), TrainingStage.ADAM))
 

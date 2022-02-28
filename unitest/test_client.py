@@ -34,7 +34,7 @@ import torch
 
 from common import distributed_test
 from patrickstar import RuntimeMemTracer
-from patrickstar.core import PatrickStarClient, AccessType, register_param, ChunkType
+from patrickstar.core import PatrickStarClient, register_param, ChunkType
 from patrickstar.core.parameter import ParamType
 
 
@@ -62,20 +62,18 @@ class TestClientAccess(unittest.TestCase):
             param_payload_ref_list.append(param.data.clone())
 
             register_param(param, ParamType.CHUNK_BASED, torch.float, f"param_{idx}")
-            self.client.append_tensor(
-                [param], torch.float, AccessType.DATA, ChunkType.PARAM_FP32
-            )
+            self.client.append_tensor([param], torch.float, ChunkType.PARAM_FP32)
 
             real_payload = self.client.access_data(param, torch.device("cpu:0"))
             real_payload.copy_(param.data)
-            self.client.release_data(param)
+            self.client.release(param)
             self.assertTrue(param.data.numel() == 0)
 
         self.client.display_chunk_info()
         for param, payload_ref in zip(param_list, param_payload_ref_list):
             real_payload = self.client.access_data(param, torch.device("cpu:0"))
             self.assertEqual(torch.max(real_payload - payload_ref), 0)
-            self.client.release_data(param)
+            self.client.release(param)
 
     @distributed_test(world_size=[1])
     def test_append_torch_tensor(self):
@@ -94,19 +92,17 @@ class TestClientAccess(unittest.TestCase):
             param_list.append(param)
             register_param(param, ParamType.TORCH_BASED, torch.float, f"param_{idx}")
             param_payload_ref_list.append(param.data.clone())
-            self.client.append_tensor(
-                [param], torch.float, AccessType.DATA, ChunkType.PARAM_FP32
-            )
+            self.client.append_tensor([param], torch.float, ChunkType.PARAM_FP32)
 
             real_payload = self.client.access_data(param, torch.device("cpu:0"))
             real_payload.copy_(param.data)
-            self.client.release_data(param)
+            self.client.release(param)
 
         self.client.display_chunk_info()
         for param, payload_ref in zip(param_list, param_payload_ref_list):
             real_payload = self.client.access_data(param, torch.device("cpu:0"))
             self.assertEqual(torch.max(real_payload - payload_ref), 0)
-            self.client.release_data(param)
+            self.client.release(param)
 
 
 if __name__ == "__main__":

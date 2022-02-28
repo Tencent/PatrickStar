@@ -28,14 +28,14 @@
 # SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import torch
-from patrickstar.core.const import ParamType, AccessType
+from patrickstar.core.const import ParamType
 
 
 def get_real_data_tensor(param):
     if param.ps_attr.param_type == ParamType.TORCH_BASED:
         return param.data
     elif param.ps_attr.param_type == ParamType.CHUNK_BASED:
-        return param.ps_attr.access_tensor(AccessType.DATA)
+        return param.ps_attr.access_tensor()
     else:
         raise RuntimeError
 
