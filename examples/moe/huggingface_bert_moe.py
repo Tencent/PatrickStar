@@ -72,7 +72,7 @@ if args.type == "patrickstar":
                 "use_hybrid_adam": True,
             },
         },
-        "default_chunk_size": 64 * 1024 * 1024,
+        "chunk_size": 64 * 1024 * 1024,
         "release_after_init": True,
         "use_cpu_embedding": False,
     }

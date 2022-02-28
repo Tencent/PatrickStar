@@ -29,14 +29,14 @@
 
 import time
 import torch
+from typing import Optional
 
+from patrickstar.core.comm import CommInfo
+from patrickstar.core.const import ChunkType, TensorState, ChunkState
+from patrickstar.core.memory_cache import MemoryCache
 from patrickstar.core.memtracer import RuntimeMemTracer
 from patrickstar.profiler import profiler
-from patrickstar.utils import logger, getsizeof
-import patrickstar.utils.global_timer as global_timer
-from .const import TensorState, ChunkState
-from patrickstar.core.memory_cache import MemoryCache
-from typing import Optional
+from patrickstar.utils import logger, get_rank, getsizeof, global_timer
 
 
 class Chunk(object):
@@ -45,6 +45,7 @@ class Chunk(object):
         capacity: int,
         data_type: torch.dtype,
         chunk_id: int,
+        chunk_type: ChunkType,
         memory_tracer: RuntimeMemTracer,
         memory_cache: Optional[MemoryCache],
         local_rank: int = 0,
@@ -66,6 +67,8 @@ class Chunk(object):
             is_dummy: bool.
         """
         self.chunk_id = chunk_id
+        self.chunk_type = chunk_type
+        self.comm_info = CommInfo(chunk_type=chunk_type)
         # payload numel does not equal to capacity. payload can be None.
         self.capacity = capacity
         self.data_type = data_type
@@ -92,6 +95,9 @@ class Chunk(object):
 
     def is_dummy(self):
         return self._is_dummy
+
+    def is_local(self):
+        return get_rank() == self.comm_info.offset
 
     def get_chunk_space(self):
         r"""Size of the chunk (Bytes)."""

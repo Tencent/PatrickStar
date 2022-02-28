@@ -60,17 +60,17 @@ def initialize_engine(model_func, local_rank, config=None, client=None):
         assert callable(model_func), "model_func need to be callable."
 
         if config is None:
-            default_chunk_size = DEFAULT_CHUNK_SIZE
+            chunk_size = DEFAULT_CHUNK_SIZE
             release_after_init = False
             use_cpu_embedding = True
         else:
-            default_chunk_size = config.get("default_chunk_size", DEFAULT_CHUNK_SIZE)
+            chunk_size = config.get("chunk_size", DEFAULT_CHUNK_SIZE)
             release_after_init = config.get("release_after_init", False)
             use_cpu_embedding = config.get("use_cpu_embedding", True)
 
         client = PatrickStarClient(
             rank=local_rank,
-            default_chunk_size=default_chunk_size,
+            chunk_size=chunk_size,
             config=config.get("client", None),
         )
 

@@ -31,7 +31,7 @@ from typing import List
 
 import torch
 
-from patrickstar.utils import logger, get_rank
+from patrickstar.utils import logger
 from .const import ChunkType
 from .parameter import is_param_registered
 from .tensor_stub import TensorInfo
@@ -39,7 +39,7 @@ from .chunk_data import Chunk
 
 
 class ChunkTensorIndex(object):
-    def __init__(self, default_chunk_size: int = 0):
+    def __init__(self, chunk_size: int = 0):
         r"""
         Storing the index information of tensor and chunks.
         Every process will maintain a `ChunkTensorIndex` instance.
@@ -47,7 +47,7 @@ class ChunkTensorIndex(object):
         Only add and search supported, no delete or update.
 
         Args:
-            default_chunk_size: int.
+            chunk_size: int.
         """
         # 1-1 dict, tensor_id -> TensorInfo
         self.tensor_id_to_info_map: dict[int, TensorInfo] = {}
@@ -60,8 +60,7 @@ class ChunkTensorIndex(object):
         self.chunk_id_to_comm_info_map = {}
 
         # Chunk_ids of chunks in different chunk type
-        self.chunk_type_to_chunk_id_list_map = {}
-        self.default_chunk_size = default_chunk_size
+        self.chunk_size = chunk_size
 
         # ref_chunk_id -> {chunk_type -> chunk_id}
         self.param_chunk_id_to_os_chunk_id_map = {}
@@ -108,31 +107,6 @@ class ChunkTensorIndex(object):
             return None
         return self.param_chunk_id_to_os_chunk_id_map[ref_chunk_id][chunk_type]
 
-    def is_local_chunk(self, chunk_id):
-        r"""If chunk of `chunk_id` is local.
-
-        Args:
-            chunk_id: int.
-        Returns:
-            bool.
-        """
-        rank = get_rank()
-        comm_info = self.chunk_id_to_comm_info_map[chunk_id]
-        return rank == comm_info.offset
-
-    def chunk_num(self, list_type: ChunkType):
-        r"""The number of chunks of type `list_type`.
-
-        Args:
-            chunk_type: :class:`ChunkType`.
-        Returns:
-            int.
-        """
-        if list_type not in self.chunk_type_to_chunk_id_list_map:
-            return 0
-        else:
-            return len(self.chunk_type_to_chunk_id_list_map[list_type])
-
     def add_chunk(self, chunk: Chunk):
         r"""Add a chunk to ChunkTensorIndex.
 
@@ -146,11 +120,6 @@ class ChunkTensorIndex(object):
             self.comm_group_to_chunk_id_list_map[comm_group_info] = list()
         self.comm_group_to_chunk_id_list_map[comm_group_info].append(chunk_id)
         self.chunk_id_to_comm_info_map[chunk_id] = comm_info
-
-        chunk_type = comm_info.chunk_type
-        if chunk_type not in self.chunk_type_to_chunk_id_list_map:
-            self.chunk_type_to_chunk_id_list_map[chunk_type] = []
-        self.chunk_type_to_chunk_id_list_map[chunk_type].append(chunk_id)
 
     def generate_tensor_info_in_order(self, chunk_id):
         r"""Return the tensors of chunk by `chunk_id`.
@@ -290,9 +259,9 @@ class ChunkTensorIndex(object):
             prev_end_pos = start_pos + tensor_info.numel
 
         logger.debug(
-            f"default_chunk_size {self.default_chunk_size}, prev_end_pos {prev_end_pos}, numel {numel}"
+            f"chunk_size {self.chunk_size}, prev_end_pos {prev_end_pos}, numel {numel}"
         )
-        if self.default_chunk_size - prev_end_pos >= numel:
+        if self.chunk_size - prev_end_pos >= numel:
             self.tensor_id_to_info_map[target_tensor_id] = TensorInfo(
                 chunk_id,
                 target_tensor_id,

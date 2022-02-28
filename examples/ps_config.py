@@ -53,7 +53,7 @@ def get_patrickstar_config(
             "hysteresis": 2,
             "min_loss_scale": 1,
         },
-        "default_chunk_size": args.default_chunk_size,
+        "chunk_size": args.chunk_size,
         "release_after_init": args.release_after_init,
         "use_fake_dist": args.use_fake_dist,
         "use_cpu_embedding": args.use_cpu_embedding,

@@ -44,7 +44,7 @@ from patrickstar.core.memtracer import RuntimeMemTracer
 class PatrickStarClient(object):
     r"""The client for managing chunks."""
 
-    def __init__(self, rank: int, default_chunk_size: int, config=None):
+    def __init__(self, rank: int, chunk_size: int, config=None):
         self.local_rank = rank
         self.device = torch.device(f"cuda:{rank}")
 
@@ -82,8 +82,8 @@ class PatrickStarClient(object):
             self.mem_tracer.metronome
         )
 
-        self.default_chunk_size = default_chunk_size
-        self.chunk_tensor_index = ChunkTensorIndex(self.default_chunk_size)
+        self.chunk_size = chunk_size
+        self.chunk_tensor_index = ChunkTensorIndex(self.chunk_size)
         self.chunk_list = ChunkList(
             self.local_rank,
             self.mem_tracer,
@@ -184,7 +184,7 @@ class PatrickStarClient(object):
         """
         self.mem_tracer.start_train(
             param_fp16_chunk_size=self.param_fp16_chunks_max_mem_usage(),
-            chunk_size=self.default_chunk_size,
+            chunk_size=self.chunk_size,
         )
 
     def append_chunk(self, data_type, chunk_type, is_dummy=False):
@@ -198,10 +198,10 @@ class PatrickStarClient(object):
             chunk_id of the newly created chunk and comm_info.
         """
         chunk = self.chunk_list.new_chunk(
-            self.default_chunk_size,
+            chunk_type,
+            self.chunk_size,
             data_type,
             is_dummy=is_dummy,
-            chunk_type=chunk_type,
         )
         self.chunk_tensor_index.add_chunk(chunk)
         return chunk.chunk_id, chunk.comm_info
@@ -265,7 +265,7 @@ class PatrickStarClient(object):
         if not self.chunk_tensor_index.try_insert_tensor_list(chunk_id, param_list):
             raise RuntimeError(
                 f"Can not append a tensor to chunk_tensor_index. "
-                f"Overall size of param list is larger than the default chunk size {self.default_chunk_size}."
+                f"Overall size of param list is larger than the default chunk size {self.chunk_size}."
             )
         return
 
@@ -304,20 +304,20 @@ class PatrickStarClient(object):
         world_size = get_world_size()
         if self.opt_config["with_mem_saving_comm"]:
             return (
-                self.chunk_tensor_index.chunk_num(ChunkType.PARAM_FP16)
-                * self.default_chunk_size
+                self.chunk_list.num_chunk(ChunkType.PARAM_FP16)
+                * self.chunk_size
                 * 2
                 / world_size
-                + self.default_chunk_size * 2
+                + self.chunk_size * 2
             )
         else:
             # non MSC has to cache work_size - 1 buffer.
             return (
-                self.chunk_tensor_index.chunk_num(ChunkType.PARAM_FP16)
-                * self.default_chunk_size
+                self.chunk_list.num_chunk(ChunkType.PARAM_FP16)
+                * self.chunk_size
                 * 2
                 / world_size
-                + (world_size - 1) * self.default_chunk_size * 2
+                + (world_size - 1) * self.chunk_size * 2
             )
 
     def set_all_tensors_state_in_chunk(self, chunk_id, new_state):
@@ -330,7 +330,7 @@ class PatrickStarClient(object):
         for info in self.chunk_tensor_index.generate_tensor_info_in_order(chunk_id):
             param = info.param
             old_state = param.ps_attr.get_state()
-            self.chunk_list.update_state(chunk_id, old_state, new_state)
+            self.chunk_list[chunk_id].update_state(old_state, new_state)
             param.ps_attr.set_state(new_state)
 
     def register_model_hook(self, model):
@@ -342,7 +342,7 @@ class PatrickStarClient(object):
     def is_local_param(self, param):
         r"""Check if param is in local chunk"""
         chunk_id = self.chunk_tensor_index.get_chunk_id(param)
-        return self.chunk_tensor_index.is_local_chunk(chunk_id)
+        return self.chunk_list[chunk_id].is_local()
 
     def _fetch_remote_chunks(
         self,
@@ -505,7 +505,7 @@ class PatrickStarClient(object):
             param.ps_attr.access_tensor().zero_()
 
         # Change the state of param to COMPUTE.
-        self.chunk_list.update_state(chunk_id, old_state, TensorState.COMPUTE)
+        self.chunk_list[chunk_id].update_state(old_state, TensorState.COMPUTE)
         param.ps_attr.set_state(TensorState.COMPUTE)
 
         return param.ps_attr.access_tensor()
@@ -686,8 +686,8 @@ class PatrickStarClient(object):
         )
 
         # Update the state of tensor and chunk.
-        self.chunk_list.update_state(
-            chunk_id, param.ps_attr.get_state(), reset_to_state
+        self.chunk_list[chunk_id].update_state(
+            param.ps_attr.get_state(), reset_to_state
         )
         param.ps_attr.set_state(reset_to_state)
 
@@ -848,8 +848,8 @@ class PatrickStarClient(object):
         )
 
         # Update the state of tensor and chunk.
-        self.chunk_list.update_state(
-            chunk_id, param.ps_attr.get_state(), reset_to_state
+        self.chunk_list[chunk_id].update_state(
+            param.ps_attr.get_state(), reset_to_state
         )
         param.ps_attr.set_state(reset_to_state)
 
@@ -874,15 +874,13 @@ class PatrickStarClient(object):
         for (
             type,
             type_chunk_list,
-        ) in self.chunk_tensor_index.chunk_type_to_chunk_id_list_map.items():
+        ) in self.chunk_list.chunk_type_to_id_list_map.items():
 
             logger.debug(f"Chunk list {type}")
             for chunk_id in type_chunk_list:
                 chunk = self.chunk_list[chunk_id]
                 if self.opt_config["with_mem_saving_comm"] and chunk.is_dummy():
                     continue
-                comm_info = self.chunk_tensor_index.chunk_id_to_comm_info_map[chunk_id]
-                assert comm_info is not None
                 last_used_pos = 0
                 for info in self.chunk_tensor_index.generate_tensor_info_in_order(
                     chunk_id
@@ -904,18 +902,16 @@ class PatrickStarClient(object):
         for (
             type,
             type_chunk_list,
-        ) in self.chunk_tensor_index.chunk_type_to_chunk_id_list_map.items():
+        ) in self.chunk_list.chunk_type_to_id_list_map.items():
             logger.debug(f"Chunk list {type}")
             for chunk_id in type_chunk_list:
                 chunk = self.chunk_list[chunk_id]
                 if self.opt_config["with_mem_saving_comm"] and chunk.is_dummy():
                     continue
-                comm_info = self.chunk_tensor_index.chunk_id_to_comm_info_map[chunk_id]
-                assert comm_info is not None
 
                 logger.debug(
                     f"Chunk id {chunk.chunk_id}, state {chunk.get_state()}, "
-                    f"comm info {comm_info}, "
+                    f"comm info {chunk.comm_info}, "
                     f"capacity {chunk.capacity / 1024 / 1024} M elems, "
                     f"dtype {chunk.data_type} device {chunk.get_device()}"
                 )

@@ -104,7 +104,7 @@ def chunk_schema_valid_check(args, config, chunk_size, overall_chunk_size):
         "ava_per_gpu_mem %.2f MB, "
         "ava_per_cpu_mem %.2f MB, "
         "need_mem %.2f MB\n",
-        args.default_chunk_size / MB_NUM,
+        args.chunk_size / MB_NUM,
         ava_per_gpu_mem / MB_NUM,
         ava_per_cpu_mem / MB_NUM,
         need_mem / MB_NUM,
@@ -119,7 +119,7 @@ def get_param_used_chunk_size(args, config, model_func):
     """
     client = PatrickStarClient(
         rank=args.local_rank,
-        default_chunk_size=args.default_chunk_size,
+        chunk_size=args.chunk_size,
         config=config.get("client", None),
     )
     start_time = time.time()
@@ -143,7 +143,7 @@ def get_param_used_chunk_size(args, config, model_func):
     if chunk_schema_valid_check(
         args,
         config["client"]["mem_tracer"],
-        args.default_chunk_size,
+        args.chunk_size,
         overall_chunk_size,
     ):
 
@@ -183,7 +183,7 @@ def evaluate_chunk_size(args):
     if get_rank() == 0:
         with open(f"{args.slog_file}", "a+") as fh:
             fh.write(
-                f"{args.default_chunk_size/1024/1024} {overall_chunk_size/1024/1024}, {utils}\n"
+                f"{args.chunk_size/1024/1024} {overall_chunk_size/1024/1024}, {utils}\n"
             )
 
 

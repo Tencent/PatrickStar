@@ -180,7 +180,7 @@ echo "searching CHUNK_SIZE ${i} M elem"
 
 python -m torch.distributed.launch --nproc_per_node=1 \
     eval_chunk_size.py \
-    --default_chunk_size=${CUR_CHUNK_SIZE} \
+    --chunk_size=${CUR_CHUNK_SIZE} \
     --slog_file=${SLOG_FILE} \
     ${cmd_opts}
 done
@@ -188,7 +188,7 @@ else
 env OMP_NUM_THREADS=${TNUM} timeout -s SIGKILL 30m python -m torch.distributed.launch --nproc_per_node=${GPU_NUM} \
 --nnodes=${NNODES} --node_rank=${NODE_RANK} --master_addr=${MASTER_ADDR} --master_port=${MASTER_PORT} \
     pretrain_demo.py \
-    --default_chunk_size=${CHUNK_SIZE} \
+    --chunk_size=${CHUNK_SIZE} \
     ${cmd_opts} \
     2>&1 | tee ${LOG_DIR}/${LOG_FILE}
 fi

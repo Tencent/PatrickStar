@@ -290,7 +290,7 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
             self.client.chunk_ids_generator(ChunkType.PARAM_FP16),
             self.client.chunk_ids_generator(ChunkType.PARAM_FP32),
         ):
-            if self.client.chunk_tensor_index.is_local_chunk(param_fp16_chunk_id):
+            if self.client.chunk_list[param_fp16_chunk_id].is_local():
                 for param_fp16, param_fp32 in zip(
                     self.client.chunk_tensor_index.params_generator(
                         param_fp16_chunk_id

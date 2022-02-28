@@ -27,21 +27,18 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 # SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+import logging
 from typing import List
 
 import torch
 
-from patrickstar.core.const import ChunkType
-from patrickstar.core.memtracer import RuntimeMemTracer
-from patrickstar.profiler import profiler
-from patrickstar.utils import logger, get_rank, get_world_size, log_dist
-import logging
-import patrickstar.utils.global_timer as global_timer
-from .chunk_data import Chunk
-from .comm import CommInfo
-from .const import ChunkState
+from patrickstar.core.chunk_data import Chunk
+from patrickstar.core.const import ChunkType, ChunkState
 from patrickstar.core.eviction_policy import ChunkEvictionPolicyBase
 from patrickstar.core.memory_cache import MemoryCache
+from patrickstar.core.memtracer import RuntimeMemTracer
+from patrickstar.profiler import profiler
+from patrickstar.utils import logger, get_rank, log_dist, global_timer
 
 
 class ChunkList(object):
@@ -64,7 +61,7 @@ class ChunkList(object):
             local_rank: int.
         """
         self.chunks = []
-        self.chunk_type_to_id_list_map: dict[ChunkType, int] = {}
+        self.chunk_type_to_id_list_map = {}
         for chunk_type in ChunkType:
             self.chunk_type_to_id_list_map[chunk_type] = []
 
@@ -98,6 +95,9 @@ class ChunkList(object):
 
     def __len__(self) -> int:
         return self.size()
+
+    def num_chunk(self, chunk_type: ChunkType):
+        return len(self.chunk_type_to_id_list_map[chunk_type])
 
     def get_chunk_memory_used(self, device):
         r"""The total memory of payload of all chunks on `device`.
@@ -334,10 +334,10 @@ class ChunkList(object):
 
     def new_chunk(
         self,
+        chunk_type: ChunkType,
         chunk_size: int,
         data_type: torch.dtype,
         is_dummy: bool = False,
-        chunk_type: ChunkType = ChunkType.UNDEF,
     ):
         r"""Create a chunk without initializing its memory.
 
@@ -355,23 +355,17 @@ class ChunkList(object):
             capacity=chunk_size,
             data_type=data_type,
             chunk_id=chunk_id,
+            chunk_type=chunk_type,
             memory_tracer=self.memory_tracer,
             memory_cache=self.memory_cache if self.with_mem_cache else None,
             local_rank=self.local_rank,
             is_dummy=is_dummy,
         )
         self.chunks.append(chunk)
-        world_size = get_world_size()
         global_rank = get_rank()
         self.chunk_type_to_id_list_map[chunk_type].append(chunk_id)
         if profiler.started():
             profiler.chunk_life_cycle[chunk_id] = {"type": chunk_type, "life_cycle": []}
-        num_type_chunk = len(self.chunk_type_to_id_list_map[chunk_type])
-        chunk.comm_info = CommInfo(
-            chunk_type=chunk_type,
-            group_id=(num_type_chunk - 1) // world_size,
-            offset=(num_type_chunk - 1) % world_size,
-        )
         logger.debug(
             f"global_rank {global_rank}, allocate with new chunk chunk_id {chunk_id} size {chunk_size} "
             f"data_type {data_type} comm group {chunk.comm_info}"
@@ -410,7 +404,3 @@ class ChunkList(object):
             self.chunks, size_in_bytes, target_device
         )
         return moved_list
-
-    def update_state(self, chunk_id, old_state, new_state):
-        r"""Update the state of chunk of id `chunk_id`."""
-        self.chunks[chunk_id].update_state(old_state, new_state)

@@ -75,7 +75,7 @@ config = {
         "hysteresis": 2,
         "min_loss_scale": 1,
     },
-    "default_chunk_size": 64 * 1024 * 1024,
+    "chunk_size": 64 * 1024 * 1024,
     "release_after_init": True,
     "use_cpu_embedding": False,
     "client": {

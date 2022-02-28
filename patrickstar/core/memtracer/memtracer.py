@@ -381,7 +381,7 @@ class RuntimeMemTracer(object):
             elif device_type == "cuda":
                 if self.metronome.training_stage() == TrainingStage.ADAM:
                     # There is no activation during Adam stage, so we can use all the GPU
-                    # mem for chunks. Need 2 * default_chunk_size for buffer, save 6 here for now.
+                    # mem for chunks. Need 2 * chunk_size for buffer, save 6 here for now.
                     ava_mem = self._overall_gpu_mem - 4 * self._default_chunk_size * 4
                     logger.debug(f"GPU available_chunk_mem is {ava_mem / 1e6} MB")
                     return ava_mem

@@ -40,7 +40,7 @@ def _add_patrick_star_args(parser):
         help="Using one GPU to stimulate multiple card.",
     )
     group.add_argument(
-        "--default_chunk_size",
+        "--chunk_size",
         type=int,
         default=32 * 1024 * 1024,
         help="Default Chunk Size in elements.",

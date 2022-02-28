@@ -170,7 +170,7 @@ config = {
     # The default chunk size, recommend values are 32M or 64M.
     # Note that this is the number of elements in a chunk instead
     # of the number of bytes.
-    "default_chunk_size": 64 * 1024 * 1024,
+    "chunk_size": 64 * 1024 * 1024,
     # In distributed training, PatrickStar will release the remote chunks
     # (the memory that is not managed by the current process) if
     # "release_after_init" is False. This will reduce the total CPU memory

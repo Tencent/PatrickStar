@@ -46,10 +46,16 @@ class CommGroupInfo(object):
 
 
 class CommInfo(object):
-    def __init__(self, chunk_type, group_id, offset):
-        assert offset < get_world_size()
+    num_chunk_type = {}
+
+    def __init__(self, chunk_type):
+        if chunk_type not in CommInfo.num_chunk_type:
+            CommInfo.num_chunk_type[chunk_type] = 0
+        world_size = get_world_size()
+        group_id = CommInfo.num_chunk_type[chunk_type] // world_size
         self.group = CommGroupInfo(chunk_type=chunk_type, id=group_id)
-        self.offset = offset
+        self.offset = CommInfo.num_chunk_type[chunk_type] % world_size
+        CommInfo.num_chunk_type[chunk_type] += 1
 
     @property
     def chunk_type(self):
