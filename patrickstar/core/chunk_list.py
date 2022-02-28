@@ -52,8 +52,6 @@ class ChunkList(object):
     All of them are managed by one instance of this class.
     """
 
-    generated_chunk_id = -1
-
     def __init__(
         self,
         local_rank: int,
@@ -65,7 +63,7 @@ class ChunkList(object):
         Args:
             local_rank: int.
         """
-        self.id_to_chunk_map: dict[int, Chunk] = {}
+        self.chunks = []
         self.chunk_type_to_id_list_map: dict[ChunkType, int] = {}
         for chunk_type in ChunkType:
             self.chunk_type_to_id_list_map[chunk_type] = []
@@ -90,18 +88,13 @@ class ChunkList(object):
         for chunk_id in self.chunk_type_to_id_list_map[chunk_type]:
             yield chunk_id
 
-    def generate_chunk_id(self) -> int:
-        r"""Get the chunk id of next chunk."""
-        ChunkList.generated_chunk_id += 1
-        return ChunkList.generated_chunk_id
-
     def __getitem__(self, chunk_id: int):
         r"""Search a chunk by id."""
-        return self.id_to_chunk_map.get(chunk_id)
+        return self.chunks[chunk_id]
 
     def size(self) -> int:
         r"""Total number of chunks."""
-        return len(self.id_to_chunk_map)
+        return len(self.chunks)
 
     def __len__(self) -> int:
         return self.size()
@@ -115,7 +108,7 @@ class ChunkList(object):
             float.
         """
         mem_used = 0
-        for _, chunk in self.id_to_chunk_map.items():
+        for chunk in self.chunks:
             if (
                 chunk.get_device() is not None
                 and chunk.get_device().type == device.type
@@ -125,7 +118,7 @@ class ChunkList(object):
 
     def max_chunk_size(self):
         max_size = 0
-        for _, chunk in self.id_to_chunk_map.items():
+        for chunk in self.chunks:
             max_size = max(chunk.capacity, max_size)
         return max_size
 
@@ -157,7 +150,7 @@ class ChunkList(object):
             chunk_id: int.
             compute_device: :class:`torch.device`.
         """
-        chunk = self.id_to_chunk_map[chunk_id]
+        chunk = self.chunks[chunk_id]
         chunk_state = chunk.get_state()
         payload_space = chunk.get_chunk_space()
         # If chunk was released, we need to reallocate it.
@@ -187,7 +180,7 @@ class ChunkList(object):
         new_device = (
             torch.device("cpu") if target_device.type == "cuda" else self.device
         )
-        for chunk_id, chunk in self.id_to_chunk_map.items():
+        for chunk_id, chunk in enumerate(self.chunks):
             if (
                 chunk.get_device() is not None
                 and chunk.get_device().type == target_device.type
@@ -321,7 +314,7 @@ class ChunkList(object):
         if self._time_profile:
             global_timer.my_timer.start_profile("CHUNK_LIST_chunk_move")
 
-        chunk = self.id_to_chunk_map[chunk_id]
+        chunk = self.chunks[chunk_id]
 
         remaining_chunk_mem_size = self.memory_tracer.remaining_chunk_mem(device.type)
 
@@ -341,7 +334,6 @@ class ChunkList(object):
 
     def new_chunk(
         self,
-        chunk_id: int,
         chunk_size: int,
         data_type: torch.dtype,
         is_dummy: bool = False,
@@ -358,11 +350,8 @@ class ChunkList(object):
         Returns:
             :class:`CommInfo`
         """
-        if chunk_id in self.id_to_chunk_map:
-            raise RuntimeError(
-                f"chunk list new chunk with chunk_id {chunk_id} already existed"
-            )
-        self.id_to_chunk_map[chunk_id] = Chunk(
+        chunk_id = len(self.chunks)
+        chunk = Chunk(
             capacity=chunk_size,
             data_type=data_type,
             chunk_id=chunk_id,
@@ -371,22 +360,23 @@ class ChunkList(object):
             local_rank=self.local_rank,
             is_dummy=is_dummy,
         )
+        self.chunks.append(chunk)
         world_size = get_world_size()
         global_rank = get_rank()
         self.chunk_type_to_id_list_map[chunk_type].append(chunk_id)
         if profiler.started():
             profiler.chunk_life_cycle[chunk_id] = {"type": chunk_type, "life_cycle": []}
         num_type_chunk = len(self.chunk_type_to_id_list_map[chunk_type])
-        comm_info = CommInfo(
+        chunk.comm_info = CommInfo(
             chunk_type=chunk_type,
             group_id=(num_type_chunk - 1) // world_size,
             offset=(num_type_chunk - 1) % world_size,
         )
         logger.debug(
             f"global_rank {global_rank}, allocate with new chunk chunk_id {chunk_id} size {chunk_size} "
-            f"data_type {data_type} comm group {comm_info}"
+            f"data_type {data_type} comm group {chunk.comm_info}"
         )
-        return comm_info
+        return chunk
 
     def is_empty(self, chunk_type: ChunkType):
         r"""Whether chunk list of type `chunk_type` is empty."""
@@ -402,7 +392,7 @@ class ChunkList(object):
 
     def generate_chunk(self):
         r"""Return all the chunks along with its id."""
-        for chunk_id, chunk in self.id_to_chunk_map.items():
+        for chunk_id, chunk in enumerate(self.chunks):
             yield chunk_id, chunk
 
     def _chunk_to_move_out_for_room_making(
@@ -417,10 +407,10 @@ class ChunkList(object):
             A list of chunk_ids.
         """
         moved_list = self.chunk_eviction_policy.derive_eviction_list(
-            self.id_to_chunk_map, size_in_bytes, target_device
+            self.chunks, size_in_bytes, target_device
         )
         return moved_list
 
     def update_state(self, chunk_id, old_state, new_state):
         r"""Update the state of chunk of id `chunk_id`."""
-        self.id_to_chunk_map[chunk_id].update_state(old_state, new_state)
+        self.chunks[chunk_id].update_state(old_state, new_state)

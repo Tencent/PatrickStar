@@ -28,7 +28,6 @@
 # SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 from typing import List
-from patrickstar.core.comm import CommInfo
 
 import torch
 
@@ -36,6 +35,7 @@ from patrickstar.utils import logger, get_rank
 from .const import ChunkType
 from .parameter import is_param_registered
 from .tensor_stub import TensorInfo
+from .chunk_data import Chunk
 
 
 class ChunkTensorIndex(object):
@@ -133,13 +133,14 @@ class ChunkTensorIndex(object):
         else:
             return len(self.chunk_type_to_chunk_id_list_map[list_type])
 
-    def add_chunk(self, chunk_id, comm_info: CommInfo):
+    def add_chunk(self, chunk: Chunk):
         r"""Add a chunk to ChunkTensorIndex.
 
         Args:
             chunk_id: int.
-            comm_info: :class:`CommInfo`.
         """
+        chunk_id = chunk.chunk_id
+        comm_info = chunk.comm_info
         comm_group_info = comm_info.group
         if comm_group_info not in self.comm_group_to_chunk_id_list_map:
             self.comm_group_to_chunk_id_list_map[comm_group_info] = list()

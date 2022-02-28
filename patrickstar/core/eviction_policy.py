@@ -96,18 +96,18 @@ class ChunkEvictionPolicyBase(ABC):
         return total_mom + access_mom_list[0]
 
     @abstractmethod
-    def derive_eviction_list(self, id_to_chunk_map, required_room, target_device):
+    def derive_eviction_list(self, chunks, required_room, target_device):
         NotImplemented
 
 
 class LatestAccessChunkEvictionPolicy(ChunkEvictionPolicyBase):
-    def derive_eviction_list(self, id_to_chunk_map, need_bytes, target_device):
+    def derive_eviction_list(self, chunks, need_bytes, target_device):
         """
         Evict the chunk latest to be accessed on the current device.
         """
         movable_chunk_info = []
         q = PriorityQueue()
-        for chunk_id, chunk in id_to_chunk_map.items():
+        for chunk_id, chunk in enumerate(chunks):
             if (
                 chunk.get_device() is not None
                 and chunk.get_device().type == target_device.type
@@ -128,7 +128,7 @@ class LatestAccessChunkEvictionPolicy(ChunkEvictionPolicyBase):
         moved_bytes = 0
         while not q.empty():
             next_mom, chunk_id = q.get()
-            moved_bytes += id_to_chunk_map[chunk_id].get_payload_space()
+            moved_bytes += chunks[chunk_id].get_payload_space()
             moved_list.append(chunk_id)
             if moved_bytes >= need_bytes:
                 break

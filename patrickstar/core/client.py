@@ -197,16 +197,14 @@ class PatrickStarClient(object):
         Returns:
             chunk_id of the newly created chunk and comm_info.
         """
-        chunk_id = self.chunk_list.generate_chunk_id()
-        comm_info = self.chunk_list.new_chunk(
-            chunk_id,
+        chunk = self.chunk_list.new_chunk(
             self.default_chunk_size,
             data_type,
             is_dummy=is_dummy,
             chunk_type=chunk_type,
         )
-        self.chunk_tensor_index.add_chunk(chunk_id, comm_info)
-        return chunk_id, comm_info
+        self.chunk_tensor_index.add_chunk(chunk)
+        return chunk.chunk_id, chunk.comm_info
 
     def append_dummy_chunk(self, data_type: torch.dtype, chunk_type: ChunkType):
         r"""Append a dummy chunk to the corresponding chunk_list"""
