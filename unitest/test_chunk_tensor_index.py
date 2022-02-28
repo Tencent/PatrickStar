@@ -35,7 +35,6 @@ import torch
 from patrickstar.core import (
     ChunkTensorIndex,
     ChunkType,
-    AccessType,
     register_param,
     ParamType,
 )
@@ -72,7 +71,6 @@ class TestAccess(unittest.TestCase):
                 start_offset=offset,
                 numel=numel,
                 param=param,
-                access_type=AccessType.DATA,
             )
             offset += numel
             param_list.append(param)
@@ -89,7 +87,7 @@ class TestAccess(unittest.TestCase):
             register_param(
                 param, ParamType.CHUNK_BASED, torch.float, f"param_{param_id}"
             )
-            is_success = chunk_tensor_index.try_insert_tensor(0, param, AccessType.DATA)
+            is_success = chunk_tensor_index.try_insert_tensor(0, param)
             success_list.append(is_success)
         self.assertEqual(success_list, [True, False, False, False, True, True])
 
@@ -106,9 +104,7 @@ class TestAccess(unittest.TestCase):
             )
             param_list.append(param)
         # 7， 2
-        is_success = chunk_tensor_index.try_insert_tensor_list(
-            0, param_list, AccessType.DATA
-        )
+        is_success = chunk_tensor_index.try_insert_tensor_list(0, param_list)
         self.assertTrue(is_success)
 
         # 7， 2， 6， 5
@@ -121,13 +117,11 @@ class TestAccess(unittest.TestCase):
             )
             param_list.append(param)
 
-        is_success = chunk_tensor_index.try_insert_tensor_list(
-            0, param_list, AccessType.DATA
-        )
+        is_success = chunk_tensor_index.try_insert_tensor_list(0, param_list)
         self.assertTrue(is_success)
 
         # 7， 2，(6), 5
-        chunk_tensor_index.delete_tensor(0, param_list[0], AccessType.DATA)
+        chunk_tensor_index.delete_tensor(0, param_list[0])
         param_numel_list = [8]
         param_list = []
         for param_id, numel in enumerate(param_numel_list):
@@ -136,9 +130,7 @@ class TestAccess(unittest.TestCase):
                 param, ParamType.CHUNK_BASED, torch.float, f"param_{param_id}"
             )
             param_list.append(param)
-        is_success = chunk_tensor_index.try_insert_tensor_list(
-            0, param_list, AccessType.DATA
-        )
+        is_success = chunk_tensor_index.try_insert_tensor_list(0, param_list)
         self.assertFalse(is_success)
 
         # 7， 2，(6) 5
@@ -150,9 +142,7 @@ class TestAccess(unittest.TestCase):
                 param, ParamType.CHUNK_BASED, torch.float, f"param_{param_id}"
             )
             param_list.append(param)
-        is_success = chunk_tensor_index.try_insert_tensor_list(
-            0, param_list, AccessType.DATA
-        )
+        is_success = chunk_tensor_index.try_insert_tensor_list(0, param_list)
         self.assertFalse(is_success)
 
         # 7， 2，(6) 5
@@ -164,9 +154,7 @@ class TestAccess(unittest.TestCase):
                 param, ParamType.CHUNK_BASED, torch.float, f"param_{param_id}"
             )
             param_list.append(param)
-        is_success = chunk_tensor_index.try_insert_tensor_list(
-            0, param_list, AccessType.DATA
-        )
+        is_success = chunk_tensor_index.try_insert_tensor_list(0, param_list)
         self.assertTrue(is_success)
 
     def test_chunk_layout_consistency(self):
@@ -182,14 +170,14 @@ class TestAccess(unittest.TestCase):
         for _, numel in enumerate(param_numel_list):
             param = torch.nn.Parameter(torch.zeros(numel))
             register_param(param, ParamType.CHUNK_BASED, torch.float, f"param_{numel}")
-            chunk_tensor_index.try_insert_tensor(0, param, AccessType.DATA)
+            chunk_tensor_index.try_insert_tensor(0, param)
             param_list.append(param)
 
         param_numel_list = [6, 9]
         for _, numel in enumerate(param_numel_list):
             param = torch.nn.Parameter(torch.zeros(numel))
             register_param(param, ParamType.CHUNK_BASED, torch.float, f"param_{numel}")
-            chunk_tensor_index.try_insert_tensor(1, param, AccessType.DATA)
+            chunk_tensor_index.try_insert_tensor(1, param)
             param_list.append(param)
 
         # Now, we have 2 chunks, (10, 5) (6, 9)
@@ -198,15 +186,15 @@ class TestAccess(unittest.TestCase):
             param_momentum, ParamType.CHUNK_BASED, torch.float, f"param_{numel}"
         )
         chunk_id = chunk_tensor_index.get_optimizer_state_chunk_id(
-            param_list[0], AccessType.DATA, ChunkType.MOMENTUM
+            param_list[0], ChunkType.MOMENTUM
         )
         self.assertTrue(chunk_id is None)
 
         chunk_tensor_index.register_optimizer_state_chunk_id(
-            param_list[0], AccessType.DATA, ChunkType.MOMENTUM, 3
+            param_list[0], ChunkType.MOMENTUM, 3
         )
         chunk_id = chunk_tensor_index.get_optimizer_state_chunk_id(
-            param_list[0], AccessType.DATA, ChunkType.MOMENTUM
+            param_list[0], ChunkType.MOMENTUM
         )
         self.assertTrue(chunk_id == 3, f"chunk_id is {chunk_id} should be 3")
 

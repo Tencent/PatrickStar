@@ -32,7 +32,7 @@ import unittest
 import torch
 
 from common import distributed_test
-from patrickstar.core import AccessType, ChunkTensorIndex
+from patrickstar.core import ChunkTensorIndex
 from patrickstar.core import register_param, ParamType
 
 
@@ -56,49 +56,46 @@ class TestChunkData(unittest.TestCase):
             start_offset=0,
             numel=param1.numel(),
             param=param1,
-            access_type=AccessType.DATA,
         )
 
         self.assertTrue(
             chunk_tensor_index.tensor_id_to_chunk_id(param1.ps_attr.data_id()) == 0
         )
-        self.assertTrue(chunk_tensor_index.get_chunk_id(param1, AccessType.DATA) == 0)
+        self.assertTrue(chunk_tensor_index.get_chunk_id(param1) == 0)
 
         param2 = torch.nn.Parameter(torch.zeros(15))
         register_param(param2, ParamType.CHUNK_BASED, torch.float, "param2")
-        self.assertTrue(
-            chunk_tensor_index.get_chunk_id(param2, AccessType.DATA) is None
-        )
-        ret = chunk_tensor_index.try_insert_tensor(0, param2, AccessType.DATA)
+        self.assertTrue(chunk_tensor_index.get_chunk_id(param2) is None)
+        ret = chunk_tensor_index.try_insert_tensor(0, param2)
         self.assertTrue(ret)
         tensor_info = chunk_tensor_index.get_tensor_info(param2.ps_attr.data_id())
         self.assertTrue(tensor_info.start_offset == 10)
 
         param3 = torch.nn.Parameter(torch.zeros(5))
         register_param(param3, ParamType.CHUNK_BASED, torch.float, "param3")
-        ret = chunk_tensor_index.try_insert_tensor(0, param3, AccessType.DATA)
+        ret = chunk_tensor_index.try_insert_tensor(0, param3)
         tensor_info = chunk_tensor_index.get_tensor_info(param3.ps_attr.data_id())
         self.assertTrue(tensor_info.start_offset == 25)
 
         param4 = torch.nn.Parameter(torch.zeros(100))
         register_param(param4, ParamType.CHUNK_BASED, torch.float, "param4")
-        ret = chunk_tensor_index.try_insert_tensor(0, param4, AccessType.DATA)
+        ret = chunk_tensor_index.try_insert_tensor(0, param4)
         self.assertFalse(ret)
         # chunk_tensor_index.delete_tensor(11)
 
         param5 = torch.nn.Parameter(torch.zeros(13))
         register_param(param5, ParamType.CHUNK_BASED, torch.float, "param5")
-        ret = chunk_tensor_index.try_insert_tensor(1, param5, AccessType.DATA)
+        ret = chunk_tensor_index.try_insert_tensor(1, param5)
         tensor_info = chunk_tensor_index.get_tensor_info(param5.ps_attr.data_id())
         self.assertTrue(tensor_info.start_offset == 0)
 
-        ret = chunk_tensor_index.try_insert_tensor(1, param5, AccessType.DATA)
+        ret = chunk_tensor_index.try_insert_tensor(1, param5)
         tensor_info = chunk_tensor_index.get_tensor_info(param5.ps_attr.data_id())
         self.assertTrue(tensor_info.start_offset == 0)
 
         param6 = torch.nn.Parameter(torch.zeros(1000))
         register_param(param6, ParamType.CHUNK_BASED, torch.float, "param6")
-        ret = chunk_tensor_index.try_insert_tensor(1, param6, AccessType.DATA)
+        ret = chunk_tensor_index.try_insert_tensor(1, param6)
         self.assertFalse(ret)
 
 

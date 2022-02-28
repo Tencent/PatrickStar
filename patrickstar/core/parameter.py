@@ -29,7 +29,7 @@
 
 import torch
 
-from .const import TensorState, AccessType, ParamType
+from .const import TensorState, ParamType
 
 
 class PSTensor(object):
@@ -74,15 +74,8 @@ class PSParameter(object):
         self.data_type = data_type
         self.param_type = param_type
 
-        self.data_chunk_id = None
-        self.grad_chunk_id = None
-
         if self.param_type == ParamType.CHUNK_BASED:
             self.data_tensor = PSTensor()
-            if param.requires_grad:
-                self.grad_tensor = PSTensor()
-            else:
-                self.grad_tensor = None
 
         # Whether the param belongs to local chunk.
         self._is_local = True
@@ -102,22 +95,9 @@ class PSParameter(object):
         self.numel = new_shape.numel()
 
     def data_id(self):
-        return self.get_tensor_id(AccessType.DATA)
+        return self.get_tensor_id()
 
-    def grad_id(self):
-        return self.get_tensor_id(AccessType.GRAD)
-
-    def _access_ps_tensor(self, access_type: AccessType):
-        if self.param_type != ParamType.CHUNK_BASED:
-            raise ValueError
-        if not isinstance(access_type, AccessType):
-            raise ValueError
-        if access_type == AccessType.DATA:
-            return self.data_tensor
-        elif access_type == AccessType.GRAD:
-            return self.grad_tensor
-
-    def get_tensor_id(self, access_type: AccessType):
+    def get_tensor_id(self):
         """
         Get the tensor id of chunk based tensor.
         For torch based tensor, return -1.
@@ -125,25 +105,24 @@ class PSParameter(object):
         if self.param_type == ParamType.TORCH_BASED:
             return -1
         else:
-            return self._access_ps_tensor(access_type).id
+            return self.data_tensor.id
 
-    def set_tensor(self, tensor: torch.Tensor, access_type: AccessType):
-        ps_tensor = self._access_ps_tensor(access_type)
-        ps_tensor.tensor = tensor.view(self.shape)
+    def set_tensor(self, tensor: torch.Tensor):
+        self.data_tensor.tensor = tensor.view(self.shape)
 
-    def access_tensor(self, access_type: AccessType):
-        return self._access_ps_tensor(access_type).tensor
+    def access_tensor(self):
+        return self.data_tensor.tensor
 
-    def get_state(self, access_type: AccessType):
-        return self._access_ps_tensor(access_type).state
+    def get_state(self):
+        return self.data_tensor.state
 
-    def set_state(self, state: TensorState, access_type: AccessType):
+    def set_state(self, state: TensorState):
         """
         Only in COMPUTE state when tensor will point to chunk payload.
         Otherwise, the tensor should be None to prevent unnecessary copy.
         TODO(jiaruifang) Need to param reset data和grad
         """
-        ps_tensor = self._access_ps_tensor(access_type)
+        ps_tensor = self.data_tensor
         ps_tensor.state = state
         if state != TensorState.COMPUTE:
             ps_tensor.tensor = None
