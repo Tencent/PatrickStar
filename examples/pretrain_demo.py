@@ -70,7 +70,7 @@ def test_transformer_model_helper(
         print("start memory profiler")
         profiler.start()
 
-    lr = 0.001
+    lr = 0.1
     betas = (0.9, 0.999)
     eps = 1e-6
     weight_decay = 0
@@ -214,7 +214,6 @@ def test_transformer_model_helper(
 
 
 if __name__ == "__main__":
-    # os.environ["NCCL_DEBUG"] = "INFO"
     args = parse_args()
     use_ckp = args.use_ckp
     use_fp16 = args.use_fp16

@@ -26,14 +26,10 @@ export SP=${SP:-0}
 export MEM_PROF=${MEM_PROF:-0}
 # asyn memory monitor for mem sampler
 export AMM=${AMM:-1}
-# mem saving comm
-export MSC=${MSC:-1}
 # mem caching comm
 export CACHE=${CACHE:-1}
 # linear tiling comm
 export TILING=${TILING:-0}
-# hybrid adam
-export HYB=${HYB:-1}
 
 export LOCAL_WORLD_SIZE=${LOCAL_WORLD_SIZE:-1}
 export CS_SEARCH=${CS_SEARCH:-0}
@@ -48,13 +44,6 @@ if [[ ${TILING} == 1 ]];  then
 TILING_FLAG="--with_tiling_linear"
 else
 export TILING_FLAG=""
-fi
-
-
-if [[ ${CACHE} == 1 ]];  then
-CACHE_FLAG="--with_mem_cache"
-else
-export CACHE_FLAG=""
 fi
 
 if [[ ${AMM} == 1 ]];  then
@@ -97,19 +86,13 @@ fi
 
 let CHUNK_SIZE=${CS}*1024*1024
 
-if [[ ${HYB} == 1 ]]; then
-    export HYBRID_ADAM_FLAG="--use_hybrid_adam"
-else
-    export HYBRID_ADAM_FLAG=""
-fi
-
 
 
 LOG_DIR="./logs_${MODEL_NAME}"
 mkdir -p ${LOG_DIR}
 
 GIT_VER=`git rev-parse --short=5 HEAD`
-LOG_FILE="log.${MODEL_NAME}_type_${MODEL_TYPE}_gpu_${GPU_NUM}_cs_${CS}_bs_${BS}_hyb_${HYB}_offload_${ACT_OFFLOAD}_SP_${SP}_AMM_${AMM}_CACHE_${CACHE}_TILING_${TILING}_${GIT_VER}_node_${NNODES}_${SUFFIX}"
+LOG_FILE="log.${MODEL_NAME}_type_${MODEL_TYPE}_gpu_${GPU_NUM}_cs_${CS}_bs_${BS}_offload_${ACT_OFFLOAD}_SP_${SP}_AMM_${AMM}_TILING_${TILING}_${GIT_VER}_node_${NNODES}_${SUFFIX}"
 
 is_run_flag=`python ./benchmark/is_run_this_file.py --path "${LOG_DIR}" --file "${LOG_FILE}"`
 echo is_run_flag $is_run_flag
@@ -146,20 +129,18 @@ cmd_opts="
     --model_name=${MODEL_NAME} \
     --model_type=${MODEL_TYPE} \
     --batch_size=${BS} \
-    ${HYBRID_ADAM_FLAG} \
     ${RELEASE_AFTER_INIT_FLAG} \
     ${LIGHTSEQ_FLAG} \
     ${ACT_OFFLOAD_FLAG} \
     ${SP_FLAG} \
     ${MEM_PROF_FLAG} \
     ${AMM_FLAG} \
-    ${CACHE_FLAG} \
     ${TILING_FLAG} \
 "
 
 if [[ ${CS_SEARCH} == 1 ]];  then
 mkdir -p ./search_res
-SLOG_FILE="./search_res/slog_file.${MODEL_NAME}_bs_${BS}_offload_${ACT_OFFLOAD}_SP_${SP}_AMM_${AMM}_MSC_${MSC}_CACHE_${CACHE}_TILING_${TILING}_${GIT_VER}"
+SLOG_FILE="./search_res/slog_file.${MODEL_NAME}_bs_${BS}_offload_${ACT_OFFLOAD}_SP_${SP}_AMM_${AMM}_TILING_${TILING}_${GIT_VER}"
 rm -rf ${SLOG_FILE}
 
 for((i=312;i>=64;i-=32));

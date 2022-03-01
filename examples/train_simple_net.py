@@ -67,7 +67,6 @@ config = {
             "betas": BETAS,
             "eps": EPS,
             "weight_decay": WEIGHT_DECAY,
-            "use_hybrid_adam": True,
         },
     },
     "fp16": {

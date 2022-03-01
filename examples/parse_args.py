@@ -53,12 +53,6 @@ def _add_patrick_star_args(parser):
         "but may fix some errors relate to checkpoint loading or"
         "weight intialization.",
     )
-    group.add_argument(
-        "--use_hybrid_adam",
-        action="store_true",
-        help="Use hybrid adam optimization. "
-        "By default ADAM is on CPU and run ADAM on GPU if possible.",
-    )
     # Some hyperparams to tune when you failed to run a model.
     group.add_argument(
         "--with_static_partition",
@@ -80,11 +74,6 @@ def _add_patrick_star_args(parser):
         "--with_async_mem_monitor",
         action="store_true",
         help="Use async memory monitor.",
-    )
-    group.add_argument(
-        "--with_mem_cache",
-        action="store_true",
-        help="Use caching to allocate chunk payload.",
     )
     group.add_argument(
         "--slog_file",

@@ -140,49 +140,45 @@ def visualize_access(dict):
 
     # TODO(zilinzhu) Currently the chunk id is not correspond to
     # the index in acess_info.
-    access_info = {}
+    access_info = []
     for chunk_id, chunk_access_info in raw_access_info.items():
         chunk_access_info = raw_access_info[chunk_id]
-        chunk_type = chunk_access_info["type"]
         raw_life_cycle = chunk_access_info["life_cycle"]
         # Do not show the empty chunk of remote optimizer states.
         if len(raw_life_cycle) == 0:
             continue
-        if chunk_type not in access_info:
-            access_info[chunk_type] = []
         life_cycle = [(data[0] - start_time, data[2]) for data in raw_life_cycle]
         if life_cycle is not None:
-            access_info[chunk_type].append(life_cycle)
+            access_info.append(life_cycle)
 
     plt.style.use("ggplot")
     _, axis = plt.subplots()
 
     end_time = dict["end_time"] - start_time
     offset = 0
-    for chunk_type, type_access_info in access_info.items():
-        for i in range(len(type_access_info)):
-            chunk_access_info = type_access_info[i]
-            for j in range(len(chunk_access_info)):
-                timestamp, device = chunk_access_info[j]
-                if j + 1 < len(chunk_access_info):
-                    next_timestamp, _ = chunk_access_info[j + 1]
-                else:
-                    next_timestamp = end_time
-                if device is None:
-                    color = "#fff"
-                elif device.type == "cpu":
-                    color = "#e9616c"
-                else:
-                    color = "#3385fe"
-                rect = patches.Rectangle(
-                    (timestamp, i + offset + 1),
-                    next_timestamp - timestamp,
-                    1,
-                    color=color,
-                    alpha=1 if device is not None else 0,
-                )
-                axis.add_patch(rect)
-        offset += len(type_access_info)
+    for i in range(len(access_info)):
+        chunk_access_info = access_info[i]
+        for j in range(len(chunk_access_info)):
+            timestamp, device = chunk_access_info[j]
+            if j + 1 < len(chunk_access_info):
+                next_timestamp, _ = chunk_access_info[j + 1]
+            else:
+                next_timestamp = end_time
+            if device is None:
+                color = "#fff"
+            elif device.type == "cpu":
+                color = "#e9616c"
+            else:
+                color = "#3385fe"
+            rect = patches.Rectangle(
+                (timestamp, i + offset + 1),
+                next_timestamp - timestamp,
+                1,
+                color=color,
+                alpha=1 if device is not None else 0,
+            )
+            axis.add_patch(rect)
+    offset += len(access_info)
 
     axis.set_xlim([0, end_time])
     axis.set_ylim([0, offset])

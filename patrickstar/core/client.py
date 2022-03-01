@@ -32,7 +32,7 @@ import torch
 
 import patrickstar.utils.global_timer as global_timer
 from patrickstar.utils import logger, get_world_size, get_rank, log_dist
-from .chunk_list import ChunkList, ChunkType
+from .chunk_list import ChunkList
 from .chunk_tensor_index import ChunkTensorIndex
 from .const import ChunkState, TensorState, TrainingStage
 from .hook import setup_patrickstar_hooks
@@ -59,21 +59,15 @@ class PatrickStarClient(object):
             "use_fake_dist": False,
             "with_static_partition": False,
         }
-        default_opt_config = {
-            "with_mem_cache": False,
-        }
         if config is not None:
             tracer_config = config.get("mem_tracer", None)
             for k, v in default_tracer_config.items():
                 if k not in tracer_config:
                     tracer_config[k] = v
-            opt_config = config.get("opts", None)
         else:
             tracer_config = default_tracer_config
-            opt_config = default_opt_config
 
         self.mem_tracer = RuntimeMemTracer(self.local_rank, tracer_config)
-        self.opt_config = opt_config
 
         self.chunk_eviction_strategy = LatestAccessChunkEvictionPolicy(
             self.mem_tracer.metronome
@@ -85,22 +79,10 @@ class PatrickStarClient(object):
             self.local_rank,
             self.mem_tracer,
             self.chunk_eviction_strategy,
-            self.opt_config["with_mem_cache"],
         )
-        if self.opt_config["with_mem_cache"]:
-            logger.debug("[CONFIG] USING MEM CACHE")
         self._time_profile = True
 
-        if torch.distributed.is_initialized():
-            self.cpu_comm_group = torch.distributed.new_group(backend="gloo")
-        else:
-            self.cpu_comm_group = None
-
         self.dummy_param_list = []
-        # The list of torch params that will register allreduce hook
-        self.torch_param_allreduce_list = []
-        self.param_fp16_to_param_fp32_map = {}
-        self.chunk_based_param_fp16 = []
 
         # for post backward hook
         self.grad_accs = []
@@ -117,16 +99,6 @@ class PatrickStarClient(object):
 
     def is_warmup(self):
         return self.mem_tracer.is_warmup()
-
-    def init(self, model, optimizer):
-        r"""Initialize and store model and optimizer"""
-
-        self.module = model
-        self.optimizer = optimizer
-        if get_rank() == 0:
-            self.display_chunk_info()
-        # Here we register the forward and backward hooks.
-        self.register_model_hook(model)
 
     def trigger_memory_tracing(self):
         self.mem_tracer.trace_memory()
@@ -160,27 +132,25 @@ class PatrickStarClient(object):
             chunk_size=self.chunk_size,
         )
 
-    def append_chunk(self, data_type, chunk_type, is_dummy=False):
+    def append_chunk(self, data_type, is_dummy=False):
         r"""Append a new chunk to chunk_list and chunk_tensor_index.
 
         Args:
             data_type: :class:`torch.dtype`.
-            chunk_type: :class:`ChunkType`.
             is_dummy: bool.
         Returns:
             chunk_id of the newly created chunk and comm_info.
         """
         chunk = self.chunk_list.new_chunk(
-            chunk_type,
             self.chunk_size,
             data_type,
             is_dummy=is_dummy,
         )
         return chunk.chunk_id, chunk.comm_info
 
-    def append_dummy_chunk(self, data_type: torch.dtype, chunk_type: ChunkType):
+    def append_dummy_chunk(self, data_type: torch.dtype):
         r"""Append a dummy chunk to the corresponding chunk_list"""
-        chunk_id, comm_info = self.append_chunk(torch.half, chunk_type, is_dummy=True)
+        chunk_id, comm_info = self.append_chunk(torch.half, is_dummy=True)
 
         dummy = torch.nn.Parameter(
             torch.tensor([], dtype=data_type), requires_grad=False
@@ -198,10 +168,7 @@ class PatrickStarClient(object):
             self.dummy_param_list[-1],
         )
 
-        logger.debug(
-            f"Append a dummy chunk to the Chunk List {chunk_type} "
-            f"comm info {comm_info}"
-        )
+        logger.debug("Append a dummy chunk to the Chunk List")
 
     def delete_param(self, param):
         """
@@ -214,9 +181,8 @@ class PatrickStarClient(object):
         self,
         param_list: List[torch.nn.Parameter],
         data_type: torch.dtype,
-        chunk_type: ChunkType,
     ):
-        r"""Append params to the last chunk of type `chunk_type`.
+        r"""Append params to the last chunk.
 
         Append the whole list of param into the same chunk. If the last
         chunk doesn't fit, append a new chunk and try to insert params in it.
@@ -224,48 +190,21 @@ class PatrickStarClient(object):
         Args:
             param_list: list of `torch.nn.Parameter`.
             data_type: :class:`torch.dtype`. Can be different from param.
-            chunk_type: :class:`ChunkType`.
         """
         assert isinstance(data_type, torch.dtype)
-        if not self.chunk_list.is_empty(chunk_type):
-            last_chunk_id = self.chunk_list.last_chunk_id(chunk_type)
+        if not self.chunk_list.is_empty():
+            last_chunk_id = self.chunk_list.last_chunk_id()
             if self.chunk_tensor_index.try_insert_tensor_list(
                 last_chunk_id, param_list
             ):
                 return
-        chunk_id, _ = self.append_chunk(data_type, chunk_type)
+        chunk_id, _ = self.append_chunk(data_type)
         if not self.chunk_tensor_index.try_insert_tensor_list(chunk_id, param_list):
             raise RuntimeError(
                 f"Can not append a tensor to chunk_tensor_index. "
                 f"Overall size of param list is larger than the default chunk size {self.chunk_size}."
             )
         return
-
-    def append_tensor_as_ref(self, param, data_type, chunk_type, ref_param):
-        r"""Append param to the last chunk with regard to the ref_param's location.
-
-        When adding optimizer params, e.g. the variance and momentum of adam to
-        chunk list, we hope they are of the same order as their corresponding
-        fp16 params. Here the `param` is the optimizer params and `ref_param` is
-        the fp16 param.
-        Notice that the chunk_id of param and ref_param are different.
-
-        Args:
-            param: :class:`torch.nn.Parameter`.
-            data_type: :class:`torch.dtype`. Can be different from param.
-            chunk_type: :class:`ChunkType`.
-            ref_param: :class:`torch.nn.Parameter`.
-        """
-        chunk_id = self.chunk_tensor_index.get_optimizer_state_chunk_id(
-            ref_param, chunk_type
-        )
-        if chunk_id is None:
-            chunk_id, _ = self.append_chunk(data_type, chunk_type)
-        if not self.chunk_tensor_index.try_insert_tensor(chunk_id, param):
-            raise RuntimeError("Failed to insert optimizer param w.r.t its ref_param.")
-        self.chunk_tensor_index.register_optimizer_state_chunk_id(
-            ref_param, chunk_type, chunk_id
-        )
 
     def param_fp16_chunks_max_mem_usage(self):
         r"""Return the total memory used by param fp16 chunks in bytes.
@@ -276,10 +215,7 @@ class PatrickStarClient(object):
         world_size = get_world_size()
         # non MSC has to cache work_size - 1 buffer.
         return (
-            self.chunk_list.num_chunk(ChunkType.PARAM_FP16)
-            * self.chunk_size
-            * 2
-            / world_size
+            len(self.chunk_list.chunks) * self.chunk_size * 2 / world_size
             + (world_size - 1) * self.chunk_size * 2
         )
 
@@ -298,9 +234,6 @@ class PatrickStarClient(object):
 
     def register_model_hook(self, model):
         setup_patrickstar_hooks(model, self)
-
-    def chunk_ids_generator(self, chunk_type: ChunkType):
-        return self.chunk_list.chunk_ids_generator(chunk_type)
 
     def is_local_param(self, param):
         r"""Check if param is in local chunk"""
@@ -543,7 +476,6 @@ class PatrickStarClient(object):
         param: torch.nn.Parameter,
         reset_to_state: TensorState,
         training_stage: TrainingStage,
-        do_allreduce: bool,
     ):
         r"""Release the param in distributed environment.
 
@@ -627,37 +559,6 @@ class PatrickStarClient(object):
                             all_chunks_ready = False
 
                 if all_chunks_ready:
-                    if do_allreduce:
-                        if self._time_profile:
-                            global_timer.my_timer.start_profile(
-                                "CLIENT_release_dist_reduce_scatter"
-                            )
-                        assert self.chunk_list[local_chunk_id].payload is not None
-                        input_list = []
-                        for i in chunk_id_list:
-                            self.chunk_eviction_strategy.trace_access(i, self.device)
-                            self.chunk_list.access_chunk(i, self.device)
-                            self.chunk_list[i].pin()
-                            input_list.append(self.chunk_list[i].payload)
-                        torch.distributed.reduce_scatter(
-                            self.chunk_list[local_chunk_id].payload,
-                            input_list,
-                            op=torch.distributed.ReduceOp.SUM,
-                            async_op=False,
-                        )
-
-                        self.chunk_list[local_chunk_id].payload /= world_size
-                        if self._time_profile:
-                            global_timer.data_move_cnter.update(
-                                "CLIENT_release_dist_reduce_scatter",
-                                self.chunk_list[local_chunk_id].payload.numel()
-                                * 2
-                                * world_size,
-                            )
-                            global_timer.my_timer.finish_profile(
-                                "CLIENT_release_dist_reduce_scatter"
-                            )
-
                     # Remove the payload of remote chunks.
                     for i in chunk_id_list:
                         self.chunk_list[i].unpin()
@@ -723,22 +624,15 @@ class PatrickStarClient(object):
         overall_size = 0
         overall_chunk_num = 0
         overall_utilization_ratio = 0.0
-        for (
-            type,
-            type_chunk_list,
-        ) in self.chunk_list.chunk_type_to_id_list_map.items():
-
-            logger.debug(f"Chunk list {type}")
-            for chunk_id in type_chunk_list:
-                chunk = self.chunk_list[chunk_id]
-                last_used_pos = 0
-                for info in self.chunk_tensor_index.generate_tensor_info_in_order(
-                    chunk_id
-                ):
-                    last_used_pos = max(last_used_pos, info.start_offset + info.numel)
-                overall_utilization_ratio += last_used_pos / chunk.capacity
-                overall_size += chunk.get_chunk_space()
-                overall_chunk_num += 1
+        for chunk in self.chunk_list.chunks:
+            last_used_pos = 0
+            for info in self.chunk_tensor_index.generate_tensor_info_in_order(
+                chunk.chunk_id
+            ):
+                last_used_pos = max(last_used_pos, info.start_offset + info.numel)
+            overall_utilization_ratio += last_used_pos / chunk.capacity
+            overall_size += chunk.get_chunk_space()
+            overall_chunk_num += 1
         overall_utilization_ratio /= overall_chunk_num
         return overall_size, overall_utilization_ratio
 
@@ -749,39 +643,32 @@ class PatrickStarClient(object):
         overall_chunk_num = 0
         overall_utilization_ratio = 0.0
         max_utilization_ratio = 0
-        for (
-            type,
-            type_chunk_list,
-        ) in self.chunk_list.chunk_type_to_id_list_map.items():
-            logger.debug(f"Chunk list {type}")
-            for chunk_id in type_chunk_list:
-                chunk = self.chunk_list[chunk_id]
+        for chunk in self.chunk_list.chunks:
+            chunk_id = chunk.chunk_id
+            logger.debug(
+                f"Chunk id {chunk.chunk_id}, state {chunk.get_state()}, "
+                f"comm info {chunk.comm_info}, "
+                f"capacity {chunk.capacity / 1024 / 1024} M elems, "
+                f"dtype {chunk.data_type} device {chunk.get_device()}"
+            )
+            last_used_pos = 0
+            for info in self.chunk_tensor_index.generate_tensor_info_in_order(chunk_id):
+                assert info.chunk_id == chunk_id, f"{info.chunk_id} vs {chunk_id}"
                 logger.debug(
-                    f"Chunk id {chunk.chunk_id}, state {chunk.get_state()}, "
-                    f"comm info {chunk.comm_info}, "
-                    f"capacity {chunk.capacity / 1024 / 1024} M elems, "
-                    f"dtype {chunk.data_type} device {chunk.get_device()}"
+                    f"** tensor: chunk_id {chunk_id}, start {info.start_offset}, "
+                    f"end {info.start_offset + info.numel}, size {info.numel}, "
+                    f"tensor_id {info.tensor_id}, state {info.state()}, name {info.tensor_name}"
                 )
-                last_used_pos = 0
-                for info in self.chunk_tensor_index.generate_tensor_info_in_order(
-                    chunk_id
-                ):
-                    assert info.chunk_id == chunk_id, f"{info.chunk_id} vs {chunk_id}"
-                    logger.debug(
-                        f"** tensor: chunk_id {chunk_id}, start {info.start_offset}, "
-                        f"end {info.start_offset + info.numel}, size {info.numel}, "
-                        f"tensor_id {info.tensor_id}, state {info.state()}, name {info.tensor_name}"
-                    )
-                    last_used_pos = max(last_used_pos, info.start_offset + info.numel)
-                logger.debug(
-                    f"chunk used {last_used_pos/1024/1024} M elem, "
-                    f"{last_used_pos/chunk.capacity * 100} %"
-                )
-                cur_util = last_used_pos / chunk.capacity
-                max_utilization_ratio = max(cur_util, max_utilization_ratio)
-                overall_utilization_ratio += cur_util
-                overall_size += chunk.get_chunk_space()
-                overall_chunk_num += 1
+                last_used_pos = max(last_used_pos, info.start_offset + info.numel)
+            logger.debug(
+                f"chunk used {last_used_pos/1024/1024} M elem, "
+                f"{last_used_pos/chunk.capacity * 100} %"
+            )
+            cur_util = last_used_pos / chunk.capacity
+            max_utilization_ratio = max(cur_util, max_utilization_ratio)
+            overall_utilization_ratio += cur_util
+            overall_size += chunk.get_chunk_space()
+            overall_chunk_num += 1
 
         log_dist(f"OVERALL CHUNK SIZE {overall_size / 1024 / 1024 / 1024} GB")
         log_dist(

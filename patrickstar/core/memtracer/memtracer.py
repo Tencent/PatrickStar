@@ -163,7 +163,6 @@ class RuntimeMemTracer(object):
         # The number of gpu chunks for adam.
         # Calculated by substracting the peak memory of fp16 params
         # from peak system memory.
-        self._margin_chunk_num_for_gpu_adam = 0
         self._default_chunk_size = 0
         self.max_cpu_sys_used = 0
 
@@ -181,45 +180,6 @@ class RuntimeMemTracer(object):
         if self.use_async_mem_monitor:
             self.async_mem_monitor.start()
         log_dist("**** Memory Tracer is stared! ****")
-
-    def update_margin_mem(self):
-        r"""Update the number of GPU free chunks for optimizer."""
-        if len(self.gpu_sys_used_list) == 0:
-            logger.warning(
-                "No gpu info collected. Maybe there are no chunk based tensors."
-            )
-            max_gpu_sys_used = 0
-        else:
-            max_gpu_sys_used = max(self.gpu_sys_used_list)
-
-        if len(self.cpu_sys_used_list) == 0:
-            logger.warning(
-                "No gpu info collected. Maybe there are no chunk based tensors."
-            )
-            self.max_cpu_sys_used = 0
-        else:
-            self.max_cpu_sys_used = max(self.cpu_sys_used_list)
-
-        margin_mem_size = (
-            self._overall_gpu_mem - max_gpu_sys_used - self._param_fp16_chunk_size
-        )
-        # 12 = 4 + 4 + 4 (fp32 + m + v)
-        self._margin_chunk_num_for_gpu_adam = (
-            (margin_mem_size) / (self._default_chunk_size * 12) * self._margin_use_ratio
-        )
-
-        log_dist("--------------- GPU INFO AFTER BWD ----------------")
-        log_dist(f"Max GPU System Mem (non-chunk) Used {max_gpu_sys_used / 1e6} MB")
-        log_dist(
-            f"Max CPU System Mem (non-chunk) Used {self.max_cpu_sys_used / 1e6} MB"
-        )
-        log_dist(f"Param FP16 Chunk Size {self._param_fp16_chunk_size / 1e6} MB")
-        log_dist(
-            f"Margin Mem Size {margin_mem_size / 1e6} MB, "
-            f"available chunk num for Optimizer States {self._margin_chunk_num_for_gpu_adam}"
-        )
-        log_dist("--------------- GPU INFO AFTER BWD ----------------")
-        logger.debug(f"OVERALL GPU MEM {self._overall_gpu_mem/1024/1024} MB")
 
     def reset_memory_stats(self):
         """
@@ -240,9 +200,6 @@ class RuntimeMemTracer(object):
             self.gpu_chunk_used_list = []
             self.gpu_sys_used_list = []
         log_dist("Reset Memory Statistics")
-
-    def get_margin_chunk_num_for_gpu_adam(self):
-        return self._margin_chunk_num_for_gpu_adam
 
     def trace_memory(self):
         """Record the memory usage of the moment and increase moment counter."""

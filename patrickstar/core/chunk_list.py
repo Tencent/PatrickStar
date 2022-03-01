@@ -33,9 +33,8 @@ from typing import List
 import torch
 
 from patrickstar.core.chunk_data import Chunk
-from patrickstar.core.const import ChunkType, ChunkState
+from patrickstar.core.const import ChunkState
 from patrickstar.core.eviction_policy import ChunkEvictionPolicyBase
-from patrickstar.core.memory_cache import MemoryCache
 from patrickstar.core.memtracer import RuntimeMemTracer
 from patrickstar.profiler import profiler
 from patrickstar.utils import logger, get_rank, log_dist, global_timer
@@ -54,16 +53,12 @@ class ChunkList(object):
         local_rank: int,
         memory_tracer: RuntimeMemTracer,
         chunk_eviction_policy: ChunkEvictionPolicyBase,
-        with_mem_cache: bool = False,
     ):
         """
         Args:
             local_rank: int.
         """
         self.chunks = []
-        self.chunk_type_to_id_list_map = {}
-        for chunk_type in ChunkType:
-            self.chunk_type_to_id_list_map[chunk_type] = []
 
         self._time_profile = True
         self.moments_cnt_of_iteration = None
@@ -71,19 +66,6 @@ class ChunkList(object):
         self.device = torch.device(f"cuda:{local_rank}")
         self.chunk_eviction_policy = chunk_eviction_policy
         self.memory_tracer = memory_tracer
-        self.with_mem_cache = with_mem_cache
-        if self.with_mem_cache:
-            self.memory_cache = MemoryCache(2, self.memory_tracer)
-        else:
-            self.memory_cache = None
-
-    def chunk_ids_generator(self, chunk_type: ChunkType):
-        r"""Return the chunk_id of all chunks with type `chunk_type`
-        Args:
-            chunk_type: :class:`ChunkType`.
-        """
-        for chunk_id in self.chunk_type_to_id_list_map[chunk_type]:
-            yield chunk_id
 
     def __getitem__(self, chunk_id: int):
         r"""Search a chunk by id."""
@@ -95,9 +77,6 @@ class ChunkList(object):
 
     def __len__(self) -> int:
         return self.size()
-
-    def num_chunk(self, chunk_type: ChunkType):
-        return len(self.chunk_type_to_id_list_map[chunk_type])
 
     def get_chunk_memory_used(self, device):
         r"""The total memory of payload of all chunks on `device`.
@@ -334,7 +313,6 @@ class ChunkList(object):
 
     def new_chunk(
         self,
-        chunk_type: ChunkType,
         chunk_size: int,
         data_type: torch.dtype,
         is_dummy: bool = False,
@@ -346,7 +324,6 @@ class ChunkList(object):
             chunk_size: int.
             data_type: :class:`torch.dtype`.
             is_dummy: bool.
-            chunk_type: :class:ChunkType.
         Returns:
             :class:`CommInfo`
         """
@@ -355,34 +332,27 @@ class ChunkList(object):
             capacity=chunk_size,
             data_type=data_type,
             chunk_id=chunk_id,
-            chunk_type=chunk_type,
             memory_tracer=self.memory_tracer,
-            memory_cache=self.memory_cache if self.with_mem_cache else None,
             local_rank=self.local_rank,
             is_dummy=is_dummy,
         )
         self.chunks.append(chunk)
         global_rank = get_rank()
-        self.chunk_type_to_id_list_map[chunk_type].append(chunk_id)
         if profiler.started():
-            profiler.chunk_life_cycle[chunk_id] = {"type": chunk_type, "life_cycle": []}
+            profiler.chunk_life_cycle[chunk_id] = {"life_cycle": []}
         logger.debug(
             f"global_rank {global_rank}, allocate with new chunk chunk_id {chunk_id} size {chunk_size} "
             f"data_type {data_type} comm group {chunk.comm_info}"
         )
         return chunk
 
-    def is_empty(self, chunk_type: ChunkType):
-        r"""Whether chunk list of type `chunk_type` is empty."""
-        return len(self.chunk_type_to_id_list_map[chunk_type]) == 0
+    def is_empty(self):
+        return len(self.chunks) == 0
 
-    def last_chunk_id(self, chunk_type: ChunkType):
-        r"""Get the last id of type `chunk_type`."""
-        if self.is_empty(chunk_type):
-            raise RuntimeError(
-                f"Call last_chunk_id on an empty {chunk_type} chunk list"
-            )
-        return self.chunk_type_to_id_list_map[chunk_type][-1]
+    def last_chunk_id(self):
+        if self.is_empty():
+            raise RuntimeError("Call last_chunk_id on an empty chunk list")
+        return len(self.chunks) - 1
 
     def generate_chunk(self):
         r"""Return all the chunks along with its id."""

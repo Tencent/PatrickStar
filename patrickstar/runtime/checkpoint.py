@@ -46,12 +46,9 @@ def state_dict(module, client, destination=None, prefix="", keep_vars=False):
                         continue
                     elif param.ps_attr.is_local():
                         if param.ps_attr.param_type == ParamType.CHUNK_BASED:
-                            param_fp32 = client.param_fp16_to_param_fp32_map[param]
-                            ps_data_fp32 = client.access(
-                                param_fp32, torch.device("cpu:0")
-                            )
+                            param_fp32 = param.ps_attr.fp32
                             destination[prefix + name] = (
-                                ps_data_fp32 if keep_vars else ps_data_fp32.detach()
+                                param_fp32 if keep_vars else param_fp32.detach()
                             )
                         else:
                             destination[prefix + name] = (
@@ -129,9 +126,8 @@ def _load_from_state_dict(
                 and param.ps_attr.param_type == ParamType.CHUNK_BASED
             ):
                 if param.ps_attr.is_local():
-                    param_fp32 = client.param_fp16_to_param_fp32_map[param]
                     ps_data_fp16 = client.access(param, torch.device("cpu:0"))
-                    ps_data_fp32 = client.access(param_fp32, torch.device("cpu:0"))
+                    ps_data_fp32 = param.ps_attr.fp32
                     assert ps_data_fp16.shape == ps_data_fp32.shape
 
                     if input_param.shape != ps_data_fp16.shape:

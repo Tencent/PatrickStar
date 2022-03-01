@@ -146,8 +146,6 @@ config = {
             "betas": betas,
             "eps": eps,
             "weight_decay": weight_decay,
-            # If set to False, all the adam operations will be on CPU.
-            "use_hybrid_adam": True,
         },
     },
     # If there is no "fp16" field in the config,
@@ -206,7 +204,7 @@ python tools/profile_visualizer.py profile.pkl --fig_type=access
 
 ![GPT3_8B model chunk location visualization on 4xV100](doc/profiler/GPT3_8B_4xV100_access.png)
 
-The red part means the chunk is on GPU, blue part means chunk is on GPU. The four section from bottm to top are the chunks of type FP16_PARAM, FP32_PARAM, VARIANCE and MOMENTUM.
+The red part means the chunk is on GPU, blue part means chunk is on GPU. The four section from bottm to top are the chunks of type FP16_PARAM and FP32_PARAM.
 
 #### Merge Checkpoints
 

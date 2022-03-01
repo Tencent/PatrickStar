@@ -31,7 +31,7 @@ import functools
 
 import torch
 
-from patrickstar.core import PatrickStarClient, ChunkType
+from patrickstar.core import PatrickStarClient
 from patrickstar.core import register_param, is_param_registered, ParamType
 from patrickstar.manager import _runtime_config
 from patrickstar.utils import logger, log_dist, print_rank, get_rank, get_world_size
@@ -225,68 +225,6 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
         self.submodule_id = -1
         self.not_init = not_init
 
-    def _post_context_exec(self):
-        """The callback function when the context exits.
-
-        1. Copy param.data to fp16 and fp32 chunk based params.
-        2. Append dummy chunk so that the number of chunks is an integer multiple of
-            number of processes.
-        """
-        log_dist("Post Model Init Context")
-
-        chunk_num = 0
-        for param_fp16_chunk_id, param_fp32_chunk_id in zip(
-            self.client.chunk_ids_generator(ChunkType.PARAM_FP16),
-            self.client.chunk_ids_generator(ChunkType.PARAM_FP32),
-        ):
-            if self.client.chunk_list[param_fp16_chunk_id].is_local():
-                for param_fp16, param_fp32 in zip(
-                    self.client.chunk_tensor_index.params_generator(
-                        param_fp16_chunk_id
-                    ),
-                    self.client.chunk_tensor_index.params_generator(
-                        param_fp32_chunk_id
-                    ),
-                ):
-                    if not self.not_init:
-                        if is_param_registered(param_fp32) and is_param_registered(
-                            param_fp16
-                        ):
-                            ps_data_fp16 = self.client.access(
-                                param_fp16, torch.device("cpu:0")
-                            )
-
-                            ps_data_fp32 = self.client.access(
-                                param_fp32, torch.device("cpu:0")
-                            )
-
-                            # Here the dtype of param_fp16 is actually fp32.
-                            ps_data_fp16.copy_(param_fp16.data)
-                            ps_data_fp32.copy_(param_fp16.data)
-
-                            self.client.release(param_fp16)
-                            self.client.release(param_fp32)
-                            param_fp16 = param_fp16.to(torch.half)
-            else:
-                for param_fp16 in self.client.chunk_tensor_index.params_generator(
-                    param_fp16_chunk_id
-                ):
-                    assert not self.client.is_local_param(param_fp16)
-                    # When release_after_init is True, we will release the remote
-                    # param tensor here.
-                    # When release_after_init is False, this will help cast dtype of
-                    # remote params to torch.half (See the NOTE below).
-                    param_fp16.data = torch.tensor(
-                        [], dtype=torch.half, device=param_fp16.device
-                    )
-            chunk_num += 1
-
-        world_size = get_world_size()
-        log_dist(f"Param fp16 chunk num {chunk_num}")
-        while chunk_num % world_size != 0:
-            self.client.append_dummy_chunk(torch.half, ChunkType.PARAM_FP16)
-            chunk_num += 1
-
     def _post_init_method(self, module):
         r"""The function to call at the end of the constructor of each nn.Module.
 
@@ -302,8 +240,6 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
             for name, param in module.named_parameters(recurse=False):
                 name = f"{module.__class__.__name__}.{name}_{self.param_idx}"
                 register_param(param, ParamType.TORCH_BASED, torch.float, name)
-                if _runtime_config.do_allreduce:
-                    self.client.torch_param_allreduce_list.append(param)
 
             # We need to cast the inputs to fp32 for the unmanaged modules.
             cast_forward(module, torch.float)
@@ -314,7 +250,6 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
         # NOTE() The order of params in model initialization is a bit different from the
         # the one in optimizer parameter group.
         param_fp16_list = []
-        param_fp32_list = []
         for name, param in module.named_parameters(recurse=False):
             name = f"{module.__class__.__name__}.{name}_{self.param_idx}"
             register_param(param, ParamType.CHUNK_BASED, torch.half, name)
@@ -323,28 +258,13 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
             logger.debug(
                 f"** Converting Params {name} in module id {self.submodule_id}"
             )
-            # Append a tensor to the param fp32 chunk list.
-            # Before that, we have to build a fp32 param.
-            param_fp32 = torch.nn.Parameter(
-                torch.tensor([], dtype=torch.float, device=torch.device("cpu:0")),
-                requires_grad=False,
-            )
-            param_fp32_list.append(param_fp32)
-            register_param(
-                param_fp32, ParamType.CHUNK_BASED, torch.float, f"{name}_fp32"
-            )
-            param_fp32.ps_attr.reset_shape(param.shape)
-            self.client.param_fp16_to_param_fp32_map[param] = param_fp32
-            self.client.chunk_based_param_fp16.append(param)
 
-        self.client.append_tensor(param_fp16_list, torch.half, ChunkType.PARAM_FP16)
-        self.client.append_tensor(param_fp32_list, torch.float, ChunkType.PARAM_FP32)
+        self.client.append_tensor(param_fp16_list, torch.half)
 
-        for param_fp16, param_fp32 in zip(param_fp16_list, param_fp32_list):
+        for param_fp16 in param_fp16_list:
             # Delete the memory of non local tensors
             if not self.client.is_local_param(param_fp16):
                 param_fp16.ps_attr._is_local = False
-                param_fp32.ps_attr._is_local = False
                 # TODO(jiaruifang) fix distributed init bug.
                 # Check results will fail when not release_after_init.
                 # As release tensor here will make the random seed generator
@@ -361,6 +281,50 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
                     )
             else:
                 param_fp16.ps_attr._is_local = True
-                param_fp32.ps_attr._is_local = True
 
         cast_forward(module, torch.half)
+
+    def _post_context_exec(self):
+        """The callback function when the context exits.
+
+        1. Copy param.data to fp16 and fp32 chunk based params.
+        2. Append dummy chunk so that the number of chunks is an integer multiple of
+            number of processes.
+        """
+        log_dist("Post Model Init Context")
+
+        chunk_num = 0
+        for chunk_id in range(len(self.client.chunk_list.chunks)):
+            if self.client.chunk_list[chunk_id].is_local():
+                for param_fp16 in self.client.chunk_tensor_index.params_generator(
+                    chunk_id
+                ):
+                    if not self.not_init:
+                        if is_param_registered(param_fp16):
+                            ps_data_fp16 = self.client.access(
+                                param_fp16, torch.device("cpu:0")
+                            )
+                            # Here the dtype of param_fp16 is actually fp32.
+                            ps_data_fp16.copy_(param_fp16.data)
+                            self.client.release(param_fp16)
+                            param_fp16.ps_attr.fp32 = param_fp16.data
+                            param_fp16 = param_fp16.to(torch.half)
+            else:
+                for param_fp16 in self.client.chunk_tensor_index.params_generator(
+                    chunk_id
+                ):
+                    assert not self.client.is_local_param(param_fp16)
+                    # When release_after_init is True, we will release the remote
+                    # param tensor here.
+                    # When release_after_init is False, this will help cast dtype of
+                    # remote params to torch.half (See the NOTE below).
+                    param_fp16.data = torch.tensor(
+                        [], dtype=torch.half, device=param_fp16.device
+                    )
+            chunk_num += 1
+
+        world_size = get_world_size()
+        log_dist(f"Param fp16 chunk num {chunk_num}")
+        while chunk_num % world_size != 0:
+            self.client.append_dummy_chunk(torch.half)
+            chunk_num += 1

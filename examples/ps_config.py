@@ -41,7 +41,6 @@ def get_patrickstar_config(
                 "betas": betas,
                 "eps": eps,
                 "weight_decay": weight_decay,
-                "use_hybrid_adam": args.use_hybrid_adam,
             },
         },
         "fp16": {
@@ -65,9 +64,6 @@ def get_patrickstar_config(
                 "margin_use_ratio": 0.8,
                 "use_fake_dist": False,
                 "with_static_partition": args.with_static_partition,
-            },
-            "opts": {
-                "with_mem_cache": args.with_mem_cache,
             },
         },
     }

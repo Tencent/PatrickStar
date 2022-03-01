@@ -68,14 +68,6 @@ class TrainingStage(Enum):
     ADAM = 3
 
 
-class ChunkType(Enum):
-    PARAM_FP16 = 0
-    PARAM_FP32 = 1
-    MOMENTUM = 2
-    VARIANCE = 3
-    UNDEF = 4
-
-
 class ParamType(Enum):
     CHUNK_BASED = 0
     TORCH_BASED = 1

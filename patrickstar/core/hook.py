@@ -120,13 +120,11 @@ class PostBackwardFunction(torch.autograd.Function):
 
 
 # Need to be idempotent.
-def pre_sub_module_forward_function(sub_module, client, name):
+def pre_module_forward_function(module, client, name):
     flag = False
     rank = get_rank()
-    logger.debug(
-        f"rank {rank} FWD pre {name}.{sub_module.__class__.__name__} access data"
-    )
-    for _, param in sub_module.named_parameters(recurse=False):
+    logger.debug(f"rank {rank} FWD pre {name}.{module.__class__.__name__} access data")
+    for _, param in module.named_parameters(recurse=False):
         if param.ps_attr.param_type == ParamType.TORCH_BASED:
             continue
         param.data = client.access_dist(
@@ -141,8 +139,8 @@ def pre_sub_module_forward_function(sub_module, client, name):
 
 
 # release submodule
-def post_sub_module_forward_function(sub_module, client, name):
-    for sub_name, param in sub_module.named_parameters(recurse=False):
+def post_module_forward_function(module, client, name):
+    for sub_name, param in module.named_parameters(recurse=False):
         if param.ps_attr.param_type == ParamType.TORCH_BASED:
             continue
         rank = get_rank()
@@ -152,47 +150,61 @@ def post_sub_module_forward_function(sub_module, client, name):
                 param,
                 TensorState.HOLD_AFTER_FWD,
                 training_stage=TrainingStage.FWD,
-                do_allreduce=False,
             )
         else:
             client.release(param, TensorState.HOLD_AFTER_FWD)
 
-        if client.training_stage() == TrainingStage.FWD:
-            param.ps_attr.fwd_used_cnt += 1
 
-    # client.trigger_memory_tracing()
-    # client.adjust_chunk_layout()
-
-
-def pre_sub_module_backward_function(sub_module, client, name):
+def pre_module_backward_function(module, client, name):
+    print("pre backward", module.__class__.__name__)
     flag = False
-    for sub_name, param in sub_module.named_parameters(recurse=False):
+    for sub_name, param in module.named_parameters(recurse=False):
         if param.ps_attr.param_type == ParamType.TORCH_BASED:
             continue
         rank = get_rank()
         logger.debug(f"rank {rank} BWD pre {name}.{sub_name}")
-        if param.ps_attr.data_type == torch.half:
-            tmp_tensor = client.access_dist(
-                param,
-                client.device,
-                training_stage=TrainingStage.BWD,
-            )
-            param.data = tmp_tensor
-
-            # NOTE() bwd first visits this param
-            if param.ps_attr.bwd_used_cnt == 0:
-                param.grad = torch.zeros_like(tmp_tensor)
-            param.ps_attr.bwd_used_cnt += 1
-        elif param.ps_attr.data_type == torch.float:
-            raise RuntimeError("fp32 training is not supported!")
+        tmp_tensor = client.access_dist(
+            param,
+            client.device,
+            training_stage=TrainingStage.BWD,
+        )
+        param.data = tmp_tensor
+        param.grad = torch.zeros_like(tmp_tensor)
         flag = True
     if flag:
         client.trigger_memory_tracing()
         client.adjust_chunk_layout()
 
 
-def post_sub_module_backward_function(sub_module, client, name):
-    for sub_name, param in sub_module.named_parameters(recurse=False):
+def reduce_grad(param, client):
+    print(param.ps_attr.name)
+    client.optimizer.check_overflow(param)
+    chunk_id = client.chunk_tensor_index.get_chunk_id(param)
+    chunk = client.chunk_list[chunk_id]
+    dst = chunk.comm_info.offset
+    # Here we use gloo backend group for the cpu tensors (embedding).
+
+    world_size = get_world_size()
+    if world_size > 1:
+        global_timer.my_timer.start_profile("HOOK_torch_allreduce")
+        torch.distributed.reduce(
+            param.grad,
+            dst,
+            op=torch.distributed.ReduceOp.SUM,
+            async_op=False,
+        )
+        if dst == get_rank():
+            param.grad /= world_size
+        else:
+            param.grad = None
+        global_timer.my_timer.finish_profile("HOOK_torch_allreduce")
+    logger.debug(f"rank {get_rank()} allreduce grad {param.ps_attr.name}")
+
+
+def post_module_backward_function(module, client, name):
+    for _, param in module.named_parameters(recurse=False):
+        reduce_grad(param, client)
+    for sub_name, param in module.named_parameters(recurse=False):
         if param.ps_attr.param_type == ParamType.TORCH_BASED:
             continue
         # NOTE() We add a fp16 or fp32 attribute to the ps_attr of param.
@@ -203,26 +215,16 @@ def post_sub_module_backward_function(sub_module, client, name):
         # NOTE() When a parameter is shared by multiple operators,
         # a reference counter is needed to correctly trigger the chunk reusing.
         # The memory space of the last updated param fp16 is covered by grad fp16.
-        client.optimizer.check_overflow(param)
-        # NOTE() bwd last visits this pardam
-        if param.ps_attr.bwd_used_cnt == param.ps_attr.fwd_used_cnt:
-            tmp_tensor = param.ps_attr.access_tensor()
-            tmp_tensor.copy_(param.grad)
-            if torch.distributed.is_initialized():
-                client.release_dist(
-                    param,
-                    TensorState.HOLD_AFTER_BWD,
-                    training_stage=TrainingStage.BWD,
-                    do_allreduce=True,
-                )
-            else:
-                client.release(param, TensorState.HOLD_AFTER_BWD)
-            rank = get_rank()
-            logger.debug(f"rank {rank} BWD post before release_dist {name}.{sub_name}")
-            param.grad = None
-
-    # client.trigger_memory_tracing()
-    # client.adjust_chunk_layout()
+        if torch.distributed.is_initialized():
+            client.release_dist(
+                param,
+                TensorState.HOLD_AFTER_BWD,
+                training_stage=TrainingStage.BWD,
+            )
+        else:
+            client.release(param, TensorState.HOLD_AFTER_BWD)
+        rank = get_rank()
+        logger.debug(f"rank {rank} BWD post before release_dist {name}.{sub_name}")
 
 
 def _register_hooks_recursively(module, client, name=""):
@@ -241,15 +243,15 @@ def _register_hooks_recursively(module, client, name=""):
         return
 
     def _pre_forward_module_hook(module, *args):
-        pre_sub_module_forward_function(module, client, name)
+        pre_module_forward_function(module, client, name)
 
     def _post_forward_module_hook(module, *args):
-        post_sub_module_forward_function(module, client, name)
+        post_module_forward_function(module, client, name)
 
     # The hook can modify the output
     def _pre_backward_module_hook(module, inputs, output):
         def _run_before_backward_function(sub_module):
-            pre_sub_module_backward_function(sub_module, client, name)
+            pre_module_backward_function(sub_module, client, name)
 
         return _apply_to_tensors_only(
             module, PreBackwardFunction, _run_before_backward_function, output
@@ -257,7 +259,7 @@ def _register_hooks_recursively(module, client, name=""):
 
     def _post_backward_module_hook(module, inputs):
         def _run_after_backward_function(sub_module):
-            post_sub_module_backward_function(sub_module, client, name)
+            post_module_backward_function(sub_module, client, name)
 
         return _apply_to_tensors_only(
             module, PostBackwardFunction, _run_after_backward_function, inputs
@@ -272,31 +274,3 @@ def _register_hooks_recursively(module, client, name=""):
 
 def setup_patrickstar_hooks(module, client):
     _register_hooks_recursively(module, client)
-
-    def make_post_backward_hook(param):
-        def hook(*ignore):
-            client.optimizer.check_overflow(param)
-            # Here we use gloo backend group for the cpu tensors (embedding).
-            if get_world_size() > 1:
-                global_timer.my_timer.start_profile("HOOK_torch_allreduce")
-                world_size = get_world_size()
-                torch.distributed.all_reduce(
-                    param.grad,
-                    op=torch.distributed.ReduceOp.SUM,
-                    group=client.cpu_comm_group,
-                    async_op=False,
-                )
-                param.grad /= world_size
-                global_timer.my_timer.finish_profile("HOOK_torch_allreduce")
-            logger.debug(f"rank {get_rank()} allreduce grad {param.ps_attr.name}")
-
-        return hook
-
-    # torch param will not override data with grad,
-    # we could use the standard register_hook on them.
-    for param in client.torch_param_allreduce_list:
-        if param.requires_grad:
-            param_tmp = param.expand_as(param)
-            grad_acc = param_tmp.grad_fn.next_functions[0][0]
-            grad_acc.register_hook(make_post_backward_hook(param))
-            client.grad_accs.append(grad_acc)

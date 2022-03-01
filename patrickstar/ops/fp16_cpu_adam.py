@@ -33,14 +33,13 @@ from typing import List
 import torch
 import time
 
-from patrickstar.core import ChunkType
 from patrickstar.core.const import TensorState, TrainingStage
-from patrickstar.core.parameter import register_param, ParamType
+from patrickstar.core.hook import reduce_grad
+from patrickstar.core.parameter import ParamType
 import patrickstar.utils.global_timer as global_timer
 from patrickstar.utils import logger, get_rank
 from .chunk_io_buff import FP32ChunkReadBuffer, FP16ChunkWriteBuffer
 from .op_builder.cpu_adam import CPUAdamBuilder
-from patrickstar.utils.helper import get_real_data_tensor
 from patrickstar.profiler import profiler
 
 
@@ -73,7 +72,6 @@ class FP16Adam(torch.optim.Optimizer):
         weight_decay=0,
         use_adamw=False,
         amsgrad=False,
-        use_hybrid_adam=True,
     ):
         """
         The implementation was based on
@@ -103,8 +101,6 @@ class FP16Adam(torch.optim.Optimizer):
         # to tensor to use clamp_cpu instead.
         self.cpu_gradient_clipping = torch.Tensor([gradient_clipping])
 
-        self.use_hybrid_adam = use_hybrid_adam
-
         assert (
             len(self.param_groups) == 1
         ), "Only support one param group at the moment."
@@ -119,53 +115,13 @@ class FP16Adam(torch.optim.Optimizer):
 
                 state["step"] = 0
 
-                if p.ps_attr.param_type == ParamType.TORCH_BASED:
-                    if p.requires_grad:
-                        state["exp_avg"] = zero_param(p)
-                        register_param(
-                            state["exp_avg"], ParamType.TORCH_BASED, torch.float
-                        )
-                        state["exp_avg_sq"] = zero_param(p)
-                        register_param(
-                            state["exp_avg_sq"], ParamType.TORCH_BASED, torch.float
-                        )
-                elif p.ps_attr.is_local():
-                    # Only create the local optimizer state params.
-                    name = p.ps_attr.name
-                    state["exp_avg"] = empty_cpu_param()
-                    register_param(
-                        state["exp_avg"],
-                        ParamType.CHUNK_BASED,
-                        torch.float,
-                        f"{name}.exp_avg",
-                    )
-                    state["exp_avg"].ps_attr.reset_shape(p.ps_attr.shape)
-                    state["exp_avg"].ps_attr._is_local = p.ps_attr.is_local()
-
-                    state["exp_avg_sq"] = empty_cpu_param()
-                    register_param(
-                        state["exp_avg_sq"],
-                        ParamType.CHUNK_BASED,
-                        torch.float,
-                        f"{name}.exp_avg_sq",
-                    )
-                    state["exp_avg_sq"].ps_attr.reset_shape(p.ps_attr.shape)
-                    state["exp_avg_sq"].ps_attr._is_local = p.ps_attr.is_local()
-
-                    # Chunk layout of Momentum and Variance should be consist with param fp16
-                    self.client.append_tensor_as_ref(
-                        state["exp_avg"],
-                        torch.float,
-                        ChunkType.MOMENTUM,
-                        p,
-                    )
-
-                    self.client.append_tensor_as_ref(
-                        state["exp_avg_sq"],
-                        torch.float,
-                        ChunkType.VARIANCE,
-                        p,
-                    )
+                # Only create the local optimizer state params.
+                state["exp_avg"] = torch.zeros(
+                    p.ps_attr.shape, device=torch.device("cpu:0")
+                )
+                state["exp_avg_sq"] = torch.zeros(
+                    p.ps_attr.shape, device=torch.device("cpu:0")
+                )
 
         # The buffer for fp16 grad.
         self.read_chunk_buff = None
@@ -290,7 +246,7 @@ class FP16Adam(torch.optim.Optimizer):
         if torch.distributed.is_initialized():
             overflow_gpu = torch.cuda.ByteTensor([self.has_overflow])
             torch.distributed.all_reduce(
-                overflow_gpu, op=torch.distributed.ReduceOp.MAX
+                overflow_gpu, op=torch.distributed.ReduceOp.MAX, async_op=False
             )
             self.has_overflow = overflow_gpu[0].item()
         if self.has_overflow:
@@ -310,7 +266,6 @@ class FP16Adam(torch.optim.Optimizer):
     def fp16_chunk_adam_ops(
         self,
         client,
-        fp32_param_list: List[torch.nn.Parameter],
         fp16_param_with_grad_list,
         exp_avg_list: List[torch.nn.Parameter],
         exp_avg_sq_list: List[torch.nn.Parameter],
@@ -320,51 +275,26 @@ class FP16Adam(torch.optim.Optimizer):
         read_chunk_buff,
         write_chunk_buff,
         time_profile=True,
-        margin_chunk_num_for_gpu_adam=0,
     ):
         r"""Functional API that performs Adam algorithm computation.
         Visit fp16_param_with_grad_list in the order of tensors stored in chunks.
         Copy the chunk into a tmp buffer to speed up the memcpy between devices.
         """
-        local_rank = client.local_rank
-        logger.debug(
-            f"local_rank {local_rank} margin_chunk_num_for_gpu_adam {margin_chunk_num_for_gpu_adam}, "
-            f"param cnt {len(fp32_param_list)}"
-        )
-        for i, fp32_param in enumerate(fp32_param_list):
+        for i, fp16_param in enumerate(fp16_param_with_grad_list):
             # 1. prepare data for Adam
-            fp16_param = fp16_param_with_grad_list[i]
-
             if time_profile:
                 global_timer.my_timer.start_profile("ADAM_prepare_data")
                 global_timer.my_timer.start_profile("ADAM_prepare_data_grad_copy")
 
-            # Copy the fp16 grads in the granularity of chunks.
-            if fp16_param.ps_attr.param_type == ParamType.TORCH_BASED:
-                # If fp16_param is managed by native torch, it should be on CPU,
-                # because only cpu_embedding optimization are managed by native torch
-                # now and it is fp32.
-                assert fp32_param is None
-                fp32_param = fp16_param
-                # Here the grad is already of dtype fp32.
-                fp16_grad_tensor = fp16_param.grad
-                assert fp16_grad_tensor.dtype == torch.float
-            else:
-                # Copy the fp16 grad chunk to the compute_device of fp32 param chunk.
-                # As we are visiting  params by its storing order in the chunk,
-                # we will only copy the chunk when visiting its first tensor and store it
-                # in the buffer. For the rest of the tensors, we will directly indexing from
-                # the buffer.
-                fp16_grad_tensor = read_chunk_buff.access_from_cache(fp16_param).view(
-                    fp16_param.ps_attr.shape
-                )
+            grad_tensor = fp16_param.grad
+            grad_tensor = grad_tensor.to(torch.device("cpu"))
 
             # Gradient clipping
             if self.gradient_clipping > 0:
                 # The gradient clipping may be larger than the max fp16 value
                 # after being amplified by loss scale.
                 max_fp16 = torch.finfo(torch.half).max
-                if fp16_grad_tensor.device.type == "cpu":
+                if grad_tensor.device.type == "cpu":
                     gradient_clipping = self.cpu_gradient_clipping
                     if self.loss_scaler is not None:
                         gradient_clipping *= self.loss_scaler.loss_scale
@@ -374,32 +304,25 @@ class FP16Adam(torch.optim.Optimizer):
                     if self.loss_scaler is not None:
                         gradient_clipping *= self.loss_scaler.loss_scale
                     gradient_clipping = min(max_fp16, gradient_clipping)
-                fp16_grad_tensor.clamp_(-gradient_clipping, gradient_clipping)
+                grad_tensor.clamp_(-gradient_clipping, gradient_clipping)
 
-            compute_device = fp16_grad_tensor.device
+            compute_device = grad_tensor.device
 
             if time_profile:
                 global_timer.my_timer.finish_profile("ADAM_prepare_data_grad_copy")
                 global_timer.data_move_cnter.update(
-                    "ADAM_prepare_data_grad_copy", fp16_grad_tensor.numel() * 2
+                    "ADAM_prepare_data_grad_copy", grad_tensor.numel() * 2
                 )
-
-            client.access(fp32_param, compute_device)
-            fp32_data_tensor = get_real_data_tensor(fp32_param)
-
-            exp_avg_param = exp_avg_list[i]
-            exp_avg_sq_param = exp_avg_sq_list[i]
-
-            client.access(exp_avg_param, compute_device)
-            client.access(exp_avg_sq_param, compute_device)
-
-            exp_avg = get_real_data_tensor(exp_avg_param)
-            exp_avg_sq = get_real_data_tensor(exp_avg_sq_param)
 
             # 2. Start Adam
             if time_profile:
                 global_timer.my_timer.finish_profile("ADAM_prepare_data")
                 global_timer.my_timer.start_profile("ADAM_compute")
+
+            fp32_data_tensor = fp16_param.ps_attr.fp32
+            print("fp32_data_tensor:", fp32_data_tensor.shape)
+            exp_avg = exp_avg_list[i]
+            exp_avg_sq = exp_avg_sq_list[i]
 
             step = state_steps[i]
             beta1, beta2 = hyperparam_list[i]["betas"]
@@ -410,10 +333,10 @@ class FP16Adam(torch.optim.Optimizer):
             bias_correction1 = 1 - beta1 ** step
             bias_correction2 = 1 - beta2 ** step
 
-            if compute_device.type == "cpu" and fp16_grad_tensor.device.type == "cpu":
+            if compute_device.type == "cpu" and grad_tensor.device.type == "cpu":
                 self.ds_cpu_adam_update(
                     fp32_data_tensor,
-                    fp16_grad_tensor,
+                    grad_tensor,
                     exp_avg,
                     exp_avg_sq,
                     step,
@@ -425,7 +348,7 @@ class FP16Adam(torch.optim.Optimizer):
                     True,
                 )
             else:
-                fp32_grad_tensor = fp16_grad_tensor.float()
+                fp32_grad_tensor = grad_tensor.float()
                 self.torch_adam_update(
                     fp32_data_tensor,
                     fp32_grad_tensor,
@@ -446,26 +369,32 @@ class FP16Adam(torch.optim.Optimizer):
 
             # 3. Finish Adam.
 
-            # Copy fp32_param back to fp16_param.
-            if fp32_param.ps_attr.param_type == ParamType.CHUNK_BASED:
-                write_chunk_buff.write_from_cache(fp16_param, fp32_param)
-
             if time_profile:
                 global_timer.my_timer.finish_profile("ADAM_param_fp32_to_fp16")
-                global_timer.data_move_cnter.update(
-                    "ADAM_param_fp32_to_fp16", fp32_data_tensor.numel() * 4
-                )
-                global_timer.my_timer.start_profile("ADAM_release_data")
-
-            client.release(fp32_param)
-            client.release(exp_avg_param)
-            client.release(exp_avg_sq_param)
-
-            if time_profile:
-                global_timer.my_timer.finish_profile("ADAM_release_data")
 
         write_chunk_buff.reset()
         read_chunk_buff.reset()
+
+    def release_last(self):
+        # the starting module would trigger post_module_backward hook
+        rank = get_rank()
+        for name, param in self.client.module.named_parameters():
+            reduce_grad(param, self.client)
+            if param.ps_attr.param_type == ParamType.TORCH_BASED:
+                continue
+            if param.ps_attr.get_state() == TensorState.COMPUTE:
+                logger.debug(
+                    f"adam forces rank {rank} to"
+                    f"release param {self.client.module.__class__.__name__}.{name} from COMPUTE to HOLD_AFTER_BWD"
+                )
+                if torch.distributed.is_initialized():
+                    self.client.release_dist(
+                        param,
+                        TensorState.HOLD_AFTER_BWD,
+                        training_stage=TrainingStage.BWD,
+                    )
+                else:
+                    self.client.release(param, TensorState.HOLD_AFTER_BWD)
 
     @torch.no_grad()
     def step(self, closure=None):
@@ -476,30 +405,7 @@ class FP16Adam(torch.optim.Optimizer):
                 and returns the loss.
         """
         global_timer.my_timer.start_profile("ADAM")
-
-        rank = get_rank()
-        mem_tracer = self.client.mem_tracer
-        for name, param in self.client.module.named_parameters():
-            if param.ps_attr.param_type == ParamType.TORCH_BASED:
-                continue
-            if param.ps_attr.get_state() == TensorState.COMPUTE:
-                self.client.optimizer.check_overflow(param)
-                logger.debug(
-                    f"adam forces rank {rank} to"
-                    f"release param {self.client.module.__class__.__name__}.{name} from COMPUTE to HOLD_AFTER_BWD"
-                )
-                tmp_tensor = param.ps_attr.access_tensor()
-                tmp_tensor.copy_(param.grad)
-                param.grad = None
-                if torch.distributed.is_initialized():
-                    self.client.release_dist(
-                        param,
-                        TensorState.HOLD_AFTER_BWD,
-                        training_stage=TrainingStage.BWD,
-                        do_allreduce=True,
-                    )
-                else:
-                    self.client.release(param, TensorState.HOLD_AFTER_BWD)
+        self.release_last()
         if profiler.started():
             profiler.stage_convert_time.append((time.time(), TrainingStage.ADAM))
 
@@ -513,30 +419,16 @@ class FP16Adam(torch.optim.Optimizer):
             with torch.enable_grad():
                 loss = closure()
 
-        if self.use_hybrid_adam:
-            margin_chunk_num_for_gpu_adam = (
-                mem_tracer.get_margin_chunk_num_for_gpu_adam()
-            )
-        else:
-            margin_chunk_num_for_gpu_adam = 0
-
         max_chunk_size = self.client.chunk_list.max_chunk_size()
         self.read_chunk_buff = FP32ChunkReadBuffer(
             self.client.chunk_list,
             self.client.chunk_tensor_index,
             max_chunk_size,
-            margin_chunk_num_for_gpu_adam,
-            self.client.chunk_list.memory_cache
-            if self.client.opt_config["with_mem_cache"]
-            else None,
         )
         self.write_chunk_buff = FP16ChunkWriteBuffer(
             self.client.chunk_list,
             self.client.chunk_tensor_index,
             max_chunk_size,
-            self.client.chunk_list.memory_cache
-            if self.client.opt_config["with_mem_cache"]
-            else None,
         )
 
         if self.has_overflow_and_reset_param(write_chunk_buff=self.write_chunk_buff):
@@ -551,41 +443,24 @@ class FP16Adam(torch.optim.Optimizer):
             return loss
 
         fp16_param_with_grad_list = []
-        fp32_param_list = []
         exp_avg_list = []
         exp_avg_sq_list = []
 
         hyperparam_list = []
         state_steps = []
 
-        max_param_size = 0
-        for _, group in enumerate(self.param_groups):
-            for _, p in enumerate(group["params"]):
-                if p.requires_grad:
+        for group in self.param_groups:
+            for p in group["params"]:
+                if p.grad is not None:
                     # update the steps for each param group update
                     state = self.state[p]
                     state["step"] += 1
-
-                    # When p is not torch param and belongs to a remote chunk, skip.
-                    if (
-                        p.ps_attr.param_type == ParamType.CHUNK_BASED
-                        and not p.ps_attr.is_local()
-                    ):
-                        continue
-
-                    if p.ps_attr.param_type == ParamType.TORCH_BASED:
-                        max_param_size = max(p.numel(), max_param_size)
 
                     fp16_param_with_grad_list.append(p)
 
                     exp_avg_list.append(state["exp_avg"])
                     exp_avg_sq_list.append(state["exp_avg_sq"])
-                    if p in self.client.param_fp16_to_param_fp32_map:
-                        fp32_param_list.append(
-                            self.client.param_fp16_to_param_fp32_map[p]
-                        )
-                    else:
-                        fp32_param_list.append(None)
+
                     hyperparam = {
                         "betas": state["betas"],
                         "lr": state["lr"],
@@ -598,10 +473,11 @@ class FP16Adam(torch.optim.Optimizer):
                     # record the step after step update
                     state_steps.append(state["step"])
 
+        print("before fp16_chunk_adam_ops")
+
         # Hybrid Adam. Put some chunks on GPU based on the warmup info.
         self.fp16_chunk_adam_ops(
             self.client,
-            fp32_param_list,
             fp16_param_with_grad_list,
             exp_avg_list,
             exp_avg_sq_list,
@@ -611,8 +487,9 @@ class FP16Adam(torch.optim.Optimizer):
             self.read_chunk_buff,
             self.write_chunk_buff,
             True,
-            margin_chunk_num_for_gpu_adam,
         )
+
+        print("after fp16_chunk_adam_ops")
 
         if self.loss_scaler:
             self.loss_scaler.update_scale(False)

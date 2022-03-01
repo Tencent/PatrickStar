@@ -64,7 +64,6 @@ config = {
             "betas": (0.9, 0.999),
             "eps": 1e-6,
             "weight_decay": 0,
-            "use_hybrid_adam": True,
         },
     },
     "fp16": {  # loss scaler params

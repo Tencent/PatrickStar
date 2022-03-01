@@ -29,7 +29,13 @@
 
 import torch
 
-from patrickstar.core import ChunkState, TensorState, TrainingStage, ParamType
+from patrickstar.core import (
+    ChunkState,
+    TensorState,
+    TrainingStage,
+    ParamType,
+    register_param,
+)
 from patrickstar.fp16 import LossScaler, DynamicLossScaler
 from patrickstar.ops import FP16Adam
 from patrickstar.utils import log_dist, global_timer
@@ -57,7 +63,6 @@ class PatrickStarEngine(torch.nn.Module):
                 "betas": (0.9, 0.999),
                 "eps": 1e-8,
                 "weight_decay": 0,
-                "use_hybrid_adam": True,
             },
         }
 
@@ -109,12 +114,15 @@ class PatrickStarEngine(torch.nn.Module):
             self.loss_scaler = None
             self.gradient_clipping = -1
 
-        # This need to be placed before the initialization of optimizer.
-        self._move_torch_parts_to_gpu(model)
+        params = list(self.parameters())
+        if len(params) == 0:
+            dummy = torch.nn.Parameter(torch.empty([1]), requires_grad=False)
+            register_param(dummy, ParamType.TORCH_BASED, torch.float, "dummy")
+            params = [dummy]
 
         self.optimizer = FP16Adam(
             self.client,
-            self.module.parameters(),
+            params,
             loss_scaler=self.loss_scaler,
             gradient_clipping=self.gradient_clipping,
             lr=optim_params["lr"],
@@ -122,16 +130,19 @@ class PatrickStarEngine(torch.nn.Module):
             eps=optim_params["eps"],
             weight_decay=optim_params["weight_decay"],
             use_adamw=(optim_type == "AdamW"),
-            use_hybrid_adam=optim_params["use_hybrid_adam"],
         )
 
-        self.client.init(self.module, self.optimizer)
+        self.client.optimizer = self.optimizer
+        self.client.module = self.module
+        self.client.register_model_hook(self.module)
+
+        # This need to be placed before the initialization of optimizer.
+        self.move_torch_parts_to_gpu(self.module)
+
         self.iteration_cnt_ = 0
-        # TODO(jiaruifang) pass in via config.
-        self.warmup_times = 1
         log_dist("PatrickStarEngine initialized.")
 
-    def _move_torch_parts_to_gpu(self, model):
+    def move_torch_parts_to_gpu(self, model):
         # TODO(zilinzhu) Currently we move all buffers to GPU as the buffer size is
         # relatively small. Maybe find a better way to deal with them.
         for buffer in model.buffers():
@@ -151,8 +162,6 @@ class PatrickStarEngine(torch.nn.Module):
         # about grad overflow.
         self.client.mem_tracer.reset_memory_stats()
         self.client.mem_tracer.metronome.reset()
-        for param_fp16 in self.client.chunk_based_param_fp16:
-            param_fp16.ps_attr.fwd_used_cnt = 0
         for _, chunk in self.client.chunk_list.generate_chunk():
             chunk.unused = 0
 
@@ -170,6 +179,15 @@ class PatrickStarEngine(torch.nn.Module):
                 chunk.set_unused()
                 self.client.set_all_tensors_state_in_chunk(chunk_id, TensorState.HOLD)
 
+    def parameters(self, recurse: bool = True):
+        for _, param in self.named_parameters(recurse=recurse):
+            yield param
+
+    def named_parameters(self, prefix: str = "", recurse: bool = True):
+        for name, param in self.module.named_parameters(prefix, recurse):
+            if param.ps_attr.is_local():
+                yield name, param
+
     def forward(self, *inputs, **kwargs):
         r"""Execute forward propagation
         Arguments:
@@ -180,7 +198,7 @@ class PatrickStarEngine(torch.nn.Module):
         # Considering the grad overflow situation.
         if self.iteration_cnt_ == 0:
             self.client.set_warmup(True)
-        if self.iteration_cnt_ == self.warmup_times:
+        if self.iteration_cnt_ == 1:
             self.client.set_warmup(False)
             self.client.mem_tracer.close_tracer()
 
@@ -206,15 +224,11 @@ class PatrickStarEngine(torch.nn.Module):
             profiler.stage_convert_time.append((time.time(), TrainingStage.FWD))
         self.client.set_training_phase(TrainingStage.BWD)
 
-        for param_fp16 in self.client.chunk_based_param_fp16:
-            param_fp16.ps_attr.bwd_used_cnt = 0
-
         self.optimizer.zero_grad()
         if self.loss_scaler:
             self.loss_scaler.backward(loss)
         else:
             loss.backward()
-        self.client.mem_tracer.update_margin_mem()
         self.iteration_cnt_ += 1
         global_timer.my_timer.finish_profile("BWD")
 

@@ -31,8 +31,6 @@ import torch
 
 from patrickstar.core import ChunkList, ChunkTensorIndex, ParamType
 from patrickstar.utils import logger, get_rank
-from patrickstar.core.memory_cache import MemoryCache
-from typing import Optional
 
 
 class FP16ChunkWriteBuffer(object):
@@ -50,7 +48,6 @@ class FP16ChunkWriteBuffer(object):
         chunk_list: ChunkList,
         chunk_tensor_index: ChunkTensorIndex,
         chunk_size: int,
-        mem_cache: Optional[MemoryCache] = None,
     ):
         """
         Args:
@@ -65,22 +62,11 @@ class FP16ChunkWriteBuffer(object):
         # NOTE() We found that doing a two stage copy, 1) CPU fp32 -> GPU fp32,
         # 2) GPU fp32 -> GPU fp16 is faster than one single copy_. And the
         # gpu_fp32_buff member is the itermediate buffer.
-
-        self.with_mem_cache = mem_cache is not None
-        if self.with_mem_cache:
-            self.memory_cache = mem_cache
-            self.gpu_fp32_buff = self.memory_cache.pop_or_allocate(
-                torch.device(f"cuda:{torch.cuda.current_device()}"),
-                chunk_size,
-                torch.float,
-                False,
-            )
-        else:
-            self.gpu_fp32_buff = torch.zeros(
-                chunk_size,
-                dtype=torch.float,
-                device=torch.device(f"cuda:{torch.cuda.current_device()}"),
-            )
+        self.gpu_fp32_buff = torch.zeros(
+            chunk_size,
+            dtype=torch.float,
+            device=torch.device(f"cuda:{torch.cuda.current_device()}"),
+        )
 
     def write_from_cache(self, target_param, src_param):
         r"""Write the value of `target_param` to `src_param` with casting.
@@ -148,9 +134,6 @@ class FP16ChunkWriteBuffer(object):
             )
         self.cached_src_chunk_id = None
         self.cached_target_chunk_id = None
-        if self.with_mem_cache:
-            self.memory_cache.push(self.gpu_fp32_buff)
-            self.gpu_fp32_buff = None
 
 
 class FP32ChunkReadBuffer(object):
@@ -167,15 +150,12 @@ class FP32ChunkReadBuffer(object):
         chunk_list: ChunkList,
         chunk_tensor_index: ChunkTensorIndex,
         chunk_size: int,
-        margin_chunk_num_for_gpu_adam: int,
-        mem_cache: Optional[MemoryCache] = None,
     ):
         """
         Args:
             chunk_list: :class:`ChunkList`.
             chunk_tensor_index: :class:`ChunkTensorIndex`.
             chunk_size: `int`.
-            margin_chunk_num_for_gpu_adam: `int`. the number of GPU chunks for Adam state.
         """
         self.chunk_list = chunk_list
         self.chunk_tensor_index = chunk_tensor_index
@@ -184,32 +164,8 @@ class FP32ChunkReadBuffer(object):
         )
         self.local_rank = chunk_list.local_rank
 
-        self.with_mem_cache = mem_cache is not None
-        if self.with_mem_cache:
-            self.memory_cache = mem_cache
-
         self.gpu_payload = None
-        if margin_chunk_num_for_gpu_adam > 0:
-            # When `margin_chunk_num_for_gpu_adam` > 0, it means there will be optimizer
-            # state resides on GPU. So we need to allocate a GPU buffer for those.
-            gpu_device = torch.device(f"cuda:{self.local_rank}")
-
-            if self.with_mem_cache:
-                self.gpu_payload = self.memory_cache.pop_or_allocate(
-                    gpu_device, chunk_size, torch.half, False
-                )
-            else:
-                logger.debug(
-                    f"Allocate fp32 Chunk Buffer of size {chunk_size / 1e6} MB on CPU."
-                )
-                self.gpu_payload = torch.empty(
-                    chunk_size, dtype=torch.half, device=gpu_device
-                )
-            logger.debug(
-                f"Allocate fp32 Chunk Buffer of size {chunk_size / 1e6} MB on {gpu_device}."
-            )
         self.cached_chunk_id = None
-        self.margin_chunk_num_for_gpu_adam = margin_chunk_num_for_gpu_adam
         self.cached_chunk_num = 0
         self.ret_payload = None
 
@@ -236,10 +192,7 @@ class FP32ChunkReadBuffer(object):
             # visiting uncached chunk
             if self.cached_chunk_id != info.chunk_id:
                 self.cached_chunk_num += 1
-                if self.cached_chunk_num < self.margin_chunk_num_for_gpu_adam:
-                    target_device = torch.device(f"cuda:{self.local_rank}")
-                else:
-                    target_device = torch.device("cpu:0")
+                target_device = torch.device("cpu:0")
 
                 chunk_payload = self.chunk_list[info.chunk_id].payload
                 if target_device.type == "cuda":
@@ -260,7 +213,3 @@ class FP32ChunkReadBuffer(object):
         self.cached_chunk_num = 0
         self.ret_payload = None
         self.cached_chunk_id = None
-        if self.with_mem_cache:
-            if self.gpu_payload is not None:
-                self.memory_cache.push(self.gpu_payload)
-                self.gpu_payload = None

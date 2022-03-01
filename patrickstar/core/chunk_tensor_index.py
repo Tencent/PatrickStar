@@ -32,7 +32,6 @@ from typing import List
 import torch
 
 from patrickstar.utils import logger
-from .const import ChunkType
 from .parameter import is_param_registered
 from .tensor_stub import TensorInfo
 
@@ -55,51 +54,6 @@ class ChunkTensorIndex(object):
 
         # Chunk_ids of chunks in different chunk type
         self.chunk_size = chunk_size
-
-        # ref_chunk_id -> {chunk_type -> chunk_id}
-        self.param_chunk_id_to_os_chunk_id_map = {}
-
-    def register_optimizer_state_chunk_id(
-        self,
-        ref_param,
-        chunk_type: ChunkType,
-        chunk_id: int,
-    ):
-        r"""Register the optimizer chunk of type `chunk_type` to `ref_param`.
-
-        Args:
-            ref_param: :class:`torch.nn.Parameter`.
-            chunk_type: :class:`ChunkType`.
-            chunk_id: int.
-        """
-        ref_chunk_id = self.get_chunk_id(ref_param)
-        if ref_chunk_id not in self.param_chunk_id_to_os_chunk_id_map:
-            self.param_chunk_id_to_os_chunk_id_map[ref_chunk_id] = {
-                chunk_type: chunk_id
-            }
-        else:
-            self.param_chunk_id_to_os_chunk_id_map[ref_chunk_id][chunk_type] = chunk_id
-
-    def get_optimizer_state_chunk_id(
-        self,
-        ref_param: torch.nn.Parameter,
-        chunk_type: ChunkType,
-    ) -> int:
-        r"""Get the chunk id storing the optimizer state of `ref_param`.
-
-        Args:
-            ref_param: the ref param, usually param fp16
-            chunk_type: type of the optimizer state chunk.
-        Returns:
-            chunk id, None if not existed.
-        """
-        ref_chunk_id = self.get_chunk_id(ref_param)
-        if (
-            ref_chunk_id not in self.param_chunk_id_to_os_chunk_id_map
-            or chunk_type not in self.param_chunk_id_to_os_chunk_id_map[ref_chunk_id]
-        ):
-            return None
-        return self.param_chunk_id_to_os_chunk_id_map[ref_chunk_id][chunk_type]
 
     def generate_tensor_info_in_order(self, chunk_id):
         r"""Return the tensors of chunk by `chunk_id`.
