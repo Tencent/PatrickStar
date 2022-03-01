@@ -38,23 +38,8 @@ from patrickstar.core.hook import reduce_grad
 from patrickstar.core.parameter import ParamType
 import patrickstar.utils.global_timer as global_timer
 from patrickstar.utils import logger, get_rank
-from .chunk_io_buff import FP32ChunkReadBuffer, FP16ChunkWriteBuffer
 from .op_builder.cpu_adam import CPUAdamBuilder
 from patrickstar.profiler import profiler
-
-
-def zero_param(p):
-    return torch.nn.Parameter(
-        torch.zeros_like(p, dtype=torch.float),
-        requires_grad=False,
-    )
-
-
-def empty_cpu_param():
-    return torch.nn.Parameter(
-        torch.tensor([], dtype=torch.float, device=torch.device("cpu:0")),
-        requires_grad=False,
-    )
 
 
 class FP16Adam(torch.optim.Optimizer):
@@ -123,8 +108,6 @@ class FP16Adam(torch.optim.Optimizer):
                     p.ps_attr.shape, device=torch.device("cpu:0")
                 )
 
-        # The buffer for fp16 grad.
-        self.read_chunk_buff = None
         self.use_adamw = use_adamw
         self.opt_id = FP16Adam.optimizer_id
         FP16Adam.optimizer_id = FP16Adam.optimizer_id + 1
@@ -238,7 +221,7 @@ class FP16Adam(torch.optim.Optimizer):
         ):
             self.has_overflow = True
 
-    def has_overflow_and_reset_param(self, write_chunk_buff):
+    def has_overflow_and_reset_param(self):
         r"""Method for collective communicating overflow and reset params.
         This method should be called after checking if each individual
         grad has overflow.
@@ -249,44 +232,28 @@ class FP16Adam(torch.optim.Optimizer):
                 overflow_gpu, op=torch.distributed.ReduceOp.MAX, async_op=False
             )
             self.has_overflow = overflow_gpu[0].item()
-        if self.has_overflow:
-            # TODO(zilinzhu): Find a better way to overwrite the grads
-            for _, p in self.client.module.named_parameters():
-                if p.ps_attr.param_type == ParamType.TORCH_BASED:
-                    continue
-                if not p.ps_attr.is_local():
-                    continue
-                fp32_param = self.client.param_fp16_to_param_fp32_map[p]
-                write_chunk_buff.write_from_cache(p, fp32_param)
-            self.has_overflow = False
-            write_chunk_buff.reset()
-            return True
-        return False
+        return self.has_overflow
 
     def fp16_chunk_adam_ops(
         self,
-        client,
         fp16_param_with_grad_list,
         exp_avg_list: List[torch.nn.Parameter],
         exp_avg_sq_list: List[torch.nn.Parameter],
         state_steps: List[int],
         amsgrad: bool,
         hyperparam_list: List[dict],
-        read_chunk_buff,
-        write_chunk_buff,
         time_profile=True,
     ):
         r"""Functional API that performs Adam algorithm computation.
         Visit fp16_param_with_grad_list in the order of tensors stored in chunks.
         Copy the chunk into a tmp buffer to speed up the memcpy between devices.
         """
-        for i, fp16_param in enumerate(fp16_param_with_grad_list):
+        for i, param in enumerate(fp16_param_with_grad_list):
             # 1. prepare data for Adam
             if time_profile:
                 global_timer.my_timer.start_profile("ADAM_prepare_data")
-                global_timer.my_timer.start_profile("ADAM_prepare_data_grad_copy")
 
-            grad_tensor = fp16_param.grad
+            grad_tensor = param.grad
             grad_tensor = grad_tensor.to(torch.device("cpu"))
 
             # Gradient clipping
@@ -308,19 +275,15 @@ class FP16Adam(torch.optim.Optimizer):
 
             compute_device = grad_tensor.device
 
-            if time_profile:
-                global_timer.my_timer.finish_profile("ADAM_prepare_data_grad_copy")
-                global_timer.data_move_cnter.update(
-                    "ADAM_prepare_data_grad_copy", grad_tensor.numel() * 2
-                )
-
             # 2. Start Adam
             if time_profile:
                 global_timer.my_timer.finish_profile("ADAM_prepare_data")
                 global_timer.my_timer.start_profile("ADAM_compute")
 
-            fp32_data_tensor = fp16_param.ps_attr.fp32
-            print("fp32_data_tensor:", fp32_data_tensor.shape)
+            if param.ps_attr.param_type == ParamType.TORCH_BASED:
+                fp32_data_tensor = param.data
+            else:
+                fp32_data_tensor = param.ps_attr.fp32
             exp_avg = exp_avg_list[i]
             exp_avg_sq = exp_avg_sq_list[i]
 
@@ -368,12 +331,8 @@ class FP16Adam(torch.optim.Optimizer):
                 global_timer.my_timer.start_profile("ADAM_param_fp32_to_fp16")
 
             # 3. Finish Adam.
-
             if time_profile:
                 global_timer.my_timer.finish_profile("ADAM_param_fp32_to_fp16")
-
-        write_chunk_buff.reset()
-        read_chunk_buff.reset()
 
     def release_last(self):
         # the starting module would trigger post_module_backward hook
@@ -395,6 +354,15 @@ class FP16Adam(torch.optim.Optimizer):
                     )
                 else:
                     self.client.release(param, TensorState.HOLD_AFTER_BWD)
+
+    def init_fp16(self):
+        for group in self.param_groups:
+            for p in group["params"]:
+                if p.ps_attr.param_type == ParamType.CHUNK_BASED:
+                    data_fp16 = self.client.access(p, torch.device("cpu:0"))
+                    data_fp32 = p.ps_attr.fp32
+                    data_fp16.copy_(data_fp32)
+                    self.client.release(p)
 
     @torch.no_grad()
     def step(self, closure=None):
@@ -419,19 +387,7 @@ class FP16Adam(torch.optim.Optimizer):
             with torch.enable_grad():
                 loss = closure()
 
-        max_chunk_size = self.client.chunk_list.max_chunk_size()
-        self.read_chunk_buff = FP32ChunkReadBuffer(
-            self.client.chunk_list,
-            self.client.chunk_tensor_index,
-            max_chunk_size,
-        )
-        self.write_chunk_buff = FP16ChunkWriteBuffer(
-            self.client.chunk_list,
-            self.client.chunk_tensor_index,
-            max_chunk_size,
-        )
-
-        if self.has_overflow_and_reset_param(write_chunk_buff=self.write_chunk_buff):
+        if self.has_overflow_and_reset_param():
             global_timer.my_timer.finish_profile("ADAM")
             old_loss_scale = self.loss_scaler.loss_scale
             self.loss_scaler.update_scale(True)
@@ -439,7 +395,8 @@ class FP16Adam(torch.optim.Optimizer):
             logger.warning(
                 f"Gradient overflow! Update loss scale from {old_loss_scale} to {new_loss_scale}."
             )
-
+            self.init_fp16()
+            self.has_overflow = False
             return loss
 
         fp16_param_with_grad_list = []
@@ -477,15 +434,12 @@ class FP16Adam(torch.optim.Optimizer):
 
         # Hybrid Adam. Put some chunks on GPU based on the warmup info.
         self.fp16_chunk_adam_ops(
-            self.client,
             fp16_param_with_grad_list,
             exp_avg_list,
             exp_avg_sq_list,
             state_steps,
             False,
             hyperparam_list,
-            self.read_chunk_buff,
-            self.write_chunk_buff,
             True,
         )
 
@@ -493,6 +447,8 @@ class FP16Adam(torch.optim.Optimizer):
 
         if self.loss_scaler:
             self.loss_scaler.update_scale(False)
+
+        self.init_fp16()
 
         global_timer.my_timer.finish_profile("ADAM")
         return loss

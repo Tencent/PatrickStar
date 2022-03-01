@@ -95,12 +95,6 @@ class ChunkList(object):
                 mem_used += chunk.get_payload_space()
         return mem_used
 
-    def max_chunk_size(self):
-        max_size = 0
-        for chunk in self.chunks:
-            max_size = max(chunk.capacity, max_size)
-        return max_size
-
     def try_best_allocate_payload(self, chunk: Chunk, compute_device):
         """
         Try our best to allocate payload for chunk.

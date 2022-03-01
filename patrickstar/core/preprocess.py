@@ -281,6 +281,7 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
                     )
             else:
                 param_fp16.ps_attr._is_local = True
+                param_fp16.ps_attr.fp32 = param_fp16.data.detach().clone()
 
         cast_forward(module, torch.half)
 
@@ -307,7 +308,6 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
                             # Here the dtype of param_fp16 is actually fp32.
                             ps_data_fp16.copy_(param_fp16.data)
                             self.client.release(param_fp16)
-                            param_fp16.ps_attr.fp32 = param_fp16.data
                             param_fp16 = param_fp16.to(torch.half)
             else:
                 for param_fp16 in self.client.chunk_tensor_index.params_generator(
