@@ -31,9 +31,12 @@ from patrickstar.utils import get_world_size
 
 
 class CommGroupInfo(object):
+    groups = {}
+
     def __init__(self, chunk_type, id):
         self.chunk_type = chunk_type
         self.id = id
+        self.elements = []
 
     def __hash__(self):
         return hash((self.chunk_type, self.id))
@@ -45,15 +48,27 @@ class CommGroupInfo(object):
         return f"({self.chunk_type}, {self.id})"
 
 
+groups = {}
+
+
+def get_comm_group(chunk_type, group_id):
+    if (chunk_type, group_id) in groups:
+        return groups[(chunk_type, group_id)]
+    group = CommGroupInfo(chunk_type=chunk_type, id=group_id)
+    groups[(chunk_type, group_id)] = group
+    return group
+
+
 class CommInfo(object):
     num_chunk_type = {}
 
-    def __init__(self, chunk_type):
+    def __init__(self, chunk_type, chunk_id):
         if chunk_type not in CommInfo.num_chunk_type:
             CommInfo.num_chunk_type[chunk_type] = 0
         world_size = get_world_size()
         group_id = CommInfo.num_chunk_type[chunk_type] // world_size
-        self.group = CommGroupInfo(chunk_type=chunk_type, id=group_id)
+        self.group = get_comm_group(chunk_type, group_id)
+        self.group.elements.append(chunk_id)
         self.offset = CommInfo.num_chunk_type[chunk_type] % world_size
         CommInfo.num_chunk_type[chunk_type] += 1
 

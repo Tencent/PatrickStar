@@ -68,7 +68,7 @@ class Chunk(object):
         """
         self.chunk_id = chunk_id
         self.chunk_type = chunk_type
-        self.comm_info = CommInfo(chunk_type=chunk_type)
+        self.comm_info = CommInfo(chunk_type=chunk_type, chunk_id=chunk_id)
         # payload numel does not equal to capacity. payload can be None.
         self.capacity = capacity
         self.data_type = data_type

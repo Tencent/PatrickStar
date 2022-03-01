@@ -203,7 +203,6 @@ class PatrickStarClient(object):
             data_type,
             is_dummy=is_dummy,
         )
-        self.chunk_tensor_index.add_chunk(chunk)
         return chunk.chunk_id, chunk.comm_info
 
     def append_dummy_chunk(self, data_type: torch.dtype, chunk_type: ChunkType):
@@ -545,7 +544,7 @@ class PatrickStarClient(object):
         rank = get_rank()
 
         if get_world_size() > 1:
-            chunk_id_list = self.chunk_tensor_index.chunk_ids_of_comm_group(chunk_id)
+            chunk_id_list = self.chunk_list[chunk_id].comm_info.group.elements
             local_chunk_id = chunk_id_list[rank]
 
             logger.debug(
@@ -677,7 +676,7 @@ class PatrickStarClient(object):
         assert torch.distributed.is_initialized()
 
         chunk_id = self.chunk_tensor_index.get_chunk_id(param)
-        chunk_id_list = self.chunk_tensor_index.chunk_ids_of_comm_group(chunk_id)
+        chunk_id_list = self.chunk_list[chunk_id].comm_info.group.elements
 
         local_chunk_id = chunk_id_list[rank]
 

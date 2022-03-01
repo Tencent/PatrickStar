@@ -35,7 +35,6 @@ from patrickstar.utils import logger
 from .const import ChunkType
 from .parameter import is_param_registered
 from .tensor_stub import TensorInfo
-from .chunk_data import Chunk
 
 
 class ChunkTensorIndex(object):
@@ -53,11 +52,6 @@ class ChunkTensorIndex(object):
         self.tensor_id_to_info_map: dict[int, TensorInfo] = {}
         # 1-N dict, chunk_id -> List(tensor_id) in order of start_offset
         self.chunk_id_to_tensor_id_list_map: dict[int, List[int]] = {}
-
-        # comm_group -> chunk_id_list
-        self.comm_group_to_chunk_id_list_map = {}
-        # chunk_id -> comm_info
-        self.chunk_id_to_comm_info_map = {}
 
         # Chunk_ids of chunks in different chunk type
         self.chunk_size = chunk_size
@@ -107,20 +101,6 @@ class ChunkTensorIndex(object):
             return None
         return self.param_chunk_id_to_os_chunk_id_map[ref_chunk_id][chunk_type]
 
-    def add_chunk(self, chunk: Chunk):
-        r"""Add a chunk to ChunkTensorIndex.
-
-        Args:
-            chunk_id: int.
-        """
-        chunk_id = chunk.chunk_id
-        comm_info = chunk.comm_info
-        comm_group_info = comm_info.group
-        if comm_group_info not in self.comm_group_to_chunk_id_list_map:
-            self.comm_group_to_chunk_id_list_map[comm_group_info] = list()
-        self.comm_group_to_chunk_id_list_map[comm_group_info].append(chunk_id)
-        self.chunk_id_to_comm_info_map[chunk_id] = comm_info
-
     def generate_tensor_info_in_order(self, chunk_id):
         r"""Return the tensors of chunk by `chunk_id`.
 
@@ -166,10 +146,6 @@ class ChunkTensorIndex(object):
         r"""Get the chunk id of the param."""
         tensor_id = param.ps_attr.get_tensor_id()
         return self.tensor_id_to_chunk_id(tensor_id)
-
-    def chunk_ids_of_comm_group(self, chunk_id: int) -> List[int]:
-        comm_info = self.chunk_id_to_comm_info_map[chunk_id]
-        return self.comm_group_to_chunk_id_list_map[comm_info.group]
 
     def _get_tensor_id_list(self, chunk_id):
         if chunk_id not in self.chunk_id_to_tensor_id_list_map:
