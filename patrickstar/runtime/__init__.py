@@ -27,12 +27,13 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 # SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import torch
-from patrickstar.core import PSPreProcessCtx, PatrickStarClient
-from patrickstar.core.memtracer import RuntimeMemTracer
-from patrickstar.utils import logger, log_dist
-from .engine import PatrickStarEngine
 import time
+
+import torch
+
+from patrickstar.core import PSPreProcessCtx, PatrickStarClient
+from patrickstar.runtime.engine import PatrickStarEngine
+from patrickstar.utils import logger, log_dist
 
 DEFAULT_CHUNK_SIZE = 32 * 1024 * 1024
 

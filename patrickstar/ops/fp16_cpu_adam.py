@@ -384,14 +384,14 @@ class FP16Adam(torch.optim.Optimizer):
                     "ADAM_prepare_data_grad_copy", fp16_grad_tensor.numel() * 2
                 )
 
-            client.access_data(fp32_param, compute_device)
+            client.access(fp32_param, compute_device)
             fp32_data_tensor = get_real_data_tensor(fp32_param)
 
             exp_avg_param = exp_avg_list[i]
             exp_avg_sq_param = exp_avg_sq_list[i]
 
-            client.access_data(exp_avg_param, compute_device)
-            client.access_data(exp_avg_sq_param, compute_device)
+            client.access(exp_avg_param, compute_device)
+            client.access(exp_avg_sq_param, compute_device)
 
             exp_avg = get_real_data_tensor(exp_avg_param)
             exp_avg_sq = get_real_data_tensor(exp_avg_sq_param)
@@ -639,9 +639,7 @@ class FP16Adam(torch.optim.Optimizer):
             for k, v in old_packed_state[idx].items():
                 if isinstance(v, torch.nn.Parameter):
                     packed_state[idx][k] = (
-                        self.client.access_data(v, torch.device("cpu:0"))
-                        .clone()
-                        .detach()
+                        self.client.access(v, torch.device("cpu:0")).clone().detach()
                     )
                 else:
                     packed_state[idx][k] = v
@@ -681,7 +679,7 @@ class FP16Adam(torch.optim.Optimizer):
             assert len(saved_single_state) == len(single_state)
             for k, v in single_state.items():
                 if isinstance(v, torch.nn.Parameter):
-                    tensor = self.client.access_data(v, torch.device("cpu:0"))
+                    tensor = self.client.access(v, torch.device("cpu:0"))
                     tensor.copy_(saved_single_state[k])
                 else:
                     single_state[k] = saved_single_state[k]

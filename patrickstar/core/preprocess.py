@@ -252,11 +252,11 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
                         if is_param_registered(param_fp32) and is_param_registered(
                             param_fp16
                         ):
-                            ps_data_fp16 = self.client.access_data(
+                            ps_data_fp16 = self.client.access(
                                 param_fp16, torch.device("cpu:0")
                             )
 
-                            ps_data_fp32 = self.client.access_data(
+                            ps_data_fp32 = self.client.access(
                                 param_fp32, torch.device("cpu:0")
                             )
 

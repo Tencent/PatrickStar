@@ -192,7 +192,7 @@ class PatrickStarClient(object):
         self.dummy_param_list.append(dummy)
         self.chunk_tensor_index.add_tensor(
             chunk_id,
-            self.dummy_param_list[-1].ps_attr.data_id(),
+            self.dummy_param_list[-1].ps_attr.get_tensor_id(),
             0,
             dummy.numel(),
             self.dummy_param_list[-1],
@@ -537,10 +537,6 @@ class PatrickStarClient(object):
         if self._time_profile:
             global_timer.my_timer.finish_profile("CLIENT_access")
         return ret
-
-    def access_data(self, param: torch.nn.Parameter, compute_device: torch.device):
-        r"""move the PSTensor of param.data to `compute_device`."""
-        return self.access(param, compute_device)
 
     def release_dist(
         self,

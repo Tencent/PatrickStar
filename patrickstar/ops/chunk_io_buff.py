@@ -97,9 +97,11 @@ class FP16ChunkWriteBuffer(object):
         """
         # Torch params are of fp32 all the time, so we don't need to copy them.
         assert src_param.ps_attr.param_type == ParamType.CHUNK_BASED
-        src_info = self.chunk_tensor_index.get_tensor_info(src_param.ps_attr.data_id())
+        src_info = self.chunk_tensor_index.get_tensor_info(
+            src_param.ps_attr.get_tensor_id()
+        )
         target_info = self.chunk_tensor_index.get_tensor_info(
-            target_param.ps_attr.data_id()
+            target_param.ps_attr.get_tensor_id()
         )
 
         if (
@@ -227,7 +229,9 @@ class FP32ChunkReadBuffer(object):
             # grad of torch params are stored in param.grad.
             return param.grad
         else:
-            info = self.chunk_tensor_index.get_tensor_info(param.ps_attr.data_id())
+            info = self.chunk_tensor_index.get_tensor_info(
+                param.ps_attr.get_tensor_id()
+            )
 
             # visiting uncached chunk
             if self.cached_chunk_id != info.chunk_id:

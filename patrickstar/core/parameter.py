@@ -94,9 +94,6 @@ class PSParameter(object):
         self.shape = new_shape
         self.numel = new_shape.numel()
 
-    def data_id(self):
-        return self.get_tensor_id()
-
     def get_tensor_id(self):
         """
         Get the tensor id of chunk based tensor.
