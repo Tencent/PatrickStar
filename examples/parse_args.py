@@ -46,13 +46,6 @@ def _add_patrick_star_args(parser):
         help="Default Chunk Size in elements.",
     )
     group.add_argument(
-        "--use_cpu_embedding",
-        dest="use_cpu_embedding",
-        action="store_true",
-        help="Using CPU to perform Embedding and do not assign "
-        "embedding params to chunks",
-    )
-    group.add_argument(
         "--release_after_init",
         action="store_true",
         help="Release the remote chunk after the whole initialization."

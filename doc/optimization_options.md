@@ -7,27 +7,19 @@ General Optimizations can be applied to any PyTorch-based framework.
 `--use_ckp`
 Make sure this option is open for large model training. It can primarily save activation memory footprint at the cost of recomputing.
 
-2. Activation Offloading
+1. Activation Offloading
 `--with_activation_offload`
 Offload the checkpoints activation from GPU to CPU. Further Save GPU memory.
 Note you have to use activation checkpoing first.
 
-3. CPU Embedding
-`--use_cpu_embedding`
-nn.Embedding is executed on CPU, save GPU memory. More importantly, it shrinks the chunk size. For some small models, the most significant layer is Embedding. Therefore, the chunk size has to be larger than the embedding numel.
 
-
-4. Tiling Linear (a.k.a Memory-centric tiling in [DeepSpeed](https://deepspeed.readthedocs.io/en/stable/zero3.html#memory-centric-tiling))
+1. Tiling Linear (a.k.a Memory-centric tiling in [DeepSpeed](https://deepspeed.readthedocs.io/en/stable/zero3.html#memory-centric-tiling))
 `--with_tiling_linear`
 Memory-centric tiling (MCT) can split a param tensor of linear into pieces, and they do not need to be stored in contiguous memory space. This will help reduce chunk size. However, to achieve the best performance, you have to tune the in_splits/out_splits of the function's parameters.
 
 ## PatrickStar-related Optmizations
 
-1. Memory Saving Communication.
-`--with_mem_saving_com`
-Use one-to-all communication to replace the original collective communication. More specifically, reduce scatter is replaced with Nx reduce. all gather is replaced with Nx bcast. In this way, we do not need to keep a Nx chunk buffer for distributed training, therefore saving the GPU memory. This method also changes the CPU-GPU and intra-GPU communication volume. In general, it reduces CPU-GPU comm volume at a cost of increasing intra-GPU bcast comm volume and also lower the intra-GPU bcast bandwidth. However, in some cases, it can improve the overall performance of the system from such a tradeoff. It is suitable for training an extremely large model with a computing cluster with high-quality intra-GPU communication bandwidth, i.e. 50B model on a node of SuperPod. Details in Merge Request #250.
-
-2. Memory Allocation Caching.
+1. Memory Allocation Caching.
 `--with_mem_cache`
 Use a cache to allocate and release chunk memory. The cache is a size-limited queue whose capacity is default as 2. It is helpful for Memory Saving Communication in distributed training. It avoids frequent release and allocates memory for remote chunks. See detail in #241.
 

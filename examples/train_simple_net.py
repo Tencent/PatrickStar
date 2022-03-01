@@ -80,7 +80,6 @@ config = {
     },
     "chunk_size": 1024,
     "use_fake_dist": False,
-    "use_cpu_embedding": False,
 }
 
 torch.manual_seed(0)

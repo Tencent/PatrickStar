@@ -74,7 +74,6 @@ if args.type == "patrickstar":
         },
         "chunk_size": 64 * 1024 * 1024,
         "release_after_init": True,
-        "use_cpu_embedding": False,
     }
 
     model, optim = initialize_engine(

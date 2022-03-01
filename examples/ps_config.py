@@ -56,7 +56,6 @@ def get_patrickstar_config(
         "chunk_size": args.chunk_size,
         "release_after_init": args.release_after_init,
         "use_fake_dist": args.use_fake_dist,
-        "use_cpu_embedding": args.use_cpu_embedding,
         "client": {
             "mem_tracer": {
                 "use_async_mem_monitor": args.with_async_mem_monitor,

@@ -128,7 +128,6 @@ def get_param_used_chunk_size(args, config, model_func):
             client=client,
             dtype=torch.float,
             release_after_init=args.release_after_init,
-            use_cpu_embedding=args.use_cpu_embedding,
             not_init=True,
         ):
             model = model_func()

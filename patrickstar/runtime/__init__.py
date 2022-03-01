@@ -62,11 +62,9 @@ def initialize_engine(model_func, local_rank, config=None, client=None):
         if config is None:
             chunk_size = DEFAULT_CHUNK_SIZE
             release_after_init = False
-            use_cpu_embedding = True
         else:
             chunk_size = config.get("chunk_size", DEFAULT_CHUNK_SIZE)
             release_after_init = config.get("release_after_init", False)
-            use_cpu_embedding = config.get("use_cpu_embedding", True)
 
         client = PatrickStarClient(
             rank=local_rank,
@@ -80,7 +78,6 @@ def initialize_engine(model_func, local_rank, config=None, client=None):
             client=client,
             dtype=torch.float,
             release_after_init=release_after_init,
-            use_cpu_embedding=use_cpu_embedding,
         ):
             model = model_func()
         end_time = time.time()

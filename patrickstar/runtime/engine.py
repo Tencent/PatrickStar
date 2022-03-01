@@ -138,8 +138,6 @@ class PatrickStarEngine(torch.nn.Module):
             buffer.data = buffer.data.to(self.client.device)
 
         def move_param_to_gpu(module):
-            if module.__class__.__name__ == "Embedding":
-                return
             for param in module.parameters(recurse=False):
                 if param.ps_attr.param_type == ParamType.TORCH_BASED:
                     param.data = param.data.to(self.client.device)

@@ -179,9 +179,6 @@ config = {
     # some library, e.g. `from_pretrained` in HuggingFace. In those cases,
     # set the "release_after_init" to True.
     "release_after_init": False,
-    # Whether to put the embedding on CPU, it may have some negative impact
-    # on the performance.
-    "use_cpu_embedding": True,
 }
 ```
 

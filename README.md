@@ -77,7 +77,6 @@ config = {
     },
     "chunk_size": 64 * 1024 * 1024,
     "release_after_init": True,
-    "use_cpu_embedding": False,
     "client": {
         "mem_tracer": {
             "use_async_mem_monitor": args.with_async_mem_monitor,

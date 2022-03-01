@@ -76,7 +76,6 @@ config = {
     },
     "chunk_size": 64 * 1024 * 1024,
     "release_after_init": False,
-    "use_cpu_embedding": False,
 }
 
 model, optim = initialize_engine(
