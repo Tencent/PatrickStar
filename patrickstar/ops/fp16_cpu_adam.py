@@ -497,16 +497,12 @@ class FP16Adam(torch.optim.Optimizer):
                         TensorState.HOLD_AFTER_BWD,
                         training_stage=TrainingStage.BWD,
                         do_allreduce=True,
-                        with_mem_saving_comm=self.client.opt_config[
-                            "with_mem_saving_comm"
-                        ],
                     )
                 else:
                     self.client.release(param, TensorState.HOLD_AFTER_BWD)
         if profiler.started():
             profiler.stage_convert_time.append((time.time(), TrainingStage.ADAM))
 
-        self.client.reset_visited_chunk()
         self.client.set_training_phase(TrainingStage.ADAM)
 
         self.client.trigger_memory_tracing()

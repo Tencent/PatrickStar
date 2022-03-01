@@ -89,11 +89,6 @@ def _add_patrick_star_args(parser):
         help="Use async memory monitor.",
     )
     group.add_argument(
-        "--with_mem_saving_comm",
-        action="store_true",
-        help="Use communication saving memory.",
-    )
-    group.add_argument(
         "--with_mem_cache",
         action="store_true",
         help="Use caching to allocate chunk payload.",

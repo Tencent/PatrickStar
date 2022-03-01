@@ -95,9 +95,7 @@ class RuntimeMemTracer(object):
         Chunkable Memry: Memory can be used to store chunk.
     """
 
-    def __init__(
-        self, local_rank: int = 0, config=None, with_mem_saving_comm: bool = False
-    ):
+    def __init__(self, local_rank: int = 0, config=None):
         self.local_rank = local_rank
         self.metronome = Metronome()
         self.gpu_chunk_available_mem = 0
@@ -106,7 +104,6 @@ class RuntimeMemTracer(object):
         self.gpu_chunk_used_mem = 0
         self.cpu_chunk_used_mem = 0
         self.cpu_chunk_used_mem_pinned = 0
-        self.with_mem_saving_comm = with_mem_saving_comm
         if config is not None:
             self._overall_gpu_mem_ratio = config.get("overall_gpu_mem_ratio", 0.8)
             self._overall_cpu_mem_ratio = config.get("overall_cpu_mem_ratio", 0.8)
@@ -397,10 +394,7 @@ class RuntimeMemTracer(object):
             else:
                 return self._overall_cpu_mem
         elif device_type == "cuda":
-            if self.with_mem_saving_comm:
-                msc_factor = 1
-            else:
-                msc_factor = get_world_size()
+            msc_factor = get_world_size()
             if self.metronome.training_stage() == TrainingStage.ADAM:
                 return self._overall_gpu_mem - 4 * self._default_chunk_size * 4
             elif self.metronome.training_stage() == TrainingStage.FWD:

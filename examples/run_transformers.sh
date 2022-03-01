@@ -163,7 +163,6 @@ cmd_opts="
     ${SP_FLAG} \
     ${MEM_PROF_FLAG} \
     ${AMM_FLAG} \
-    ${MSC_FLAG} \
     ${CACHE_FLAG} \
     ${TILING_FLAG} \
 "
