@@ -308,7 +308,6 @@ class ChunkList(object):
     def new_chunk(
         self,
         chunk_size: int,
-        data_type: torch.dtype,
         is_dummy: bool = False,
     ):
         r"""Create a chunk without initializing its memory.
@@ -316,7 +315,6 @@ class ChunkList(object):
         Args:
             chunk_id: int.
             chunk_size: int.
-            data_type: :class:`torch.dtype`.
             is_dummy: bool.
         Returns:
             :class:`CommInfo`
@@ -324,7 +322,6 @@ class ChunkList(object):
         chunk_id = len(self.chunks)
         chunk = Chunk(
             capacity=chunk_size,
-            data_type=data_type,
             chunk_id=chunk_id,
             memory_tracer=self.memory_tracer,
             local_rank=self.local_rank,
@@ -336,7 +333,7 @@ class ChunkList(object):
             profiler.chunk_life_cycle[chunk_id] = {"life_cycle": []}
         logger.debug(
             f"global_rank {global_rank}, allocate with new chunk chunk_id {chunk_id} size {chunk_size} "
-            f"data_type {data_type} comm group {chunk.comm_info}"
+            f"comm group {chunk.comm_info}"
         )
         return chunk
 

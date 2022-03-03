@@ -270,15 +270,6 @@ class FP16Adam(torch.optim.Optimizer):
                 else:
                     self.client.release(param, TensorState.HOLD_AFTER_BWD)
 
-    def init_fp16(self):
-        for group in self.param_groups:
-            for p in group["params"]:
-                if p.ps_attr.param_type == ParamType.CHUNK_BASED:
-                    data_fp16 = self.client.access(p, torch.device("cpu:0"))
-                    data_fp32 = p.ps_attr.fp32
-                    data_fp16.copy_(data_fp32)
-                    self.client.release(p)
-
     @torch.no_grad()
     def step(self, closure=None):
         """Performs a single optimization step.
@@ -309,7 +300,6 @@ class FP16Adam(torch.optim.Optimizer):
             logger.warning(
                 f"Gradient overflow! Update loss scale from {old_loss_scale} to {new_loss_scale}."
             )
-            self.init_fp16()
             self.has_overflow = False
             return loss
 
@@ -326,7 +316,9 @@ class FP16Adam(torch.optim.Optimizer):
 
             for p in group["params"]:
                 if p.grad is not None:
-                    params_with_grad.append(p.ps_attr.fp32)
+                    params_with_grad.append(
+                        self.client.access(p, torch.device("cuda:0"))
+                    )
                     if p.grad.is_sparse:
                         raise RuntimeError(
                             "Adam does not support sparse gradients, please consider SparseAdam instead"
@@ -360,10 +352,12 @@ class FP16Adam(torch.optim.Optimizer):
                 maximize=False,
             )
 
+            for p in group["params"]:
+                if p.grad is not None:
+                    self.client.release(p)
+
         if self.loss_scaler:
             self.loss_scaler.update_scale(False)
-
-        self.init_fp16()
 
         global_timer.my_timer.finish_profile("ADAM")
         return loss

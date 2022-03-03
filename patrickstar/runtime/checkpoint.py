@@ -46,9 +46,9 @@ def state_dict(module, client, destination=None, prefix="", keep_vars=False):
                         continue
                     elif param.ps_attr.is_local():
                         if param.ps_attr.param_type == ParamType.CHUNK_BASED:
-                            param_fp32 = param.ps_attr.fp32
+                            ps_data = client.access_data(param, torch.device("cpu:0"))
                             destination[prefix + name] = (
-                                param_fp32 if keep_vars else param_fp32.detach()
+                                ps_data if keep_vars else ps_data.detach()
                             )
                         else:
                             destination[prefix + name] = (
@@ -126,30 +126,27 @@ def _load_from_state_dict(
                 and param.ps_attr.param_type == ParamType.CHUNK_BASED
             ):
                 if param.ps_attr.is_local():
-                    ps_data_fp16 = client.access(param, torch.device("cpu:0"))
-                    ps_data_fp32 = param.ps_attr.fp32
-                    assert ps_data_fp16.shape == ps_data_fp32.shape
+                    ps_data = client.access(param, torch.device("cpu:0"))
 
-                    if input_param.shape != ps_data_fp16.shape:
+                    if input_param.shape != ps_data.shape:
                         # local shape should match the one in checkpoint
                         error_msgs.append(
                             "size mismatch for {}: copying a param with shape {} from checkpoint, "
                             "the shape in current model is {}.".format(
-                                key, input_param.shape, ps_data_fp16.shape
+                                key, input_param.shape, ps_data.shape
                             )
                         )
                         continue
                     try:
                         with torch.no_grad():
-                            ps_data_fp16.copy_(input_param)
-                            ps_data_fp32.copy_(input_param)
+                            ps_data.copy_(input_param)
                     except MemoryError as ex:
                         error_msgs.append(
                             'While copying the parameter named "{}", '
                             "whose dimensions in the model are {} and "
                             "whose dimensions in the checkpoint are {}, "
                             "an exception occurred : {}.".format(
-                                key, ps_data_fp16.size(), input_param.size(), ex.args
+                                key, ps_data.size(), input_param.size(), ex.args
                             )
                         )
                 else:

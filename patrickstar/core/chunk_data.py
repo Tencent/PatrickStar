@@ -41,7 +41,6 @@ class Chunk(object):
     def __init__(
         self,
         capacity: int,
-        data_type: torch.dtype,
         chunk_id: int,
         memory_tracer: RuntimeMemTracer,
         local_rank: int = 0,
@@ -57,7 +56,6 @@ class Chunk(object):
 
         Args:
             capacity: int. The maximum number of elements in the chunk.
-            data_type: :class:`torch.dtype`.
             chunk_id: int.
             local_rank: int.
             is_dummy: bool.
@@ -66,7 +64,6 @@ class Chunk(object):
         self.comm_info = CommInfo(chunk_id=chunk_id)
         # payload numel does not equal to capacity. payload can be None.
         self.capacity = capacity
-        self.data_type = data_type
         self.local_rank = local_rank
         self._is_dummy = is_dummy
         self.memory_tracer = memory_tracer
@@ -93,7 +90,7 @@ class Chunk(object):
 
     def get_chunk_space(self):
         r"""Size of the chunk (Bytes)."""
-        return getsizeof(self.data_type) * self.capacity
+        return getsizeof(torch.float) * self.capacity
 
     def get_payload_space(self):
         r"""Size of the payload (Bytes)."""
@@ -127,7 +124,7 @@ class Chunk(object):
         try:
             self.payload = torch.zeros(
                 payload_numel,
-                dtype=self.data_type,
+                dtype=torch.float,
                 device=device,
                 pin_memory=(device.type == "cpu"),
             )

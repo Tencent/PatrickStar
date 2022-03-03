@@ -117,7 +117,7 @@ class PatrickStarEngine(torch.nn.Module):
         params = list(self.parameters())
         if len(params) == 0:
             dummy = torch.nn.Parameter(torch.empty([1]), requires_grad=False)
-            register_param(dummy, ParamType.TORCH_BASED, torch.float, "dummy")
+            register_param(dummy, ParamType.TORCH_BASED, "dummy")
             params = [dummy]
 
         self.optimizer = FP16Adam(

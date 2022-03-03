@@ -112,40 +112,32 @@ class PatrickStarClient(object):
             chunk_size=self.chunk_size,
         )
 
-    def append_chunk(self, data_type, is_dummy=False):
+    def append_chunk(self, is_dummy=False):
         r"""Append a new chunk to chunk_list and chunk_tensor_index.
 
         Args:
-            data_type: :class:`torch.dtype`.
             is_dummy: bool.
         Returns:
             chunk_id of the newly created chunk and comm_info.
         """
         chunk = self.chunk_list.new_chunk(
             self.chunk_size,
-            data_type,
             is_dummy=is_dummy,
         )
-        return chunk.chunk_id, chunk.comm_info
+        return chunk
 
-    def append_dummy_chunk(self, data_type: torch.dtype):
+    def append_dummy_chunk(self):
         r"""Append a dummy chunk to the corresponding chunk_list"""
-        # chunk_id, comm_info = self.append_chunk(torch.half, is_dummy=True)
-        chunk_id, comm_info = self.append_chunk(torch.float, is_dummy=True)
+        chunk = self.append_chunk(is_dummy=True)
 
         dummy = torch.nn.Parameter(
-            torch.tensor([], dtype=data_type), requires_grad=False
+            torch.tensor([], dtype=torch.float), requires_grad=False
         )
         # Add a dummy param to dummy chunk, so that the chunk can be set in HOLD state.
-        # register_param(
-        #     dummy, ParamType.CHUNK_BASED, torch.half, f"dummy_{comm_info.group_id}"
-        # )
-        register_param(
-            dummy, ParamType.CHUNK_BASED, torch.float, f"dummy_{comm_info.group_id}"
-        )
+        register_param(dummy, ParamType.CHUNK_BASED, "dummy")
         self.dummy_param_list.append(dummy)
         self.chunk_tensor_index.add_tensor(
-            chunk_id,
+            chunk.chunk_id,
             self.dummy_param_list[-1].ps_attr.get_tensor_id(),
             0,
             dummy.numel(),
@@ -164,7 +156,6 @@ class PatrickStarClient(object):
     def append_tensor(
         self,
         param_list: List[torch.nn.Parameter],
-        data_type: torch.dtype,
     ):
         r"""Append params to the last chunk.
 
@@ -173,17 +164,17 @@ class PatrickStarClient(object):
 
         Args:
             param_list: list of `torch.nn.Parameter`.
-            data_type: :class:`torch.dtype`. Can be different from param.
         """
-        assert isinstance(data_type, torch.dtype)
         if not self.chunk_list.is_empty():
             last_chunk_id = self.chunk_list.last_chunk_id()
             if self.chunk_tensor_index.try_insert_tensor_list(
                 last_chunk_id, param_list
             ):
                 return
-        chunk_id, _ = self.append_chunk(data_type)
-        if not self.chunk_tensor_index.try_insert_tensor_list(chunk_id, param_list):
+        chunk = self.append_chunk()
+        if not self.chunk_tensor_index.try_insert_tensor_list(
+            chunk.chunk_id, param_list
+        ):
             raise RuntimeError(
                 f"Can not append a tensor to chunk_tensor_index. "
                 f"Overall size of param list is larger than the default chunk size {self.chunk_size}."
@@ -511,9 +502,7 @@ class PatrickStarClient(object):
 
         # NOTE(jiaruifang) device must be the same as the origin param.
         # Or it will affect hook of param.grad_fn.next_functions[0][0].
-        param.data = torch.tensor(
-            [], dtype=param.ps_attr.data_type, device=param.device
-        )
+        param.data = torch.tensor([], dtype=param.ps_attr.dtype, device=param.device)
 
         # Check if we finished using all tensors in all chunks of the chunk group,
         # then we can release the remote chunks.
@@ -592,9 +581,7 @@ class PatrickStarClient(object):
 
         # NOTE(jiaruifang) device must be the same as the origin param.
         # Or it will affect hook of param.grad_fn.next_functions[0][0].
-        param.data = torch.tensor(
-            [], dtype=param.ps_attr.data_type, device=param.device
-        )
+        param.data = torch.tensor([], dtype=param.ps_attr.dtype, device=param.device)
 
         if self._time_profile:
             global_timer.my_timer.finish_profile("CLIENT_release")
@@ -633,7 +620,7 @@ class PatrickStarClient(object):
                 f"Chunk id {chunk.chunk_id}, state {chunk.get_state()}, "
                 f"comm info {chunk.comm_info}, "
                 f"capacity {chunk.capacity / 1024 / 1024} M elems, "
-                f"dtype {chunk.data_type} device {chunk.get_device()}"
+                f"device {chunk.get_device()}"
             )
             last_used_pos = 0
             for info in self.chunk_tensor_index.generate_tensor_info_in_order(chunk_id):

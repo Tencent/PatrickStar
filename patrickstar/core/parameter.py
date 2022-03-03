@@ -52,7 +52,7 @@ class PSParameter(object):
         self,
         param: torch.nn.Parameter,
         param_type: ParamType,
-        data_type: torch.dtype,
+        dtype: torch.dtype,
         name: str = None,
     ):
         """
@@ -62,7 +62,7 @@ class PSParameter(object):
             param: :class:`torch.nn.Parameter`. PSParameter will manage its data and grad.
             param_type: :class:`ParamType`. The torch based param is managed by pytorch,
                 while chunk_based is managed by patrickstar chunks.
-            data_type: :class:`torch.dtype`. Dtype of PSParameter, can be different from
+            dtype: :class:`torch.dtype`. Dtype of PSParameter, can be different from
                 `param`.
             name: str
         """
@@ -71,12 +71,11 @@ class PSParameter(object):
         self.numel = param.numel()
         self.shape = param.shape
 
-        self.data_type = data_type
+        self.dtype = dtype
         self.param_type = param_type
 
         if self.param_type == ParamType.CHUNK_BASED:
             self.data_tensor = PSTensor()
-            self.fp32 = None
 
         # Whether the param belongs to local chunk.
         self._is_local = True
@@ -84,7 +83,7 @@ class PSParameter(object):
     def __str__(self):
         return (
             f"name: {self.name}, numel: {self.numel}, shape: {self.shape}, "
-            f"data_type: {self.data_type}, param_type: {self.param_type}, "
+            f"dtype: {self.dtype}, param_type: {self.param_type}, "
             f"is_local: {self.is_local()}"
         )
 
@@ -126,10 +125,12 @@ class PSParameter(object):
             ps_tensor.tensor = None
 
 
-def register_param(param, param_type, data_type, name=None):
+def register_param(param, param_type, name=None):
     assert isinstance(param, torch.nn.Parameter)
+    if param_type == ParamType.CHUNK_BASED and param.dtype != torch.float:
+        raise RuntimeError("only support float parameter in chunk")
     if not hasattr(param, "ps_attr"):
-        param.ps_attr = PSParameter(param, param_type, data_type, name)
+        param.ps_attr = PSParameter(param, param_type, param.dtype, name)
 
 
 def is_param_registered(param) -> bool:

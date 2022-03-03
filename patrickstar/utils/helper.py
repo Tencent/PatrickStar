@@ -40,21 +40,21 @@ def get_real_data_tensor(param):
         raise RuntimeError
 
 
-def getsizeof(data_type: torch.dtype):
-    if data_type == torch.float:
+def getsizeof(dtype: torch.dtype):
+    if dtype == torch.float:
         return 4
-    elif data_type == torch.half:
+    elif dtype == torch.half:
         return 2
-    elif data_type == torch.int8:
+    elif dtype == torch.int8:
         return 1
-    elif data_type == torch.int16:
+    elif dtype == torch.int16:
         return 2
-    elif data_type == torch.int32:
+    elif dtype == torch.int32:
         return 4
-    elif data_type == torch.int64:
+    elif dtype == torch.int64:
         return 8
     else:
-        raise TypeError(f"getsizeof dose not support data type {data_type}")
+        raise TypeError(f"getsizeof dose not support data type {dtype}")
 
 
 def get_space_of(tensor):

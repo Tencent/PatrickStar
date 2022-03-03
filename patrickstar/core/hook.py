@@ -206,8 +206,8 @@ def post_module_backward_function(module, client, name):
         # We should not use the data type of param.data in the condition judgment.
         # Since the data type of param.data and ps_attr are not the same.
         # We can change the param.data at will, and there is no restriction to do this.
-        # assert param.ps_attr.data_type == torch.half
-        assert param.ps_attr.data_type == torch.float
+        # assert param.ps_attr.dtype == torch.half
+        assert param.ps_attr.dtype == torch.float
         # NOTE() When a parameter is shared by multiple operators,
         # a reference counter is needed to correctly trigger the chunk reusing.
         # The memory space of the last updated param fp16 is covered by grad fp16.
