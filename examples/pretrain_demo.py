@@ -34,11 +34,10 @@ import time
 import torch
 import numpy as np
 
-import patrickstar.utils.global_timer as global_timer
 from data_loader import get_bert_data_loader
 from patrickstar.profiler import profiler
 from patrickstar.runtime import initialize_engine
-from patrickstar.utils import see_memory_usage, get_world_size
+from patrickstar.utils import see_memory_usage, get_world_size, global_timer
 from patrickstar.utils.logging import log_dist, logger
 from patrickstar.utils.model_size_calculator import get_ps_model_size
 from model_builder import build_transformer_model

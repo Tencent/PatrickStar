@@ -27,19 +27,20 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 # SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-from copy import deepcopy
 import math
-from typing import List
-import torch
 import time
+from copy import deepcopy
+from typing import List
+
+import torch
 
 from patrickstar.core.const import TensorState, TrainingStage
 from patrickstar.core.hook import reduce_grad
 from patrickstar.core.parameter import ParamType
-import patrickstar.utils.global_timer as global_timer
-from patrickstar.utils import logger, get_rank
-from .op_builder.cpu_adam import CPUAdamBuilder
+from patrickstar.utils import logger, get_rank, global_timer
 from patrickstar.profiler import profiler
+
+from .op_builder.cpu_adam import CPUAdamBuilder
 
 
 def adam(

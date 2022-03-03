@@ -28,16 +28,16 @@
 # SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 from typing import List
+
 import torch
 
-import patrickstar.utils.global_timer as global_timer
-from patrickstar.utils import logger, get_world_size, get_rank, log_dist
-from .chunk_list import ChunkList
-from .const import ChunkState, TensorState, TrainingStage
-from .hook import setup_patrickstar_hooks
-from .parameter import register_param, is_param_registered, ParamType
-from .eviction_policy import LatestAccessChunkEvictionPolicy
+from patrickstar.core.chunk_list import ChunkList
+from patrickstar.core.const import ChunkState, TensorState, TrainingStage
+from patrickstar.core.hook import setup_patrickstar_hooks
+from patrickstar.core.parameter import register_param, is_param_registered, ParamType
+from patrickstar.core.eviction_policy import LatestAccessChunkEvictionPolicy
 from patrickstar.core.memtracer import RuntimeMemTracer
+from patrickstar.utils import logger, get_world_size, get_rank, log_dist, global_timer
 
 
 class PatrickStarClient(object):
@@ -120,7 +120,7 @@ class PatrickStarClient(object):
         # Add a dummy param to dummy chunk, so that the chunk can be set in HOLD state.
         register_param(dummy, ParamType.CHUNK_BASED, "dummy")
         self.dummy_param_list.append(dummy)
-        chunk.add_param(dummy, dummy.numel())
+        chunk.add_param(dummy)
         logger.debug("Append a dummy chunk to the Chunk List")
 
     def append_params(
@@ -197,7 +197,6 @@ class PatrickStarClient(object):
         local_chunk_id,
         compute_device,
         param_name,
-        training_stage,
     ):
         r"""Fetch the remote chunks to local.
 
@@ -216,12 +215,12 @@ class PatrickStarClient(object):
         # When the first param is visited, the remote chunk should be of state
         # RELEASED, therefore, we do the allgather when the state of chunks are
         # changing form HOLD_AFTER_FWD(HOLD_ADFTER_BWD) to RELEASED.
-        has_released_chunk = False
+        no_chunk_released = True
         for i in chunk_id_list:
             if self.chunk_list[i].get_state() == ChunkState.RELEASED:
-                has_released_chunk = True
+                no_chunk_released = False
                 break
-        if not has_released_chunk:
+        if no_chunk_released:
             return
 
         if self._time_profile:
@@ -252,9 +251,6 @@ class PatrickStarClient(object):
         for chunk_id in chunk_id_list:
             self.chunk_list[chunk_id].unpin()
 
-        assert (
-            torch.distributed.is_initialized()
-        ), "torch distributed is not initialized during allgather"
         if self._time_profile:
             global_timer.my_timer.start_profile("CLIENT_fetch_remote_chunks_allgather")
 
@@ -279,14 +275,12 @@ class PatrickStarClient(object):
         self.chunk_eviction_strategy.trace_access(chunk_id, compute_device)
         self.chunk_list.access_chunk(chunk_id, compute_device)
         # 2. Locate the param on the chunk.
+        chunk = self.chunk_list[chunk_id]
         info = param.ps_attr.info
         start_offset = info.start_offset
-        numel = info.numel
-        assert numel == param.ps_attr.numel, f"{numel} vs {param.ps_attr.numel}"
+        numel = param.ps_attr.numel
 
-        param.ps_attr.set_tensor(
-            self.chunk_list[chunk_id].payload.narrow(0, start_offset, numel)
-        )
+        param.ps_attr.set_tensor(chunk.payload.narrow(0, start_offset, numel))
 
         # 3. Change the state of param tensor.
         # The state of chunk should be determined by the state of its tensors.
@@ -297,7 +291,7 @@ class PatrickStarClient(object):
             param.ps_attr.access_tensor().zero_()
 
         # Change the state of param to COMPUTE.
-        self.chunk_list[chunk_id].update_state(old_state, TensorState.COMPUTE)
+        chunk.update_state(old_state, TensorState.COMPUTE)
         param.ps_attr.set_state(TensorState.COMPUTE)
 
         return param.ps_attr.access_tensor()
@@ -306,7 +300,6 @@ class PatrickStarClient(object):
         self,
         param: torch.nn.Parameter,
         compute_device: torch.device,
-        training_stage: TrainingStage,
     ) -> torch.Tensor:
         r"""Visit tensor of param in distributed environment.
 
@@ -351,7 +344,6 @@ class PatrickStarClient(object):
                 local_chunk_id,
                 compute_device,
                 param.ps_attr.name,
-                training_stage,
             )
         else:
             local_chunk_id = chunk_id
@@ -404,16 +396,7 @@ class PatrickStarClient(object):
         # 1. Prepare the memory of the chunks. If the chunk is not one the
         #   compute device, then we need to move or allocate.
         chunk_id = param.ps_attr.info.chunk_id
-
-        # collect the time a chunk has to be placed on compute-device
-        # self.chunk_eviction_strategy.trace_access(chunk_id, compute_device)
-
-        if chunk_id is None:
-            raise RuntimeError(
-                "FP16 training shall not meet tensors with no chunk assigned. "
-                "Every tensor has to be assigned to a chunk during a tensor-chunk-mapping "
-                "process before training."
-            )
+        assert chunk_id is not None
 
         ret = self._access_tensor_in_chunk(param, compute_device, chunk_id)
         if self._time_profile:

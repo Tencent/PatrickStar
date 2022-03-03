@@ -316,6 +316,6 @@ class Chunk(object):
         if not self.can_fit(numel):
             return False
         self.params.append(param)
-        param.ps_attr.info = TensorInfo(self.chunk_id, numel, param, self.end_pos)
+        param.ps_attr.info = TensorInfo(self.chunk_id, param, self.end_pos)
         self.end_pos += numel
         return True

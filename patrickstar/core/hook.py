@@ -29,10 +29,9 @@
 
 import torch
 
-import patrickstar.utils.global_timer as global_timer
+from patrickstar.core.const import TensorState, TrainingStage
 from patrickstar.core.parameter import ParamType
-from patrickstar.utils import logger, get_rank, get_world_size
-from .const import TensorState, TrainingStage
+from patrickstar.utils import logger, get_rank, get_world_size, global_timer
 
 
 # For each tensor in outputs run the forward_funciton and register backward_function as hook
@@ -70,10 +69,8 @@ def _apply_to_tensors_only(module, functional, backward_function, outputs):
             touched_outputs.append(touched_output)
         return tuple(touched_outputs)
     elif type(outputs) is torch.Tensor:
-        # logger.debug(f'_apply_to_tensors_only {module}')
         return functional.apply(module, backward_function, outputs)
     else:
-        # print('_apply_to_tensors_only', outputs)
         return outputs
 
 
@@ -130,7 +127,6 @@ def pre_module_forward_function(module, client, name):
         param.data = client.access_dist(
             param,
             client.device,
-            training_stage=TrainingStage.FWD,
         )
         flag = True
     if flag:
@@ -164,7 +160,6 @@ def pre_module_backward_function(module, client, name):
         tmp_tensor = client.access_dist(
             param,
             client.device,
-            training_stage=TrainingStage.BWD,
         )
         param.data = tmp_tensor
         flag = True
@@ -201,11 +196,6 @@ def post_module_backward_function(module, client, name):
     for sub_name, param in module.named_parameters(recurse=False):
         if param.ps_attr.param_type == ParamType.TORCH_BASED:
             continue
-        # NOTE() We add a fp16 or fp32 attribute to the ps_attr of param.
-        # We should not use the data type of param.data in the condition judgment.
-        # Since the data type of param.data and ps_attr are not the same.
-        # We can change the param.data at will, and there is no restriction to do this.
-        # assert param.ps_attr.dtype == torch.half
         assert param.ps_attr.dtype == torch.float
         # NOTE() When a parameter is shared by multiple operators,
         # a reference counter is needed to correctly trigger the chunk reusing.

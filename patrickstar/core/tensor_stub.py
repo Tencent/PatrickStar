@@ -38,20 +38,15 @@ class TensorInfo(object):
     def __init__(
         self,
         chunk_id: int,
-        numel: int,
         param: torch.nn.Parameter,
         start_offset: int,
     ):
         self.chunk_id = chunk_id
-        self.numel = numel
         self.param = param
         self.start_offset = start_offset
 
     def __str__(self):
-        return (
-            f"shape: {self.param.shape}, chunk_id: {self.chunk_id}, "
-            f"numel: {self.numel}, state: {self.state()}"
-        )
+        return f"shape: {self.param.shape}, chunk_id: {self.chunk_id}, state: {self.state()}"
 
     def state(self):
         if self.param.ps_attr.param_type == ParamType.TORCH_BASED:

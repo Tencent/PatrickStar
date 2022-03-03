@@ -73,12 +73,8 @@ class ChunkList(object):
         r"""Search a chunk by id."""
         return self.chunks[chunk_id]
 
-    def size(self) -> int:
-        r"""Total number of chunks."""
-        return len(self.chunks)
-
     def __len__(self) -> int:
-        return self.size()
+        return len(self.chunks)
 
     def get_chunk_memory_used(self, device):
         r"""The total memory of payload of all chunks on `device`.
@@ -326,20 +322,13 @@ class ChunkList(object):
             is_dummy=is_dummy,
         )
         self.chunks.append(chunk)
-        global_rank = get_rank()
         if profiler.started():
             profiler.chunk_life_cycle[chunk_id] = {"life_cycle": []}
         logger.debug(
-            f"global_rank {global_rank}, allocate with new chunk chunk_id {chunk_id} size {self.chunk_size} "
+            f"Allocate with new chunk chunk_id {chunk_id} size {self.chunk_size} "
             f"comm group {chunk.comm_info}"
         )
         return chunk
-
-    def is_empty(self):
-        return len(self.chunks) == 0
-
-    def last_chunk_id(self):
-        return len(self.chunks) - 1
 
     def _chunk_to_move_out_for_room_making(
         self, size_in_bytes: int, target_device: torch.device
