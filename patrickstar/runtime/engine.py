@@ -36,7 +36,6 @@ from patrickstar.core import (
     ParamType,
     register_param,
 )
-from patrickstar.fp16 import LossScaler, DynamicLossScaler
 from patrickstar.ops import FP16Adam
 from patrickstar.utils import log_dist, global_timer
 
@@ -79,40 +78,9 @@ class PatrickStarEngine(torch.nn.Module):
             for key, val in default_optim_config["params"].items():
                 if key not in optim_params:
                     optim_params[key] = val
-
-            # Loss scaler configuration
-            if "fp16" not in config:
-                self.loss_scaler = None
-            else:
-                loss_scale_config = config["fp16"]
-                assert loss_scale_config["enabled"], "Must enable fp16 training."
-                assert (
-                    "loss_scale" in loss_scale_config
-                ), "Must have `loss_scale` field set."
-                loss_scale = loss_scale_config["loss_scale"]
-                if loss_scale == 0:
-                    log_dist("Use DynamicLossScaler")
-                    self.loss_scaler = DynamicLossScaler(
-                        init_scale=(
-                            2 ** loss_scale_config.get("initial_scale_power", 16)
-                        ),
-                        scale_factor=loss_scale_config.get("hysteresis", 2),
-                        scale_window=loss_scale_config.get("loss_scale_window", 2000),
-                        min_scale=loss_scale_config.get("min_loss_scale", 1),
-                    )
-                else:
-                    self.loss_scaler = LossScaler(loss_scale)
-
-            # Gradient clipping configuration
-            if "gradient_clipping" not in config:
-                self.gradient_clipping = -1
-            else:
-                self.gradient_clipping = config["gradient_clipping"]
         else:
             optim_type = default_optim_config["type"]
             optim_params = default_optim_config["params"]
-            self.loss_scaler = None
-            self.gradient_clipping = -1
 
         params = list(self.parameters())
         if len(params) == 0:
@@ -123,8 +91,6 @@ class PatrickStarEngine(torch.nn.Module):
         self.optimizer = FP16Adam(
             self.client,
             params,
-            loss_scaler=self.loss_scaler,
-            gradient_clipping=self.gradient_clipping,
             lr=optim_params["lr"],
             betas=optim_params["betas"],
             eps=optim_params["eps"],
@@ -214,7 +180,7 @@ class PatrickStarEngine(torch.nn.Module):
         global_timer.my_timer.finish_profile("FWD")
         return loss
 
-    def backward(self, loss):
+    def backward(self, loss, scaler=None):
         r"""Execute backward pass on the loss
         Arguments:
             loss: Torch tensor on which to execute backward propagation
@@ -224,9 +190,8 @@ class PatrickStarEngine(torch.nn.Module):
             profiler.stage_convert_time.append((time.time(), TrainingStage.FWD))
         self.client.set_training_phase(TrainingStage.BWD)
 
-        self.optimizer.zero_grad()
-        if self.loss_scaler:
-            self.loss_scaler.backward(loss)
+        if scaler is not None:
+            scaler.scale(loss).backward()
         else:
             loss.backward()
         self.iteration_cnt_ += 1

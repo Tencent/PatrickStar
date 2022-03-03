@@ -78,7 +78,6 @@ config = {
         "min_loss_scale": 1,
     },
     "chunk_size": 1024,
-    "use_fake_dist": False,
 }
 
 torch.manual_seed(0)

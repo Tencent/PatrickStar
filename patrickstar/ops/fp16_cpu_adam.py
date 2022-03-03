@@ -98,8 +98,6 @@ class FP16Adam(torch.optim.Optimizer):
         self,
         client,
         params,
-        loss_scaler=None,
-        gradient_clipping=-1,
         lr=1e-3,
         betas=(0.9, 0.999),
         eps=1e-8,
@@ -126,14 +124,6 @@ class FP16Adam(torch.optim.Optimizer):
         )
         super(FP16Adam, self).__init__(params, defaults)
         self.client = client
-
-        self.loss_scaler = loss_scaler
-        self.has_overflow = False
-
-        self.gradient_clipping = gradient_clipping
-        # clamp_scalar_cpu does not support fp16. Turn the gradient_clipping
-        # to tensor to use clamp_cpu instead.
-        self.cpu_gradient_clipping = torch.Tensor([gradient_clipping])
 
         assert (
             len(self.param_groups) == 1
@@ -210,7 +200,6 @@ class FP16Adam(torch.optim.Optimizer):
         assert momentum.device.type == "cpu"
         assert variance.device.type == "cpu"
 
-        loss_scale = self.loss_scaler.loss_scale if self.loss_scaler is not None else -1
         # Inputs of DS CPU Adam need to be flattened.
         self.ds_opt_adam.adam_update(
             self.opt_id,
@@ -225,29 +214,8 @@ class FP16Adam(torch.optim.Optimizer):
             grad.view(-1),
             momentum.view(-1),
             variance.view(-1),
-            loss_scale,
+            -1,
         )
-
-    def check_overflow(self, param):
-        if (
-            self.loss_scaler is not None
-            and not self.has_overflow
-            and self.loss_scaler.has_overflow(param)
-        ):
-            self.has_overflow = True
-
-    def has_overflow_and_reset_param(self):
-        r"""Method for collective communicating overflow and reset params.
-        This method should be called after checking if each individual
-        grad has overflow.
-        """
-        if torch.distributed.is_initialized():
-            overflow_gpu = torch.cuda.ByteTensor([self.has_overflow])
-            torch.distributed.all_reduce(
-                overflow_gpu, op=torch.distributed.ReduceOp.MAX, async_op=False
-            )
-            self.has_overflow = overflow_gpu[0].item()
-        return self.has_overflow
 
     def release_last(self):
         # the starting module would trigger post_module_backward hook
@@ -291,17 +259,6 @@ class FP16Adam(torch.optim.Optimizer):
         if closure is not None:
             with torch.enable_grad():
                 loss = closure()
-
-        if self.loss_scaler is not None and self.has_overflow_and_reset_param():
-            global_timer.my_timer.finish_profile("ADAM")
-            old_loss_scale = self.loss_scaler.loss_scale
-            self.loss_scaler.update_scale(True)
-            new_loss_scale = self.loss_scaler.loss_scale
-            logger.warning(
-                f"Gradient overflow! Update loss scale from {old_loss_scale} to {new_loss_scale}."
-            )
-            self.has_overflow = False
-            return loss
 
         state_steps = []
 
@@ -355,9 +312,6 @@ class FP16Adam(torch.optim.Optimizer):
             for p in group["params"]:
                 if p.grad is not None:
                     self.client.release(p)
-
-        if self.loss_scaler:
-            self.loss_scaler.update_scale(False)
 
         global_timer.my_timer.finish_profile("ADAM")
         return loss

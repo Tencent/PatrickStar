@@ -56,7 +56,6 @@ class PatrickStarClient(object):
             "overall_gpu_mem_ratio": 0.8,
             "overall_cpu_mem_ratio": 0.8,
             "margin_use_ratio": 0.8,
-            "use_fake_dist": False,
             "with_static_partition": False,
         }
         if config is not None:

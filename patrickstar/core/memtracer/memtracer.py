@@ -111,7 +111,6 @@ class RuntimeMemTracer(object):
             self.warmup_gpu_chunk_mem_ratio = config.get(
                 "warmup_gpu_chunk_mem_ratio", 0.1
             )
-            self.use_fake_dist = config.get("use_fake_dist", False)
             self.with_static_partition = config.get("with_static_partition", False)
             self.use_async_mem_monitor = config.get("use_async_mem_monitor", False)
 
@@ -120,7 +119,6 @@ class RuntimeMemTracer(object):
             self._overall_cpu_mem_ratio = 0.8
             self._margin_use_ratio = 0.8
             self.warmup_gpu_chunk_mem_ratio = 0.2
-            self.use_fake_dist = False
             self.with_static_partition = False
             self.use_async_mem_monitor = True
         if self.use_async_mem_monitor:
@@ -128,24 +126,13 @@ class RuntimeMemTracer(object):
 
         mem_info = get_memory_info()
         local_world_size = get_local_world_size()
-        if self.use_fake_dist:
-            # Fake distribtued mode: all processes share the same GPU.
-            self._overall_gpu_mem = (
-                torch.cuda.get_device_properties(0).total_memory
-                * self._overall_gpu_mem_ratio
-                / local_world_size
-            )
-            self._overall_cpu_mem = (
-                mem_info.total * self._overall_cpu_mem_ratio / local_world_size
-            )
-        else:
-            self._overall_gpu_mem = (
-                torch.cuda.get_device_properties(self.local_rank).total_memory
-                * self._overall_gpu_mem_ratio
-            )
-            self._overall_cpu_mem = (
-                mem_info.total * self._overall_cpu_mem_ratio / local_world_size
-            )
+        self._overall_gpu_mem = (
+            torch.cuda.get_device_properties(self.local_rank).total_memory
+            * self._overall_gpu_mem_ratio
+        )
+        self._overall_cpu_mem = (
+            mem_info.total * self._overall_cpu_mem_ratio / local_world_size
+        )
 
         log_dist(
             f"Init Manager over all gpu mem {self._overall_gpu_mem / 1e6} MB, "

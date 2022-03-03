@@ -34,12 +34,6 @@ import os
 def _add_patrick_star_args(parser):
     group = parser.add_argument_group(title="patrickstar")
     group.add_argument(
-        "--use_fake_dist",
-        dest="use_fake_dist",
-        action="store_true",
-        help="Using one GPU to stimulate multiple card.",
-    )
-    group.add_argument(
         "--chunk_size",
         type=int,
         default=32 * 1024 * 1024,

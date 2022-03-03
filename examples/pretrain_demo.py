@@ -53,12 +53,7 @@ def test_transformer_model_helper(
     dist_plan: str,
     num_steps,
 ):
-    # Use single card to simulate multicard. Used when you are poor and
-    # no more GPU avaiable.
-    if args.use_fake_dist:
-        rank = 0
-    else:
-        rank = args.local_rank
+    rank = args.local_rank
 
     # Avoid gpu0 use more memory.
     # https://discuss.pytorch.org/t/extra-10gb-memory-on-gpu-0-in-ddp-tutorial/118113
@@ -100,21 +95,20 @@ def test_transformer_model_helper(
         optimizer = torch.optim.Adam(
             model.parameters(), lr=lr, betas=betas, eps=eps, weight_decay=weight_decay
         )
-
-        if is_fp16:
-            scaler = torch.cuda.amp.GradScaler(
-                init_scale=2 ** args.init_loss_scale_power,
-                growth_factor=2,
-                backoff_factor=0.5,
-                growth_interval=1000,
-            )
-
         model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[rank])
+
+    if is_fp16:
+        scaler = torch.cuda.amp.GradScaler(
+            init_scale=2 ** 16,
+            growth_factor=2,
+            backoff_factor=0.5,
+            growth_interval=1000,
+        )
 
     model_numel, model_num_param = get_ps_model_size(model)
     log_dist(f"Model size {model_numel / 1e9} B, total params: {model_num_param}")
     total_macs = model_numel * args.batch_size * sequence_length * 2 * 4
-    log_dist(f"Total MACs: {total_macs/1024/1024/1024/1024} TFlops")
+    log_dist(f"Total MACs: {total_macs / 1024 ** 4} TFlops")
 
     see_memory_usage(
         f"After model init. using {dist_plan}, gradient checkpoint: {is_ckp}, fp16 {is_fp16}",
@@ -138,37 +132,36 @@ def test_transformer_model_helper(
     for n, batch in enumerate(data_loader):
         if n == num_steps:
             break
+        if n == num_steps - 1:
+            global_timer.my_timer.start()
+        # Only collect running time of the last iteration.
+        if args.with_mem_profiler and n == 1:
+            profiler.warmup_finish()
+
         # You may need to empty_cache for really large models.
         torch.cuda.empty_cache()
         log_dist(f"Start Step {n} with {dist_plan}...")
-
         step_start_time = time.time()
-        # Only collect running time of the last iteration.
-        if n == num_steps - 1:
-            global_timer.my_timer.start()
-        optimizer.zero_grad()
-        if args.with_mem_profiler:
-            if n == 1:
-                profiler.warmup_finish()
 
-        if dist_plan == "patrickstar":
+        optimizer.zero_grad()
+        if is_fp16:
+            with torch.cuda.amp.autocast():
+                output = model(input_ids=batch[0], labels=batch[1])
+            loss = output[0]
+            if dist_plan == "patrickstar":
+                model.backward(loss, scaler)
+            else:
+                scaler.scale(loss).backward()
+            scaler.step(optimizer)
+            scaler.update()
+        else:
             output = model(input_ids=batch[0], labels=batch[1])
             loss = output[0]
-            model.backward(loss)
-            optimizer.step()
-        else:
-            if is_fp16:
-                with torch.cuda.amp.autocast():
-                    output = model(input_ids=batch[0], labels=batch[1])
-                loss = output[0]
-                scaler.scale(loss).backward()
-                scaler.step(optimizer)
-                scaler.update()
+            if dist_plan == "patrickstar":
+                model.backward(loss)
             else:
-                output = model(input_ids=batch[0], labels=batch[1])
-                loss = output[0]
                 loss.backward()
-                optimizer.step()
+            optimizer.step()
 
         print(f"LOSS of step {n}: {loss.item()}")
         loss_res.append(loss.item())
@@ -224,9 +217,7 @@ if __name__ == "__main__":
     # information.
     logger.setLevel(logging.INFO)
     if not torch.distributed.is_initialized():
-        torch.distributed.init_process_group(
-            backend="gloo" if args.use_fake_dist else "nccl"
-        )
+        torch.distributed.init_process_group(backend="nccl")
 
     world_size = torch.distributed.get_world_size()
 
@@ -255,19 +246,7 @@ if __name__ == "__main__":
         torch_res_list = test_transformer_model_helper(
             args=args,
             is_ckp=use_ckp,
-            is_fp16=False,
-            dist_plan="torch",
-            num_steps=NUM_STEPS,
-        )
-
-        torch.cuda.empty_cache()
-        logging.info("-" * 50)
-
-        torch.manual_seed(0)
-        autocast_res_list = test_transformer_model_helper(
-            args=args,
-            is_ckp=use_ckp,
-            is_fp16=True,
+            is_fp16=use_fp16,
             dist_plan="torch",
             num_steps=NUM_STEPS,
         )
@@ -279,19 +258,20 @@ if __name__ == "__main__":
         ps_res_list = test_transformer_model_helper(
             args=args,
             is_ckp=use_ckp,
-            is_fp16=False,  # use_fp16,
+            is_fp16=use_fp16,
             dist_plan="patrickstar",
             num_steps=NUM_STEPS,
         )
 
         print("-" * 20 + " LOSS " + "-" * 20)
-        print(f"torch fp32 : {torch_res_list}")
-        print(f"autocast   : {autocast_res_list}")
+        print(f"torch : {torch_res_list}")
         print(f"patrickstar: {ps_res_list}")
 
         def diff(array):
-            return list(np.array(ps_res_list) - np.array(array))
+            dtype = np.float16 if use_fp16 else np.float
+            return list(
+                np.array(ps_res_list, dtype=dtype) - np.array(array, dtype=dtype)
+            )
 
         print("-" * 20 + " DIFF " + "-" * 20)
-        print(f"vs torch fp32: {diff(torch_res_list)}")
-        print(f"vs autocast  : {diff(autocast_res_list)}")
+        print(f"vs torch: {diff(torch_res_list)}")

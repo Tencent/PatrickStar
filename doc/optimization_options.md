@@ -48,8 +48,6 @@ We provide ways to adjust the CPU and GPU memory usage quota for the memory trac
 
 `margin_use_ratio`: Space to host optimizer states in GPU / the rest GPU space excluding the peak chunk-used space after warmup FWD+BWD.
 
-`use_fake_dist`: a debug flag, to simulate multiple-GPU on one GPU. It is used when we are poor. After we have multi-GPU we deprecated this flag.
-
 ```
 "mem_tracer": {
                     "use_async_mem_monitor": args.with_async_mem_monitor,
@@ -57,7 +55,6 @@ We provide ways to adjust the CPU and GPU memory usage quota for the memory trac
                     "overall_gpu_mem_ratio": 0.8,
                     "overall_cpu_mem_ratio": 0.8,
                     "margin_use_ratio": 0.8,
-                    "use_fake_dist": False,
                     "with_static_partition": args.with_static_partition,
                 },
 ```

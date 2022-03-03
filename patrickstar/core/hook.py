@@ -173,7 +173,6 @@ def pre_module_backward_function(module, client, name):
 
 
 def reduce_grad(param, client):
-    client.optimizer.check_overflow(param)
     chunk_id = client.chunk_tensor_index.get_chunk_id(param)
     chunk = client.chunk_list[chunk_id]
     dst = chunk.comm_info.offset
