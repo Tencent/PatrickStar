@@ -173,7 +173,7 @@ def pre_module_backward_function(module, client, name):
 
 
 def reduce_grad(param, client):
-    chunk_id = client.chunk_tensor_index.get_chunk_id(param)
+    chunk_id = param.ps_attr.info.chunk_id
     chunk = client.chunk_list[chunk_id]
     dst = chunk.comm_info.offset
     # Here we use gloo backend group for the cpu tensors (embedding).

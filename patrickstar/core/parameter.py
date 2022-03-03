@@ -77,6 +77,8 @@ class PSParameter(object):
         if self.param_type == ParamType.CHUNK_BASED:
             self.data_tensor = PSTensor()
 
+        self.info = None
+
         # Whether the param belongs to local chunk.
         self._is_local = True
 

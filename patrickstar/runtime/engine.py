@@ -128,7 +128,7 @@ class PatrickStarEngine(torch.nn.Module):
         # about grad overflow.
         self.client.mem_tracer.reset_memory_stats()
         self.client.mem_tracer.metronome.reset()
-        for _, chunk in self.client.chunk_list.generate_chunk():
+        for chunk in self.client.chunk_list.chunks:
             chunk.unused = 0
 
     def _set_state_after_forward(self):
@@ -137,7 +137,7 @@ class PatrickStarEngine(torch.nn.Module):
         tensors from HOLD_AFTER_FWD to HOLD. Otherwise, chunks may be
         released accidentally when using gradient checkpointing.
         """
-        for chunk_id, chunk in self.client.chunk_list.generate_chunk():
+        for chunk_id, chunk in enumerate(self.client.chunk_list.chunks):
             if (
                 chunk.get_state() == ChunkState.HOLD
                 or chunk.get_state() == ChunkState.HOLD_AFTER_FWD

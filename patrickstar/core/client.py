@@ -33,7 +33,6 @@ import torch
 import patrickstar.utils.global_timer as global_timer
 from patrickstar.utils import logger, get_world_size, get_rank, log_dist
 from .chunk_list import ChunkList
-from .chunk_tensor_index import ChunkTensorIndex
 from .const import ChunkState, TensorState, TrainingStage
 from .hook import setup_patrickstar_hooks
 from .parameter import register_param, is_param_registered, ParamType
@@ -73,11 +72,11 @@ class PatrickStarClient(object):
         )
 
         self.chunk_size = chunk_size
-        self.chunk_tensor_index = ChunkTensorIndex(self.chunk_size)
         self.chunk_list = ChunkList(
             self.local_rank,
             self.mem_tracer,
             self.chunk_eviction_strategy,
+            self.chunk_size,
         )
         self._time_profile = True
 
@@ -111,23 +110,9 @@ class PatrickStarClient(object):
             chunk_size=self.chunk_size,
         )
 
-    def append_chunk(self, is_dummy=False):
-        r"""Append a new chunk to chunk_list and chunk_tensor_index.
-
-        Args:
-            is_dummy: bool.
-        Returns:
-            chunk_id of the newly created chunk and comm_info.
-        """
-        chunk = self.chunk_list.new_chunk(
-            self.chunk_size,
-            is_dummy=is_dummy,
-        )
-        return chunk
-
-    def append_dummy_chunk(self):
+    def new_dummy_chunk(self):
         r"""Append a dummy chunk to the corresponding chunk_list"""
-        chunk = self.append_chunk(is_dummy=True)
+        chunk = self.chunk_list.new_chunk(is_dummy=True)
 
         dummy = torch.nn.Parameter(
             torch.tensor([], dtype=torch.float), requires_grad=False
@@ -135,26 +120,12 @@ class PatrickStarClient(object):
         # Add a dummy param to dummy chunk, so that the chunk can be set in HOLD state.
         register_param(dummy, ParamType.CHUNK_BASED, "dummy")
         self.dummy_param_list.append(dummy)
-        self.chunk_tensor_index.add_tensor(
-            chunk.chunk_id,
-            self.dummy_param_list[-1].ps_attr.get_tensor_id(),
-            0,
-            dummy.numel(),
-            self.dummy_param_list[-1],
-        )
-
+        chunk.add_param(dummy, dummy.numel())
         logger.debug("Append a dummy chunk to the Chunk List")
 
-    def delete_param(self, param):
-        """
-        TODO(jiaruifang) Remove tensor of the param
-        """
-        chunk_id = self.chunk_tensor_index.get_chunk_id(param)
-        self.chunk_tensor_index.delete_tensor(chunk_id, param)
-
-    def append_tensor(
+    def append_params(
         self,
-        param_list: List[torch.nn.Parameter],
+        params: List[torch.nn.Parameter],
     ):
         r"""Append params to the last chunk.
 
@@ -164,20 +135,25 @@ class PatrickStarClient(object):
         Args:
             param_list: list of `torch.nn.Parameter`.
         """
-        if not self.chunk_list.is_empty():
-            last_chunk_id = self.chunk_list.last_chunk_id()
-            if self.chunk_tensor_index.try_insert_tensor_list(
-                last_chunk_id, param_list
-            ):
+        total_numel = 0
+        for param in params:
+            assert is_param_registered(param)
+            total_numel += param.ps_attr.numel
+
+        if len(self.chunk_list) != 0:
+            last_chunk = self.chunk_list[-1]
+            if last_chunk.can_fit(total_numel):
+                for param in params:
+                    last_chunk.add_param(param)
                 return
-        chunk = self.append_chunk()
-        if not self.chunk_tensor_index.try_insert_tensor_list(
-            chunk.chunk_id, param_list
-        ):
+
+        chunk = self.chunk_list.new_chunk()
+        if not chunk.can_fit(total_numel):
             raise RuntimeError(
-                f"Can not append a tensor to chunk_tensor_index. "
-                f"Overall size of param list is larger than the default chunk size {self.chunk_size}."
+                f"Overall size of params is larger than the chunk size {chunk.capacity}."
             )
+        for param in params:
+            chunk.add_param(param)
         return
 
     def param_fp16_chunks_max_mem_usage(self):
@@ -200,10 +176,10 @@ class PatrickStarClient(object):
         And this method has nothing to do with whether the payload of
         the chunk is allocated or not.
         """
-        for info in self.chunk_tensor_index.generate_tensor_info_in_order(chunk_id):
-            param = info.param
+        chunk = self.chunk_list[chunk_id]
+        for param in chunk.params:
             old_state = param.ps_attr.get_state()
-            self.chunk_list[chunk_id].update_state(old_state, new_state)
+            chunk.update_state(old_state, new_state)
             param.ps_attr.set_state(new_state)
 
     def register_model_hook(self, model):
@@ -211,7 +187,7 @@ class PatrickStarClient(object):
 
     def is_local_param(self, param):
         r"""Check if param is in local chunk"""
-        chunk_id = self.chunk_tensor_index.get_chunk_id(param)
+        chunk_id = param.ps_attr.info.chunk_id
         return self.chunk_list[chunk_id].is_local()
 
     def _fetch_remote_chunks(
@@ -303,8 +279,7 @@ class PatrickStarClient(object):
         self.chunk_eviction_strategy.trace_access(chunk_id, compute_device)
         self.chunk_list.access_chunk(chunk_id, compute_device)
         # 2. Locate the param on the chunk.
-        tensor_id = param.ps_attr.get_tensor_id()
-        info = self.chunk_tensor_index.get_tensor_info(tensor_id)
+        info = param.ps_attr.info
         start_offset = info.start_offset
         numel = info.numel
         assert numel == param.ps_attr.numel, f"{numel} vs {param.ps_attr.numel}"
@@ -356,7 +331,7 @@ class PatrickStarClient(object):
 
         # 1. Prepare the memory of the chunks. If the chunk is not one the
         #   compute device, then we need to move or allocate.
-        chunk_id = self.chunk_tensor_index.get_chunk_id(param)
+        chunk_id = param.ps_attr.info.chunk_id
 
         rank = get_rank()
 
@@ -428,7 +403,7 @@ class PatrickStarClient(object):
 
         # 1. Prepare the memory of the chunks. If the chunk is not one the
         #   compute device, then we need to move or allocate.
-        chunk_id = self.chunk_tensor_index.get_chunk_id(param)
+        chunk_id = param.ps_attr.info.chunk_id
 
         # collect the time a chunk has to be placed on compute-device
         # self.chunk_eviction_strategy.trace_access(chunk_id, compute_device)
@@ -484,7 +459,7 @@ class PatrickStarClient(object):
         )
         assert torch.distributed.is_initialized()
 
-        chunk_id = self.chunk_tensor_index.get_chunk_id(param)
+        chunk_id = param.ps_attr.info.chunk_id
         chunk_id_list = self.chunk_list[chunk_id].comm_info.group.elements
 
         local_chunk_id = chunk_id_list[rank]
@@ -567,7 +542,7 @@ class PatrickStarClient(object):
         rank = self.local_rank
         assert isinstance(reset_to_state, TensorState)
 
-        chunk_id = self.chunk_tensor_index.get_chunk_id(param)
+        chunk_id = param.ps_attr.info.chunk_id
         logger.debug(
             f"rank {rank} release a tensor of chunk_id {chunk_id} to {reset_to_state}"
         )
@@ -595,11 +570,7 @@ class PatrickStarClient(object):
         overall_chunk_num = 0
         overall_utilization_ratio = 0.0
         for chunk in self.chunk_list.chunks:
-            last_used_pos = 0
-            for info in self.chunk_tensor_index.generate_tensor_info_in_order(
-                chunk.chunk_id
-            ):
-                last_used_pos = max(last_used_pos, info.start_offset + info.numel)
+            last_used_pos = chunk.end_pos
             overall_utilization_ratio += last_used_pos / chunk.capacity
             overall_size += chunk.get_chunk_space()
             overall_chunk_num += 1
@@ -614,22 +585,13 @@ class PatrickStarClient(object):
         overall_utilization_ratio = 0.0
         max_utilization_ratio = 0
         for chunk in self.chunk_list.chunks:
-            chunk_id = chunk.chunk_id
             logger.debug(
                 f"Chunk id {chunk.chunk_id}, state {chunk.get_state()}, "
                 f"comm info {chunk.comm_info}, "
                 f"capacity {chunk.capacity / 1024 / 1024} M elems, "
                 f"device {chunk.get_device()}"
             )
-            last_used_pos = 0
-            for info in self.chunk_tensor_index.generate_tensor_info_in_order(chunk_id):
-                assert info.chunk_id == chunk_id, f"{info.chunk_id} vs {chunk_id}"
-                logger.debug(
-                    f"** tensor: chunk_id {chunk_id}, start {info.start_offset}, "
-                    f"end {info.start_offset + info.numel}, size {info.numel}, "
-                    f"tensor_id {info.tensor_id}, state {info.state()}, name {info.tensor_name}"
-                )
-                last_used_pos = max(last_used_pos, info.start_offset + info.numel)
+            last_used_pos = chunk.end_pos
             logger.debug(
                 f"chunk used {last_used_pos/1024/1024} M elem, "
                 f"{last_used_pos/chunk.capacity * 100} %"

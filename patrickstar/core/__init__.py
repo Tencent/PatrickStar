@@ -29,7 +29,6 @@
 
 from .chunk_data import Chunk
 from .chunk_list import ChunkList
-from .chunk_tensor_index import ChunkTensorIndex
 from .client import PatrickStarClient
 from .const import ChunkState, TensorState, TrainingStage
 from .hook import setup_patrickstar_hooks

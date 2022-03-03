@@ -38,24 +38,19 @@ class TensorInfo(object):
     def __init__(
         self,
         chunk_id: int,
-        tensor_id: int,
-        start_offset: int,
         numel: int,
         param: torch.nn.Parameter,
-        param_name="",
+        start_offset: int,
     ):
-        self.tensor_id = tensor_id
         self.chunk_id = chunk_id
-        self.start_offset = start_offset
         self.numel = numel
         self.param = param
-        self.tensor_name = f"{param_name}.data"
+        self.start_offset = start_offset
 
     def __str__(self):
         return (
-            f"tensor_id: {self.tensor_id}, name: {self.tensor_name}, "
             f"shape: {self.param.shape}, chunk_id: {self.chunk_id}, "
-            f"start_offset: {self.start_offset}, numel: {self.numel}, state: {self.state()}"
+            f"numel: {self.numel}, state: {self.state()}"
         )
 
     def state(self):

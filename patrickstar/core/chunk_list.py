@@ -53,12 +53,14 @@ class ChunkList(object):
         local_rank: int,
         memory_tracer: RuntimeMemTracer,
         chunk_eviction_policy: ChunkEvictionPolicyBase,
+        chunk_size: int,
     ):
         """
         Args:
             local_rank: int.
         """
         self.chunks = []
+        self.chunk_size = chunk_size
 
         self._time_profile = True
         self.moments_cnt_of_iteration = None
@@ -305,11 +307,7 @@ class ChunkList(object):
         if self._time_profile:
             global_timer.my_timer.finish_profile("CHUNK_LIST_chunk_move")
 
-    def new_chunk(
-        self,
-        chunk_size: int,
-        is_dummy: bool = False,
-    ):
+    def new_chunk(self, is_dummy: bool = False):
         r"""Create a chunk without initializing its memory.
 
         Args:
@@ -321,7 +319,7 @@ class ChunkList(object):
         """
         chunk_id = len(self.chunks)
         chunk = Chunk(
-            capacity=chunk_size,
+            capacity=self.chunk_size,
             chunk_id=chunk_id,
             memory_tracer=self.memory_tracer,
             local_rank=self.local_rank,
@@ -332,7 +330,7 @@ class ChunkList(object):
         if profiler.started():
             profiler.chunk_life_cycle[chunk_id] = {"life_cycle": []}
         logger.debug(
-            f"global_rank {global_rank}, allocate with new chunk chunk_id {chunk_id} size {chunk_size} "
+            f"global_rank {global_rank}, allocate with new chunk chunk_id {chunk_id} size {self.chunk_size} "
             f"comm group {chunk.comm_info}"
         )
         return chunk
@@ -341,14 +339,7 @@ class ChunkList(object):
         return len(self.chunks) == 0
 
     def last_chunk_id(self):
-        if self.is_empty():
-            raise RuntimeError("Call last_chunk_id on an empty chunk list")
         return len(self.chunks) - 1
-
-    def generate_chunk(self):
-        r"""Return all the chunks along with its id."""
-        for chunk_id, chunk in enumerate(self.chunks):
-            yield chunk_id, chunk
 
     def _chunk_to_move_out_for_room_making(
         self, size_in_bytes: int, target_device: torch.device

@@ -234,7 +234,7 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
                 register_param(param, ParamType.TORCH_BASED, name)
                 param.ps_attr._is_local = True
 
-        self.client.append_tensor(params)
+        self.client.append_params(params)
 
         for param in params:
             # Delete the memory of non local tensors
@@ -263,16 +263,16 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
         log_dist("Post Model Init Context")
 
         chunk_num = 0
-        for chunk_id in range(len(self.client.chunk_list.chunks)):
-            if self.client.chunk_list[chunk_id].is_local():
-                for param in self.client.chunk_tensor_index.params_generator(chunk_id):
+        for chunk in self.client.chunk_list.chunks:
+            if chunk.is_local():
+                for param in chunk.params:
                     if not self.not_init:
                         if is_param_registered(param):
                             ps_data = self.client.access(param, torch.device("cpu:0"))
                             ps_data.copy_(param.data)
                             self.client.release(param)
             else:
-                for param in self.client.chunk_tensor_index.params_generator(chunk_id):
+                for param in chunk.params:
                     assert not self.client.is_local_param(param)
                     # When release_after_init is True, we will release the remote
                     # param tensor here.
@@ -287,5 +287,5 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
         world_size = get_world_size()
         log_dist(f"Param fp16 chunk num {chunk_num}")
         while chunk_num % world_size != 0:
-            self.client.append_dummy_chunk()
+            self.client.new_dummy_chunk()
             chunk_num += 1

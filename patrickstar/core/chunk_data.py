@@ -33,6 +33,7 @@ import torch
 from patrickstar.core.comm import CommInfo
 from patrickstar.core.const import TensorState, ChunkState
 from patrickstar.core.memtracer import RuntimeMemTracer
+from patrickstar.core.tensor_stub import TensorInfo
 from patrickstar.profiler import profiler
 from patrickstar.utils import logger, get_rank, getsizeof, global_timer
 
@@ -81,6 +82,9 @@ class Chunk(object):
         self.payload = None
         self._time_profile = True
         self._pin_flag = False
+
+        self.end_pos = 0
+        self.params = []
 
     def is_dummy(self):
         return self._is_dummy
@@ -302,3 +306,16 @@ class Chunk(object):
             return self.payload.device
         else:
             return None
+
+    def can_fit(self, numel):
+        return self.capacity - self.end_pos >= numel
+
+    def add_param(self, param):
+        assert param.dtype == torch.float
+        numel = param.ps_attr.numel
+        if not self.can_fit(numel):
+            return False
+        self.params.append(param)
+        param.ps_attr.info = TensorInfo(self.chunk_id, numel, param, self.end_pos)
+        self.end_pos += numel
+        return True
