@@ -135,7 +135,6 @@ def pre_module_forward_function(module, client, name):
         flag = True
     if flag:
         client.trigger_memory_tracing()
-        client.adjust_chunk_layout()
 
 
 # release submodule
@@ -156,7 +155,6 @@ def post_module_forward_function(module, client, name):
 
 
 def pre_module_backward_function(module, client, name):
-    print("pre backward", module.__class__.__name__)
     flag = False
     for sub_name, param in module.named_parameters(recurse=False):
         if param.ps_attr.param_type == ParamType.TORCH_BASED:
@@ -169,15 +167,12 @@ def pre_module_backward_function(module, client, name):
             training_stage=TrainingStage.BWD,
         )
         param.data = tmp_tensor
-        param.grad = torch.zeros_like(tmp_tensor)
         flag = True
     if flag:
         client.trigger_memory_tracing()
-        client.adjust_chunk_layout()
 
 
 def reduce_grad(param, client):
-    print(param.ps_attr.name)
     client.optimizer.check_overflow(param)
     chunk_id = client.chunk_tensor_index.get_chunk_id(param)
     chunk = client.chunk_list[chunk_id]
@@ -211,7 +206,8 @@ def post_module_backward_function(module, client, name):
         # We should not use the data type of param.data in the condition judgment.
         # Since the data type of param.data and ps_attr are not the same.
         # We can change the param.data at will, and there is no restriction to do this.
-        assert param.ps_attr.data_type == torch.half
+        # assert param.ps_attr.data_type == torch.half
+        assert param.ps_attr.data_type == torch.float
         # NOTE() When a parameter is shared by multiple operators,
         # a reference counter is needed to correctly trigger the chunk reusing.
         # The memory space of the last updated param fp16 is covered by grad fp16.

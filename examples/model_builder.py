@@ -37,7 +37,12 @@ def model_config(model_name):
     """
     generate the model config according to the model name.
     """
-    if model_name == "Bert":
+    if model_name == "Tiny":
+        HIDDEN_DIM = 16
+        SEQ_LEN = 8
+        NUM_LAYER = 1
+        NUM_HEAD = 4
+    elif model_name == "Bert":
         # 0.11B
         HIDDEN_DIM = 768
         SEQ_LEN = 512

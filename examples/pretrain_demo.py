@@ -48,10 +48,10 @@ from ps_config import get_patrickstar_config
 
 def test_transformer_model_helper(
     args,
-    is_ckp: bool = False,
-    is_fp16: bool = False,
-    dist_plan: str = "torch",
-    num_steps=5,
+    is_ckp: bool,
+    is_fp16: bool,
+    dist_plan: str,
+    num_steps,
 ):
     # Use single card to simulate multicard. Used when you are poor and
     # no more GPU avaiable.
@@ -70,7 +70,7 @@ def test_transformer_model_helper(
         print("start memory profiler")
         profiler.start()
 
-    lr = 0.1
+    lr = 0.001
     betas = (0.9, 0.999)
     eps = 1e-6
     weight_decay = 0
@@ -230,10 +230,6 @@ if __name__ == "__main__":
 
     world_size = torch.distributed.get_world_size()
 
-    if res_check:
-        args.model_name = "Bert"
-        args.batch_size = 2
-
     if not res_check:
         torch.manual_seed(0)
         loss_list = test_transformer_model_helper(
@@ -251,7 +247,9 @@ if __name__ == "__main__":
             "Running to check result. This will use Bert model and batch size is 2."
         )
 
-        NUM_STEPS = 5
+        args.model_name = "Bert"
+        args.batch_size = 2
+        NUM_STEPS = 10
 
         torch.manual_seed(0)
         torch_res_list = test_transformer_model_helper(
@@ -281,8 +279,9 @@ if __name__ == "__main__":
         ps_res_list = test_transformer_model_helper(
             args=args,
             is_ckp=use_ckp,
-            is_fp16=use_fp16,
+            is_fp16=False,  # use_fp16,
             dist_plan="patrickstar",
+            num_steps=NUM_STEPS,
         )
 
         print("-" * 20 + " LOSS " + "-" * 20)

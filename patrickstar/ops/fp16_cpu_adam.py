@@ -42,6 +42,55 @@ from .op_builder.cpu_adam import CPUAdamBuilder
 from patrickstar.profiler import profiler
 
 
+def adam(
+    params: List[torch.Tensor],
+    grads: List[torch.Tensor],
+    exp_avgs: List[torch.Tensor],
+    exp_avg_sqs: List[torch.Tensor],
+    max_exp_avg_sqs: List[torch.Tensor],
+    state_steps: List[int],
+    *,
+    amsgrad: bool,
+    beta1: float,
+    beta2: float,
+    lr: float,
+    weight_decay: float,
+    eps: float,
+    maximize: bool,
+):
+    r"""Functional API that performs Adam algorithm computation.
+
+    See :class:`~torch.optim.Adam` for details.
+    """
+
+    for i, param in enumerate(params):
+
+        grad = grads[i] if not maximize else -grads[i]
+        exp_avg = exp_avgs[i]
+        exp_avg_sq = exp_avg_sqs[i]
+        step = state_steps[i]
+
+        bias_correction1 = 1 - beta1 ** step
+        bias_correction2 = 1 - beta2 ** step
+
+        if weight_decay != 0:
+            grad = grad.add(param, alpha=weight_decay)
+
+        # Decay the first and second moment running average coefficient
+        exp_avg.mul_(beta1).add_(grad, alpha=1 - beta1)
+        exp_avg_sq.mul_(beta2).addcmul_(grad, grad.conj(), value=1 - beta2)
+        if amsgrad:
+            # Maintains the maximum of all 2nd moment running avg. till now
+            torch.maximum(max_exp_avg_sqs[i], exp_avg_sq, out=max_exp_avg_sqs[i])
+            # Use the max. for normalizing running avg. of gradient
+            denom = (max_exp_avg_sqs[i].sqrt() / math.sqrt(bias_correction2)).add_(eps)
+        else:
+            denom = (exp_avg_sq.sqrt() / math.sqrt(bias_correction2)).add_(eps)
+
+        step_size = lr / bias_correction1
+        param.addcdiv_(exp_avg, denom, value=-step_size)
+
+
 class FP16Adam(torch.optim.Optimizer):
     optimizer_id = 0
 
@@ -102,10 +151,10 @@ class FP16Adam(torch.optim.Optimizer):
 
                 # Only create the local optimizer state params.
                 state["exp_avg"] = torch.zeros(
-                    p.ps_attr.shape, device=torch.device("cpu:0")
+                    p.ps_attr.shape, device=torch.device("cuda:0")
                 )
                 state["exp_avg_sq"] = torch.zeros(
-                    p.ps_attr.shape, device=torch.device("cpu:0")
+                    p.ps_attr.shape, device=torch.device("cuda:0")
                 )
 
         self.use_adamw = use_adamw
@@ -179,40 +228,6 @@ class FP16Adam(torch.optim.Optimizer):
             loss_scale,
         )
 
-    def torch_adam_update(
-        self,
-        data,
-        grad,
-        exp_avg,
-        exp_avg_sq,
-        lr,
-        beta1,
-        beta2,
-        eps,
-        weight_decay,
-        bias_correction1,
-        bias_correction2,
-    ):
-        if self.loss_scaler is not None:
-            grad.div_(self.loss_scaler.loss_scale)
-        if weight_decay != 0:
-            if self.use_adamw:
-                # Perform stepweight decay
-                data.mul_(1 - lr * weight_decay)
-            else:
-                grad = grad.add(data, alpha=weight_decay)
-
-        # Decay the first and second moment running average coefficient
-        exp_avg.mul_(beta1).add_(grad, alpha=1 - beta1)
-        exp_avg_sq.mul_(beta2).addcmul_(grad, grad, value=1 - beta2)
-
-        # TODO(jiaruifang) dose not support amsgrad
-        denom = (exp_avg_sq.sqrt() / math.sqrt(bias_correction2)).add_(eps)
-
-        step_size = lr / bias_correction1
-
-        data.addcdiv_(exp_avg, denom, value=-step_size)
-
     def check_overflow(self, param):
         if (
             self.loss_scaler is not None
@@ -233,106 +248,6 @@ class FP16Adam(torch.optim.Optimizer):
             )
             self.has_overflow = overflow_gpu[0].item()
         return self.has_overflow
-
-    def fp16_chunk_adam_ops(
-        self,
-        fp16_param_with_grad_list,
-        exp_avg_list: List[torch.nn.Parameter],
-        exp_avg_sq_list: List[torch.nn.Parameter],
-        state_steps: List[int],
-        amsgrad: bool,
-        hyperparam_list: List[dict],
-        time_profile=True,
-    ):
-        r"""Functional API that performs Adam algorithm computation.
-        Visit fp16_param_with_grad_list in the order of tensors stored in chunks.
-        Copy the chunk into a tmp buffer to speed up the memcpy between devices.
-        """
-        for i, param in enumerate(fp16_param_with_grad_list):
-            # 1. prepare data for Adam
-            if time_profile:
-                global_timer.my_timer.start_profile("ADAM_prepare_data")
-
-            grad_tensor = param.grad
-            grad_tensor = grad_tensor.to(torch.device("cpu"))
-
-            # Gradient clipping
-            if self.gradient_clipping > 0:
-                # The gradient clipping may be larger than the max fp16 value
-                # after being amplified by loss scale.
-                max_fp16 = torch.finfo(torch.half).max
-                if grad_tensor.device.type == "cpu":
-                    gradient_clipping = self.cpu_gradient_clipping
-                    if self.loss_scaler is not None:
-                        gradient_clipping *= self.loss_scaler.loss_scale
-                    gradient_clipping = min(torch.Tensor([max_fp16]), gradient_clipping)
-                else:
-                    gradient_clipping = self.gradient_clipping
-                    if self.loss_scaler is not None:
-                        gradient_clipping *= self.loss_scaler.loss_scale
-                    gradient_clipping = min(max_fp16, gradient_clipping)
-                grad_tensor.clamp_(-gradient_clipping, gradient_clipping)
-
-            compute_device = grad_tensor.device
-
-            # 2. Start Adam
-            if time_profile:
-                global_timer.my_timer.finish_profile("ADAM_prepare_data")
-                global_timer.my_timer.start_profile("ADAM_compute")
-
-            if param.ps_attr.param_type == ParamType.TORCH_BASED:
-                fp32_data_tensor = param.data
-            else:
-                fp32_data_tensor = param.ps_attr.fp32
-            exp_avg = exp_avg_list[i]
-            exp_avg_sq = exp_avg_sq_list[i]
-
-            step = state_steps[i]
-            beta1, beta2 = hyperparam_list[i]["betas"]
-            eps = hyperparam_list[i]["eps"]
-            weight_decay = hyperparam_list[i]["weight_decay"]
-            lr = hyperparam_list[i]["lr"]
-
-            bias_correction1 = 1 - beta1 ** step
-            bias_correction2 = 1 - beta2 ** step
-
-            if compute_device.type == "cpu" and grad_tensor.device.type == "cpu":
-                self.ds_cpu_adam_update(
-                    fp32_data_tensor,
-                    grad_tensor,
-                    exp_avg,
-                    exp_avg_sq,
-                    step,
-                    lr,
-                    beta1,
-                    beta2,
-                    eps,
-                    weight_decay,
-                    True,
-                )
-            else:
-                fp32_grad_tensor = grad_tensor.float()
-                self.torch_adam_update(
-                    fp32_data_tensor,
-                    fp32_grad_tensor,
-                    exp_avg,
-                    exp_avg_sq,
-                    lr,
-                    beta1,
-                    beta2,
-                    eps,
-                    weight_decay,
-                    bias_correction1,
-                    bias_correction2,
-                )
-
-            if time_profile:
-                global_timer.my_timer.finish_profile("ADAM_compute")
-                global_timer.my_timer.start_profile("ADAM_param_fp32_to_fp16")
-
-            # 3. Finish Adam.
-            if time_profile:
-                global_timer.my_timer.finish_profile("ADAM_param_fp32_to_fp16")
 
     def release_last(self):
         # the starting module would trigger post_module_backward hook
@@ -380,14 +295,13 @@ class FP16Adam(torch.optim.Optimizer):
         self.client.set_training_phase(TrainingStage.ADAM)
 
         self.client.trigger_memory_tracing()
-        self.client.adjust_chunk_layout()
 
         loss = None
         if closure is not None:
             with torch.enable_grad():
                 loss = closure()
 
-        if self.has_overflow_and_reset_param():
+        if self.loss_scaler is not None and self.has_overflow_and_reset_param():
             global_timer.my_timer.finish_profile("ADAM")
             old_loss_scale = self.loss_scaler.loss_scale
             self.loss_scaler.update_scale(True)
@@ -399,51 +313,52 @@ class FP16Adam(torch.optim.Optimizer):
             self.has_overflow = False
             return loss
 
-        fp16_param_with_grad_list = []
-        exp_avg_list = []
-        exp_avg_sq_list = []
-
-        hyperparam_list = []
         state_steps = []
 
         for group in self.param_groups:
+            params_with_grad = []
+            grads = []
+            exp_avgs = []
+            exp_avg_sqs = []
+            max_exp_avg_sqs = []
+            state_steps = []
+            beta1, beta2 = group["betas"]
+
             for p in group["params"]:
                 if p.grad is not None:
+                    params_with_grad.append(p.ps_attr.fp32)
+                    if p.grad.is_sparse:
+                        raise RuntimeError(
+                            "Adam does not support sparse gradients, please consider SparseAdam instead"
+                        )
+                    grads.append(p.grad)
+
                     # update the steps for each param group update
                     state = self.state[p]
+
+                    exp_avgs.append(state["exp_avg"])
+                    exp_avg_sqs.append(state["exp_avg_sq"])
+
+                    # update the steps for each param group update
                     state["step"] += 1
-
-                    fp16_param_with_grad_list.append(p)
-
-                    exp_avg_list.append(state["exp_avg"])
-                    exp_avg_sq_list.append(state["exp_avg_sq"])
-
-                    hyperparam = {
-                        "betas": state["betas"],
-                        "lr": state["lr"],
-                        "weight_decay": state["weight_decay"],
-                        "eps": state["eps"],
-                    }
-
-                    hyperparam_list.append(hyperparam)
-
                     # record the step after step update
                     state_steps.append(state["step"])
 
-        print("before fp16_chunk_adam_ops")
-
-        # Hybrid Adam. Put some chunks on GPU based on the warmup info.
-        self.fp16_chunk_adam_ops(
-            fp16_param_with_grad_list,
-            exp_avg_list,
-            exp_avg_sq_list,
-            state_steps,
-            False,
-            hyperparam_list,
-            True,
-        )
-
-        print("after fp16_chunk_adam_ops")
+            adam(
+                params_with_grad,
+                grads,
+                exp_avgs,
+                exp_avg_sqs,
+                max_exp_avg_sqs,
+                state_steps,
+                amsgrad=group["amsgrad"],
+                beta1=beta1,
+                beta2=beta2,
+                lr=group["lr"],
+                weight_decay=group["weight_decay"],
+                eps=group["eps"],
+                maximize=False,
+            )
 
         if self.loss_scaler:
             self.loss_scaler.update_scale(False)

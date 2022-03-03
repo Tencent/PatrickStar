@@ -103,26 +103,6 @@ class PatrickStarClient(object):
     def trigger_memory_tracing(self):
         self.mem_tracer.trace_memory()
 
-    def adjust_chunk_layout(self):
-        """ "
-        Adjust chunk layout in heterogenous memory space
-        according to the runtime memory statictis.
-        """
-        if self.mem_tracer.metronome.is_warmup():
-            return
-        gpu_device = torch.device(f"cuda:{self.local_rank}")
-        next_mom = self.mem_tracer.metronome.next_moment()
-        # cur_mom = self.mem_tracer.metronome.moment()
-        gpu_next_mom_ava_chunk_mem = (
-            self.mem_tracer._overall_gpu_mem
-            - self.mem_tracer.gpu_sys_used_list[next_mom]
-        )
-        gpu_cur_mom_used_chunk_mem = self.chunk_list.get_chunk_memory_used(gpu_device)
-        if gpu_next_mom_ava_chunk_mem < gpu_cur_mom_used_chunk_mem:
-            offload_size = gpu_cur_mom_used_chunk_mem - gpu_next_mom_ava_chunk_mem
-            # NOTE() Here will lead to GPU <-> CPU memory movement.
-            self.chunk_list.make_room(offload_size, gpu_device)
-
     def start_mem_tracer(self):
         """
         Memory tracer start to work!
@@ -150,14 +130,18 @@ class PatrickStarClient(object):
 
     def append_dummy_chunk(self, data_type: torch.dtype):
         r"""Append a dummy chunk to the corresponding chunk_list"""
-        chunk_id, comm_info = self.append_chunk(torch.half, is_dummy=True)
+        # chunk_id, comm_info = self.append_chunk(torch.half, is_dummy=True)
+        chunk_id, comm_info = self.append_chunk(torch.float, is_dummy=True)
 
         dummy = torch.nn.Parameter(
             torch.tensor([], dtype=data_type), requires_grad=False
         )
         # Add a dummy param to dummy chunk, so that the chunk can be set in HOLD state.
+        # register_param(
+        #     dummy, ParamType.CHUNK_BASED, torch.half, f"dummy_{comm_info.group_id}"
+        # )
         register_param(
-            dummy, ParamType.CHUNK_BASED, torch.half, f"dummy_{comm_info.group_id}"
+            dummy, ParamType.CHUNK_BASED, torch.float, f"dummy_{comm_info.group_id}"
         )
         self.dummy_param_list.append(dummy)
         self.chunk_tensor_index.add_tensor(

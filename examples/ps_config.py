@@ -43,15 +43,15 @@ def get_patrickstar_config(
                 "weight_decay": weight_decay,
             },
         },
-        "fp16": {
-            "enabled": True,
-            # Set "loss_scale" to 0 to use DynamicLossScaler.
-            "loss_scale": 0,
-            "initial_scale_power": args.init_loss_scale_power,
-            "loss_scale_window": 1000,
-            "hysteresis": 2,
-            "min_loss_scale": 1,
-        },
+        # "fp16": {
+        #     "enabled": True,
+        #     # Set "loss_scale" to 0 to use DynamicLossScaler.
+        #     "loss_scale": 0,
+        #     "initial_scale_power": args.init_loss_scale_power,
+        #     "loss_scale_window": 1000,
+        #     "hysteresis": 2,
+        #     "min_loss_scale": 1,
+        # },
         "chunk_size": args.chunk_size,
         "release_after_init": args.release_after_init,
         "use_fake_dist": args.use_fake_dist,
