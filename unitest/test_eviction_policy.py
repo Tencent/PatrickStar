@@ -50,7 +50,7 @@ class TestEvictionPolicy(unittest.TestCase):
         id_to_chunk_list[1] = Chunk(10, torch.float, 1, mem_tracer, None, 0, False)
         id_to_chunk_list[1].allocate_payload(dev)
         metronome = mem_tracer.metronome
-        metronome.set_warmup(True)
+        metronome.is_warmup = True
         policy = LatestAccessChunkEvictionPolicy(metronome)
 
         # trace chunk access
@@ -60,7 +60,7 @@ class TestEvictionPolicy(unittest.TestCase):
         print(policy.chunk_access_dict)
 
         # Finish warmup
-        metronome.set_warmup(False)
+        metronome.is_warmup = False
         metronome.reset()
 
         # Test eviction strategy

@@ -27,25 +27,21 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 # SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-from typing import List
-
 import torch
 
 from patrickstar.core.chunk_list import ChunkList
 from patrickstar.core.const import ChunkState, TensorState
-from patrickstar.core.hook import setup_patrickstar_hooks
 from patrickstar.core.parameter import register_param, is_registered, ParamType
-from patrickstar.core.eviction_policy import LatestAccessChunkEvictionPolicy
+from patrickstar.core.eviction_policy import LRUEvictionPolicy
 from patrickstar.core.memtracer import RuntimeMemTracer
-from patrickstar.utils import logger, get_world_size, get_rank, global_timer
+from patrickstar.utils import logger, get_world_size, get_rank, global_timer, Metronome
 
 
-class PatrickStarClient(object):
+class PatrickStarClient:
     r"""The client for managing chunks."""
 
-    def __init__(self, rank: int, chunk_size: int, config=None):
-        self.local_rank = rank
-        self.device = torch.device(f"cuda:{rank}")
+    def __init__(self, local_rank, chunk_size, config=None):
+        self.device = torch.device(f"cuda:{local_rank}")
 
         self.module = None
 
@@ -55,7 +51,6 @@ class PatrickStarClient(object):
             "overall_gpu_mem_ratio": 0.8,
             "overall_cpu_mem_ratio": 0.8,
             "margin_use_ratio": 0.8,
-            "with_static_partition": False,
         }
         if config is not None:
             tracer_config = config.get("mem_tracer", None)
@@ -65,50 +60,37 @@ class PatrickStarClient(object):
         else:
             tracer_config = default_tracer_config
 
-        self.mem_tracer = RuntimeMemTracer(self.local_rank, tracer_config)
-
-        self.chunk_eviction_strategy = LatestAccessChunkEvictionPolicy(
-            self.mem_tracer.metronome
-        )
+        self.metronome = Metronome()
+        self.mem_tracer = RuntimeMemTracer(local_rank, self.metronome, tracer_config)
+        self.eviction_policy = LRUEvictionPolicy(self.metronome)
 
         self.chunk_size = chunk_size
         self.chunk_list = ChunkList(
-            self.local_rank,
+            local_rank,
             self.mem_tracer,
-            self.chunk_eviction_strategy,
+            self.eviction_policy,
             self.chunk_size,
         )
         self._time_profile = True
 
-        self.dummy_param_list = []
-
-        # for post backward hook
-        self.grad_accs = []
-
     # expose APIs from metrome ti client
     def training_stage(self):
-        return self.mem_tracer.metronome.training_stage()
+        return self.metronome.training_stage
 
-    def set_training_phase(self, phase):
-        self.mem_tracer.metronome.set_training_phase(phase)
-
-    def set_warmup(self, flag):
-        self.mem_tracer.metronome.set_warmup(flag)
+    def set_training_stage(self, stage):
+        self.metronome.training_stage = stage
 
     def is_warmup(self):
-        return self.mem_tracer.is_warmup()
+        return self.metronome.is_warmup
 
-    def trigger_memory_tracing(self):
-        self.mem_tracer.trace_memory()
+    def set_warmup(self, flag):
+        self.metronome.is_warmup = flag
 
     def start_mem_tracer(self):
         """
         Memory tracer start to work!
         """
-        self.mem_tracer.start_train(
-            param_fp16_chunk_size=self.param_fp16_chunks_max_mem_usage(),
-            chunk_size=self.chunk_size,
-        )
+        self.mem_tracer.start_train(chunk_size=self.chunk_size)
 
     def new_dummy_chunk(self):
         r"""Append a dummy chunk to the corresponding chunk_list"""
@@ -119,14 +101,10 @@ class PatrickStarClient(object):
         )
         # Add a dummy param to dummy chunk, so that the chunk can be set in HOLD state.
         register_param(dummy, ParamType.CHUNK_BASED, "dummy")
-        self.dummy_param_list.append(dummy)
         chunk.add_param(dummy)
         logger.debug("Append a dummy chunk to the Chunk List")
 
-    def append_params(
-        self,
-        params: List[torch.nn.Parameter],
-    ):
+    def append_params(self, params):
         r"""Append params to the last chunk.
 
         Append the whole list of param into the same chunk. If the last
@@ -156,32 +134,12 @@ class PatrickStarClient(object):
             chunk.add_param(param)
         return
 
-    def param_fp16_chunks_max_mem_usage(self):
-        r"""Return the total memory used by param fp16 chunks in bytes.
-
-        In distributed environment, the return value includes remote chunks
-        from allgather.
-        """
-        world_size = get_world_size()
-        # non MSC has to cache work_size - 1 buffer.
-        return (
-            len(self.chunk_list.chunks) * self.chunk_size * 2 / world_size
-            + (world_size - 1) * self.chunk_size * 2
-        )
-
-    def register_model_hook(self, model):
-        setup_patrickstar_hooks(model, self)
-
     def is_local_param(self, param):
         r"""Check if param is in local chunk"""
         chunk_id = param.ps_attr.info.chunk_id
         return self.chunk_list[chunk_id].is_local()
 
-    def fetch_remote_chunks(
-        self,
-        comm_group,
-        compute_device,
-    ):
+    def fetch_remote_chunks(self, comm_group, compute_device):
         r"""Fetch the remote chunks to local."""
         no_chunk_released = True
         for i in comm_group.elements:
@@ -193,15 +151,17 @@ class PatrickStarClient(object):
             return
 
         local_chunk_id = comm_group.elements[get_rank()]
+        local_chunk = self.chunk_list[local_chunk_id]
 
         if self._time_profile:
             global_timer.start_profile("CLIENT_fetch_remote_chunks")
 
         # Use collective communication to achieve the most efficient communication.
         # However, it is memory consumping. world_size chunks on GPU simutaneously.
-        self.chunk_eviction_strategy.trace_access(local_chunk_id, compute_device)
-        self.chunk_list.access_chunk(local_chunk_id, compute_device)
-        self.chunk_list[local_chunk_id].pin()
+        if self.is_warmup():
+            self.eviction_policy.trace_access(local_chunk_id, compute_device)
+        self.chunk_list.access_chunk(local_chunk, compute_device)
+        local_chunk.pin()
         allgather_payload_buff = []
         for chunk_id in comm_group.elements:
             chunk = self.chunk_list[chunk_id]
@@ -219,7 +179,7 @@ class PatrickStarClient(object):
 
         torch.distributed.all_gather(
             allgather_payload_buff,
-            self.chunk_list[local_chunk_id].payload,
+            local_chunk.payload,
             async_op=False,
         )
 
@@ -250,10 +210,12 @@ class PatrickStarClient(object):
             return
 
         chunk_id = param.ps_attr.info.chunk_id
-        self.chunk_eviction_strategy.trace_access(chunk_id, compute_device)
-        self.chunk_list.access_chunk(chunk_id, compute_device)
-        # 2. Locate the param on the chunk.
+        if self.is_warmup():
+            self.eviction_policy.trace_access(chunk_id, compute_device)
+
         chunk = self.chunk_list[chunk_id]
+        self.chunk_list.access_chunk(chunk, compute_device)
+
         info = param.ps_attr.info
         numel = param.ps_attr.numel
         shape = param.ps_attr.shape
@@ -286,17 +248,13 @@ class PatrickStarClient(object):
 
     def get_overall_chunk_size(self):
         """
-        return the overall size of all chunks and
+        Return the overall size of all chunks and
         the overall chunk utilization excluding fragments.
-        Excepting the dummy chunk if using MSC.
         """
         overall_size = 0
-        overall_chunk_num = 0
         overall_utilization_ratio = 0.0
         for chunk in self.chunk_list.chunks:
-            last_used_pos = chunk.end_pos
-            overall_utilization_ratio += last_used_pos / chunk.capacity
+            overall_utilization_ratio += chunk.end_pos / chunk.capacity
             overall_size += chunk.get_chunk_space()
-            overall_chunk_num += 1
-        overall_utilization_ratio /= overall_chunk_num
+        overall_utilization_ratio /= len(self.chunk_list)
         return overall_size, overall_utilization_ratio

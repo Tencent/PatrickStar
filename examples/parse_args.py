@@ -47,12 +47,6 @@ def _add_patrick_star_args(parser):
         "but may fix some errors relate to checkpoint loading or"
         "weight intialization.",
     )
-    # Some hyperparams to tune when you failed to run a model.
-    group.add_argument(
-        "--with_static_partition",
-        action="store_true",
-        help="Use static partition for model data on CPU and GPU.",
-    )
     group.add_argument(
         "--init_loss_scale_power",
         type=float,

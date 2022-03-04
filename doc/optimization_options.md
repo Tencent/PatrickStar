@@ -28,11 +28,6 @@ Offload activation to CPU. Must used in combination with activation checkpointin
 Async Sampling memory usage with an independent thread. It will bring a more accurate runtime
 memory usage statistics. If you turn off this flag, memory usage sampling will triggered at the exact moment before or after operators (submodule in PyTorch) computing.
 
-
-1. Static Partion.
-`--with_static_partition`
-PatirckStar is famous for dynamic partition model data. With help of this flag you can static partition model data between CPU and GPU. The max GPU used by chunks is `warmup_gpu_chunk_mem_ratio` * gpu_size. It is still better than Zero-Offload, which alway put all param and grad in GPU, to avoid OOM. It will lead to lower computing efficient than the default dynamic partition. But it is helpful to aggressively avoid OOM.
-
 1. Release Remote Chunk After Initialization.
 `release_after_init`
 The is a computing efficient irrelevant option used for distributed training. It allocates memory for remote chunks but release it immediately. In this way, we can make sure the model parameter is randomly initialized the same as a serial version. Solve the problem with random seed. It is used in combination with the `--res_check` option to check the correctness of distributed training.
@@ -55,6 +50,5 @@ We provide ways to adjust the CPU and GPU memory usage quota for the memory trac
                     "overall_gpu_mem_ratio": 0.8,
                     "overall_cpu_mem_ratio": 0.8,
                     "margin_use_ratio": 0.8,
-                    "with_static_partition": args.with_static_partition,
                 },
 ```

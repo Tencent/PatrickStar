@@ -242,7 +242,7 @@ if __name__ == "__main__":
         print(f"patrickstar: {ps_res_list}")
 
         def diff(array):
-            dtype = np.float16 if use_fp16 else np.float
+            dtype = np.float16 if use_fp16 else float
             return list(
                 np.array(ps_res_list, dtype=dtype) - np.array(array, dtype=dtype)
             )

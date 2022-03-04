@@ -32,7 +32,7 @@ import gc
 import psutil
 import torch
 from .distributed import get_rank, get_local_world_size
-from .memory import get_memory_info
+from .memory import get_sys_memory_info
 
 
 def get_sys_memory_used(device):
@@ -47,7 +47,7 @@ def get_sys_memory_used(device):
         if hasattr(torch.cuda, "reset_peak_memory_stats"):  # pytorch 1.4+
             torch.cuda.reset_peak_memory_stats()
     elif device.type == "cpu":
-        mem_info = get_memory_info()
+        mem_info = get_sys_memory_info()
         ret = mem_info.used / get_local_world_size()
     return ret
 
@@ -75,7 +75,7 @@ def see_memory_usage(message, force=False, scale_name="MB"):
     )
 
     # TODO(zilinzhu) Find how to get the available and percent value of the
-    # memory in docker to substitute psutil.virtual_memory to get_memory_info.
+    # memory in docker to substitute psutil.virtual_memory to get_sys_memory_info.
     vm_stats = psutil.virtual_memory()
     used_gb = round(((vm_stats.total - vm_stats.available) / (1024 ** 3)), 2)
     print(f"CPU Virtual Memory: used = {used_gb} GB, percent = {vm_stats.percent}%")

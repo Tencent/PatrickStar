@@ -41,7 +41,7 @@ from patrickstar.utils import global_timer
 from .op_builder.cpu_adam import CPUAdamBuilder
 
 
-def adam(
+def torch_adam(
     params: List[torch.Tensor],
     grads: List[torch.Tensor],
     exp_avgs: List[torch.Tensor],
@@ -101,7 +101,6 @@ class FP16Adam(torch.optim.Optimizer):
         betas=(0.9, 0.999),
         eps=1e-8,
         weight_decay=0,
-        use_adamw=False,
         amsgrad=False,
     ):
         """
@@ -146,7 +145,6 @@ class FP16Adam(torch.optim.Optimizer):
                     p.ps_attr.shape, device=torch.device("cuda:0")
                 )
 
-        self.use_adamw = use_adamw
         self.opt_id = FP16Adam.optimizer_id
         FP16Adam.optimizer_id = FP16Adam.optimizer_id + 1
         try:
@@ -163,7 +161,7 @@ class FP16Adam(torch.optim.Optimizer):
             betas[1],
             eps,
             weight_decay,
-            self.use_adamw,
+            False,
             True,
         )
 
@@ -218,12 +216,16 @@ class FP16Adam(torch.optim.Optimizer):
 
     def release_last(self):
         # the starting module would not trigger post_module_backward hook
+        flag = False
         for param in self.client.module.parameters():
             reduce_grad(param, self.client)
             if param.ps_attr.param_type == ParamType.TORCH_BASED:
                 continue
             if param.ps_attr.state == TensorState.COMPUTE:
                 self.client.release(param)
+                flag = True
+        if flag:
+            self.client.mem_tracer.trace_memory()
 
     @torch.no_grad()
     def step(self, closure=None):
@@ -236,9 +238,7 @@ class FP16Adam(torch.optim.Optimizer):
         global_timer.start_profile("ADAM")
         self.release_last()
 
-        self.client.set_training_phase(TrainingStage.ADAM)
-
-        self.client.trigger_memory_tracing()
+        self.client.set_training_stage(TrainingStage.ADAM)
 
         loss = None
         if closure is not None:
@@ -280,7 +280,7 @@ class FP16Adam(torch.optim.Optimizer):
                     # record the step after step update
                     state_steps.append(state["step"])
 
-            adam(
+            torch_adam(
                 params_with_grad,
                 grads,
                 exp_avgs,

@@ -68,7 +68,7 @@ def initialize_engine(model_func, local_rank, config=None, client=None):
             release_after_init = config.get("release_after_init", False)
 
         client = PatrickStarClient(
-            rank=local_rank,
+            local_rank=local_rank,
             chunk_size=chunk_size,
             config=config.get("client", None),
         )

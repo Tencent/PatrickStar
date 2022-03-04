@@ -118,7 +118,7 @@ def get_param_used_chunk_size(args, config, model_func):
     as well as the memory utilization of chunks.
     """
     client = PatrickStarClient(
-        rank=args.local_rank,
+        local_rank=args.local_rank,
         chunk_size=args.chunk_size,
         config=config.get("client", None),
     )

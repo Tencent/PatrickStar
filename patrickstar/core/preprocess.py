@@ -50,7 +50,7 @@ def torch_scope(do_allreduce=True):
 
 # Inserts _post_init_method at the end of init method
 # for all sub classes of torch.nn.Module
-class InsertPostInitMethodToModuleSubClasses(object):
+class InsertPostInitMethodToModuleSubClasses:
     def __enter__(self):
         def preprocess_after(f):
             @functools.wraps(f)
@@ -124,7 +124,6 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
         self.rank = get_rank()
         self.world_size = get_world_size()
         self.client = client
-        self.dummy_param_list = []
         self.param_idx = 0
 
         self.release_after_init = release_after_init

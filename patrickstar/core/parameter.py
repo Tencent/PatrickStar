@@ -32,7 +32,7 @@ import torch
 from .const import TensorState, ParamType
 
 
-class TensorInfo(object):
+class TensorInfo:
     r"""The info related to certain tensor."""
 
     def __init__(
@@ -46,7 +46,7 @@ class TensorInfo(object):
         self.start_offset = start_offset
 
 
-class PSParameter(object):
+class PSParameter:
     global_id = 0
 
     def __init__(

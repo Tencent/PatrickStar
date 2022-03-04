@@ -28,7 +28,6 @@
 # SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 from .core import PatrickStarClient
-from .core.memtracer import RuntimeMemTracer
 from .ops import FP16Adam
 from .runtime import initialize_engine
 from .utils import global_timer

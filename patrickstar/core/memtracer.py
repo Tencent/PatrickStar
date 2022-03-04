@@ -27,20 +27,20 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 # SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+import time
+
 import torch
 
 from patrickstar.core.const import TrainingStage
 from patrickstar.utils import (
     log_dist,
-    get_memory_info,
+    get_sys_memory_info,
     get_sys_memory_used,
     get_local_world_size,
     logger,
     get_world_size,
 )
-from patrickstar.core.memtracer.metronome import Metronome
 from concurrent.futures import ThreadPoolExecutor
-from time import sleep
 
 
 class AsyncMemoryMonitor:
@@ -76,78 +76,70 @@ class AsyncMemoryMonitor:
         while self.keep_measuring:
             max_usage = max(
                 max_usage,
-                # resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
                 get_sys_memory_used(dev),
             )
-            # print(f"tmp max usage {max_usage}")
-            sleep(self.interval)
+            time.sleep(self.interval)
 
         return max_usage
 
 
-class RuntimeMemTracer(object):
+class MemoryInfo:
+    def __init__(self, cpu_total, cpu_chunk, cpu_sys, gpu_total, gpu_chunk, gpu_sys):
+        self.cpu_total = cpu_total
+        self.cpu_chunk = cpu_chunk
+        # non-chunk memory
+        self.cpu_sys = cpu_sys
+
+        self.gpu_total = gpu_total
+        self.gpu_chunk = gpu_chunk
+        # non-chunk memory
+        self.gpu_sys = gpu_sys
+
+
+class RuntimeMemTracer:
     r"""Collecting memory statistics on CPU and GPU during training,
     to direct chunk moving.
     Glossary:
         Chunkable Memry: Memory can be used to store chunk.
     """
 
-    def __init__(self, local_rank: int = 0, config=None):
+    def __init__(self, local_rank, metronome, config=None):
         self.local_rank = local_rank
-        self.metronome = Metronome()
-        self.gpu_chunk_available_mem = 0
-        self.cpu_chunk_available_mem = 0
+        self.metronome = metronome
 
-        self.gpu_chunk_used_mem = 0
+        self.cpu_chunk_available_mem = 0
         self.cpu_chunk_used_mem = 0
         self.cpu_chunk_used_mem_pinned = 0
-        if config is not None:
-            self._overall_gpu_mem_ratio = config.get("overall_gpu_mem_ratio", 0.8)
-            self._overall_cpu_mem_ratio = config.get("overall_cpu_mem_ratio", 0.8)
-            self._margin_use_ratio = config.get("margin_use_ratio", 0.8)
-            self.warmup_gpu_chunk_mem_ratio = config.get(
-                "warmup_gpu_chunk_mem_ratio", 0.1
-            )
-            self.with_static_partition = config.get("with_static_partition", False)
-            self.use_async_mem_monitor = config.get("use_async_mem_monitor", False)
 
-        else:
-            self._overall_gpu_mem_ratio = 0.8
-            self._overall_cpu_mem_ratio = 0.8
-            self._margin_use_ratio = 0.8
-            self.warmup_gpu_chunk_mem_ratio = 0.2
-            self.with_static_partition = False
-            self.use_async_mem_monitor = True
+        self.gpu_chunk_available_mem = 0
+        self.gpu_chunk_used_mem = 0
+
+        assert config is not None
+        self.overall_gpu_mem_ratio = config.get("overall_gpu_mem_ratio", 0.8)
+        self.overall_cpu_mem_ratio = config.get("overall_cpu_mem_ratio", 0.8)
+        self._margin_use_ratio = config.get("margin_use_ratio", 0.8)
+        self.warmup_gpu_chunk_mem_ratio = config.get("warmup_gpu_chunk_mem_ratio", 0.1)
+        self.use_async_mem_monitor = config.get("use_async_mem_monitor", False)
         if self.use_async_mem_monitor:
             self.async_mem_monitor = AsyncMemoryMonitor()
 
-        mem_info = get_memory_info()
+        mem_info = get_sys_memory_info()
         local_world_size = get_local_world_size()
-        self._overall_gpu_mem = (
+        self.overall_gpu_mem = (
             torch.cuda.get_device_properties(self.local_rank).total_memory
-            * self._overall_gpu_mem_ratio
+            * self.overall_gpu_mem_ratio
         )
-        self._overall_cpu_mem = (
-            mem_info.total * self._overall_cpu_mem_ratio / local_world_size
+        self.overall_cpu_mem = (
+            mem_info.total * self.overall_cpu_mem_ratio / local_world_size
         )
 
         log_dist(
-            f"Init Manager over all gpu mem {self._overall_gpu_mem / 1e6} MB, "
-            f"cpu mem {self._overall_cpu_mem / 1e6} MB"
+            f"Init Manager over all gpu mem {self.overall_gpu_mem / 1e6} MB, "
+            f"cpu mem {self.overall_cpu_mem / 1e6} MB"
         )
-        self.cpu_used_list = []
-        self.cpu_chunk_used_list = []
-        # non-chunk memory
-        self.cpu_sys_used_list = []
+        self.memory_infos = []
 
-        self.gpu_used_list = []
-        self.gpu_chunk_used_list = []
-        self.gpu_sys_used_list = []
-
-        # The number of gpu chunks for adam.
-        # Calculated by substracting the peak memory of fp16 params
-        # from peak system memory.
-        self._default_chunk_size = 0
+        self.chunk_size = 0
         self.max_cpu_sys_used = 0
 
     def close_tracer(self):
@@ -156,14 +148,13 @@ class RuntimeMemTracer(object):
         """
         if self.use_async_mem_monitor:
             self.async_mem_monitor.finish()
-        log_dist("**** Memory Tracer is closed! ****")
+        log_dist("**** Memory Tracer closed ****")
 
-    def start_train(self, param_fp16_chunk_size, chunk_size):
-        self._param_fp16_chunk_size = param_fp16_chunk_size
-        self._default_chunk_size = chunk_size
+    def start_train(self, chunk_size):
+        self.chunk_size = chunk_size
         if self.use_async_mem_monitor:
             self.async_mem_monitor.start()
-        log_dist("**** Memory Tracer is stared! ****")
+        log_dist("**** Memory Tracer started ****")
 
     def reset_memory_stats(self):
         """
@@ -175,14 +166,8 @@ class RuntimeMemTracer(object):
         # is still doing warmup, it means the previous run didn't
         # cover the full procedure (forward -> backward -> optimizer).
         # Therefore clean the stats collected.
-        if self.metronome.is_warmup():
-            self.cpu_used_list = []
-            self.cpu_chunk_used_list = []
-            self.cpu_sys_used_list = []
-
-            self.gpu_used_list = []
-            self.gpu_chunk_used_list = []
-            self.gpu_sys_used_list = []
+        if self.metronome.is_warmup:
+            self.memory_infos = []
         log_dist("Reset Memory Statistics")
 
     def trace_memory(self):
@@ -195,38 +180,29 @@ class RuntimeMemTracer(object):
         cpu_device = torch.device("cpu:0")
         gpu_used = get_sys_memory_used(gpu_device)
 
-        if self.metronome.is_warmup():
+        if self.metronome.is_warmup:
             # Get peak memory between cur tracing and the prev tracing
             if self.use_async_mem_monitor:
                 max_mem_period = self.async_mem_monitor.finish()
                 gpu_used = max(max_mem_period, gpu_used)
                 self.async_mem_monitor.start()
 
-            self.gpu_used_list.append(gpu_used)
-            self.gpu_chunk_used_list.append(self.gpu_chunk_used_mem)
-            self.gpu_sys_used_list.append((gpu_used - self.gpu_chunk_used_mem))
-
             cpu_used = get_sys_memory_used(cpu_device)
-            self.cpu_used_list.append(cpu_used)
-            self.cpu_chunk_used_list.append(self.cpu_chunk_used_mem)
-            # detected cpu memory usage (already excluded pinned memory) - chunk non
-            # pinned memory usage = system cpu usage (non-chunk cpu memory)
-            self.cpu_sys_used_list.append(
-                cpu_used - (self.cpu_chunk_used_mem - self.cpu_chunk_used_mem_pinned)
+            self.memory_infos.append(
+                MemoryInfo(
+                    cpu_total=cpu_used,
+                    cpu_chunk=self.cpu_chunk_used_mem,
+                    # detected cpu memory usage (already excluded pinned memory) - chunk non
+                    # pinned memory usage = system cpu usage (non-chunk cpu memory)
+                    cpu_sys=cpu_used
+                    - (self.cpu_chunk_used_mem - self.cpu_chunk_used_mem_pinned),
+                    gpu_total=gpu_used,
+                    gpu_chunk=self.gpu_chunk_used_mem,
+                    gpu_sys=gpu_used - self.gpu_chunk_used_mem,
+                )
             )
-
-            # For non-warmup iter, we update the mem of index cur_mom,
-            # and for warmup iter, we append the gpu mem to the end of the list.
-            # Make sure the length of the list is 1 more than `cur_mom`.
-            cur_mom = self.metronome.moment()
-            assert (
-                len(self.gpu_sys_used_list) - 1 == cur_mom
-            ), f"{len(self.gpu_sys_used_list) - 1} vs {cur_mom}"
-
-        # The async memory monitor maybe time-consuming.
-        # We only run it during warmup.
-        # Calibrate the GPU sys used memory.
-        # self.gpu_sys_used_list[cur_mom] = gpu_used - self.gpu_chunk_used_mem
+            cur_mom = self.metronome.moment
+            assert len(self.memory_infos) - 1 == cur_mom
 
         self.metronome.tiktac()
 
@@ -257,7 +233,7 @@ class RuntimeMemTracer(object):
         """
         size = self.available_chunk_mem(device_type) - self.used_chunk_mem(device_type)
         logger.debug(
-            f"remaining_chunk_mem on {device_type} {size / 1e6} MB on mement {self.metronome.moment()}"
+            f"remaining_chunk_mem on {device_type} {size / 1e6} MB on mement {self.metronome.moment}"
         )
         return size
 
@@ -270,7 +246,7 @@ class RuntimeMemTracer(object):
         elif device_type == "cuda":
             return self.gpu_chunk_used_mem
         else:
-            raise RuntimeError(f"used_chunk_mem {device_type}")
+            raise RuntimeError(f"unknown device type {device_type}")
 
     def available_chunk_mem(self, device_type):
         r"""The amount of memory on device_type that can be used for chunks.
@@ -285,67 +261,63 @@ class RuntimeMemTracer(object):
         After warmup, it is the minimal value of available mem of the
         current moment and next moment.
         """
-        is_training_start = self.metronome.training_stage() is not TrainingStage.UNSTART
-
         # If the training is not started, ava chunk mem is the overall system mem.
-        if not is_training_start:
+        if self.metronome.training_stage != TrainingStage.UNSTART:
             if device_type == "cpu":
-                return self._overall_cpu_mem
+                return self.overall_cpu_mem
             elif device_type == "cuda":
-                return self._overall_gpu_mem
+                return self.overall_gpu_mem
 
-        is_warmup = self.metronome.is_warmup() or self.with_static_partition
-
-        # If it is warmup phase, chunk can used gpu_ratio * overall_gpu
+        # If it is warmup stage, chunk can used gpu_ratio * overall_gpu
         # chunk can used all cpu.
-        if is_warmup:
+        if self.metronome.is_warmup:
             if device_type == "cpu":
-                return self._overall_cpu_mem
+                return self.overall_cpu_mem
             elif device_type == "cuda":
-                if self.metronome.training_stage() == TrainingStage.ADAM:
+                if self.metronome.training_stage == TrainingStage.ADAM:
                     # There is no activation during Adam stage, so we can use all the GPU
                     # mem for chunks. Need 2 * chunk_size for buffer, save 6 here for now.
-                    ava_mem = self._overall_gpu_mem - 4 * self._default_chunk_size * 4
+                    ava_mem = self.overall_gpu_mem - 4 * self.chunk_size * 4
                     logger.debug(f"GPU available_chunk_mem is {ava_mem / 1e6} MB")
                     return ava_mem
                 else:
                     # TODO(jiaruifang) using a guessed number -- 1/3 of the GPU
                     # mem is used for chunk.
-                    return self._overall_gpu_mem * self.warmup_gpu_chunk_mem_ratio
+                    return self.overall_gpu_mem * self.warmup_gpu_chunk_mem_ratio
 
         if device_type == "cpu":
             local_world_size = get_local_world_size()
-            if self.metronome.training_stage() != TrainingStage.ADAM:
-                return self._overall_cpu_mem - self.max_cpu_sys_used / local_world_size
+            if self.metronome.training_stage != TrainingStage.ADAM:
+                return self.overall_cpu_mem - self.max_cpu_sys_used / local_world_size
             else:
-                return self._overall_cpu_mem
+                return self.overall_cpu_mem
         elif device_type == "cuda":
             msc_factor = get_world_size()
-            if self.metronome.training_stage() == TrainingStage.ADAM:
-                return self._overall_gpu_mem - 4 * self._default_chunk_size * 4
-            elif self.metronome.training_stage() == TrainingStage.FWD:
+            if self.metronome.training_stage == TrainingStage.ADAM:
+                return self.overall_gpu_mem - 4 * self.chunk_size * 4
+            elif self.metronome.training_stage == TrainingStage.FWD:
                 next_mom = self.metronome.next_moment()
-                cur_mom = self.metronome.moment()
+                cur_mom = self.metronome.moment
                 next_mom_ava_mem = (
-                    self._overall_gpu_mem - self.gpu_sys_used_list[next_mom]
+                    self.overall_gpu_mem - self.memory_infos[next_mom].gpu_sys
                 )
                 cur_mom_ava_mem = (
-                    self._overall_gpu_mem - self.gpu_sys_used_list[cur_mom]
+                    self.overall_gpu_mem - self.memory_infos[cur_mom].gpu_sys
                 )
                 return (
                     min(next_mom_ava_mem, cur_mom_ava_mem)
-                    - msc_factor * 2 * self._default_chunk_size
+                    - msc_factor * 2 * self.chunk_size
                 )
-            elif self.metronome.training_stage() == TrainingStage.BWD:
+            elif self.metronome.training_stage == TrainingStage.BWD:
                 next_mom = self.metronome.next_moment()
-                cur_mom = self.metronome.moment()
+                cur_mom = self.metronome.moment
                 next_mom_ava_mem = (
-                    self._overall_gpu_mem - self.gpu_sys_used_list[next_mom]
+                    self.overall_gpu_mem - self.memory_infos[next_mom].gpu_sys
                 )
                 cur_mom_ava_mem = (
-                    self._overall_gpu_mem - self.gpu_sys_used_list[cur_mom]
+                    self.overall_gpu_mem - self.memory_infos[cur_mom].gpu_sys
                 )
                 return (
                     min(next_mom_ava_mem, cur_mom_ava_mem)
-                    - msc_factor * 2 * self._default_chunk_size * msc_factor
+                    - msc_factor * 2 * self.chunk_size * msc_factor
                 )

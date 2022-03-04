@@ -30,11 +30,40 @@
 from patrickstar.core.const import TrainingStage
 
 
-class TrainingStageMgr:
+class Metronome:
+    """
+    A metronome for memory stats sampling.
+    Use two indicators to tell us where the training is now
+    One is moment, indicates the moment of one iteration.
+    The other is training stage, indicates FWD/BWD/ADAM and is this iteration is
+    a warmup iteration.
+
+    It also contain the training stage information.
+    """
+
     def __init__(self):
-        """
-        Tell us in which stage the training are. (FWD, BWD, ADAM)
-        Also tell us whether in an warmup iteration.
-        """
-        self.training_phase = TrainingStage.UNSTART
+        self.moment = 0
+        self.total_moment = None
+        self.training_stage = TrainingStage.UNSTART
         self.is_warmup = False
+
+    def tiktac(self):
+        """
+        The function should be called right before and after computing of an operator.
+        """
+        self.moment += 1
+
+    def reset(self):
+        """
+        The function is called after a trainig iteration is finished.
+        """
+        self.total_moment = self.moment
+        self.moment = 0
+
+    def next_moment(self):
+        assert self.total_moment is not None
+        return min(self.total_moment, self.moment + 1) % self.total_moment
+
+    def prev_moment(self):
+        assert self.total_moment is not None
+        return max(0, self.moment - 1) % self.total_moment

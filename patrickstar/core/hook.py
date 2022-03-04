@@ -93,7 +93,7 @@ def load_params(module, client, name):
             client.access_dist(param, client.device)
             flag = True
     if flag:
-        client.trigger_memory_tracing()
+        client.mem_tracer.trace_memory()
 
 
 # release submodule

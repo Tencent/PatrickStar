@@ -36,6 +36,7 @@ from patrickstar.core import (
 )
 from patrickstar.ops import FP16Adam
 from patrickstar.utils import log_dist, global_timer
+from patrickstar.core.hook import setup_patrickstar_hooks
 
 from .checkpoint import state_dict, load_state_dict
 
@@ -65,7 +66,7 @@ class PatrickStarEngine(torch.nn.Module):
             # Optimizer configuration
             optim_config = config.get("optimizer", default_optim_config)
             optim_type = optim_config.get("type", default_optim_config["type"])
-            if optim_type not in ["Adam", "AdamW"]:
+            if optim_type != "Adam":
                 raise ValueError(
                     f"Only support Adam and AdamW at the moment. "
                     f"Get optimizer type {optim_type}"
@@ -91,12 +92,11 @@ class PatrickStarEngine(torch.nn.Module):
             betas=optim_params["betas"],
             eps=optim_params["eps"],
             weight_decay=optim_params["weight_decay"],
-            use_adamw=(optim_type == "AdamW"),
         )
 
         self.client.optimizer = self.optimizer
         self.client.module = self.module
-        self.client.register_model_hook(self.module)
+        setup_patrickstar_hooks(model, self.client)
 
         # This need to be placed before the initialization of optimizer.
         self.move_torch_parts_to_gpu(self.module)
@@ -120,8 +120,6 @@ class PatrickStarEngine(torch.nn.Module):
         move_param_to_gpu(model)
 
     def _reset_before_forward(self):
-        # TODO(jiaruifang) so difficult to understand.
-        # about grad overflow.
         self.client.mem_tracer.reset_memory_stats()
         self.client.mem_tracer.metronome.reset()
         for chunk in self.client.chunk_list.chunks:
@@ -152,7 +150,7 @@ class PatrickStarEngine(torch.nn.Module):
 
         global_timer.start_profile("FWD")
 
-        self.client.set_training_phase(TrainingStage.FWD)
+        self.client.set_training_stage(TrainingStage.FWD)
         self._reset_before_forward()
 
         loss = self.module(*inputs, **kwargs)
@@ -165,7 +163,7 @@ class PatrickStarEngine(torch.nn.Module):
             loss: Torch tensor on which to execute backward propagation
         """
         global_timer.start_profile("BWD")
-        self.client.set_training_phase(TrainingStage.BWD)
+        self.client.set_training_stage(TrainingStage.BWD)
 
         if scaler is not None:
             scaler.scale(loss).backward()

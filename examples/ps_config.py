@@ -52,7 +52,6 @@ def get_patrickstar_config(
                 "overall_gpu_mem_ratio": 0.9,
                 "overall_cpu_mem_ratio": 0.9,
                 "margin_use_ratio": 0.8,
-                "with_static_partition": args.with_static_partition,
             },
         },
     }

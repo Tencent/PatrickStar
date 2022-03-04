@@ -30,7 +30,7 @@
 from patrickstar.utils import get_world_size
 
 
-class CommGroupInfo(object):
+class CommGroupInfo:
     groups = {}
 
     def __init__(self, id):
@@ -55,7 +55,7 @@ def get_comm_group(group_id):
     return group
 
 
-class CommInfo(object):
+class CommInfo:
     def __init__(self, chunk_id):
         world_size = get_world_size()
         group_id = chunk_id // world_size

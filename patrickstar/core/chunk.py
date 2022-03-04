@@ -36,7 +36,7 @@ from patrickstar.core.parameter import TensorInfo
 from patrickstar.utils import logger, get_rank, getsizeof, global_timer
 
 
-class Chunk(object):
+class Chunk:
     def __init__(
         self,
         capacity: int,
@@ -137,28 +137,18 @@ class Chunk(object):
 
     def allocate_payload(self, device):
         r"""Allocate payload on device for the chunk."""
-        if self._time_profile:
-            global_timer.start_profile(f"CHUNK_allocate_payload_{device.type}")
-        try:
-            self.payload = torch.zeros(
-                self.capacity,
-                dtype=torch.float,
-                device=device,
-                pin_memory=(device.type == "cpu"),
-            )
-            self.memory_tracer.add(
-                device.type,
-                self.get_payload_space(),
-                self.payload.is_pinned(),
-            )
-        except RuntimeError:
-            if self._time_profile:
-                global_timer.finish_profile(f"CHUNK_allocate_payload_{device.type}")
-            return False
-
-        if self._time_profile:
-            global_timer.finish_profile(f"CHUNK_allocate_payload_{device.type}")
-        return True
+        self.payload = torch.zeros(
+            self.capacity,
+            dtype=torch.float,
+            device=device,
+            pin_memory=(device.type == "cpu"),
+        )
+        self.memory_tracer.add(
+            device.type,
+            self.get_payload_space(),
+            self.payload.is_pinned(),
+        )
+        self.state = ChunkState.HOLD
 
     def release_payload(self):
         r"""Release the payload."""
@@ -169,6 +159,7 @@ class Chunk(object):
         )
         del self.payload
         self.payload = None
+        self.state = ChunkState.RELEASED
 
     def move(self, target_device: torch.device):
         r"""

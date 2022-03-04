@@ -20,8 +20,6 @@ export ACT_OFFLOAD=${ACT_OFFLOAD:-0}
 export CKP=${CKP:-1}
 export FP16=${FP16:-1}
 export SKIP_LOG_EXSIT=${SKIP_LOG_EXSIT:-0}
-# static partition.
-export SP=${SP:-0}
 # asyn memory monitor for mem sampler
 export AMM=${AMM:-1}
 # mem caching comm
@@ -89,7 +87,7 @@ LOG_DIR="./logs_${MODEL_NAME}"
 mkdir -p ${LOG_DIR}
 
 GIT_VER=`git rev-parse --short=5 HEAD`
-LOG_FILE="log.${MODEL_NAME}_type_${MODEL_TYPE}_gpu_${GPU_NUM}_cs_${CS}_bs_${BS}_offload_${ACT_OFFLOAD}_SP_${SP}_AMM_${AMM}_TILING_${TILING}_${GIT_VER}_node_${NNODES}_${SUFFIX}"
+LOG_FILE="log.${MODEL_NAME}_type_${MODEL_TYPE}_gpu_${GPU_NUM}_cs_${CS}_bs_${BS}_offload_${ACT_OFFLOAD}_AMM_${AMM}_TILING_${TILING}_${GIT_VER}_node_${NNODES}_${SUFFIX}"
 
 is_run_flag=`python ./benchmark/is_run_this_file.py --path "${LOG_DIR}" --file "${LOG_FILE}"`
 echo is_run_flag $is_run_flag
@@ -99,12 +97,6 @@ echo "it has been logged"
 exit
 fi
 echo "runing ${LOG_DIR} ${LOG_FILE}"
-
-
-if [[ ${SP} == 1 ]];
-then
-SP_FLAG="--with_static_partition"
-fi
 
 
 wc=`cat /proc/cpuinfo | grep "processor"| wc -l`
@@ -123,14 +115,13 @@ cmd_opts="
     ${RELEASE_AFTER_INIT_FLAG} \
     ${LIGHTSEQ_FLAG} \
     ${ACT_OFFLOAD_FLAG} \
-    ${SP_FLAG} \
     ${AMM_FLAG} \
     ${TILING_FLAG} \
 "
 
 if [[ ${CS_SEARCH} == 1 ]];  then
 mkdir -p ./search_res
-SLOG_FILE="./search_res/slog_file.${MODEL_NAME}_bs_${BS}_offload_${ACT_OFFLOAD}_SP_${SP}_AMM_${AMM}_TILING_${TILING}_${GIT_VER}"
+SLOG_FILE="./search_res/slog_file.${MODEL_NAME}_bs_${BS}_offload_${ACT_OFFLOAD}_AMM_${AMM}_TILING_${TILING}_${GIT_VER}"
 rm -rf ${SLOG_FILE}
 
 for((i=312;i>=64;i-=32));

@@ -35,7 +35,7 @@ import psutil
 ps_mem_info = namedtuple("ps_mem_info", ["total", "free", "cached", "buffers", "used"])
 
 
-def get_memory_info():
+def get_sys_memory_info():
     try:
         # psutil reads the memory info from /proc/memory_info,
         # which results in returning the host memory instead of
