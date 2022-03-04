@@ -126,54 +126,40 @@ def _load_from_state_dict(
                 and param.ps_attr.param_type == ParamType.CHUNK_BASED
             ):
                 if param.ps_attr.is_local():
-                    ps_data = client.access(param, torch.device("cpu:0"))
-
-                    if input_param.shape != ps_data.shape:
-                        # local shape should match the one in checkpoint
-                        error_msgs.append(
-                            "size mismatch for {}: copying a param with shape {} from checkpoint, "
-                            "the shape in current model is {}.".format(
-                                key, input_param.shape, ps_data.shape
-                            )
-                        )
-                        continue
-                    try:
-                        with torch.no_grad():
-                            ps_data.copy_(input_param)
-                    except MemoryError as ex:
-                        error_msgs.append(
-                            'While copying the parameter named "{}", '
-                            "whose dimensions in the model are {} and "
-                            "whose dimensions in the checkpoint are {}, "
-                            "an exception occurred : {}.".format(
-                                key, ps_data.size(), input_param.size(), ex.args
-                            )
-                        )
+                    client.access(param, torch.device("cpu:0"))
                 else:
-                    # Skip remote params.
                     continue
-            else:
-                if input_param.shape != param.shape:
-                    # local shape should match the one in checkpoint
-                    error_msgs.append(
-                        "size mismatch for {}: copying a param with shape {} from checkpoint, "
-                        "the shape in current model is {}.".format(
-                            key, input_param.shape, param.shape
-                        )
+
+            if input_param.shape != param.shape:
+                # local shape should match the one in checkpoint
+                error_msgs.append(
+                    "size mismatch for {}: copying a param with shape {} from checkpoint, "
+                    "the shape in current model is {}.".format(
+                        key, input_param.shape, param.shape
                     )
-                    continue
-                try:
-                    with torch.no_grad():
-                        param.copy_(input_param)
-                except MemoryError as ex:
-                    error_msgs.append(
-                        'While copying the parameter named "{}", '
-                        "whose dimensions in the model are {} and "
-                        "whose dimensions in the checkpoint are {}, "
-                        "an exception occurred : {}.".format(
-                            key, param.size(), input_param.size(), ex.args
-                        )
+                )
+                continue
+            try:
+                with torch.no_grad():
+                    param.copy_(input_param)
+            except MemoryError as ex:
+                error_msgs.append(
+                    'While copying the parameter named "{}", '
+                    "whose dimensions in the model are {} and "
+                    "whose dimensions in the checkpoint are {}, "
+                    "an exception occurred : {}.".format(
+                        key, param.size(), input_param.size(), ex.args
                     )
+                )
+
+            if (
+                isinstance(param, torch.nn.Parameter)
+                and is_param_registered(param)
+                and param.ps_attr.param_type == ParamType.CHUNK_BASED
+            ):
+                if param.ps_attr.is_local():
+                    client.release(param)
+
         elif strict:
             missing_keys.append(key)
 

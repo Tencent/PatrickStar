@@ -32,17 +32,9 @@ from enum import Enum
 
 class ChunkState(Enum):
     r"""Chunk state during training."""
-    FREE = 0
-    # Chunk memory is allocated.
-    # Tensors are used for computing.
-    COMPUTE = 1
-    # Holding meaningful data.
-    HOLD = 2
-    HOLD_AFTER_FWD = 3
-    HOLD_AFTER_BWD = 4
-
-    # Chunk memory is not allocated.
-    RELEASED = 5
+    RELEASED = 0  # empty remote enter
+    COMPUTE = 1  # in computation, cannot be moved.
+    HOLD = 2  # can be moved or be released.
 
 
 class TensorState(Enum):
@@ -51,14 +43,9 @@ class TensorState(Enum):
     Notice that this is the state of the tensor in the chunk,
     while `ChunkState` is the state of the whole state.
     """
-    # Can be released.
-    FREE = 0
-    # In computation, cannot be moved.
-    COMPUTE = 1
-    # Can be moved, cannot be released.
-    HOLD = 2
-    HOLD_AFTER_FWD = 3
-    HOLD_AFTER_BWD = 4
+    RELEASED = 0  # empty remote enter
+    COMPUTE = 1  # in computation, cannot be moved.
+    HOLD = 2  # can be moved or be released.
 
 
 class TrainingStage(Enum):

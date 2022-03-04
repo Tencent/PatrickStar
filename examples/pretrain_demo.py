@@ -35,7 +35,6 @@ import torch
 import numpy as np
 
 from data_loader import get_bert_data_loader
-from patrickstar.profiler import profiler
 from patrickstar.runtime import initialize_engine
 from patrickstar.utils import see_memory_usage, get_world_size, global_timer
 from patrickstar.utils.logging import log_dist, logger
@@ -60,10 +59,6 @@ def test_transformer_model_helper(
     torch.cuda.empty_cache()
     device = torch.device(f"cuda:{rank}")
 
-    if args.with_mem_profiler:
-        print("start memory profiler")
-        profiler.start()
-
     lr = 0.001
     betas = (0.9, 0.999)
     eps = 1e-6
@@ -81,12 +76,6 @@ def test_transformer_model_helper(
         )
     else:
         model = model_func()
-        if args.with_mem_profiler:
-            from patrickstar.core.torch_profiler_hook import (
-                register_torch_profiler_hook,
-            )
-
-            register_torch_profiler_hook(model)
 
         model.cuda(rank)
         model.train()
@@ -132,10 +121,7 @@ def test_transformer_model_helper(
         if n == num_steps:
             break
         if n == num_steps - 1:
-            global_timer.my_timer.start()
-        # Only collect running time of the last iteration.
-        if args.with_mem_profiler and n == 1:
-            profiler.warmup_finish()
+            global_timer.start()
 
         # You may need to empty_cache for really large models.
         torch.cuda.empty_cache()
@@ -181,11 +167,8 @@ def test_transformer_model_helper(
                     f"{args.batch_size * world_size/step_elapse} SamplesPerSec"
                 )
                 if n == num_steps - 1:
-                    global_timer.my_timer.print()
-                    global_timer.data_move_cnter.print()
-
-                    global_timer.my_timer.reset()
-                    global_timer.data_move_cnter.reset()
+                    global_timer.print()
+                    global_timer.reset()
             else:
                 print(
                     f"Step {n} elaspe {step_elapse} s, "
@@ -194,14 +177,6 @@ def test_transformer_model_helper(
                 )
 
         log_dist(f"End Step {n} with {dist_plan}.\n")
-
-    if args.with_mem_profiler:
-        profiler.end()
-        if rank == 0:
-            profiler.save(
-                f"{dist_plan}_{args.model_name}_bs_{args.batch_size}_"
-                f"ckp_{is_ckp}_offload_{args.with_activation_offload}_profile.pkl"
-            )
     return loss_res
 
 

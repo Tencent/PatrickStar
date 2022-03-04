@@ -27,12 +27,9 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 # SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-
-import time
 import torch
 
 from patrickstar.core.const import TrainingStage
-from patrickstar.profiler import profiler
 from patrickstar.utils import (
     log_dist,
     get_memory_info,
@@ -197,21 +194,6 @@ class RuntimeMemTracer(object):
         gpu_device = torch.device(f"cuda:{rank}")
         cpu_device = torch.device("cpu:0")
         gpu_used = get_sys_memory_used(gpu_device)
-
-        if profiler.started():
-            timestamp = time.time()
-            cur_mom = self.metronome.moment()
-            profiler.gpu_memory_used.append((cur_mom, timestamp, gpu_used))
-            profiler.gpu_chunk_memory_used.append(
-                (cur_mom, timestamp, self.gpu_chunk_used_mem)
-            )
-            # TODO(jiaruifang) the value of cpu_used does not
-            # take into consideration of pinned mem.
-            cpu_used = get_sys_memory_used(cpu_device)
-            profiler.cpu_memory_used.append((cur_mom, timestamp, cpu_used))
-            profiler.cpu_chunk_memory_used.append(
-                (cur_mom, timestamp, self.cpu_chunk_used_mem)
-            )
 
         if self.metronome.is_warmup():
             # Get peak memory between cur tracing and the prev tracing

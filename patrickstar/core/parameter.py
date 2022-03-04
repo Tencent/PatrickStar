@@ -36,9 +36,8 @@ class PSTensor(object):
     global_id = 0
 
     def __init__(self):
-        self.tensor = None
         self.id = PSTensor.global_id
-        self.state = TensorState.FREE
+        self.state = TensorState.RELEASED
         PSTensor.global_id += 1
 
     def __str__(self):
@@ -105,12 +104,6 @@ class PSParameter(object):
             return -1
         else:
             return self.data_tensor.id
-
-    def set_tensor(self, tensor: torch.Tensor):
-        self.data_tensor.tensor = tensor.view(self.shape)
-
-    def access_tensor(self):
-        return self.data_tensor.tensor
 
     def get_state(self):
         return self.data_tensor.state

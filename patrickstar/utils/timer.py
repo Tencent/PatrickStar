@@ -88,42 +88,4 @@ class GlobalTimer(metaclass=SingletonMeta):
         print(f'TOTAL {"." * (dot_length - len("TOTAL"))} {overall_elapse}')
 
 
-my_timer = GlobalTimer()
-
-
-class DataMoveCnter(metaclass=SingletonMeta):
-    def __init__(self):
-        self.amount_dict = {}
-        self.times_dict = {}
-
-    def update(self, key_name, tensor_size):
-        my_timer = GlobalTimer()
-        if not my_timer.start_flag:
-            return
-        if key_name in self.times_dict:
-            self.times_dict[key_name] += 1
-            self.amount_dict[key_name] += tensor_size
-        else:
-            self.times_dict[key_name] = 1
-            self.amount_dict[key_name] = tensor_size
-
-    def reset(self):
-        for k, _ in self.times_dict.items():
-            self.times_dict[k] = 0
-            self.amount_dict[k] = 0
-
-    def print(self):
-        print("------------- DATA MOVE RESULTS --------------")
-        my_timer = GlobalTimer()
-        for k, v in self.times_dict.items():
-            bwd = 0
-            if k in my_timer.elapse_stat and self.amount_dict[k] != 0:
-                bwd = self.amount_dict[k] / my_timer.elapse_stat[k]
-                print(
-                    f"{k}: {self.amount_dict[k] / 1024 / 1024} MB, {v} times, {bwd / 1024 / 1024} MB/s"
-                )
-            else:
-                print(f"{k}: {self.amount_dict[k] / 1024 / 1024} MB")
-
-
-data_move_cnter = DataMoveCnter()
+global_timer = GlobalTimer()

@@ -30,8 +30,6 @@
 import torch
 
 from patrickstar.core import (
-    ChunkState,
-    TensorState,
     TrainingStage,
     ParamType,
     register_param,
@@ -40,8 +38,6 @@ from patrickstar.ops import FP16Adam
 from patrickstar.utils import log_dist, global_timer
 
 from .checkpoint import state_dict, load_state_dict
-from patrickstar.profiler import profiler
-import time
 
 
 class PatrickStarEngine(torch.nn.Module):
@@ -131,20 +127,6 @@ class PatrickStarEngine(torch.nn.Module):
         for chunk in self.client.chunk_list.chunks:
             chunk.unused = 0
 
-    def _set_state_after_forward(self):
-        """
-        After forward calculation, we need to reset the state of
-        tensors from HOLD_AFTER_FWD to HOLD. Otherwise, chunks may be
-        released accidentally when using gradient checkpointing.
-        """
-        for chunk_id, chunk in enumerate(self.client.chunk_list.chunks):
-            if (
-                chunk.get_state() == ChunkState.HOLD
-                or chunk.get_state() == ChunkState.HOLD_AFTER_FWD
-            ):
-                chunk.set_unused()
-                self.client.set_all_tensors_state_in_chunk(chunk_id, TensorState.HOLD)
-
     def parameters(self, recurse: bool = True):
         for _, param in self.named_parameters(recurse=recurse):
             yield param
@@ -168,16 +150,13 @@ class PatrickStarEngine(torch.nn.Module):
             self.client.set_warmup(False)
             self.client.mem_tracer.close_tracer()
 
-        global_timer.my_timer.start_profile("FWD")
-        if profiler.started():
-            profiler.stage_convert_time.append((time.time(), TrainingStage.FWD))
+        global_timer.start_profile("FWD")
 
         self.client.set_training_phase(TrainingStage.FWD)
         self._reset_before_forward()
 
         loss = self.module(*inputs, **kwargs)
-        self._set_state_after_forward()
-        global_timer.my_timer.finish_profile("FWD")
+        global_timer.finish_profile("FWD")
         return loss
 
     def backward(self, loss, scaler=None):
@@ -185,9 +164,7 @@ class PatrickStarEngine(torch.nn.Module):
         Arguments:
             loss: Torch tensor on which to execute backward propagation
         """
-        global_timer.my_timer.start_profile("BWD")
-        if profiler.started():
-            profiler.stage_convert_time.append((time.time(), TrainingStage.FWD))
+        global_timer.start_profile("BWD")
         self.client.set_training_phase(TrainingStage.BWD)
 
         if scaler is not None:
@@ -195,7 +172,7 @@ class PatrickStarEngine(torch.nn.Module):
         else:
             loss.backward()
         self.iteration_cnt_ += 1
-        global_timer.my_timer.finish_profile("BWD")
+        global_timer.finish_profile("BWD")
 
     def state_dict(self, destination=None, prefix="", keep_vars=False):
         return state_dict(

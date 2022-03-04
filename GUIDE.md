@@ -105,32 +105,6 @@ state_dict.update(state_dict1)
 model.load_state_dict(state_dict)
 ```
 
-We also provide a tool for merging checkpoints, please check the Merge Checkpoints section below.
-
-### Profiler
-
-You could profile the memory usage or the location of chunks with the profiler module in PatrickStar. Here is an example of profiler:
-
-```python
-from patrickstar.profiler import profiler
-
-profiler.start()
-model, optimizer = initialize_engine(
-    model_func=model_func, local_rank=rank, config=config
-)
-
-...
-
-for data in dataloader:
-    ...
-
-profiler.end()
-if rank == 0:
-    profiler.save("profile.pkl")
-```
-
-You could visualize the saved `profile.pkl` with the profiler visualizer tool we provide. For detail, check the Profile Visualizer section below.
-
 ### Configuration
 
 The configuration is a python dictionary with the same format as [DeepSpeed config](https://www.deepspeed.ai/docs/config-json/), the following are most configs and their default values:
@@ -148,23 +122,6 @@ config = {
             "weight_decay": weight_decay,
         },
     },
-    # If there is no "fp16" field in the config,
-    # then the model will be trained without loss scaler.
-    # Note that there are no loss scaler on default.
-    "fp16": {
-        # Always need to be True
-        "enabled": True,
-        # If set to 0, use dynamic loss scaler,
-        # otherwise use static loss scaler with the value as loss scale
-        # Note that static loss scale will not check if the gradient overflows.
-        "loss_scale": 0,
-        # The initial loss scale of dynamic loss scaler will be
-        # 2 ** initial_scale_power
-        "initial_scale_power": 16,
-        "loss_scale_window": 1000,
-        "hysteresis": 2,
-        "min_loss_scale": 1,
-    },
     # The default chunk size, recommend values are 32M or 64M.
     # Note that this is the number of elements in a chunk instead
     # of the number of bytes.
@@ -181,30 +138,6 @@ config = {
 ```
 
 ### Tools
-
-#### Profile Visualizer
-
-The profiler visualizer (`tools/visualizer`) could visualize the saved profile data.
-
-The following command could visualize the GPU memory info:
-
-```bash
-python tools/profile_visualizer.py profile.pkl --fig_type=memory --memory_type=GPU
-```
-
-![GPT3_8B model memory visualization](doc/profiler/GPT3_8B_memory.png)
-
-The red curve is the total GPU memory used, blue curve is the memory manged by chunk. The green, blue and purple background represent forward, backward, adam stage respectively.
-
-We could also visualize the location info of chunks:
-
-```bash
-python tools/profile_visualizer.py profile.pkl --fig_type=access
-```
-
-![GPT3_8B model chunk location visualization on 4xV100](doc/profiler/GPT3_8B_4xV100_access.png)
-
-The red part means the chunk is on GPU, blue part means chunk is on GPU. The four section from bottm to top are the chunks of type FP16_PARAM and FP32_PARAM.
 
 #### Merge Checkpoints
 

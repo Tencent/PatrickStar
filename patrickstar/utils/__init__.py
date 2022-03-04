@@ -28,6 +28,7 @@
 # SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 from .distributed import get_world_size, get_rank, get_local_world_size
+from .timer import global_timer
 from .helper import getsizeof
 from .logging import log_dist, logger, print_rank
 from .memory import get_memory_info

@@ -54,11 +54,6 @@ def _add_patrick_star_args(parser):
         help="Use static partition for model data on CPU and GPU.",
     )
     group.add_argument(
-        "--with_mem_profiler",
-        action="store_true",
-        help="Profiling memory usage.",
-    )
-    group.add_argument(
         "--init_loss_scale_power",
         type=float,
         default=10,

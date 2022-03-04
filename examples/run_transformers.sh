@@ -22,7 +22,6 @@ export FP16=${FP16:-1}
 export SKIP_LOG_EXSIT=${SKIP_LOG_EXSIT:-0}
 # static partition.
 export SP=${SP:-0}
-export MEM_PROF=${MEM_PROF:-0}
 # asyn memory monitor for mem sampler
 export AMM=${AMM:-1}
 # mem caching comm
@@ -49,13 +48,6 @@ if [[ ${AMM} == 1 ]];  then
 AMM_FLAG="--with_async_mem_monitor"
 else
 export AMM_FLAG=""
-fi
-
-
-if [[ ${MEM_PROF} == 1 ]];  then
-MEM_PROF_FLAG="--with_mem_profiler"
-else
-export MEM_PROF_FLAG=""
 fi
 
 
@@ -132,7 +124,6 @@ cmd_opts="
     ${LIGHTSEQ_FLAG} \
     ${ACT_OFFLOAD_FLAG} \
     ${SP_FLAG} \
-    ${MEM_PROF_FLAG} \
     ${AMM_FLAG} \
     ${TILING_FLAG} \
 "

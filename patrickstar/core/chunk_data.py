@@ -27,14 +27,12 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 # SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import time
 import torch
 
 from patrickstar.core.comm import CommInfo
-from patrickstar.core.const import TensorState, ChunkState
+from patrickstar.core.const import ChunkState
 from patrickstar.core.memtracer import RuntimeMemTracer
 from patrickstar.core.tensor_stub import TensorInfo
-from patrickstar.profiler import profiler
 from patrickstar.utils import logger, get_rank, getsizeof, global_timer
 
 
@@ -50,7 +48,6 @@ class Chunk(object):
         r"""
         Chunk is the minimal unit of the data transfer.
         It is a contiguous memory for saving tensors.
-        To remove a tensor, we only need to set the state of the tensor to `FREE`.
 
         Chunk does no know if we are doing distributed training or not.
         Every process will observe its own chunk instances.
@@ -68,16 +65,6 @@ class Chunk(object):
         self.local_rank = local_rank
         self._is_dummy = is_dummy
         self.memory_tracer = memory_tracer
-        # the number of tensors of the chunk in each state
-        self._state_dict = {
-            TensorState.COMPUTE: 0,
-            TensorState.HOLD: 0,
-            TensorState.HOLD_AFTER_FWD: 0,
-            TensorState.HOLD_AFTER_BWD: 0,
-            TensorState.FREE: 0,
-        }
-        # the number of tensors that are not used in the forward calculation
-        self.unused = 0
 
         self.payload = None
         self._time_profile = True
@@ -85,6 +72,8 @@ class Chunk(object):
 
         self.end_pos = 0
         self.params = []
+        # the number of params in compute state
+        self.num_in_compute = 0
 
     def is_dummy(self):
         return self._is_dummy
@@ -124,7 +113,7 @@ class Chunk(object):
         payload_numel = self.capacity
 
         if self._time_profile:
-            global_timer.my_timer.start_profile(f"CHUNK_allocate_payload_{device.type}")
+            global_timer.start_profile(f"CHUNK_allocate_payload_{device.type}")
         try:
             self.payload = torch.zeros(
                 payload_numel,
@@ -139,20 +128,11 @@ class Chunk(object):
             )
         except RuntimeError:
             if self._time_profile:
-                global_timer.my_timer.finish_profile(
-                    f"CHUNK_allocate_payload_{device.type}"
-                )
+                global_timer.finish_profile(f"CHUNK_allocate_payload_{device.type}")
             return False
 
-        if profiler.started():
-            profiler.chunk_life_cycle[self.chunk_id]["life_cycle"].append(
-                (time.time(), "allocate", device)
-            )
-
         if self._time_profile:
-            global_timer.my_timer.finish_profile(
-                f"CHUNK_allocate_payload_{device.type}"
-            )
+            global_timer.finish_profile(f"CHUNK_allocate_payload_{device.type}")
         return True
 
     def release_payload(self):
@@ -164,20 +144,6 @@ class Chunk(object):
         )
         del self.payload
         self.payload = None
-        if profiler.started():
-            profiler.chunk_life_cycle[self.chunk_id]["life_cycle"].append(
-                (time.time(), "release", None)
-            )
-
-    def update_state(self, old_state, new_state):
-        r"""Update the state counter of tensors of the chunk.
-
-        Args:
-            old_state: :class:`TensorState`.
-            new_state: :class:`TensorState`.
-        """
-        self._state_dict[old_state] -= 1
-        self._state_dict[new_state] += 1
 
     def get_state(self):
         """
@@ -191,42 +157,10 @@ class Chunk(object):
             return ChunkState.RELEASED
 
         # Distributed training need to fix the chunk on the compute device.
-        if self._state_dict[TensorState.COMPUTE] > 0:
+        if self.num_in_compute > 0:
             return ChunkState.COMPUTE
-        elif self._state_dict[TensorState.HOLD] > 0:
-            return ChunkState.HOLD
-        elif self._state_dict[TensorState.HOLD_AFTER_FWD] > 0:
-            return ChunkState.HOLD_AFTER_FWD
-        elif self._state_dict[TensorState.HOLD_AFTER_BWD] > 0:
-            return ChunkState.HOLD_AFTER_BWD
         else:
-            return ChunkState.FREE
-
-    def all_tensor_state(self, state):
-        r"""If all tensors are in the state or `FREE`.
-
-        Args:
-            state: :class:`TensorState`.
-        Return:
-            bool.
-        """
-        for k, v in self._state_dict.items():
-            if k != TensorState.FREE and k != state:
-                if v != 0:
-                    # Ignore the unused tensors.
-                    if k == TensorState.HOLD and v == self.unused:
-                        continue
-                    return False
-        return True
-
-    def set_unused(self):
-        r"""
-        After forward calculation, the tensors in `HOLD` state are the ones
-        that are not used. Remember them for the release.
-        NOTE() This function can only be called at the end of forward calculation.
-        """
-        # TODO(zilinzhu) Find a better way to represent the unused tensors
-        self.unused = self._state_dict[TensorState.HOLD]
+            return ChunkState.HOLD
 
     def move(self, target_device: torch.device):
         r"""
@@ -243,9 +177,9 @@ class Chunk(object):
             return
         if self._time_profile:
             if target_device.type == "cuda":
-                global_timer.my_timer.start_profile("chunk_cpu_gpu_move")
+                global_timer.start_profile("chunk_cpu_gpu_move")
             else:
-                global_timer.my_timer.start_profile("chunk_gpu_cpu_move")
+                global_timer.start_profile("chunk_gpu_cpu_move")
         src_device = self.get_device()
 
         logger.debug(
@@ -255,14 +189,13 @@ class Chunk(object):
         )
 
         if target_device.type == "cpu":
-            pinned_payload_cpu = torch.empty(
+            self.payload = torch.empty(
                 self.payload.shape,
                 dtype=self.payload.dtype,
                 device="cpu:0",
                 pin_memory=True,
             )
-            pinned_payload_cpu.copy_(self.payload)
-            self.payload = pinned_payload_cpu
+            self.payload.copy_(self.payload)
         elif target_device.type == "cuda":
             self.payload = self.payload.pin_memory()
             self.payload = self.payload.to(target_device)
@@ -280,25 +213,9 @@ class Chunk(object):
 
         if self._time_profile:
             if target_device.type == "cuda":
-                global_timer.my_timer.finish_profile("chunk_cpu_gpu_move")
-                global_timer.data_move_cnter.update(
-                    "chunk_cpu_gpu_move", self.get_payload_space()
-                )
+                global_timer.finish_profile("chunk_cpu_gpu_move")
             elif target_device.type == "cpu":
-                global_timer.my_timer.finish_profile("chunk_gpu_cpu_move")
-                global_timer.data_move_cnter.update(
-                    "chunk_gpu_cpu_move", self.get_payload_space()
-                )
-
-        if profiler.started():
-            if len(profiler.chunk_life_cycle[self.chunk_id]["life_cycle"]) == 0:
-                raise RuntimeError(
-                    f"Chunk {self.chunk_id} allocation time is not recorded. "
-                    f"You may need to put profiler.start() before initialize_engine "
-                )
-            profiler.chunk_life_cycle[self.chunk_id]["life_cycle"].append(
-                (time.time(), "move", target_device)
-            )
+                global_timer.finish_profile("chunk_gpu_cpu_move")
 
     def get_device(self):
         r"""Get device of the payload of chunk, return None if not allocated."""

@@ -36,7 +36,6 @@ from patrickstar.core.chunk_data import Chunk
 from patrickstar.core.const import ChunkState
 from patrickstar.core.eviction_policy import ChunkEvictionPolicyBase
 from patrickstar.core.memtracer import RuntimeMemTracer
-from patrickstar.profiler import profiler
 from patrickstar.utils import logger, get_rank, log_dist, global_timer
 
 
@@ -172,7 +171,7 @@ class ChunkList(object):
             need_bytes: int.
         """
         if self._time_profile:
-            global_timer.my_timer.start_profile("CHUNK_LIST_prepare_device")
+            global_timer.start_profile("CHUNK_LIST_prepare_device")
 
         ava_chunk_mem_size = self.memory_tracer.available_chunk_mem(target_device.type)
         remaining_chunk_mem_size = self.memory_tracer.remaining_chunk_mem(
@@ -201,7 +200,7 @@ class ChunkList(object):
                 level=logging.WARNING,
             )
             if self._time_profile:
-                global_timer.my_timer.finish_profile("CHUNK_LIST_prepare_device")
+                global_timer.finish_profile("CHUNK_LIST_prepare_device")
             return False
             # TODO(jiaruifang) We can catch the error and the release or move the chunks here.
             # raise RuntimeError(
@@ -220,7 +219,7 @@ class ChunkList(object):
         # No need for new allocation.
         if extra_need_bytes <= 0:
             if self._time_profile:
-                global_timer.my_timer.finish_profile("CHUNK_LIST_prepare_device")
+                global_timer.finish_profile("CHUNK_LIST_prepare_device")
             return
 
         logger.debug(
@@ -244,7 +243,7 @@ class ChunkList(object):
             self.chunk_move(idx, new_device)
 
         if self._time_profile:
-            global_timer.my_timer.finish_profile("CHUNK_LIST_prepare_device")
+            global_timer.finish_profile("CHUNK_LIST_prepare_device")
         return True
 
     def make_room(self, offload_size_in_bytes, target_device):
@@ -257,7 +256,7 @@ class ChunkList(object):
             target_device: :class:`torch.device`.
         """
         if self._time_profile:
-            global_timer.my_timer.start_profile("CHUNK_LIST_make_room")
+            global_timer.start_profile("CHUNK_LIST_make_room")
 
         moved_list = self._chunk_to_move_out_for_room_making(
             offload_size_in_bytes, target_device
@@ -271,7 +270,7 @@ class ChunkList(object):
             self.chunk_move(idx, new_device)
 
         if self._time_profile:
-            global_timer.my_timer.finish_profile("CHUNK_LIST_make_room")
+            global_timer.finish_profile("CHUNK_LIST_make_room")
 
     def chunk_move(self, chunk_id: int, device: torch.device):
         r"""Move chunk of id `chunk_id` to `device`.
@@ -283,7 +282,7 @@ class ChunkList(object):
             device: :class:`torch.device`.
         """
         if self._time_profile:
-            global_timer.my_timer.start_profile("CHUNK_LIST_chunk_move")
+            global_timer.start_profile("CHUNK_LIST_chunk_move")
 
         chunk = self.chunks[chunk_id]
 
@@ -301,7 +300,7 @@ class ChunkList(object):
             chunk.move(device)
 
         if self._time_profile:
-            global_timer.my_timer.finish_profile("CHUNK_LIST_chunk_move")
+            global_timer.finish_profile("CHUNK_LIST_chunk_move")
 
     def new_chunk(self, is_dummy: bool = False):
         r"""Create a chunk without initializing its memory.
@@ -322,12 +321,6 @@ class ChunkList(object):
             is_dummy=is_dummy,
         )
         self.chunks.append(chunk)
-        if profiler.started():
-            profiler.chunk_life_cycle[chunk_id] = {"life_cycle": []}
-        logger.debug(
-            f"Allocate with new chunk chunk_id {chunk_id} size {self.chunk_size} "
-            f"comm group {chunk.comm_info}"
-        )
         return chunk
 
     def _chunk_to_move_out_for_room_making(

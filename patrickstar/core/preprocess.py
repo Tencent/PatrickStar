@@ -198,8 +198,9 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
                 for param in chunk.params:
                     if not self.not_init:
                         if is_param_registered(param):
-                            ps_data = self.client.access(param, torch.device("cpu:0"))
-                            ps_data.copy_(param.data)
+                            init_data = param.data
+                            self.client.access(param, torch.device("cpu:0"))
+                            param.data.copy_(init_data)
                             self.client.release(param)
             else:
                 for param in chunk.params:

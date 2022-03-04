@@ -32,7 +32,7 @@ from typing import List
 import torch
 
 from patrickstar.core.chunk_list import ChunkList
-from patrickstar.core.const import ChunkState, TensorState, TrainingStage
+from patrickstar.core.const import ChunkState, TensorState
 from patrickstar.core.hook import setup_patrickstar_hooks
 from patrickstar.core.parameter import register_param, is_param_registered, ParamType
 from patrickstar.core.eviction_policy import LatestAccessChunkEvictionPolicy
@@ -169,19 +169,6 @@ class PatrickStarClient(object):
             + (world_size - 1) * self.chunk_size * 2
         )
 
-    def set_all_tensors_state_in_chunk(self, chunk_id, new_state):
-        r"""Set the state of all tensors in a chunk.
-
-        Notice that the state of the chunk will change as well.
-        And this method has nothing to do with whether the payload of
-        the chunk is allocated or not.
-        """
-        chunk = self.chunk_list[chunk_id]
-        for param in chunk.params:
-            old_state = param.ps_attr.get_state()
-            chunk.update_state(old_state, new_state)
-            param.ps_attr.set_state(new_state)
-
     def register_model_hook(self, model):
         setup_patrickstar_hooks(model, self)
 
@@ -190,45 +177,25 @@ class PatrickStarClient(object):
         chunk_id = param.ps_attr.info.chunk_id
         return self.chunk_list[chunk_id].is_local()
 
-    def _fetch_remote_chunks(
+    def fetch_remote_chunks(
         self,
-        chunk_id,
-        chunk_id_list,
-        local_chunk_id,
+        comm_group,
         compute_device,
-        param_name,
     ):
-        r"""Fetch the remote chunks to local.
-
-        Args:
-            chunk_id: the id of accessed chunk
-            chunk_id_list: list of int. The id of the chunks in a same comm group.
-            local_chunk_id: int. The id of the local chunk in the comm group.
-            compute_device: :class:`torch.device`.
-            param_name: str.
-        """
-        rank = get_rank()
-        # During FWD, when there are param in the chunk group being visited for
-        # the first time, collect the chunk group to local.
-        # How can we determine if a chunk group is being visited for the first time,
-        # so that we can trigger the correct allgather?
-        # When the first param is visited, the remote chunk should be of state
-        # RELEASED, therefore, we do the allgather when the state of chunks are
-        # changing form HOLD_AFTER_FWD(HOLD_ADFTER_BWD) to RELEASED.
+        r"""Fetch the remote chunks to local."""
         no_chunk_released = True
-        for i in chunk_id_list:
+        for i in comm_group.elements:
             if self.chunk_list[i].get_state() == ChunkState.RELEASED:
                 no_chunk_released = False
                 break
+
         if no_chunk_released:
             return
 
-        if self._time_profile:
-            global_timer.my_timer.start_profile("CLIENT_fetch_remote_chunks")
+        local_chunk_id = comm_group.elements[get_rank()]
 
-        logger.debug(
-            f"rank {rank} fetch {param_name} remote chunks {chunk_id_list} local chunk {local_chunk_id}"
-        )
+        if self._time_profile:
+            global_timer.start_profile("CLIENT_fetch_remote_chunks")
 
         # Use collective communication to achieve the most efficient communication.
         # However, it is memory consumping. world_size chunks on GPU simutaneously.
@@ -236,42 +203,54 @@ class PatrickStarClient(object):
         self.chunk_list.access_chunk(local_chunk_id, compute_device)
         self.chunk_list[local_chunk_id].pin()
         allgather_payload_buff = []
-        comm_data_amount = 0
-        for chunk_id in chunk_id_list:
+        for chunk_id in comm_group.elements:
+            chunk = self.chunk_list[chunk_id]
             if chunk_id != local_chunk_id:
-                self.chunk_list.try_best_allocate_payload(
-                    self.chunk_list[chunk_id], compute_device
-                )
-                self.chunk_list[chunk_id].pin()
-            self.set_all_tensors_state_in_chunk(chunk_id, TensorState.HOLD)
-            allgather_payload_buff.append(self.chunk_list[chunk_id].payload)
-        comm_data_amount = (
-            len(allgather_payload_buff) * allgather_payload_buff[0].numel() * 2
-        )  # half = 2 bytes
-        for chunk_id in chunk_id_list:
-            self.chunk_list[chunk_id].unpin()
+                self.chunk_list.try_best_allocate_payload(chunk, compute_device)
+                chunk.pin()
+                chunk.num_in_compute = 0
+                for param in chunk.params:
+                    param.ps_attr.set_state(TensorState.HOLD)
+
+            allgather_payload_buff.append(chunk.payload)
 
         if self._time_profile:
-            global_timer.my_timer.start_profile("CLIENT_fetch_remote_chunks_allgather")
+            global_timer.start_profile("CLIENT_fetch_remote_chunks_allgather")
 
-        logger.debug(f"rank {rank} allgather {chunk_id_list}")
         torch.distributed.all_gather(
             allgather_payload_buff,
             self.chunk_list[local_chunk_id].payload,
             async_op=False,
         )
 
-        allgather_payload_buff = []
-        self.chunk_list[local_chunk_id].unpin()
+        for chunk_id in comm_group.elements:
+            self.chunk_list[chunk_id].unpin()
 
         if self._time_profile:
-            global_timer.my_timer.finish_profile("CLIENT_fetch_remote_chunks_allgather")
-            global_timer.data_move_cnter.update(
-                "CLIENT_fetch_remote_chunks_allgather", comm_data_amount
-            )
-        global_timer.my_timer.finish_profile("CLIENT_fetch_remote_chunks")
+            global_timer.finish_profile("CLIENT_fetch_remote_chunks_allgather")
+        global_timer.finish_profile("CLIENT_fetch_remote_chunks")
 
-    def _access_tensor_in_chunk(self, param, compute_device, chunk_id):
+    def access_dist(self, param, compute_device):
+        r"""Attach data to param.data, fetch from remote if chunk is released."""
+        if param.ps_attr.param_type == ParamType.TORCH_BASED:
+            return
+
+        chunk_id = param.ps_attr.info.chunk_id
+        if get_world_size() > 1:
+            # 1.2 Fetch the remote chunks to local.
+            self.fetch_remote_chunks(
+                self.chunk_list[chunk_id].comm_info.group,
+                compute_device,
+            )
+
+        self.access(param, compute_device)
+
+    def access(self, param, compute_device):
+        r"""Attach tensor to param.data."""
+        if param.ps_attr.param_type == ParamType.TORCH_BASED:
+            return
+
+        chunk_id = param.ps_attr.info.chunk_id
         self.chunk_eviction_strategy.trace_access(chunk_id, compute_device)
         self.chunk_list.access_chunk(chunk_id, compute_device)
         # 2. Locate the param on the chunk.
@@ -279,269 +258,32 @@ class PatrickStarClient(object):
         info = param.ps_attr.info
         start_offset = info.start_offset
         numel = param.ps_attr.numel
+        shape = param.ps_attr.shape
 
-        param.ps_attr.set_tensor(chunk.payload.narrow(0, start_offset, numel))
-
-        # 3. Change the state of param tensor.
-        # The state of chunk should be determined by the state of its tensors.
-        old_state = param.ps_attr.get_state()
-
-        # If the old state was FREE, we need to fill the param to zero.
-        if old_state == TensorState.FREE:
-            param.ps_attr.access_tensor().zero_()
+        param.data = chunk.payload.narrow(0, start_offset, numel).view(shape)
 
         # Change the state of param to COMPUTE.
-        chunk.update_state(old_state, TensorState.COMPUTE)
+        chunk.num_in_compute += 1
         param.ps_attr.set_state(TensorState.COMPUTE)
 
-        return param.ps_attr.access_tensor()
-
-    def access_dist(
-        self,
-        param: torch.nn.Parameter,
-        compute_device: torch.device,
-    ) -> torch.Tensor:
-        r"""Visit tensor of param in distributed environment.
-
-        Notice that this method also works at standalone circumstances.
-
-        Args:
-            param: :class:`torch.nn.Parameter`. The param to visit.
-            compute_device: :class:`torch.device`.
-            training_stage: :class:`TrainingStage`.
-        Returns:
-            The tensor of the params.
-        """
-
-        assert is_param_registered(
-            param
-        ), "Client can only access_dist tensor registered for PatrickStar."
-        if param.ps_attr.param_type == ParamType.TORCH_BASED:
-            return param.data
-
-        if self._time_profile:
-            global_timer.my_timer.start_profile("CLIENT_access_dist")
-
-        # 1. Prepare the memory of the chunks. If the chunk is not one the
-        #   compute device, then we need to move or allocate.
-        chunk_id = param.ps_attr.info.chunk_id
-
-        rank = get_rank()
-
-        if get_world_size() > 1:
-            chunk_id_list = self.chunk_list[chunk_id].comm_info.group.elements
-            local_chunk_id = chunk_id_list[rank]
-
-            logger.debug(
-                f"rank {rank} access_dist access tensor {param.ps_attr.name} "
-                f"local_chunk_id {local_chunk_id} chunk_id_list {chunk_id_list}"
-            )
-
-            # 1.2 Fetch the remote chunks to local.
-            self._fetch_remote_chunks(
-                chunk_id,
-                chunk_id_list,
-                local_chunk_id,
-                compute_device,
-                param.ps_attr.name,
-            )
-        else:
-            local_chunk_id = chunk_id
-
-        # collect the time a chunk has to be placed on compute-device
-        # self.chunk_eviction_strategy.trace_access(local_chunk_id, compute_device)
-
-        ret = self._access_tensor_in_chunk(param, compute_device, chunk_id)
-        if self._time_profile:
-            global_timer.my_timer.finish_profile("CLIENT_access_dist")
-        return ret
-
-    def access(
-        self,
-        param: torch.nn.Parameter,
-        compute_device: torch.device,
-    ):
-        r"""Visit the data or grad of the local `param`.
-
-        Steps:
-            1. Find the chunk of the `param`.
-            2.1 If the payload of the chunk exists,
-                decide whether to move the chunk to `compute_device`.
-            2.2 If the payload of the chunk does not exist,
-                allocate the payload of on `compute_device`.
-        Before moving or allocating, make sure there is enough space
-        on the `compute_device`.
-
-        Exceptions:
-            The compute devices of 2 tensors in the same chunk is different.
-
-        Notice that different from access_dist, this method will not do cross
-        process communication.
-
-        Args:
-            param: :class:`torch.nn.Parameter`.
-            compute_device: :class:`torch.device`.
-        Returns:
-            The tensor to access.
-        """
-        assert is_param_registered(
-            param
-        ), "client shall not access tensor not registered for PatrickStar"
-        if param.ps_attr.param_type == ParamType.TORCH_BASED:
-            return param.data
-
-        if self._time_profile:
-            global_timer.my_timer.start_profile("CLIENT_access")
-
-        # 1. Prepare the memory of the chunks. If the chunk is not one the
-        #   compute device, then we need to move or allocate.
-        chunk_id = param.ps_attr.info.chunk_id
-        assert chunk_id is not None
-
-        ret = self._access_tensor_in_chunk(param, compute_device, chunk_id)
-        if self._time_profile:
-            global_timer.my_timer.finish_profile("CLIENT_access")
-        return ret
-
-    def release_dist(
-        self,
-        param: torch.nn.Parameter,
-        reset_to_state: TensorState,
-        training_stage: TrainingStage,
-    ):
-        r"""Release the param in distributed environment.
-
-        This means the data and grad of the param no longer need to
-        stay in the current compute device.
-
-        Steps:
-            1. Update the state of tensor and chunk.
-            2. If the chunk can be released,
-                if `do_allreduce` is True, do reduce scatter to average the gradients.
-                then released the payload.
-
-        Args:
-            param: :class:`torch.nn.Parameter`.
-            reset_to_state: :class:`TensorState`. The state to reset tensor to.
-            training_stage: :class:`TrainingStage`.
-            do_allreduce: bool. Whether to do allreduce(reduce scatter).
-                Notice that because user may use gradient checkpointing, the do_allreduce
-                in TrainingStage.BWD doesn't equal to True.
-            underutilze communication bandwidth.
-        """
-        if param.ps_attr.param_type == ParamType.TORCH_BASED:
-            return
-
-        if self._time_profile:
-            global_timer.my_timer.start_profile("CLIENT_release_dist")
-        rank = get_rank()
-
-        assert isinstance(reset_to_state, TensorState)
-        assert (
-            training_stage == TrainingStage.FWD or training_stage == TrainingStage.BWD
-        )
-        assert torch.distributed.is_initialized()
-
-        chunk_id = param.ps_attr.info.chunk_id
-        chunk_id_list = self.chunk_list[chunk_id].comm_info.group.elements
-
-        local_chunk_id = chunk_id_list[rank]
-
-        logger.debug(
-            f"rank {rank} release tensor {param.ps_attr.name} of chunk_id {chunk_id} to {reset_to_state}"
-        )
-
-        # Update the state of tensor and chunk.
-        self.chunk_list[chunk_id].update_state(
-            param.ps_attr.get_state(), reset_to_state
-        )
-        param.ps_attr.set_state(reset_to_state)
-
-        # NOTE(jiaruifang) device must be the same as the origin param.
-        # Or it will affect hook of param.grad_fn.next_functions[0][0].
-        param.data = torch.tensor([], dtype=param.ps_attr.dtype, device=param.device)
-
-        # Check if we finished using all tensors in all chunks of the chunk group,
-        # then we can release the remote chunks.
-        # The condition for releasing chunks are:
-        #     FWD: All non-dummy chunks are of state HOLD_AFTER_FWD;
-        #     BWD: All non-dummy chunks are of state HOLD_AFTER_BWD.
-        world_size = get_world_size()
-        if world_size > 1:
-            if True:
-                all_chunks_ready = True
-                for i in chunk_id_list:
-                    if training_stage == TrainingStage.FWD:
-                        if (
-                            not self.chunk_list[i].all_tensor_state(
-                                TensorState.HOLD_AFTER_FWD
-                            )
-                            and not self.chunk_list[i].is_dummy()
-                        ):
-                            all_chunks_ready = False
-                    elif training_stage == TrainingStage.BWD:
-                        if (
-                            not self.chunk_list[i].all_tensor_state(
-                                TensorState.HOLD_AFTER_BWD
-                            )
-                            and not self.chunk_list[i].is_dummy()
-                        ):
-                            all_chunks_ready = False
-
-                if all_chunks_ready:
-                    # Remove the payload of remote chunks.
-                    for i in chunk_id_list:
-                        self.chunk_list[i].unpin()
-                        if i != local_chunk_id:
-                            logger.debug(f"rank {rank} remove payload of chunk_id {i}")
-                            self.chunk_list[i].release_payload()
-                            self.set_all_tensors_state_in_chunk(i, TensorState.FREE)
-
-        if self._time_profile:
-            global_timer.my_timer.finish_profile("CLIENT_release_dist")
-
-    def release(
-        self,
-        param: torch.nn.Parameter,
-        reset_to_state: TensorState = TensorState.HOLD,
-    ):
+    def release(self, param):
         r"""Release the param in standalone environment.
 
-        This means the data and grad of the param no longer need to
-        stay in the current compute device.
-
-        Steps:
-            1. Update the state of tensor and chunk.
-            2. If the chunk can be released released the payload.
-
-        Args:
-            param: :class:`torch.nn.Parameter`.
-            reset_to_state: :class:`TensorState`. The state to reset tensor to.
+        This means the param can be move to other device.
         """
         if param.ps_attr.param_type == ParamType.TORCH_BASED:
             return
-        if self._time_profile:
-            global_timer.my_timer.start_profile("CLIENT_release")
-        rank = self.local_rank
-        assert isinstance(reset_to_state, TensorState)
 
         chunk_id = param.ps_attr.info.chunk_id
-        logger.debug(
-            f"rank {rank} release a tensor of chunk_id {chunk_id} to {reset_to_state}"
-        )
-
-        # Update the state of tensor and chunk.
-        self.chunk_list[chunk_id].update_state(
-            param.ps_attr.get_state(), reset_to_state
-        )
-        param.ps_attr.set_state(reset_to_state)
+        chunk = self.chunk_list[chunk_id]
+        assert chunk.get_state() != TensorState.RELEASED
+        if param.ps_attr.get_state() == TensorState.COMPUTE:
+            chunk.num_in_compute -= 1
+        param.ps_attr.set_state(TensorState.HOLD)
 
         # NOTE(jiaruifang) device must be the same as the origin param.
         # Or it will affect hook of param.grad_fn.next_functions[0][0].
         param.data = torch.tensor([], dtype=param.ps_attr.dtype, device=param.device)
-
-        if self._time_profile:
-            global_timer.my_timer.finish_profile("CLIENT_release")
 
     def get_overall_chunk_size(self):
         """
