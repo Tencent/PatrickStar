@@ -32,7 +32,7 @@ import torch
 from patrickstar.core.comm import CommInfo
 from patrickstar.core.const import ChunkState
 from patrickstar.core.memtracer import RuntimeMemTracer
-from patrickstar.core.tensor_stub import TensorInfo
+from patrickstar.core.parameter import TensorInfo
 from patrickstar.utils import logger, get_rank, getsizeof, global_timer
 
 
@@ -92,6 +92,27 @@ class Chunk(object):
         else:
             return getsizeof(self.payload.dtype) * self.payload.numel()
 
+    def get_device(self):
+        r"""Get device of the payload of chunk, return None if not allocated."""
+        if self.payload is not None:
+            return self.payload.device
+        else:
+            return None
+
+    def get_state(self):
+        r"""
+        When payload is None, the state is `RELEASED`,
+        otherwise, state of the chunk is decided by its tensors.
+        """
+        if self.payload is None:
+            return ChunkState.RELEASED
+
+        # Distributed training need to fix the chunk on the compute device.
+        if self.num_in_compute > 0:
+            return ChunkState.COMPUTE
+        else:
+            return ChunkState.HOLD
+
     def pin(self):
         self._pin_flag = True
 
@@ -101,22 +122,26 @@ class Chunk(object):
     def is_pin(self):
         return self._pin_flag
 
+    def can_fit(self, numel):
+        return self.capacity - self.end_pos >= numel
+
+    def add_param(self, param):
+        assert param.dtype == torch.float
+        numel = param.ps_attr.numel
+        if not self.can_fit(numel):
+            return False
+        self.params.append(param)
+        param.ps_attr.info = TensorInfo(self.chunk_id, param, self.end_pos)
+        self.end_pos += numel
+        return True
+
     def allocate_payload(self, device):
-        r"""Allocate payload on device for the chunk.
-
-        NOTE() This method does not check availability. Please check if
-        there is enough room for the chunk.
-        This function should be exception-safe.
-        Args:
-            device: :class:`torch.device`.
-        """
-        payload_numel = self.capacity
-
+        r"""Allocate payload on device for the chunk."""
         if self._time_profile:
             global_timer.start_profile(f"CHUNK_allocate_payload_{device.type}")
         try:
             self.payload = torch.zeros(
-                payload_numel,
+                self.capacity,
                 dtype=torch.float,
                 device=device,
                 pin_memory=(device.type == "cpu"),
@@ -145,23 +170,6 @@ class Chunk(object):
         del self.payload
         self.payload = None
 
-    def get_state(self):
-        """
-        When payload is None, the state is `RELEASED`,
-        otherwise, state of the chunk is decided by its tensors.
-
-        Returns:
-            :class:`ChunkState`.
-        """
-        if self.payload is None:
-            return ChunkState.RELEASED
-
-        # Distributed training need to fix the chunk on the compute device.
-        if self.num_in_compute > 0:
-            return ChunkState.COMPUTE
-        else:
-            return ChunkState.HOLD
-
     def move(self, target_device: torch.device):
         r"""
         Move the chunk to `target_device` synchronizely.
@@ -183,9 +191,9 @@ class Chunk(object):
         src_device = self.get_device()
 
         logger.debug(
-            f"move chunk {self.chunk_id}, which has {self.payload.numel() / 1e6} M {self.payload.dtype} elements, "
+            f"move chunk {self.chunk_id}, which has {self.get_chunk_space() / 1024 ** 2} MB, "
             f"from {src_device} to {target_device}, "
-            f"used mem {self.memory_tracer.used_chunk_mem(target_device.type) / 1e6} MB"
+            f"used mem {self.memory_tracer.used_chunk_mem(target_device.type) / 1024 ** 2} MB"
         )
 
         if target_device.type == "cpu":
@@ -216,23 +224,3 @@ class Chunk(object):
                 global_timer.finish_profile("chunk_cpu_gpu_move")
             elif target_device.type == "cpu":
                 global_timer.finish_profile("chunk_gpu_cpu_move")
-
-    def get_device(self):
-        r"""Get device of the payload of chunk, return None if not allocated."""
-        if self.payload is not None:
-            return self.payload.device
-        else:
-            return None
-
-    def can_fit(self, numel):
-        return self.capacity - self.end_pos >= numel
-
-    def add_param(self, param):
-        assert param.dtype == torch.float
-        numel = param.ps_attr.numel
-        if not self.can_fit(numel):
-            return False
-        self.params.append(param)
-        param.ps_attr.info = TensorInfo(self.chunk_id, param, self.end_pos)
-        self.end_pos += numel
-        return True

@@ -32,7 +32,7 @@ import itertools
 
 import torch
 
-from patrickstar.core import is_param_registered, ParamType
+from patrickstar.core import is_registered, ParamType
 from patrickstar.utils import logger
 
 
@@ -40,7 +40,7 @@ def state_dict(module, client, destination=None, prefix="", keep_vars=False):
     def _save_to_state_dict(module, destination, prefix, keep_vars):
         for name, param in module._parameters.items():
             if param is not None:
-                if is_param_registered(param):
+                if is_registered(param):
                     attr_name = param.ps_attr.name
                     if attr_name == "embedding_dummy" or attr_name.startswith("dummy_"):
                         continue
@@ -122,7 +122,7 @@ def _load_from_state_dict(
 
             if (
                 isinstance(param, torch.nn.Parameter)
-                and is_param_registered(param)
+                and is_registered(param)
                 and param.ps_attr.param_type == ParamType.CHUNK_BASED
             ):
                 if param.ps_attr.is_local():
@@ -154,7 +154,7 @@ def _load_from_state_dict(
 
             if (
                 isinstance(param, torch.nn.Parameter)
-                and is_param_registered(param)
+                and is_registered(param)
                 and param.ps_attr.param_type == ParamType.CHUNK_BASED
             ):
                 if param.ps_attr.is_local():

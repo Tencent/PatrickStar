@@ -32,20 +32,22 @@ import torch
 from .const import TensorState, ParamType
 
 
-class PSTensor(object):
-    global_id = 0
+class TensorInfo(object):
+    r"""The info related to certain tensor."""
 
-    def __init__(self):
-        self.id = PSTensor.global_id
-        self.state = TensorState.RELEASED
-        PSTensor.global_id += 1
-
-    def __str__(self):
-        return f"id: {self.id}, state: {self.state}, tensor: {self.tensor}"
+    def __init__(
+        self,
+        chunk_id: int,
+        param: torch.nn.Parameter,
+        start_offset: int,
+    ):
+        self.chunk_id = chunk_id
+        self.param = param
+        self.start_offset = start_offset
 
 
 class PSParameter(object):
-    r""""""
+    global_id = 0
 
     def __init__(
         self,
@@ -73,10 +75,13 @@ class PSParameter(object):
         self.dtype = dtype
         self.param_type = param_type
 
-        if self.param_type == ParamType.CHUNK_BASED:
-            self.data_tensor = PSTensor()
-
         self.info = None
+        self.state = TensorState.RELEASED
+        if self.param_type == ParamType.CHUNK_BASED:
+            self.id = PSParameter.global_id
+            PSParameter.global_id += 1
+        else:
+            self.id = -1
 
         # Whether the param belongs to local chunk.
         self._is_local = True
@@ -95,30 +100,6 @@ class PSParameter(object):
         self.shape = new_shape
         self.numel = new_shape.numel()
 
-    def get_tensor_id(self):
-        """
-        Get the tensor id of chunk based tensor.
-        For torch based tensor, return -1.
-        """
-        if self.param_type == ParamType.TORCH_BASED:
-            return -1
-        else:
-            return self.data_tensor.id
-
-    def get_state(self):
-        return self.data_tensor.state
-
-    def set_state(self, state: TensorState):
-        """
-        Only in COMPUTE state when tensor will point to chunk payload.
-        Otherwise, the tensor should be None to prevent unnecessary copy.
-        TODO(jiaruifang) Need to param reset data和grad
-        """
-        ps_tensor = self.data_tensor
-        ps_tensor.state = state
-        if state != TensorState.COMPUTE:
-            ps_tensor.tensor = None
-
 
 def register_param(param, param_type, name=None):
     assert isinstance(param, torch.nn.Parameter)
@@ -128,6 +109,6 @@ def register_param(param, param_type, name=None):
         param.ps_attr = PSParameter(param, param_type, param.dtype, name)
 
 
-def is_param_registered(param) -> bool:
+def is_registered(param) -> bool:
     assert isinstance(param, torch.nn.Parameter)
     return hasattr(param, "ps_attr")

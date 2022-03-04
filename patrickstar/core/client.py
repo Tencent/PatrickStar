@@ -34,10 +34,10 @@ import torch
 from patrickstar.core.chunk_list import ChunkList
 from patrickstar.core.const import ChunkState, TensorState
 from patrickstar.core.hook import setup_patrickstar_hooks
-from patrickstar.core.parameter import register_param, is_param_registered, ParamType
+from patrickstar.core.parameter import register_param, is_registered, ParamType
 from patrickstar.core.eviction_policy import LatestAccessChunkEvictionPolicy
 from patrickstar.core.memtracer import RuntimeMemTracer
-from patrickstar.utils import logger, get_world_size, get_rank, log_dist, global_timer
+from patrickstar.utils import logger, get_world_size, get_rank, global_timer
 
 
 class PatrickStarClient(object):
@@ -137,7 +137,7 @@ class PatrickStarClient(object):
         """
         total_numel = 0
         for param in params:
-            assert is_param_registered(param)
+            assert is_registered(param)
             total_numel += param.ps_attr.numel
 
         if len(self.chunk_list) != 0:
@@ -206,11 +206,11 @@ class PatrickStarClient(object):
         for chunk_id in comm_group.elements:
             chunk = self.chunk_list[chunk_id]
             if chunk_id != local_chunk_id:
-                self.chunk_list.try_best_allocate_payload(chunk, compute_device)
+                self.chunk_list.try_allocate_payload(chunk, compute_device)
                 chunk.pin()
                 chunk.num_in_compute = 0
                 for param in chunk.params:
-                    param.ps_attr.set_state(TensorState.HOLD)
+                    param.ps_attr.state = TensorState.HOLD
 
             allgather_payload_buff.append(chunk.payload)
 
@@ -237,7 +237,6 @@ class PatrickStarClient(object):
 
         chunk_id = param.ps_attr.info.chunk_id
         if get_world_size() > 1:
-            # 1.2 Fetch the remote chunks to local.
             self.fetch_remote_chunks(
                 self.chunk_list[chunk_id].comm_info.group,
                 compute_device,
@@ -256,15 +255,15 @@ class PatrickStarClient(object):
         # 2. Locate the param on the chunk.
         chunk = self.chunk_list[chunk_id]
         info = param.ps_attr.info
-        start_offset = info.start_offset
         numel = param.ps_attr.numel
         shape = param.ps_attr.shape
+        start_offset = info.start_offset
 
         param.data = chunk.payload.narrow(0, start_offset, numel).view(shape)
 
         # Change the state of param to COMPUTE.
         chunk.num_in_compute += 1
-        param.ps_attr.set_state(TensorState.COMPUTE)
+        param.ps_attr.state = TensorState.COMPUTE
 
     def release(self, param):
         r"""Release the param in standalone environment.
@@ -277,9 +276,9 @@ class PatrickStarClient(object):
         chunk_id = param.ps_attr.info.chunk_id
         chunk = self.chunk_list[chunk_id]
         assert chunk.get_state() != TensorState.RELEASED
-        if param.ps_attr.get_state() == TensorState.COMPUTE:
+        if param.ps_attr.state == TensorState.COMPUTE:
             chunk.num_in_compute -= 1
-        param.ps_attr.set_state(TensorState.HOLD)
+        param.ps_attr.state = TensorState.HOLD
 
         # NOTE(jiaruifang) device must be the same as the origin param.
         # Or it will affect hook of param.grad_fn.next_functions[0][0].
@@ -301,34 +300,3 @@ class PatrickStarClient(object):
             overall_chunk_num += 1
         overall_utilization_ratio /= overall_chunk_num
         return overall_size, overall_utilization_ratio
-
-    def display_chunk_info(self):
-        logger.debug("Print chunk list info.")
-
-        overall_size = 0
-        overall_chunk_num = 0
-        overall_utilization_ratio = 0.0
-        max_utilization_ratio = 0
-        for chunk in self.chunk_list.chunks:
-            logger.debug(
-                f"Chunk id {chunk.chunk_id}, state {chunk.get_state()}, "
-                f"comm info {chunk.comm_info}, "
-                f"capacity {chunk.capacity / 1024 / 1024} M elems, "
-                f"device {chunk.get_device()}"
-            )
-            last_used_pos = chunk.end_pos
-            logger.debug(
-                f"chunk used {last_used_pos/1024/1024} M elem, "
-                f"{last_used_pos/chunk.capacity * 100} %"
-            )
-            cur_util = last_used_pos / chunk.capacity
-            max_utilization_ratio = max(cur_util, max_utilization_ratio)
-            overall_utilization_ratio += cur_util
-            overall_size += chunk.get_chunk_space()
-            overall_chunk_num += 1
-
-        log_dist(f"OVERALL CHUNK SIZE {overall_size / 1024 / 1024 / 1024} GB")
-        log_dist(
-            f"OVERALL UTILIZATION {overall_utilization_ratio / overall_chunk_num * 100} %"
-        )
-        log_dist(f"MAX UTILIZATION {max_utilization_ratio * 100} %")

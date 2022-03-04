@@ -27,10 +27,10 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 # SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-from .chunk_data import Chunk
+from .chunk import Chunk
 from .chunk_list import ChunkList
 from .client import PatrickStarClient
 from .const import ChunkState, TensorState, TrainingStage
 from .hook import setup_patrickstar_hooks
-from .parameter import PSParameter, register_param, is_param_registered, ParamType
+from .parameter import PSParameter, register_param, is_registered, ParamType
 from .preprocess import PSPreProcessCtx, torch_scope

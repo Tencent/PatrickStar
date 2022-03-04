@@ -32,7 +32,7 @@ import functools
 import torch
 
 from patrickstar.core import PatrickStarClient
-from patrickstar.core import register_param, is_param_registered, ParamType
+from patrickstar.core import register_param, is_registered, ParamType
 from patrickstar.manager import _runtime_config
 from patrickstar.utils import log_dist, get_rank, get_world_size
 from patrickstar.utils import see_memory_usage
@@ -197,7 +197,7 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
             if chunk.is_local():
                 for param in chunk.params:
                     if not self.not_init:
-                        if is_param_registered(param):
+                        if is_registered(param):
                             init_data = param.data
                             self.client.access(param, torch.device("cpu:0"))
                             param.data.copy_(init_data)

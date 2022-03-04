@@ -31,7 +31,7 @@ import unittest
 
 import torch
 from patrickstar.core.eviction_policy import LatestAccessChunkEvictionPolicy
-from patrickstar.core.chunk_data import Chunk
+from patrickstar.core.chunk import Chunk
 from patrickstar.core.memtracer import RuntimeMemTracer
 
 

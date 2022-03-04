@@ -32,7 +32,7 @@ from typing import List
 
 import torch
 
-from patrickstar.core.chunk_data import Chunk
+from patrickstar.core.chunk import Chunk
 from patrickstar.core.const import ChunkState
 from patrickstar.core.eviction_policy import ChunkEvictionPolicyBase
 from patrickstar.core.memtracer import RuntimeMemTracer
@@ -92,7 +92,7 @@ class ChunkList(object):
                 mem_used += chunk.get_payload_space()
         return mem_used
 
-    def try_best_allocate_payload(self, chunk: Chunk, compute_device):
+    def try_allocate_payload(self, chunk: Chunk, compute_device):
         """
         Try our best to allocate payload for chunk.
         First free up chunk size space on the target device.
@@ -130,7 +130,7 @@ class ChunkList(object):
                 f"need to allocate {payload_space} B memory on {compute_device}"
             )
             # Allocating a chunk on compute_device.
-            self.try_best_allocate_payload(chunk, compute_device)
+            self.try_allocate_payload(chunk, compute_device)
             return
         elif chunk.get_device().type != compute_device.type:
             self.prepare_device(compute_device, payload_space)

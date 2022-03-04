@@ -27,14 +27,14 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 # SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-from patrickstar.core.parameter import is_param_registered
+from patrickstar.core.parameter import is_registered
 
 
 def get_ps_model_size(model):
     numel = 0
     param_cnt = 0
     for _, param in model.named_parameters(recurse=True):
-        if is_param_registered(param):
+        if is_registered(param):
             numel += param.ps_attr.numel
         else:
             numel += param.numel()

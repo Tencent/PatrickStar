@@ -222,7 +222,7 @@ class FP16Adam(torch.optim.Optimizer):
             reduce_grad(param, self.client)
             if param.ps_attr.param_type == ParamType.TORCH_BASED:
                 continue
-            if param.ps_attr.get_state() == TensorState.COMPUTE:
+            if param.ps_attr.state == TensorState.COMPUTE:
                 self.client.release(param)
 
     @torch.no_grad()
