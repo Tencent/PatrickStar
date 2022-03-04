@@ -225,7 +225,7 @@ class FP16Adam(torch.optim.Optimizer):
                 self.client.release(param)
                 flag = True
         if flag:
-            self.client.mem_tracer.trace_memory()
+            self.client.mem_tracer.trace()
 
     @torch.no_grad()
     def step(self, closure=None):

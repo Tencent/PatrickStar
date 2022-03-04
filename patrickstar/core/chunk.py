@@ -33,7 +33,7 @@ from patrickstar.core.comm import CommInfo
 from patrickstar.core.const import ChunkState
 from patrickstar.core.memtracer import RuntimeMemTracer
 from patrickstar.core.parameter import TensorInfo
-from patrickstar.utils import logger, get_rank, getsizeof, global_timer
+from patrickstar.utils import get_rank, getsizeof
 
 
 class Chunk:
@@ -67,7 +67,6 @@ class Chunk:
         self.memory_tracer = memory_tracer
 
         self.payload = None
-        self._time_profile = True
         self._pin_flag = False
 
         self.end_pos = 0
@@ -169,23 +168,8 @@ class Chunk:
         Args:
             target_device: :class:`torch.device`.
         """
-        if self.get_device() is None:
-            logger.warning(f"chunk move payload None to {target_device}")
-            return
-        if self.get_device() == target_device:
-            return
-        if self._time_profile:
-            if target_device.type == "cuda":
-                global_timer.start_profile("chunk_cpu_gpu_move")
-            else:
-                global_timer.start_profile("chunk_gpu_cpu_move")
         src_device = self.get_device()
-
-        logger.debug(
-            f"move chunk {self.chunk_id}, which has {self.get_chunk_space() / 1024 ** 2} MB, "
-            f"from {src_device} to {target_device}, "
-            f"used mem {self.memory_tracer.used_chunk_mem(target_device.type) / 1024 ** 2} MB"
-        )
+        assert src_device is not None and src_device != target_device
 
         if target_device.type == "cpu":
             self.payload = torch.empty(
@@ -209,9 +193,3 @@ class Chunk:
             self.get_payload_space(),
             self.payload.is_pinned(),
         )
-
-        if self._time_profile:
-            if target_device.type == "cuda":
-                global_timer.finish_profile("chunk_cpu_gpu_move")
-            elif target_device.type == "cpu":
-                global_timer.finish_profile("chunk_gpu_cpu_move")

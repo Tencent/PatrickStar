@@ -34,7 +34,7 @@ from patrickstar.core.const import ChunkState, TensorState
 from patrickstar.core.parameter import register_param, is_registered, ParamType
 from patrickstar.core.eviction_policy import LRUEvictionPolicy
 from patrickstar.core.memtracer import RuntimeMemTracer
-from patrickstar.utils import logger, get_world_size, get_rank, global_timer, Metronome
+from patrickstar.utils import logger, get_world_size, get_rank, Metronome
 
 
 class PatrickStarClient:
@@ -71,7 +71,6 @@ class PatrickStarClient:
             self.eviction_policy,
             self.chunk_size,
         )
-        self._time_profile = True
 
     # expose APIs from metrome ti client
     def training_stage(self):
@@ -87,10 +86,7 @@ class PatrickStarClient:
         self.metronome.is_warmup = flag
 
     def start_mem_tracer(self):
-        """
-        Memory tracer start to work!
-        """
-        self.mem_tracer.start_train(chunk_size=self.chunk_size)
+        self.mem_tracer.start(chunk_size=self.chunk_size)
 
     def new_dummy_chunk(self):
         r"""Append a dummy chunk to the corresponding chunk_list"""
@@ -153,13 +149,11 @@ class PatrickStarClient:
         local_chunk_id = comm_group.elements[get_rank()]
         local_chunk = self.chunk_list[local_chunk_id]
 
-        if self._time_profile:
-            global_timer.start_profile("CLIENT_fetch_remote_chunks")
-
         # Use collective communication to achieve the most efficient communication.
         # However, it is memory consumping. world_size chunks on GPU simutaneously.
         if self.is_warmup():
             self.eviction_policy.trace_access(local_chunk_id, compute_device)
+
         self.chunk_list.access_chunk(local_chunk, compute_device)
         local_chunk.pin()
         allgather_payload_buff = []
@@ -174,9 +168,6 @@ class PatrickStarClient:
 
             allgather_payload_buff.append(chunk.payload)
 
-        if self._time_profile:
-            global_timer.start_profile("CLIENT_fetch_remote_chunks_allgather")
-
         torch.distributed.all_gather(
             allgather_payload_buff,
             local_chunk.payload,
@@ -185,10 +176,6 @@ class PatrickStarClient:
 
         for chunk_id in comm_group.elements:
             self.chunk_list[chunk_id].unpin()
-
-        if self._time_profile:
-            global_timer.finish_profile("CLIENT_fetch_remote_chunks_allgather")
-        global_timer.finish_profile("CLIENT_fetch_remote_chunks")
 
     def access_dist(self, param, compute_device):
         r"""Attach data to param.data, fetch from remote if chunk is released."""
@@ -245,16 +232,3 @@ class PatrickStarClient:
         # NOTE(jiaruifang) device must be the same as the origin param.
         # Or it will affect hook of param.grad_fn.next_functions[0][0].
         param.data = torch.tensor([], dtype=param.ps_attr.dtype, device=param.device)
-
-    def get_overall_chunk_size(self):
-        """
-        Return the overall size of all chunks and
-        the overall chunk utilization excluding fragments.
-        """
-        overall_size = 0
-        overall_utilization_ratio = 0.0
-        for chunk in self.chunk_list.chunks:
-            overall_utilization_ratio += chunk.end_pos / chunk.capacity
-            overall_size += chunk.get_chunk_space()
-        overall_utilization_ratio /= len(self.chunk_list)
-        return overall_size, overall_utilization_ratio

@@ -146,7 +146,7 @@ class PatrickStarEngine(torch.nn.Module):
             self.client.set_warmup(True)
         if self.iteration_cnt_ == 1:
             self.client.set_warmup(False)
-            self.client.mem_tracer.close_tracer()
+            self.client.mem_tracer.end()
 
         global_timer.start_profile("FWD")
 
