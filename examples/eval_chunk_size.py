@@ -126,7 +126,6 @@ def get_param_used_chunk_size(args, config, model_func):
     try:
         with PSPreProcessCtx(
             client=client,
-            dtype=torch.float,
             release_after_init=args.release_after_init,
             not_init=True,
         ):

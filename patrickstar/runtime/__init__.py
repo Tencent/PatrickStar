@@ -77,7 +77,6 @@ def initialize_engine(model_func, local_rank, config=None, client=None):
         log_dist("begin initialize the model parameters...")
         with PSPreProcessCtx(
             client=client,
-            dtype=torch.float,
             release_after_init=release_after_init,
         ):
             model = model_func()

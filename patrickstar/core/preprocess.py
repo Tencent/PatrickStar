@@ -34,45 +34,8 @@ import torch
 from patrickstar.core import PatrickStarClient
 from patrickstar.core import register_param, is_param_registered, ParamType
 from patrickstar.manager import _runtime_config
-from patrickstar.utils import log_dist, print_rank, get_rank, get_world_size
+from patrickstar.utils import log_dist, get_rank, get_world_size
 from patrickstar.utils import see_memory_usage
-
-_orig_torch_empty = torch.empty
-
-
-def empty_cpu_tensor_half(*size, **kwargs):
-    if "device" not in kwargs.keys():
-        kwargs["device"] = torch.device("cpu:0")
-    tensor = _orig_torch_empty(*size, **kwargs)
-    if tensor.is_floating_point():
-        return tensor.half()
-    else:
-        return tensor
-
-
-def new_cpu_tensor_half(cls, *args):
-    device = torch.device("cpu:0")
-    tensor = torch.ones((1, 1), device=device).new_empty(*args).half()
-    print_rank(
-        f"During model initialization, a new tensor of shape {tensor.shape} is created."
-    )
-    if tensor.is_floating_point():
-        return tensor.half()
-    else:
-        return tensor
-
-
-def empty_cpu_tensor(*size, **kwargs):
-    if "device" not in kwargs.keys():
-        kwargs["device"] = torch.device("cpu:0")
-    tensor = _orig_torch_empty(*size, **kwargs)
-    return tensor
-
-
-def new_cpu_tensor(cls, *args):
-    device = torch.device("cpu:0")
-    tensor = torch.ones((1, 1), device=device).new_empty(*args)
-    return tensor
 
 
 @contextlib.contextmanager
@@ -88,26 +51,12 @@ def torch_scope(do_allreduce=True):
 # Inserts _post_init_method at the end of init method
 # for all sub classes of torch.nn.Module
 class InsertPostInitMethodToModuleSubClasses(object):
-    def __init__(self, config=None, dtype=None):
-        self._set_dtype(config, dtype)
-        assert self.dtype in [
-            torch.half,
-            torch.float,
-        ], f"Invalid data type {self.dtype}, allowed values are [torch.half, torch.float]"
-
     def __enter__(self):
         def preprocess_after(f):
             @functools.wraps(f)
             def wrapper(module, *args, **kwargs):
-                print_rank(
-                    f"Before initializing {module.__class__.__name__}", force=False
-                )
                 f(module, *args, **kwargs)
                 self._post_init_method(module)
-                print_rank(
-                    f"After initializing followed by post init for {module.__class__.__name__}",
-                    force=False,
-                )
 
             return wrapper
 
@@ -126,16 +75,9 @@ class InsertPostInitMethodToModuleSubClasses(object):
         torch.nn.modules.module.Module._old_init_subclass = (
             torch.nn.modules.module.Module.__init_subclass__
         )
-        torch.Tensor.__old_new__ = torch.Tensor.__new__
 
         # Replace .__init__() for future subclasses of torch.nn.Module
         torch.nn.modules.module.Module.__init_subclass__ = classmethod(_init_subclass)
-        if self.dtype == torch.half:
-            torch.Tensor.__new__ = new_cpu_tensor_half
-            torch.empty = empty_cpu_tensor_half
-        else:
-            torch.Tensor.__new__ = new_cpu_tensor
-            torch.empty = empty_cpu_tensor
 
         self._pre_context_exec()
 
@@ -152,9 +94,6 @@ class InsertPostInitMethodToModuleSubClasses(object):
             torch.nn.modules.module.Module._old_init_subclass
         )
 
-        torch.Tensor.__new__ = torch.Tensor.__old_new__
-        torch.empty = _orig_torch_empty
-
         self._post_context_exec()
         # Now that we cleaned up the metaclass injection, raise the exception.
         if exc_type is not None:
@@ -170,12 +109,6 @@ class InsertPostInitMethodToModuleSubClasses(object):
     def _post_context_exec(self):
         pass
 
-    def _set_dtype(self, ds_config, dtype):
-        if dtype is None:
-            self.dtype = torch.half
-        else:
-            self.dtype = dtype
-
 
 class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
     """
@@ -186,10 +119,8 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
         self,
         client: PatrickStarClient,
         release_after_init=False,
-        dtype=None,
         not_init=False,
     ):
-        super().__init__(config=None, dtype=dtype)
         self.rank = get_rank()
         self.world_size = get_world_size()
         self.client = client
@@ -262,7 +193,6 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
         """
         log_dist("Post Model Init Context")
 
-        chunk_num = 0
         for chunk in self.client.chunk_list.chunks:
             if chunk.is_local():
                 for param in chunk.params:
@@ -278,14 +208,12 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
                     # param tensor here.
                     # When release_after_init is False, this will help cast dtype of
                     # remote params to torch.half (See the NOTE below).
-
                     param.data = torch.tensor(
                         [], dtype=torch.float, device=param.device
                     )
-            chunk_num += 1
 
+        num_chunk = len(self.client.chunk_list)
         world_size = get_world_size()
-        log_dist(f"Param fp16 chunk num {chunk_num}")
-        while chunk_num % world_size != 0:
+        while num_chunk % world_size != 0:
             self.client.new_dummy_chunk()
-            chunk_num += 1
+            num_chunk += 1
