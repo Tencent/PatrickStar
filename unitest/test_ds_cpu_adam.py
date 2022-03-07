@@ -46,11 +46,8 @@ def torch_adam_update(
     grad,
     exp_avg,
     exp_avg_sq,
-    loss_scale,
     use_adamw,
 ):
-    if loss_scale > 0:
-        grad.div_(loss_scale)
     bias_correction1 = 1 - beta1 ** step
     bias_correction2 = 1 - beta2 ** step
 
@@ -85,7 +82,6 @@ class TestAccess(unittest.TestCase):
         weight_decay,
         shape,
         grad_dtype,
-        loss_scale,
         use_adamw,
         cpu_adam_op,
     ):
@@ -93,8 +89,6 @@ class TestAccess(unittest.TestCase):
         p_data = torch.rand(shape)
         p_data_copy = p_data.clone()
         p_grad = torch.rand(shape, dtype=grad_dtype)
-        if loss_scale > 0:
-            p_grad.mul_(loss_scale)
         p_grad_copy = p_grad.clone().float()
         exp_avg = torch.rand(shape)
         exp_avg_copy = exp_avg.clone()
@@ -115,7 +109,6 @@ class TestAccess(unittest.TestCase):
             p_grad.view(-1),  # fp32 grad
             exp_avg.view(-1),
             exp_avg_sq.view(-1),
-            loss_scale,
         )
 
         torch_adam_update(
@@ -130,13 +123,8 @@ class TestAccess(unittest.TestCase):
             p_grad_copy,  # fp32 grad
             exp_avg_copy,
             exp_avg_sq_copy,
-            loss_scale,
             use_adamw,
         )
-
-        # torch_adam_update update the grad inplace.
-        if loss_scale > 0:
-            p_grad.div_(loss_scale)
 
         data_diff = torch.max(torch.abs(p_data_copy - p_data))
         self.assertLess(
@@ -176,20 +164,18 @@ class TestAccess(unittest.TestCase):
                                 for beta2 in [0.999]:
                                     for weight_decay in [0.001]:
                                         for grad_dtype in [torch.float, torch.half]:
-                                            for loss_scale in [-1, 2 ** 5]:
-                                                self.check_res(
-                                                    step,
-                                                    lr,
-                                                    eps,
-                                                    beta1,
-                                                    beta2,
-                                                    weight_decay,
-                                                    shape,
-                                                    grad_dtype,
-                                                    loss_scale,
-                                                    use_adamw,
-                                                    cpu_adam_op,
-                                                )
+                                            self.check_res(
+                                                step,
+                                                lr,
+                                                eps,
+                                                beta1,
+                                                beta2,
+                                                weight_decay,
+                                                shape,
+                                                grad_dtype,
+                                                use_adamw,
+                                                cpu_adam_op,
+                                            )
 
 
 if __name__ == "__main__":

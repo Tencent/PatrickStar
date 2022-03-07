@@ -37,7 +37,8 @@ from patrickstar.core import (
 from patrickstar.ops import FP16Adam
 from patrickstar.utils import log_dist, global_timer
 from patrickstar.core.hook import setup_patrickstar_hooks
-
+from patrickstar.core.const import TensorState
+from patrickstar.core.hook import reduce_grad
 from .checkpoint import state_dict, load_state_dict
 
 
@@ -157,6 +158,19 @@ class PatrickStarEngine(torch.nn.Module):
         global_timer.finish_profile("FWD")
         return loss
 
+    def release_last(self):
+        # the starting module would not trigger post_module_backward hook
+        flag = False
+        for param in self.client.module.parameters():
+            reduce_grad(param, self.client)
+            if param.ps_attr.param_type == ParamType.TORCH_BASED:
+                continue
+            if param.ps_attr.state == TensorState.COMPUTE:
+                self.client.release(param)
+                flag = True
+        if flag:
+            self.client.mem_tracer.trace()
+
     def backward(self, loss, scaler=None):
         r"""Execute backward pass on the loss
         Arguments:
@@ -169,8 +183,26 @@ class PatrickStarEngine(torch.nn.Module):
             scaler.scale(loss).backward()
         else:
             loss.backward()
+        self.release_last()
         self.iteration_cnt_ += 1
         global_timer.finish_profile("BWD")
+
+    def step(self, scaler=None):
+        for group in self.optimizer.param_groups:
+            for p in group["params"]:
+                if p.ps_attr.grad is not None:
+                    self.optimizer.client.access(p, torch.device("cpu:0"))
+                    p.grad = p.ps_attr.grad
+                    p.ps_attr.grad = None
+        if scaler is not None:
+            scaler.step(self.optimizer)
+        else:
+            self.optimizer.step()
+        for group in self.optimizer.param_groups:
+            for p in group["params"]:
+                if p.grad is not None:
+                    self.optimizer.client.release(p)
+                    p.grad = None
 
     def state_dict(self, destination=None, prefix="", keep_vars=False):
         return state_dict(

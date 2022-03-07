@@ -228,7 +228,10 @@ class PatrickStarClient:
         if param.ps_attr.state == TensorState.COMPUTE:
             chunk.num_in_compute -= 1
         param.ps_attr.state = TensorState.HOLD
-
         # NOTE(jiaruifang) device must be the same as the origin param.
         # Or it will affect hook of param.grad_fn.next_functions[0][0].
         param.data = torch.tensor([], dtype=param.ps_attr.dtype, device=param.device)
+
+        if chunk.get_state() == ChunkState.HOLD:
+            if chunk.get_device().type == "cuda":
+                chunk.move(torch.device("cpu:0"))

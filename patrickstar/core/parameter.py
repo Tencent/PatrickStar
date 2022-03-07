@@ -83,6 +83,8 @@ class PSParameter:
         else:
             self.id = -1
 
+        self.grad = None
+
         # Whether the param belongs to local chunk.
         self._is_local = True
 

@@ -99,31 +99,44 @@ def load_params(module, client, name):
 # release submodule
 def unload_params(module, client, name):
     for param in module.parameters(recurse=False):
-        if param.ps_attr.param_type == ParamType.TORCH_BASED:
-            continue
-        client.release(param)
+        if param.ps_attr.param_type == ParamType.CHUNK_BASED:
+            client.release(param)
 
 
 def reduce_grad(param, client):
+    # this may not be correct...
+    if param.ps_attr.grad is not None:
+        return
     chunk_id = param.ps_attr.info.chunk_id
     chunk = client.chunk_list[chunk_id]
-    dst = chunk.comm_info.offset
     # Here we use gloo backend group for the cpu tensors (embedding).
 
     world_size = get_world_size()
     if world_size > 1:
         global_timer.start_profile("HOOK_torch_allreduce")
-        torch.distributed.reduce(
-            param.grad,
-            dst,
-            op=torch.distributed.ReduceOp.SUM,
-            async_op=False,
-        )
-        if dst == get_rank():
-            param.grad /= world_size
+        if param.ps_attr.param_type == ParamType.CHUNK_BASED:
+            dst = chunk.comm_info.offset
+            torch.distributed.reduce(
+                param.grad,
+                dst,
+                op=torch.distributed.ReduceOp.SUM,
+                async_op=False,
+            )
+            if dst == get_rank():
+                param.grad /= world_size
+            else:
+                param.grad = None
         else:
-            param.grad = None
+            torch.distributed.all_reduce(
+                param.grad,
+                op=torch.distributed.ReduceOp.SUM,
+                async_op=False,
+            )
+            param.grad /= world_size
         global_timer.finish_profile("HOOK_torch_allreduce")
+    if param.grad is not None:
+        param.ps_attr.grad = param.grad.to(torch.device("cpu:0"))
+        param.grad = None
     logger.debug(f"rank {get_rank()} allreduce grad {param.ps_attr.name}")
 
 

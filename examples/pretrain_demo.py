@@ -135,18 +135,20 @@ def test_transformer_model_helper(
             loss = output[0]
             if dist_plan == "patrickstar":
                 model.backward(loss, scaler)
+                model.step(scaler)
             else:
                 scaler.scale(loss).backward()
-            scaler.step(optimizer)
+                scaler.step(optimizer)
             scaler.update()
         else:
             output = model(input_ids=batch[0], labels=batch[1])
             loss = output[0]
             if dist_plan == "patrickstar":
                 model.backward(loss)
+                model.step()
             else:
                 loss.backward()
-            optimizer.step()
+                optimizer.step()
 
         print(f"LOSS of step {n}: {loss.item()}")
         loss_res.append(loss.item())
@@ -202,7 +204,7 @@ if __name__ == "__main__":
             is_ckp=use_ckp,
             is_fp16=use_fp16,
             dist_plan=dist_plan,
-            num_steps=20,
+            num_steps=5,
         )
         print("*" * 20 + " LOSS " + "*" * 20)
         print(f"{loss_list}")

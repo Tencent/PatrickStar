@@ -33,61 +33,10 @@ from typing import List
 
 import torch
 
-from patrickstar.core.const import TensorState, TrainingStage
-from patrickstar.core.hook import reduce_grad
-from patrickstar.core.parameter import ParamType
+from patrickstar.core.const import TrainingStage
 from patrickstar.utils import global_timer
 
 from .op_builder.cpu_adam import CPUAdamBuilder
-
-
-def torch_adam(
-    params: List[torch.Tensor],
-    grads: List[torch.Tensor],
-    exp_avgs: List[torch.Tensor],
-    exp_avg_sqs: List[torch.Tensor],
-    max_exp_avg_sqs: List[torch.Tensor],
-    state_steps: List[int],
-    *,
-    amsgrad: bool,
-    beta1: float,
-    beta2: float,
-    lr: float,
-    weight_decay: float,
-    eps: float,
-    maximize: bool,
-):
-    r"""Functional API that performs Adam algorithm computation.
-
-    See :class:`~torch.optim.Adam` for details.
-    """
-
-    for i, param in enumerate(params):
-
-        grad = grads[i] if not maximize else -grads[i]
-        exp_avg = exp_avgs[i]
-        exp_avg_sq = exp_avg_sqs[i]
-        step = state_steps[i]
-
-        bias_correction1 = 1 - beta1 ** step
-        bias_correction2 = 1 - beta2 ** step
-
-        if weight_decay != 0:
-            grad = grad.add(param, alpha=weight_decay)
-
-        # Decay the first and second moment running average coefficient
-        exp_avg.mul_(beta1).add_(grad, alpha=1 - beta1)
-        exp_avg_sq.mul_(beta2).addcmul_(grad, grad.conj(), value=1 - beta2)
-        if amsgrad:
-            # Maintains the maximum of all 2nd moment running avg. till now
-            torch.maximum(max_exp_avg_sqs[i], exp_avg_sq, out=max_exp_avg_sqs[i])
-            # Use the max. for normalizing running avg. of gradient
-            denom = (max_exp_avg_sqs[i].sqrt() / math.sqrt(bias_correction2)).add_(eps)
-        else:
-            denom = (exp_avg_sq.sqrt() / math.sqrt(bias_correction2)).add_(eps)
-
-        step_size = lr / bias_correction1
-        param.addcdiv_(exp_avg, denom, value=-step_size)
 
 
 class FP16Adam(torch.optim.Optimizer):
@@ -139,10 +88,10 @@ class FP16Adam(torch.optim.Optimizer):
 
                 # Only create the local optimizer state params.
                 state["exp_avg"] = torch.zeros(
-                    p.ps_attr.shape, device=torch.device("cuda:0")
+                    p.ps_attr.shape, device=torch.device("cpu:0")
                 )
                 state["exp_avg_sq"] = torch.zeros(
-                    p.ps_attr.shape, device=torch.device("cuda:0")
+                    p.ps_attr.shape, device=torch.device("cpu:0")
                 )
 
         self.opt_id = FP16Adam.optimizer_id
@@ -175,57 +124,91 @@ class FP16Adam(torch.optim.Optimizer):
         for group in self.param_groups:
             group.setdefault("amsgrad", False)
 
-    def ds_cpu_adam_update(
+    def ds_cpu_adam(
         self,
-        data,
-        grad,
-        momentum,
-        variance,
-        step,
-        lr,
-        beta1,
-        beta2,
-        eps,
-        weight_decay,
-        bias_correction,
+        params: List[torch.Tensor],
+        grads: List[torch.Tensor],
+        exp_avgs: List[torch.Tensor],
+        exp_avg_sqs: List[torch.Tensor],
+        max_exp_avg_sqs: List[torch.Tensor],
+        state_steps: List[int],
+        *,
+        amsgrad: bool,
+        beta1: float,
+        beta2: float,
+        lr: float,
+        weight_decay: float,
+        eps: float,
+        maximize: bool,
     ):
-        """
-        This function will update the data, momentum and variance inplace.
-        """
-        assert data.device.type == "cpu"
-        assert grad.device.type == "cpu"
-        assert momentum.device.type == "cpu"
-        assert variance.device.type == "cpu"
 
-        # Inputs of DS CPU Adam need to be flattened.
-        self.ds_opt_adam.adam_update(
-            self.opt_id,
-            step,
-            lr,
-            beta1,
-            beta2,
-            eps,
-            weight_decay,
-            bias_correction,
-            data.view(-1),
-            grad.view(-1),
-            momentum.view(-1),
-            variance.view(-1),
-            -1,
-        )
+        for i, param in enumerate(params):
+            # Inputs of DS CPU Adam need to be flattened.
+            self.ds_opt_adam.adam_update(
+                self.opt_id,
+                state_steps[i],
+                lr,
+                beta1,
+                beta2,
+                eps,
+                weight_decay,
+                True,
+                param.view(-1),
+                grads[i].view(-1),
+                exp_avgs[i].view(-1),
+                exp_avg_sqs[i].view(-1),
+            )
 
-    def release_last(self):
-        # the starting module would not trigger post_module_backward hook
-        flag = False
-        for param in self.client.module.parameters():
-            reduce_grad(param, self.client)
-            if param.ps_attr.param_type == ParamType.TORCH_BASED:
-                continue
-            if param.ps_attr.state == TensorState.COMPUTE:
-                self.client.release(param)
-                flag = True
-        if flag:
-            self.client.mem_tracer.trace()
+    def torch_adam(
+        self,
+        params: List[torch.Tensor],
+        grads: List[torch.Tensor],
+        exp_avgs: List[torch.Tensor],
+        exp_avg_sqs: List[torch.Tensor],
+        max_exp_avg_sqs: List[torch.Tensor],
+        state_steps: List[int],
+        *,
+        amsgrad: bool,
+        beta1: float,
+        beta2: float,
+        lr: float,
+        weight_decay: float,
+        eps: float,
+        maximize: bool,
+    ):
+        r"""Functional API that performs Adam algorithm computation.
+
+        See :class:`~torch.optim.Adam` for details.
+        """
+
+        for i, param in enumerate(params):
+
+            grad = grads[i] if not maximize else -grads[i]
+            exp_avg = exp_avgs[i]
+            exp_avg_sq = exp_avg_sqs[i]
+            step = state_steps[i]
+
+            bias_correction1 = 1 - beta1 ** step
+            bias_correction2 = 1 - beta2 ** step
+
+            if weight_decay != 0:
+                grad = grad.add(param, alpha=weight_decay)
+
+            # Decay the first and second moment running average coefficient
+            exp_avg.mul_(beta1).add_(grad, alpha=1 - beta1)
+            exp_avg_sq.mul_(beta2).addcmul_(grad, grad.conj(), value=1 - beta2)
+            if amsgrad:
+                # Maintains the maximum of all 2nd moment running avg. till now
+                torch.maximum(max_exp_avg_sqs[i], exp_avg_sq, out=max_exp_avg_sqs[i])
+                # Use the max. for normalizing running avg. of gradient
+                denom = (max_exp_avg_sqs[i].sqrt() / math.sqrt(bias_correction2)).add_(
+                    eps
+                )
+            else:
+                denom = (exp_avg_sq.sqrt() / math.sqrt(bias_correction2)).add_(eps)
+
+            step_size = lr / bias_correction1
+            param.addcdiv_(exp_avg, denom, value=-step_size)
 
     @torch.no_grad()
     def step(self, closure=None):
@@ -236,7 +219,6 @@ class FP16Adam(torch.optim.Optimizer):
                 and returns the loss.
         """
         global_timer.start_profile("ADAM")
-        self.release_last()
 
         self.client.set_training_stage(TrainingStage.ADAM)
 
@@ -258,10 +240,6 @@ class FP16Adam(torch.optim.Optimizer):
 
             for p in group["params"]:
                 if p.grad is not None:
-                    self.client.access(p, torch.device("cuda:0"))
-
-            for p in group["params"]:
-                if p.grad is not None:
                     params_with_grad.append(p.data)
                     if p.grad.is_sparse:
                         raise RuntimeError(
@@ -280,7 +258,7 @@ class FP16Adam(torch.optim.Optimizer):
                     # record the step after step update
                     state_steps.append(state["step"])
 
-            torch_adam(
+            self.ds_cpu_adam(
                 params_with_grad,
                 grads,
                 exp_avgs,
@@ -295,10 +273,6 @@ class FP16Adam(torch.optim.Optimizer):
                 eps=group["eps"],
                 maximize=False,
             )
-
-            for p in group["params"]:
-                if p.grad is not None:
-                    self.client.release(p)
 
         global_timer.finish_profile("ADAM")
         return loss

@@ -75,7 +75,9 @@ class AsyncMemoryMonitor:
         while self.keep_measuring:
             max_usage = max(
                 max_usage,
-                get_sys_memory_used(torch.cuda.current_device()),
+                get_sys_memory_used(
+                    torch.device(f"cuda:{torch.cuda.current_device()}")
+                ),
             )
             time.sleep(self.interval)
 
