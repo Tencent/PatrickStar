@@ -43,7 +43,6 @@ class Chunk:
         chunk_id: int,
         memory_tracer: RuntimeMemTracer,
         local_rank: int = 0,
-        is_dummy: bool = False,
     ):
         r"""
         Chunk is the minimal unit of the data transfer.
@@ -56,14 +55,12 @@ class Chunk:
             capacity: int. The maximum number of elements in the chunk.
             chunk_id: int.
             local_rank: int.
-            is_dummy: bool.
         """
         self.chunk_id = chunk_id
         self.comm_info = CommInfo(chunk_id=chunk_id)
         # payload numel does not equal to capacity. payload can be None.
         self.capacity = capacity
         self.local_rank = local_rank
-        self._is_dummy = is_dummy
         self.memory_tracer = memory_tracer
 
         self.payload = None
@@ -73,9 +70,6 @@ class Chunk:
         self.params = []
         # the number of params in compute state
         self.num_in_compute = 0
-
-    def is_dummy(self):
-        return self._is_dummy
 
     def is_local(self):
         return get_rank() == self.comm_info.offset
@@ -172,13 +166,14 @@ class Chunk:
         assert src_device is not None and src_device != target_device
 
         if target_device.type == "cpu":
+            tmp = self.payload
             self.payload = torch.empty(
                 self.payload.shape,
                 dtype=self.payload.dtype,
                 device="cpu:0",
                 pin_memory=True,
             )
-            self.payload.copy_(self.payload)
+            self.payload.copy_(tmp)
         elif target_device.type == "cuda":
             self.payload = self.payload.pin_memory()
             self.payload = self.payload.to(target_device)

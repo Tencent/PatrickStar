@@ -128,27 +128,34 @@ def test_transformer_model_helper(
         log_dist(f"Start Step {n} with {dist_plan}...")
         step_start_time = time.time()
 
-        optimizer.zero_grad()
         if is_fp16:
             with torch.cuda.amp.autocast():
                 output = model(input_ids=batch[0], labels=batch[1])
             loss = output[0]
             if dist_plan == "patrickstar":
-                model.backward(loss, scaler)
-                model.step(scaler)
+                # TODO(zilinzhu) fix here when scaler support unscaling grad on CPU
+                model.backward(loss)
+                model.step()
+                # model.backward(loss, scaler)
+                # model.step(scaler)
+                # scaler.update()
+                model.zero_grad()
             else:
                 scaler.scale(loss).backward()
                 scaler.step(optimizer)
-            scaler.update()
+                scaler.update()
+                optimizer.zero_grad()
         else:
             output = model(input_ids=batch[0], labels=batch[1])
             loss = output[0]
             if dist_plan == "patrickstar":
                 model.backward(loss)
                 model.step()
+                model.zero_grad()
             else:
                 loss.backward()
                 optimizer.step()
+                optimizer.zero_grad()
 
         print(f"LOSS of step {n}: {loss.item()}")
         loss_res.append(loss.item())
@@ -204,7 +211,7 @@ if __name__ == "__main__":
             is_ckp=use_ckp,
             is_fp16=use_fp16,
             dist_plan=dist_plan,
-            num_steps=5,
+            num_steps=3,
         )
         print("*" * 20 + " LOSS " + "*" * 20)
         print(f"{loss_list}")
@@ -214,7 +221,7 @@ if __name__ == "__main__":
             "Running to check result. This will use Bert model and batch size is 2."
         )
 
-        args.model_name = "Bert"
+        args.model_name = "Tiny"
         args.batch_size = 2
         NUM_STEPS = 10
 

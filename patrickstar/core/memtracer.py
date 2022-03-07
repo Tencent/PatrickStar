@@ -38,7 +38,6 @@ from patrickstar.utils import (
     get_sys_memory_used,
     get_local_world_size,
     logger,
-    get_world_size,
 )
 from concurrent.futures import ThreadPoolExecutor
 
@@ -214,9 +213,6 @@ class RuntimeMemTracer:
         which can be used to host chunks.
         """
         size = self.available_chunk_mem(device_type) - self.chunk_used_mem[device_type]
-        logger.debug(
-            f"remaining_chunk_mem on {device_type} {size / 1e6} MB on mement {self.metronome.moment}"
-        )
         return size
 
     def available_chunk_mem(self, device_type):
@@ -233,7 +229,7 @@ class RuntimeMemTracer:
         current moment and next moment.
         """
         # If the training is not started, ava chunk mem is the overall system mem.
-        if self.metronome.training_stage != TrainingStage.UNSTART:
+        if self.metronome.training_stage == TrainingStage.UNSTART:
             if device_type == "cpu":
                 return self.overall_cpu_mem
             elif device_type == "cuda":
@@ -254,6 +250,12 @@ class RuntimeMemTracer:
                 else:
                     # TODO(jiaruifang) using a guessed number -- 1/3 of the GPU
                     # mem is used for chunk.
+                    print(
+                        "warmup gpu: ",
+                        self.overall_gpu_mem
+                        * self.warmup_gpu_chunk_mem_ratio
+                        / 1024 ** 2,
+                    )
                     return self.overall_gpu_mem * self.warmup_gpu_chunk_mem_ratio
 
         if device_type == "cpu":
@@ -263,10 +265,9 @@ class RuntimeMemTracer:
             else:
                 return self.overall_cpu_mem
         elif device_type == "cuda":
-            msc_factor = get_world_size()
             if self.metronome.training_stage == TrainingStage.ADAM:
                 return self.overall_gpu_mem - 4 * self.chunk_size * 4
-            elif self.metronome.training_stage == TrainingStage.FWD:
+            else:
                 next_mom = self.metronome.next_moment()
                 cur_mom = self.metronome.moment
                 next_mom_ava_mem = (
@@ -275,20 +276,4 @@ class RuntimeMemTracer:
                 cur_mom_ava_mem = (
                     self.overall_gpu_mem - self.memory_stats[cur_mom].gpu_sys
                 )
-                return (
-                    min(next_mom_ava_mem, cur_mom_ava_mem)
-                    - msc_factor * 2 * self.chunk_size
-                )
-            elif self.metronome.training_stage == TrainingStage.BWD:
-                next_mom = self.metronome.next_moment()
-                cur_mom = self.metronome.moment
-                next_mom_ava_mem = (
-                    self.overall_gpu_mem - self.memory_stats[next_mom].gpu_sys
-                )
-                cur_mom_ava_mem = (
-                    self.overall_gpu_mem - self.memory_stats[cur_mom].gpu_sys
-                )
-                return (
-                    min(next_mom_ava_mem, cur_mom_ava_mem)
-                    - msc_factor * 2 * self.chunk_size * msc_factor
-                )
+                return min(next_mom_ava_mem, cur_mom_ava_mem) * 0.5

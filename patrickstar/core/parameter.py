@@ -77,30 +77,18 @@ class PSParameter:
 
         self.info = None
         self.state = TensorState.RELEASED
-        if self.param_type == ParamType.CHUNK_BASED:
-            self.id = PSParameter.global_id
-            PSParameter.global_id += 1
-        else:
-            self.id = -1
-
-        self.grad = None
 
         # Whether the param belongs to local chunk.
         self._is_local = True
 
-    def __str__(self):
-        return (
-            f"name: {self.name}, numel: {self.numel}, shape: {self.shape}, "
-            f"dtype: {self.dtype}, param_type: {self.param_type}, "
-            f"is_local: {self.is_local()}"
-        )
-
     def is_local(self):
         return self._is_local
 
-    def reset_shape(self, new_shape):
-        self.shape = new_shape
-        self.numel = new_shape.numel()
+    def is_chunk_based(self):
+        return self.param_type == ParamType.CHUNK_BASED
+
+    def is_torch_based(self):
+        return self.param_type == ParamType.TORCH_BASED
 
 
 def register_param(param, param_type, name=None):

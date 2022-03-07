@@ -33,9 +33,6 @@ from typing import List
 
 import torch
 
-from patrickstar.core.const import TrainingStage
-from patrickstar.utils import global_timer
-
 from .op_builder.cpu_adam import CPUAdamBuilder
 
 
@@ -218,10 +215,6 @@ class FP16Adam(torch.optim.Optimizer):
             closure (callable, optional): A closure that reevaluates the model
                 and returns the loss.
         """
-        global_timer.start_profile("ADAM")
-
-        self.client.set_training_stage(TrainingStage.ADAM)
-
         loss = None
         if closure is not None:
             with torch.enable_grad():
@@ -273,8 +266,6 @@ class FP16Adam(torch.optim.Optimizer):
                 eps=group["eps"],
                 maximize=False,
             )
-
-        global_timer.finish_profile("ADAM")
         return loss
 
     def state_dict(self):
@@ -296,7 +287,9 @@ class FP16Adam(torch.optim.Optimizer):
             for k, v in old_packed_state[idx].items():
                 if isinstance(v, torch.nn.Parameter):
                     packed_state[idx][k] = (
-                        self.client.access(v, torch.device("cpu:0")).clone().detach()
+                        self.client.access(v, torch.device("cpu:0"), grad=False)
+                        .clone()
+                        .detach()
                     )
                 else:
                     packed_state[idx][k] = v
@@ -336,8 +329,8 @@ class FP16Adam(torch.optim.Optimizer):
             assert len(saved_single_state) == len(single_state)
             for k, v in single_state.items():
                 if isinstance(v, torch.nn.Parameter):
-                    self.client.access(v, torch.device("cpu:0"))
+                    self.client.access(v, torch.device("cpu:0"), grad=False)
                     v.data.copy_(saved_single_state[k])
-                    self.client.release(v)
+                    self.client.release(v, grad=False)
                 else:
                     single_state[k] = saved_single_state[k]

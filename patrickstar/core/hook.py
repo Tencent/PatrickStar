@@ -27,9 +27,9 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 # SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+from patrickstar.core.const import TensorState
 import torch
 
-from patrickstar.core.parameter import ParamType
 from patrickstar.utils import logger, get_rank, get_world_size, global_timer
 
 
@@ -84,37 +84,35 @@ class PostBackwardFunction(torch.autograd.Function):
         return (None, None) + args
 
 
-# Need to be idempotent.
-def load_params(module, client, name):
-    logger.debug(f"load params of {name}.{module.__class__.__name__}")
+def load_params(module, client, name, *, grad):
     flag = False
     for _, param in module.named_parameters(recurse=False):
-        if param.ps_attr.param_type == ParamType.CHUNK_BASED:
-            client.access_dist(param, client.device)
+        if param.ps_attr.is_chunk_based():
+            client.access_dist(param, client.device, grad=grad)
             flag = True
     if flag:
         client.mem_tracer.trace()
 
 
 # release submodule
-def unload_params(module, client, name):
+def unload_params(module, client, name, *, grad):
     for param in module.parameters(recurse=False):
-        if param.ps_attr.param_type == ParamType.CHUNK_BASED:
-            client.release(param)
+        if param.ps_attr.is_chunk_based():
+            client.release(param, grad=grad)
 
 
 def reduce_grad(param, client):
-    # this may not be correct...
-    if param.ps_attr.grad is not None:
+    # TODO(zilinzhu) Here we may do allreduce on torch based params twice.
+    if param.grad is None:
+        return
+    if param.ps_attr.is_chunk_based() and param.ps_attr.state != TensorState.COMPUTE:
         return
     chunk_id = param.ps_attr.info.chunk_id
     chunk = client.chunk_list[chunk_id]
-    # Here we use gloo backend group for the cpu tensors (embedding).
-
     world_size = get_world_size()
     if world_size > 1:
         global_timer.start_profile("HOOK_torch_allreduce")
-        if param.ps_attr.param_type == ParamType.CHUNK_BASED:
+        if param.ps_attr.is_chunk_based():
             dst = chunk.comm_info.offset
             torch.distributed.reduce(
                 param.grad,
@@ -134,16 +132,12 @@ def reduce_grad(param, client):
             )
             param.grad /= world_size
         global_timer.finish_profile("HOOK_torch_allreduce")
-    if param.grad is not None:
-        param.ps_attr.grad = param.grad.to(torch.device("cpu:0"))
-        param.grad = None
-    logger.debug(f"rank {get_rank()} allreduce grad {param.ps_attr.name}")
 
 
 def post_module_backward_function(module, client, name):
     for param in module.parameters(recurse=False):
         reduce_grad(param, client)
-    unload_params(module, client, name)
+    unload_params(module, client, name, grad=True)
 
 
 def _register_hooks_recursively(module, client, name=""):
@@ -162,15 +156,15 @@ def _register_hooks_recursively(module, client, name=""):
         return
 
     def _pre_forward_module_hook(module, *args):
-        load_params(module, client, name)
+        load_params(module, client, name, grad=False)
 
     def _post_forward_module_hook(module, *args):
-        unload_params(module, client, name)
+        unload_params(module, client, name, grad=False)
 
     # The hook can modify the output
     def _pre_backward_module_hook(module, inputs, output):
         def _run_before_backward_function(sub_module):
-            load_params(sub_module, client, name)
+            load_params(sub_module, client, name, grad=True)
 
         return _apply_to_tensors_only(
             module, PreBackwardFunction, _run_before_backward_function, output

@@ -32,7 +32,7 @@ import itertools
 
 import torch
 
-from patrickstar.core import is_registered, ParamType
+from patrickstar.core import is_registered
 from patrickstar.utils import logger
 
 
@@ -45,7 +45,7 @@ def state_dict(module, client, destination=None, prefix="", keep_vars=False):
                     if attr_name == "embedding_dummy" or attr_name.startswith("dummy_"):
                         continue
                     elif param.ps_attr.is_local():
-                        if param.ps_attr.param_type == ParamType.CHUNK_BASED:
+                        if param.ps_attr.is_chunk_based():
                             ps_data = client.access_data(param, torch.device("cpu:0"))
                             destination[prefix + name] = (
                                 ps_data if keep_vars else ps_data.detach()
@@ -123,10 +123,10 @@ def _load_from_state_dict(
             if (
                 isinstance(param, torch.nn.Parameter)
                 and is_registered(param)
-                and param.ps_attr.param_type == ParamType.CHUNK_BASED
+                and param.ps_attr.is_chunk_based()
             ):
                 if param.ps_attr.is_local():
-                    client.access(param, torch.device("cpu:0"))
+                    client.access(param, torch.device("cpu:0"), grad=False)
                 else:
                     continue
 
@@ -155,10 +155,10 @@ def _load_from_state_dict(
             if (
                 isinstance(param, torch.nn.Parameter)
                 and is_registered(param)
-                and param.ps_attr.param_type == ParamType.CHUNK_BASED
+                and param.ps_attr.is_chunk_based()
             ):
                 if param.ps_attr.is_local():
-                    client.release(param)
+                    client.release(param, grad=False)
 
         elif strict:
             missing_keys.append(key)

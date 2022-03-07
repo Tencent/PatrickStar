@@ -37,7 +37,7 @@ from patrickstar.core import (
 from patrickstar.ops import FP16Adam
 from patrickstar.utils import log_dist, global_timer
 from patrickstar.core.hook import setup_patrickstar_hooks
-from patrickstar.core.const import TensorState
+from patrickstar.core.const import ChunkState, TensorState
 from patrickstar.core.hook import reduce_grad
 from .checkpoint import state_dict, load_state_dict
 
@@ -113,7 +113,7 @@ class PatrickStarEngine(torch.nn.Module):
 
         def move_param_to_gpu(module):
             for param in module.parameters(recurse=False):
-                if param.ps_attr.param_type == ParamType.TORCH_BASED:
+                if param.ps_attr.is_torch_based():
                     param.data = param.data.to(self.client.device)
             for submodule in module.children():
                 move_param_to_gpu(submodule)
@@ -163,10 +163,10 @@ class PatrickStarEngine(torch.nn.Module):
         flag = False
         for param in self.client.module.parameters():
             reduce_grad(param, self.client)
-            if param.ps_attr.param_type == ParamType.TORCH_BASED:
+            if param.ps_attr.is_torch_based():
                 continue
             if param.ps_attr.state == TensorState.COMPUTE:
-                self.client.release(param)
+                self.client.release(param, grad=True)
                 flag = True
         if flag:
             self.client.mem_tracer.trace()
@@ -188,21 +188,26 @@ class PatrickStarEngine(torch.nn.Module):
         global_timer.finish_profile("BWD")
 
     def step(self, scaler=None):
+        global_timer.start_profile("ADAM")
+        self.client.set_training_stage(TrainingStage.ADAM)
+
         for group in self.optimizer.param_groups:
             for p in group["params"]:
-                if p.ps_attr.grad is not None:
-                    self.optimizer.client.access(p, torch.device("cpu:0"))
-                    p.grad = p.ps_attr.grad
-                    p.ps_attr.grad = None
+                self.optimizer.client.access(p, torch.device("cpu:0"), grad=True)
+
         if scaler is not None:
             scaler.step(self.optimizer)
         else:
             self.optimizer.step()
         for group in self.optimizer.param_groups:
             for p in group["params"]:
-                if p.grad is not None:
-                    self.optimizer.client.release(p)
-                    p.grad = None
+                self.optimizer.client.release(p, grad=True)
+        global_timer.finish_profile("ADAM")
+
+    def zero_grad(self):
+        for grad_chunk in self.client.chunk_list.grad_chunks:
+            if grad_chunk.get_state() != ChunkState.RELEASED:
+                grad_chunk.payload.zero_()
 
     def state_dict(self, destination=None, prefix="", keep_vars=False):
         return state_dict(

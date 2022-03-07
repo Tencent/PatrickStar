@@ -62,7 +62,9 @@ class PatrickStarClient:
 
         self.metronome = Metronome()
         self.mem_tracer = RuntimeMemTracer(local_rank, self.metronome, tracer_config)
-        self.eviction_policy = LRUEvictionPolicy(self.metronome)
+        self.eviction_policy = LRUEvictionPolicy(
+            local_rank, self.metronome, self.mem_tracer
+        )
 
         self.chunk_size = chunk_size
         self.chunk_list = ChunkList(
@@ -90,7 +92,7 @@ class PatrickStarClient:
 
     def new_dummy_chunk(self):
         r"""Append a dummy chunk to the corresponding chunk_list"""
-        chunk = self.chunk_list.new_chunk(is_dummy=True)
+        chunk = self.chunk_list.new_chunk()
 
         dummy = torch.nn.Parameter(
             torch.tensor([], dtype=torch.float), requires_grad=False
@@ -177,9 +179,9 @@ class PatrickStarClient:
         for chunk_id in comm_group.elements:
             self.chunk_list[chunk_id].unpin()
 
-    def access_dist(self, param, compute_device):
+    def access_dist(self, param, compute_device, *, grad):
         r"""Attach data to param.data, fetch from remote if chunk is released."""
-        if param.ps_attr.param_type == ParamType.TORCH_BASED:
+        if param.ps_attr.is_torch_based():
             return
 
         chunk_id = param.ps_attr.info.chunk_id
@@ -189,49 +191,53 @@ class PatrickStarClient:
                 compute_device,
             )
 
-        self.access(param, compute_device)
+        self.access(param, compute_device, grad=grad)
 
-    def access(self, param, compute_device):
+    def access(self, param, compute_device, *, grad):
         r"""Attach tensor to param.data."""
-        if param.ps_attr.param_type == ParamType.TORCH_BASED:
+        if param.ps_attr.is_torch_based():
             return
-
-        chunk_id = param.ps_attr.info.chunk_id
-        if self.is_warmup():
-            self.eviction_policy.trace_access(chunk_id, compute_device)
-
-        chunk = self.chunk_list[chunk_id]
-        self.chunk_list.access_chunk(chunk, compute_device)
 
         info = param.ps_attr.info
         numel = param.ps_attr.numel
         shape = param.ps_attr.shape
         start_offset = info.start_offset
+        chunk_id = info.chunk_id
+        if self.is_warmup():
+            self.eviction_policy.trace_access(chunk_id, compute_device)
 
-        param.data = chunk.payload.narrow(0, start_offset, numel).view(shape)
-
-        # Change the state of param to COMPUTE.
+        chunk = self.chunk_list[chunk_id]
+        self.chunk_list.access_chunk(chunk, compute_device)
         chunk.num_in_compute += 1
+        param.data = chunk.payload.narrow(0, start_offset, numel).view(shape)
         param.ps_attr.state = TensorState.COMPUTE
 
-    def release(self, param):
+        if grad:
+            grad_chunk = self.chunk_list.grad_chunks[chunk_id]
+            self.chunk_list.access_chunk(grad_chunk, compute_device)
+            grad_chunk.num_in_compute += 1
+            param.grad = grad_chunk.payload.narrow(0, start_offset, numel).view(shape)
+
+    def release(self, param, *, grad):
         r"""Release the param in standalone environment.
 
         This means the param can be move to other device.
         """
-        if param.ps_attr.param_type == ParamType.TORCH_BASED:
+        if param.ps_attr.is_torch_based():
             return
 
         chunk_id = param.ps_attr.info.chunk_id
         chunk = self.chunk_list[chunk_id]
+        if grad:
+            grad_chunk = self.chunk_list.grad_chunks[chunk_id]
         assert chunk.get_state() != TensorState.RELEASED
         if param.ps_attr.state == TensorState.COMPUTE:
             chunk.num_in_compute -= 1
+            if grad:
+                grad_chunk.num_in_compute -= 1
         param.ps_attr.state = TensorState.HOLD
         # NOTE(jiaruifang) device must be the same as the origin param.
         # Or it will affect hook of param.grad_fn.next_functions[0][0].
         param.data = torch.tensor([], dtype=param.ps_attr.dtype, device=param.device)
-
-        if chunk.get_state() == ChunkState.HOLD:
-            if chunk.get_device().type == "cuda":
-                chunk.move(torch.device("cpu:0"))
+        if grad:
+            param.grad = None

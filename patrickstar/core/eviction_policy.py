@@ -30,15 +30,18 @@
 from abc import ABC, abstractmethod
 from queue import PriorityQueue
 
-from patrickstar.utils import Metronome
+import torch
+
 from patrickstar.core.const import ChunkState
 from patrickstar.utils import logger
 
 
 class ChunkEvictionPolicyBase(ABC):
-    def __init__(self, metronome: Metronome):
+    def __init__(self, local_rank, metronome, memory_tracer):
+        self.local_rank = local_rank
         self.chunk_access_dict = {}
         self.metronome = metronome
+        self.memory_tracer = memory_tracer
 
     def trace_access(self, chunk_id, device):
         """
@@ -70,6 +73,27 @@ class ChunkEvictionPolicyBase(ABC):
             if mom > cur_mom:
                 return mom
         return total_mom + access_mom_list[0]
+
+    def prepare_device(self, chunks, required_room, target_device):
+        remaining_chunk_mem_size = self.memory_tracer.remaining_chunk_mem(
+            target_device.type
+        )
+        required_room -= remaining_chunk_mem_size
+
+        if required_room <= 0:
+            return
+
+        moved_list = self.derive_eviction_list(chunks, required_room, target_device)
+
+        if target_device.type == "cuda":
+            new_device = torch.device("cpu:0")
+        else:
+            new_device = torch.device(f"cuda:{self.local_rank}")
+
+        for chunk_id in moved_list:
+            chunk = chunks[chunk_id]
+            assert chunk.get_device() != new_device
+            chunk.move(new_device)
 
     @abstractmethod
     def derive_eviction_list(self, chunks, required_room, target_device):
