@@ -16,7 +16,6 @@ export DIST_PLAN=${DIST_PLAN:-"patrickstar"}
 export RES_CHECK=${RES_CHECK:-0}
 # activation rematerization, aka. gradient checkpointing
 export CKP=${CKP:-1}
-export FP16=${FP16:-1}
 export SKIP_LOG_EXSIT=${SKIP_LOG_EXSIT:-0}
 # asyn memory monitor for mem sampler
 export AMM=${AMM:-1}
@@ -56,12 +55,6 @@ else
     export CKP_FLAG=""
 fi
 
-if [[ ${FP16} == 1 ]]; then
-    export FP16_FLAG="--use_fp16"
-else
-    export FP16_FLAG=""
-fi
-
 let CHUNK_SIZE=${CS}*1024*1024
 
 
@@ -89,7 +82,6 @@ echo "CPU core number " $wc "THREAD NUM " ${TNUM}
 cmd_opts="
     ${RES_CHECK_FLAG} \
     ${CKP_FLAG} \
-    ${FP16_FLAG} \
     --dist_plan=${DIST_PLAN} \
     --batch_size=${BS} \
     --model_name=${MODEL_NAME} \

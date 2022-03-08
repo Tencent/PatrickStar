@@ -1,45 +1,25 @@
-# BSD 3-Clause License
-#
-# Copyright (C) 2021 THL A29 Limited, a Tencent company.  All rights reserved.
-#
-# Redistribution and use in source and binary forms, with or without modification,
-# are permitted provided that the following conditions are met:
-#
-#  * Redistributions of source code must retain the above copyright notice, this
-#    list of conditions and the following disclaimer.
-#
-#  * Redistributions in binary form must reproduce the above copyright notice,
-#    this list of conditions and the following disclaimer in the documentation
-#    and/or other materials provided with the distribution.
-#
-#  * Neither the name of the psutil authors nor the names of its contributors
-#    may be used to endorse or promote products derived from this software without
-#    specific prior written permission.
-#
-# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
-# ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
-# WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
-# DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR
-# ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
-# (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
-# LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON
-# ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-# (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
-# SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+# Copyright (C) 2021 THL A29 Limited, a Tencent company.
+# All rights reserved.
+# Licensed under the BSD 3-Clause License (the "License"); you may
+# not use this file except in compliance with the License. You may
+# obtain a copy of the License at
+# https://opensource.org/licenses/BSD-3-Clause
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" basis,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
+# implied. See the License for the specific language governing
+# permissions and limitations under the License.
+# See the AUTHORS file for names of contributors.
 
 import torch
 
-from patrickstar.core import (
-    TrainingStage,
-    ParamType,
-    register_param,
-)
+from patrickstar.core.const import ChunkState, TensorState, ParamType, TrainingStage
+from patrickstar.core.hook import reduce_grad, setup_patrickstar_hooks
+from patrickstar.core.parameter import register_param
+from patrickstar.fp16 import DynamicLossScaler
 from patrickstar.ops import FP16Adam
+from patrickstar.runtime.checkpoint import state_dict, load_state_dict
 from patrickstar.utils import log_dist, global_timer
-from patrickstar.core.hook import setup_patrickstar_hooks
-from patrickstar.core.const import ChunkState, TensorState
-from patrickstar.core.hook import reduce_grad
-from .checkpoint import state_dict, load_state_dict
 
 
 class PatrickStarEngine(torch.nn.Module):
@@ -80,6 +60,8 @@ class PatrickStarEngine(torch.nn.Module):
             optim_type = default_optim_config["type"]
             optim_params = default_optim_config["params"]
 
+        self.loss_scaler = DynamicLossScaler()
+
         params = list(self.parameters())
         if len(params) == 0:
             dummy = torch.nn.Parameter(torch.empty([1]), requires_grad=False)
@@ -89,6 +71,7 @@ class PatrickStarEngine(torch.nn.Module):
         self.optimizer = FP16Adam(
             self.client,
             params,
+            self.loss_scaler,
             lr=optim_params["lr"],
             betas=optim_params["betas"],
             eps=optim_params["eps"],
@@ -171,7 +154,7 @@ class PatrickStarEngine(torch.nn.Module):
         if flag:
             self.client.mem_tracer.trace()
 
-    def backward(self, loss, scaler=None):
+    def backward(self, loss):
         r"""Execute backward pass on the loss
         Arguments:
             loss: Torch tensor on which to execute backward propagation
@@ -179,15 +162,15 @@ class PatrickStarEngine(torch.nn.Module):
         global_timer.start_profile("BWD")
         self.client.set_training_stage(TrainingStage.BWD)
 
-        if scaler is not None:
-            scaler.scale(loss).backward()
+        if self.loss_scaler is not None:
+            self.loss_scaler.backward(loss)
         else:
             loss.backward()
         self.release_last()
         self.iteration_cnt_ += 1
         global_timer.finish_profile("BWD")
 
-    def step(self, scaler=None):
+    def step(self):
         global_timer.start_profile("ADAM")
         self.client.set_training_stage(TrainingStage.ADAM)
 
@@ -197,15 +180,18 @@ class PatrickStarEngine(torch.nn.Module):
                 self.client.access(p, torch.device("cpu:0"))
                 # p.grad = ...
                 p.grad = self.client.get_grad(p, torch.device("cpu:0"))
+                p.data = self.client.get_fp32(p, torch.device("cpu:0"))
 
-        if scaler is not None:
-            scaler.step(self.optimizer)
-        else:
-            self.optimizer.step()
+        self.optimizer.step()
         for group in self.optimizer.param_groups:
             for p in group["params"]:
                 self.client.release(p)
                 p.grad = None
+        for i in range(len(self.client.chunk_list)):
+            chunk = self.client.chunk_list.chunks[i]
+            if chunk.is_local():
+                fp32_chunk = self.client.chunk_list.fp32_chunks[i]
+                chunk.payload.copy_(fp32_chunk.payload)
 
         global_timer.finish_profile("ADAM")
 

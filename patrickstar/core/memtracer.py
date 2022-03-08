@@ -1,31 +1,15 @@
-# BSD 3-Clause License
-#
-# Copyright (C) 2021 THL A29 Limited, a Tencent company.  All rights reserved.
-#
-# Redistribution and use in source and binary forms, with or without modification,
-# are permitted provided that the following conditions are met:
-#
-#  * Redistributions of source code must retain the above copyright notice, this
-#    list of conditions and the following disclaimer.
-#
-#  * Redistributions in binary form must reproduce the above copyright notice,
-#    this list of conditions and the following disclaimer in the documentation
-#    and/or other materials provided with the distribution.
-#
-#  * Neither the name of the psutil authors nor the names of its contributors
-#    may be used to endorse or promote products derived from this software without
-#    specific prior written permission.
-#
-# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
-# ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
-# WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
-# DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR
-# ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
-# (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
-# LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON
-# ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-# (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
-# SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+# Copyright (C) 2021 THL A29 Limited, a Tencent company.
+# All rights reserved.
+# Licensed under the BSD 3-Clause License (the "License"); you may
+# not use this file except in compliance with the License. You may
+# obtain a copy of the License at
+# https://opensource.org/licenses/BSD-3-Clause
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" basis,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
+# implied. See the License for the specific language governing
+# permissions and limitations under the License.
+# See the AUTHORS file for names of contributors.
 
 import time
 
@@ -37,7 +21,6 @@ from patrickstar.utils import (
     get_sys_memory_info,
     get_sys_memory_used,
     get_local_world_size,
-    logger,
 )
 from concurrent.futures import ThreadPoolExecutor
 
@@ -207,8 +190,16 @@ class RuntimeMemTracer:
         Return the remainig chunkable memory on device_type,
         which can be used to host chunks.
         """
-        size = self.available_chunk_mem(device_type) - self.chunk_used_mem[device_type]
-        return size
+        available_mem = self.available_chunk_mem(device_type)
+        chunk_mem = self.chunk_used_mem[device_type]
+        if device_type == "cuda":
+            print(
+                "available_mem:",
+                available_mem / 1024 ** 2,
+                "chunk_mem:",
+                chunk_mem / 1024 ** 2,
+            )
+        return available_mem - chunk_mem
 
     def available_chunk_mem(self, device_type):
         r"""The amount of memory on device_type that can be used for chunks.
@@ -236,14 +227,7 @@ class RuntimeMemTracer:
             if device_type == "cpu":
                 return self.overall_cpu_mem
             elif device_type == "cuda":
-                if self.metronome.training_stage == TrainingStage.ADAM:
-                    # There is no activation during Adam stage, so we can use all the GPU
-                    # mem for chunks. Need 2 * chunk_size for buffer, save 6 here for now.
-                    ava_mem = self.overall_gpu_mem - 4 * self.chunk_size * 4
-                    logger.debug(f"GPU available_chunk_mem is {ava_mem / 1e6} MB")
-                    return ava_mem
-                else:
-                    return self.overall_gpu_mem * self.warmup_gpu_chunk_mem_ratio
+                return self.overall_gpu_mem * self.warmup_gpu_chunk_mem_ratio
 
         if device_type == "cpu":
             local_world_size = get_local_world_size()
@@ -252,15 +236,9 @@ class RuntimeMemTracer:
             else:
                 return self.overall_cpu_mem
         elif device_type == "cuda":
-            if self.metronome.training_stage == TrainingStage.ADAM:
-                return self.overall_gpu_mem - 4 * self.chunk_size * 4
-            else:
-                next_mom = self.metronome.next_moment()
-                cur_mom = self.metronome.moment
-                next_mom_ava_mem = (
-                    self.overall_gpu_mem - self.memory_stats[next_mom].gpu_sys
-                )
-                cur_mom_ava_mem = (
-                    self.overall_gpu_mem - self.memory_stats[cur_mom].gpu_sys
-                )
-                return min(next_mom_ava_mem, cur_mom_ava_mem) * 0.5
+            next_mom = self.metronome.next_moment()
+            cur_mom = self.metronome.moment
+            ava_mem = max(
+                self.memory_stats[next_mom].gpu_sys, self.memory_stats[cur_mom].gpu_sys
+            )
+            return (self.overall_gpu_mem - ava_mem) * 0.5

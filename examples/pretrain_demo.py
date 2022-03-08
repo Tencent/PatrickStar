@@ -1,38 +1,22 @@
-# BSD 3-Clause License
-#
-# Copyright (C) 2021 THL A29 Limited, a Tencent company.  All rights reserved.
-#
-# Redistribution and use in source and binary forms, with or without modification,
-# are permitted provided that the following conditions are met:
-#
-#  * Redistributions of source code must retain the above copyright notice, this
-#    list of conditions and the following disclaimer.
-#
-#  * Redistributions in binary form must reproduce the above copyright notice,
-#    this list of conditions and the following disclaimer in the documentation
-#    and/or other materials provided with the distribution.
-#
-#  * Neither the name of the psutil authors nor the names of its contributors
-#    may be used to endorse or promote products derived from this software without
-#    specific prior written permission.
-#
-# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
-# ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
-# WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
-# DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR
-# ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
-# (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
-# LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON
-# ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-# (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
-# SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-
+# Copyright (C) 2021 THL A29 Limited, a Tencent company.
+# All rights reserved.
+# Licensed under the BSD 3-Clause License (the "License"); you may
+# not use this file except in compliance with the License. You may
+# obtain a copy of the License at
+# https://opensource.org/licenses/BSD-3-Clause
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" basis,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
+# implied. See the License for the specific language governing
+# permissions and limitations under the License.
+# See the AUTHORS file for names of contributors.
 
 import logging
 import time
 
 import torch
 import numpy as np
+from apex import amp
 
 from data_loader import get_bert_data_loader
 from patrickstar.runtime import initialize_engine
@@ -47,7 +31,6 @@ from ps_config import get_patrickstar_config
 def test_transformer_model_helper(
     args,
     is_ckp: bool,
-    is_fp16: bool,
     dist_plan: str,
     num_steps,
 ):
@@ -59,15 +42,13 @@ def test_transformer_model_helper(
     torch.cuda.empty_cache()
     device = torch.device(f"cuda:{rank}")
 
-    lr = 0.001
+    lr = 0.1
     betas = (0.9, 0.999)
     eps = 1e-6
     weight_decay = 0
 
     model_func, sequence_length = build_transformer_model(args)
     if dist_plan == "patrickstar":
-        if not is_fp16:
-            logger.warning("PatrickStar will always use mixed precision training.")
         config = get_patrickstar_config(
             args, lr=lr, betas=betas, eps=eps, weight_decay=weight_decay
         )
@@ -83,15 +64,14 @@ def test_transformer_model_helper(
         optimizer = torch.optim.Adam(
             model.parameters(), lr=lr, betas=betas, eps=eps, weight_decay=weight_decay
         )
-        model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[rank])
-
-    if is_fp16:
-        scaler = torch.cuda.amp.GradScaler(
-            init_scale=2 ** 16,
-            growth_factor=2,
-            backoff_factor=0.5,
-            growth_interval=1000,
+        model, optimizer = amp.initialize(
+            model,
+            optimizer,
+            opt_level="O2",
+            loss_scale="dynamic",
+            max_loss_scale=2 ** 16,
         )
+        model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[rank])
 
     model_numel, model_num_param = get_ps_model_size(model)
     log_dist(f"Model size {model_numel / 1e9} B, total params: {model_num_param}")
@@ -99,8 +79,7 @@ def test_transformer_model_helper(
     log_dist(f"Total MACs: {total_macs / 1024 ** 4} TFlops")
 
     see_memory_usage(
-        f"After model init. using {dist_plan}, gradient checkpoint: {is_ckp}, fp16 {is_fp16}",
-        force=True,
+        f"After model init. using {dist_plan}, gradient checkpoint: {is_ckp}"
     )
 
     # load data, here we generate random data for benchmarking.
@@ -114,7 +93,7 @@ def test_transformer_model_helper(
 
     loss_res = []
 
-    print(f"model param size: {model_numel / 1e9} B")
+    print(f"model param size: {model_numel / 1024 ** 3} B")
 
     for n, batch in enumerate(data_loader):
         if n == num_steps:
@@ -127,34 +106,19 @@ def test_transformer_model_helper(
         log_dist(f"Start Step {n} with {dist_plan}...")
         step_start_time = time.time()
 
-        if is_fp16:
-            with torch.cuda.amp.autocast():
-                output = model(input_ids=batch[0], labels=batch[1])
-            loss = output[0]
-            if dist_plan == "patrickstar":
-                # TODO(zilinzhu) fix here when scaler support unscaling grad on CPU
-                model.backward(loss)
-                model.step()
-                # model.backward(loss, scaler)
-                # model.step(scaler)
-                # scaler.update()
-                model.zero_grad()
-            else:
-                scaler.scale(loss).backward()
-                scaler.step(optimizer)
-                scaler.update()
-                optimizer.zero_grad()
-        else:
+        if dist_plan == "patrickstar":
             output = model(input_ids=batch[0], labels=batch[1])
             loss = output[0]
-            if dist_plan == "patrickstar":
-                model.backward(loss)
-                model.step()
-                model.zero_grad()
-            else:
-                loss.backward()
-                optimizer.step()
-                optimizer.zero_grad()
+            model.backward(loss)
+            model.step()
+            model.zero_grad()
+        else:
+            output = model(input_ids=batch[0], labels=batch[1])
+            loss = output["loss"]
+            with amp.scale_loss(loss, optimizer) as scaled_loss:
+                scaled_loss.backward()
+            optimizer.step()
+            optimizer.zero_grad()
 
         print(f"LOSS of step {n}: {loss.item()}")
         loss_res.append(loss.item())
@@ -162,10 +126,6 @@ def test_transformer_model_helper(
         step_elapse = time.time() - step_start_time
 
         if args.rank == 0:
-            see_memory_usage(
-                f"After step {n}. using {dist_plan}, gradient checkpoint: {is_ckp}, fp16 {is_fp16}",
-                force=True,
-            )
             world_size = get_world_size()
             if dist_plan == "patrickstar":
                 print(
@@ -174,8 +134,9 @@ def test_transformer_model_helper(
                     f"{total_macs / 1e12 / step_elapse} Tflops Per GPU "
                     f"{args.batch_size * world_size/step_elapse} SamplesPerSec"
                 )
-                global_timer.print()
-                global_timer.reset()
+                if n == num_steps - 1:
+                    global_timer.print()
+                    global_timer.reset()
             else:
                 print(
                     f"Step {n} elaspe {step_elapse} s, "
@@ -190,7 +151,6 @@ def test_transformer_model_helper(
 if __name__ == "__main__":
     args = parse_args()
     use_ckp = args.use_ckp
-    use_fp16 = args.use_fp16
     dist_plan = args.dist_plan
     res_check = args.res_check
 
@@ -207,7 +167,6 @@ if __name__ == "__main__":
         loss_list = test_transformer_model_helper(
             args=args,
             is_ckp=use_ckp,
-            is_fp16=use_fp16,
             dist_plan=dist_plan,
             num_steps=5,
         )
@@ -219,7 +178,7 @@ if __name__ == "__main__":
             "Running to check result. This will use Bert model and batch size is 2."
         )
 
-        args.model_name = "Tiny"
+        args.model_name = "Bert"
         args.batch_size = 2
         NUM_STEPS = 10
 
@@ -227,8 +186,7 @@ if __name__ == "__main__":
         torch_res_list = test_transformer_model_helper(
             args=args,
             is_ckp=use_ckp,
-            is_fp16=use_fp16,
-            dist_plan="torch",
+            dist_plan="apex",
             num_steps=NUM_STEPS,
         )
 
@@ -239,17 +197,16 @@ if __name__ == "__main__":
         ps_res_list = test_transformer_model_helper(
             args=args,
             is_ckp=use_ckp,
-            is_fp16=use_fp16,
             dist_plan="patrickstar",
             num_steps=NUM_STEPS,
         )
 
         print("-" * 20 + " LOSS " + "-" * 20)
-        print(f"torch : {torch_res_list}")
+        print(f"apex O2: {torch_res_list}")
         print(f"patrickstar: {ps_res_list}")
 
         def diff(array):
-            dtype = np.float16 if use_fp16 else float
+            dtype = np.float16
             return list(
                 np.array(ps_res_list, dtype=dtype) - np.array(array, dtype=dtype)
             )

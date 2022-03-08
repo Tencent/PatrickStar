@@ -1,31 +1,28 @@
-// BSD 3-Clause License
-//
-// Copyright (C) 2021 THL A29 Limited, a Tencent company.  All rights reserved.
-//
-// Redistribution and use in source and binary forms, with or without modification,
-// are permitted provided that the following conditions are met:
-//
-//  * Redistributions of source code must retain the above copyright notice, this
-//    list of conditions and the following disclaimer.
-//
-//  * Redistributions in binary form must reproduce the above copyright notice,
-//    this list of conditions and the following disclaimer in the documentation
-//    and/or other materials provided with the distribution.
-//
-//  * Neither the name of the psutil authors nor the names of its contributors
-//    may be used to endorse or promote products derived from this software without
-//    specific prior written permission.
-//
-// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
-// ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
-// WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
-// DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR
-// ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
-// (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
-// LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON
-// ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-// (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
-// SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+// Copyright (C) 2021 THL A29 Limited, a Tencent company.
+// All rights reserved.
+// Licensed under the BSD 3-Clause License (the "License"); you may
+// not use this file except in compliance with the License. You may
+// obtain a copy of the License at
+// https://opensource.org/licenses/BSD-3-Clause
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" basis,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
+// implied. See the License for the specific language governing
+// permissions and limitations under the License.
+// See the AUTHORS file for names of contributors.
+
+// // Copyright (C) 2021 THL A29 Limited, a Tencent company.
+// // All rights reserved.
+// // Licensed under the BSD 3-Clause License (the "License"); you may
+// // not use this file except in compliance with the License. You may
+// // obtain a copy of the License at
+// // https://opensource.org/licenses/BSD-3-Clause
+// // Unless required by applicable law or agreed to in writing, software
+// // distributed under the License is distributed on an "AS IS" basis,
+// // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
+// // implied. See the License for the specific language governing
+// // permissions and limitations under the License.
+// // See the AUTHORS file for names of contributors.
 
 #include "cpu_adam.h"
 #include <cuda_runtime_api.h>
@@ -52,7 +49,8 @@ void Adam_Optimizer::Step(float* _params,
                           float* _exp_avg_sq,
                           size_t _param_size,
                           bool param_half_precision,
-                          bool grad_half_precision)
+                          bool grad_half_precision,
+                          float loss_scale)
 {
     float betta1_minus1 = 1 - _betta1;
     float betta2_minus1 = 1 - _betta2;
@@ -110,6 +108,11 @@ void Adam_Optimizer::Step(float* _params,
             } else {
                 grad_4.data = SIMD_LOAD(grads + i);
             }
+            if (loss_scale > 0) {
+                AVX_Data loss_scale_vec;
+                loss_scale_vec.data = SIMD_LOAD_SCALAR(loss_scale);
+                grad_4.data = SIMD_DIV(grad_4.data, loss_scale_vec.data);
+            }
             AVX_Data momentum_4;
             momentum_4.data = SIMD_LOAD(_exp_avg + i);
             AVX_Data variance_4;
@@ -163,6 +166,9 @@ void Adam_Optimizer::Step(float* _params,
 #pragma omp parallel for
             for (size_t k = t; k < offset; k++) {
                 float grad = grad_half_precision ? (float)grads_cast_h[k] : grads[k];
+                if (loss_scale > 0) {
+                  grad /= loss_scale;
+                }
                 float param = param_half_precision ? (float)params_cast_h[k] : _params[k];
                 float momentum = _exp_avg[k];
                 float variance = _exp_avg_sq[k];
@@ -197,7 +203,8 @@ void Adam_Optimizer::Step_4(float* _params,
                             float* _exp_avg_sq,
                             size_t _param_size,
                             bool param_half_precision,
-                            bool grad_half_precision)
+                            bool grad_half_precision,
+                            float loss_scale)
 {
     size_t rounded_size = 0;
 
@@ -258,6 +265,14 @@ void Adam_Optimizer::Step_4(float* _params,
                 grad_4[1].data = SIMD_LOAD(grads + i + SIMD_WIDTH);
                 grad_4[2].data = SIMD_LOAD(grads + i + (SIMD_WIDTH << 1));
                 grad_4[3].data = SIMD_LOAD(grads + i + SIMD_WIDTH * 3);
+            }
+            if (loss_scale > 0) {
+                AVX_Data loss_scale_vec;
+                loss_scale_vec.data = SIMD_LOAD_SCALAR(loss_scale);
+                grad_4[0].data = SIMD_DIV(grad_4[0].data, loss_scale_vec.data);
+                grad_4[1].data = SIMD_DIV(grad_4[1].data, loss_scale_vec.data);
+                grad_4[2].data = SIMD_DIV(grad_4[2].data, loss_scale_vec.data);
+                grad_4[3].data = SIMD_DIV(grad_4[3].data, loss_scale_vec.data);
             }
             AVX_Data momentum_4[4];
             momentum_4[0].data = SIMD_LOAD(_exp_avg + i);
@@ -370,7 +385,8 @@ void Adam_Optimizer::Step_4(float* _params,
              (_exp_avg_sq + rounded_size),
              (_param_size - rounded_size),
              param_half_precision,
-             grad_half_precision);
+             grad_half_precision,
+             loss_scale);
 }
 
 int create_adam_optimizer(int optimizer_id,
@@ -419,7 +435,8 @@ void Adam_Optimizer::Step_8(float* _params,
                             float* _exp_avg_sq,
                             size_t _param_size,
                             bool param_half_precision,
-                            bool grad_half_precision)
+                            bool grad_half_precision,
+                            float loss_scale)
 {
     size_t rounded_size = 0;
 
@@ -488,6 +505,18 @@ void Adam_Optimizer::Step_8(float* _params,
                 grad_4[5].data = SIMD_LOAD(grads + i + SIMD_WIDTH * 5);
                 grad_4[6].data = SIMD_LOAD(grads + i + SIMD_WIDTH * 6);
                 grad_4[7].data = SIMD_LOAD(grads + i + SIMD_WIDTH * 7);
+            }
+            if (loss_scale > 0) {
+                AVX_Data loss_scale_vec;
+                loss_scale_vec.data = SIMD_LOAD_SCALAR(loss_scale);
+                grad_4[0].data = SIMD_DIV(grad_4[0].data, loss_scale_vec.data);
+                grad_4[1].data = SIMD_DIV(grad_4[1].data, loss_scale_vec.data);
+                grad_4[2].data = SIMD_DIV(grad_4[2].data, loss_scale_vec.data);
+                grad_4[3].data = SIMD_DIV(grad_4[3].data, loss_scale_vec.data);
+                grad_4[4].data = SIMD_DIV(grad_4[4].data, loss_scale_vec.data);
+                grad_4[5].data = SIMD_DIV(grad_4[5].data, loss_scale_vec.data);
+                grad_4[6].data = SIMD_DIV(grad_4[6].data, loss_scale_vec.data);
+                grad_4[7].data = SIMD_DIV(grad_4[7].data, loss_scale_vec.data);
             }
 
             AVX_Data momentum_4[8];
@@ -677,7 +706,8 @@ void Adam_Optimizer::Step_8(float* _params,
                (_exp_avg_sq + rounded_size),
                (_param_size - rounded_size),
                param_half_precision,
-               grad_half_precision);
+               grad_half_precision,
+               loss_scale);
 }
 
 int ds_adam_step(int optimizer_id,
@@ -691,12 +721,15 @@ int ds_adam_step(int optimizer_id,
                  torch::Tensor& params,
                  torch::Tensor& grads,
                  torch::Tensor& exp_avg,
-                 torch::Tensor& exp_avg_sq)
+                 torch::Tensor& exp_avg_sq,
+                 float loss_scale)
 {
     auto params_c = params.contiguous();
     auto grads_c = grads.contiguous();
     auto exp_avg_c = exp_avg.contiguous();
     auto exp_avg_sq_c = exp_avg_sq.contiguous();
+
+    // assert(params.options().dtype() == grads.options().dtype());
 
     float* params_ptr = (float*)params_c.data_ptr();
     float* grads_ptr = (float*)grads_c.data_ptr();
@@ -714,7 +747,8 @@ int ds_adam_step(int optimizer_id,
                 exp_avg_sq_ptr,
                 params_c.size(0),
                 (params.options().dtype() == at::kHalf),
-                (grads.options().dtype() == at::kHalf));
+                (grads.options().dtype() == at::kHalf),
+                loss_scale);
 
     opt->SynchronizeStreams();
     return 0;

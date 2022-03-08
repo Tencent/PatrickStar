@@ -11,4 +11,4 @@
 # permissions and limitations under the License.
 # See the AUTHORS file for names of contributors.
 
-from .fp16_cpu_adam import FP16Adam
+from .loss_scaler import LossScaler, DynamicLossScaler

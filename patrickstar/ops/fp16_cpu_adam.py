@@ -1,31 +1,15 @@
-# BSD 3-Clause License
-#
-# Copyright (C) 2021 THL A29 Limited, a Tencent company.  All rights reserved.
-#
-# Redistribution and use in source and binary forms, with or without modification,
-# are permitted provided that the following conditions are met:
-#
-#  * Redistributions of source code must retain the above copyright notice, this
-#    list of conditions and the following disclaimer.
-#
-#  * Redistributions in binary form must reproduce the above copyright notice,
-#    this list of conditions and the following disclaimer in the documentation
-#    and/or other materials provided with the distribution.
-#
-#  * Neither the name of the psutil authors nor the names of its contributors
-#    may be used to endorse or promote products derived from this software without
-#    specific prior written permission.
-#
-# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
-# ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
-# WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
-# DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR
-# ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
-# (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
-# LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON
-# ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-# (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
-# SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+# Copyright (C) 2021 THL A29 Limited, a Tencent company.
+# All rights reserved.
+# Licensed under the BSD 3-Clause License (the "License"); you may
+# not use this file except in compliance with the License. You may
+# obtain a copy of the License at
+# https://opensource.org/licenses/BSD-3-Clause
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" basis,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
+# implied. See the License for the specific language governing
+# permissions and limitations under the License.
+# See the AUTHORS file for names of contributors.
 
 import math
 from copy import deepcopy
@@ -33,6 +17,7 @@ from typing import List
 
 import torch
 
+from patrickstar.utils import logger
 from .op_builder.cpu_adam import CPUAdamBuilder
 
 
@@ -43,6 +28,7 @@ class FP16Adam(torch.optim.Optimizer):
         self,
         client,
         params,
+        loss_scaler=None,
         lr=1e-3,
         betas=(0.9, 0.999),
         eps=1e-8,
@@ -68,10 +54,9 @@ class FP16Adam(torch.optim.Optimizer):
         )
         super(FP16Adam, self).__init__(params, defaults)
         self.client = client
+        self.loss_scaler = loss_scaler
+        self.has_overflow = False
 
-        assert (
-            len(self.param_groups) == 1
-        ), "Only support one param group at the moment."
         # Eager state initialization, different from Pytorch
         for group in self.param_groups:
             for p in group["params"]:
@@ -138,7 +123,7 @@ class FP16Adam(torch.optim.Optimizer):
         eps: float,
         maximize: bool,
     ):
-
+        loss_scale = self.loss_scaler.loss_scale if self.loss_scaler is not None else -1
         for i, param in enumerate(params):
             # Inputs of DS CPU Adam need to be flattened.
             self.ds_opt_adam.adam_update(
@@ -154,6 +139,7 @@ class FP16Adam(torch.optim.Optimizer):
                 grads[i].view(-1),
                 exp_avgs[i].view(-1),
                 exp_avg_sqs[i].view(-1),
+                loss_scale,
             )
 
     def torch_adam(
@@ -188,6 +174,8 @@ class FP16Adam(torch.optim.Optimizer):
             bias_correction1 = 1 - beta1 ** step
             bias_correction2 = 1 - beta2 ** step
 
+            if self.loss_scaler is not None:
+                grad.div_(self.loss_scaler.loss_scale)
             if weight_decay != 0:
                 grad = grad.add(param, alpha=weight_decay)
 
@@ -207,6 +195,24 @@ class FP16Adam(torch.optim.Optimizer):
             step_size = lr / bias_correction1
             param.addcdiv_(exp_avg, denom, value=-step_size)
 
+    def check_overflow(self, param):
+        if self.loss_scaler is None:
+            return
+        self.has_overflow = self.has_overflow or self.loss_scaler.has_overflow(param)
+
+    def has_overflow_and_reset_param(self):
+        r"""Method for collective communicating overflow and reset params.
+        This method should be called after checking if each individual
+        grad has overflow.
+        """
+        if torch.distributed.is_initialized():
+            overflow_gpu = torch.cuda.ByteTensor([self.has_overflow])
+            torch.distributed.all_reduce(
+                overflow_gpu, op=torch.distributed.ReduceOp.MAX
+            )
+            self.has_overflow = overflow_gpu[0].item()
+        return self.has_overflow
+
     @torch.no_grad()
     def step(self, closure=None):
         """Performs a single optimization step.
@@ -219,6 +225,16 @@ class FP16Adam(torch.optim.Optimizer):
         if closure is not None:
             with torch.enable_grad():
                 loss = closure()
+
+        if self.has_overflow_and_reset_param():
+            old_loss_scale = self.loss_scaler.loss_scale
+            self.loss_scaler.update_scale(True)
+            new_loss_scale = self.loss_scaler.loss_scale
+            self.has_overflow = False
+            logger.warning(
+                f"Gradient overflow! Update loss scale from {old_loss_scale} to {new_loss_scale}."
+            )
+            return loss
 
         state_steps = []
 
@@ -266,6 +282,10 @@ class FP16Adam(torch.optim.Optimizer):
                 eps=group["eps"],
                 maximize=False,
             )
+
+        if self.loss_scaler:
+            self.loss_scaler.update_scale(False)
+
         return loss
 
     def state_dict(self):
