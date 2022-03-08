@@ -149,10 +149,6 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
                 register_param(param, ParamType.TORCH_BASED, name)
             return
 
-        # The granularity of `post_init_method` is nn.Module, e.g. BertAttention.
-        # For every process, we will initialize the params.
-        # NOTE() The order of params in model initialization is a bit different from the
-        # the one in optimizer parameter group.
         params = []
         for name, param in module.named_parameters(recurse=False):
             name = f"{module.__class__.__name__}.{name}_{self.param_idx}"
@@ -208,9 +204,7 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
                     # param tensor here.
                     # When release_after_init is False, this will help cast dtype of
                     # remote params to torch.half (See the NOTE below).
-                    param.data = torch.tensor(
-                        [], dtype=torch.float, device=param.device
-                    )
+                    param.data = torch.tensor([], dtype=torch.half, device=param.device)
 
         num_chunk = len(self.client.chunk_list)
         world_size = get_world_size()

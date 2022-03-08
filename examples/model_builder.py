@@ -27,10 +27,11 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 # SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+from packaging import version
+
 import transformers
 from transformers import BertConfig, GPT2Config
-from packaging import version
-import optimizations.global_opt_flags as global_opt_flags
+from transformers import BertForSequenceClassification, GPT2ForSequenceClassification
 
 
 def model_config(model_name):
@@ -230,32 +231,10 @@ def build_transformer_model(args):
     Build a transformer-based model based on transformer bert.
     return a function able to build the model.
     """
-    if args.with_tiling_linear or args.with_activation_offload:
-        if args.model_type.upper() == "GPT":
-            raise RuntimeError(
-                "GPT models do not support with_tiling_linear or "
-                "with_activation_offload at the moment"
-            )
-        if args.with_tiling_linear:
-            global_opt_flags.USE_TILE = True
-        else:
-            global_opt_flags.USE_TILE = False
-        if args.with_activation_offload:
-            global_opt_flags.USE_ACT_OFFLOAD = True
-        else:
-            global_opt_flags.USE_ACT_OFFLOAD = False
-        from optimizations.ps_tile_modeling_bert import BertForSequenceClassification
-
+    if args.model_type.upper() == "BERT":
         Model = BertForSequenceClassification
-    else:
-        if args.model_type.upper() == "BERT":
-            from transformers import BertForSequenceClassification
-
-            Model = BertForSequenceClassification
-        elif args.model_type.upper() == "GPT":
-            from transformers import GPT2ForSequenceClassification
-
-            Model = GPT2ForSequenceClassification
+    elif args.model_type.upper() == "GPT":
+        Model = GPT2ForSequenceClassification
 
     hidden_dim, sequence_length, num_layer, num_head = model_config(args.model_name)
 

@@ -95,7 +95,7 @@ def load_params(module, client, name):
 
 
 # release submodule
-def unload_params(module, client, name):
+def offload_params(module, client, name):
     for param in module.parameters(recurse=False):
         if param.ps_attr.is_chunk_based():
             client.release(param)
@@ -141,7 +141,7 @@ def reduce_grad(param, client):
 def post_module_backward_function(module, client, name):
     for param in module.parameters(recurse=False):
         reduce_grad(param, client)
-    unload_params(module, client, name)
+    offload_params(module, client, name)
 
 
 def _register_hooks_recursively(module, client, name=""):
@@ -163,7 +163,7 @@ def _register_hooks_recursively(module, client, name=""):
         load_params(module, client, name)
 
     def _post_forward_module_hook(module, *args):
-        unload_params(module, client, name)
+        offload_params(module, client, name)
 
     # The hook can modify the output
     def _pre_backward_module_hook(module, inputs, output):

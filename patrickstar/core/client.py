@@ -95,7 +95,7 @@ class PatrickStarClient:
         chunk = self.chunk_list.new_chunk()
 
         dummy = torch.nn.Parameter(
-            torch.tensor([], dtype=torch.float), requires_grad=False
+            torch.tensor([], dtype=torch.half), requires_grad=False
         )
         # Add a dummy param to dummy chunk, so that the chunk can be set in HOLD state.
         register_param(dummy, ParamType.CHUNK_BASED, "dummy")

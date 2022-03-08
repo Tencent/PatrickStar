@@ -109,7 +109,6 @@ def test_transformer_model_helper(
         total_samples=10000,
         sequence_length=sequence_length,
         device=device,
-        data_type=torch.half if is_fp16 else torch.float,
         is_distrbuted=True,
     )
 
@@ -175,9 +174,8 @@ def test_transformer_model_helper(
                     f"{total_macs / 1e12 / step_elapse} Tflops Per GPU "
                     f"{args.batch_size * world_size/step_elapse} SamplesPerSec"
                 )
-                if n == num_steps - 1:
-                    global_timer.print()
-                    global_timer.reset()
+                global_timer.print()
+                global_timer.reset()
             else:
                 print(
                     f"Step {n} elaspe {step_elapse} s, "

@@ -698,8 +698,6 @@ int ds_adam_step(int optimizer_id,
     auto exp_avg_c = exp_avg.contiguous();
     auto exp_avg_sq_c = exp_avg_sq.contiguous();
 
-    // assert(params.options().dtype() == grads.options().dtype());
-
     float* params_ptr = (float*)params_c.data_ptr();
     float* grads_ptr = (float*)grads_c.data_ptr();
     float* exp_avg_ptr = (float*)exp_avg_c.data_ptr();

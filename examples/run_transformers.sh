@@ -14,8 +14,6 @@ export DIST_PLAN=${DIST_PLAN:-"patrickstar"}
 # check results of patrickstar and torch, which disable
 # DIST_PLAN setting
 export RES_CHECK=${RES_CHECK:-0}
-# offload activation checkpoints to CPU
-export ACT_OFFLOAD=${ACT_OFFLOAD:-0}
 # activation rematerization, aka. gradient checkpointing
 export CKP=${CKP:-1}
 export FP16=${FP16:-1}
@@ -24,8 +22,6 @@ export SKIP_LOG_EXSIT=${SKIP_LOG_EXSIT:-0}
 export AMM=${AMM:-1}
 # mem caching comm
 export CACHE=${CACHE:-1}
-# linear tiling comm
-export TILING=${TILING:-0}
 
 export LOCAL_WORLD_SIZE=${LOCAL_WORLD_SIZE:-1}
 export CS_SEARCH=${CS_SEARCH:-0}
@@ -36,23 +32,10 @@ export MASTER_ADDR=${MASTER_ADDR:-"127.0.0.1"}
 export MASTER_PORT=${MASTER_PORT:-"12345"}
 export SUFFIX=${SUFFIX:-""}
 
-if [[ ${TILING} == 1 ]];  then
-TILING_FLAG="--with_tiling_linear"
-else
-export TILING_FLAG=""
-fi
-
 if [[ ${AMM} == 1 ]];  then
 AMM_FLAG="--with_async_mem_monitor"
 else
 export AMM_FLAG=""
-fi
-
-
-if [[ ${ACT_OFFLOAD} == 1 ]];  then
-ACT_OFFLOAD_FLAG="--with_activation_offload"
-else
-export ACT_OFFLOAD_FLAG=""
 fi
 
 if [[ ${RES_CHECK} == 1 ]];  then
@@ -87,7 +70,7 @@ LOG_DIR="./logs_${MODEL_NAME}"
 mkdir -p ${LOG_DIR}
 
 GIT_VER=`git rev-parse --short=5 HEAD`
-LOG_FILE="log.${MODEL_NAME}_type_${MODEL_TYPE}_gpu_${GPU_NUM}_cs_${CS}_bs_${BS}_offload_${ACT_OFFLOAD}_AMM_${AMM}_TILING_${TILING}_${GIT_VER}_node_${NNODES}_${SUFFIX}"
+LOG_FILE="log.${MODEL_NAME}_type_${MODEL_TYPE}_gpu_${GPU_NUM}_cs_${CS}_bs_${BS}_AMM_${AMM}_${GIT_VER}_node_${NNODES}_${SUFFIX}"
 
 is_run_flag=`python ./benchmark/is_run_this_file.py --path "${LOG_DIR}" --file "${LOG_FILE}"`
 echo is_run_flag $is_run_flag
@@ -113,15 +96,12 @@ cmd_opts="
     --model_type=${MODEL_TYPE} \
     --batch_size=${BS} \
     ${RELEASE_AFTER_INIT_FLAG} \
-    ${LIGHTSEQ_FLAG} \
-    ${ACT_OFFLOAD_FLAG} \
     ${AMM_FLAG} \
-    ${TILING_FLAG} \
 "
 
 if [[ ${CS_SEARCH} == 1 ]];  then
 mkdir -p ./search_res
-SLOG_FILE="./search_res/slog_file.${MODEL_NAME}_bs_${BS}_offload_${ACT_OFFLOAD}_AMM_${AMM}_TILING_${TILING}_${GIT_VER}"
+SLOG_FILE="./search_res/slog_file.${MODEL_NAME}_bs_${BS}_AMM_${AMM}_${GIT_VER}"
 rm -rf ${SLOG_FILE}
 
 for((i=312;i>=64;i-=32));

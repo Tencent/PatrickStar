@@ -33,7 +33,7 @@ from patrickstar.core.comm import CommInfo
 from patrickstar.core.const import ChunkState
 from patrickstar.core.memtracer import RuntimeMemTracer
 from patrickstar.core.parameter import TensorInfo
-from patrickstar.utils import get_rank, getsizeof
+from patrickstar.utils import get_rank, getsizeof, global_timer
 
 
 class Chunk:
@@ -76,7 +76,7 @@ class Chunk:
 
     def get_chunk_space(self):
         r"""Size of the chunk (Bytes)."""
-        return getsizeof(torch.float) * self.capacity
+        return getsizeof(torch.half) * self.capacity
 
     def get_payload_space(self):
         r"""Size of the payload (Bytes)."""
@@ -132,7 +132,7 @@ class Chunk:
         r"""Allocate payload on device for the chunk."""
         self.payload = torch.zeros(
             self.capacity,
-            dtype=torch.float,
+            dtype=torch.half,
             device=device,
             pin_memory=(device.type == "cpu"),
         )
@@ -165,6 +165,8 @@ class Chunk:
         src_device = self.get_device()
         assert src_device is not None and src_device != target_device
 
+        global_timer.start_profile("move chunk")
+
         if target_device.type == "cpu":
             tmp = self.payload
             self.payload = torch.empty(
@@ -174,9 +176,12 @@ class Chunk:
                 pin_memory=True,
             )
             self.payload.copy_(tmp)
+            del tmp
         elif target_device.type == "cuda":
             self.payload = self.payload.pin_memory()
             self.payload = self.payload.to(target_device)
+
+        global_timer.finish_profile("move chunk")
 
         self.memory_tracer.delete(
             src_device.type,

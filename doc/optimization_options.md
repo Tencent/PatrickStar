@@ -12,11 +12,6 @@ Make sure this option is open for large model training. It can primarily save ac
 Offload the checkpoints activation from GPU to CPU. Further Save GPU memory.
 Note you have to use activation checkpoing first.
 
-
-1. Tiling Linear (a.k.a Memory-centric tiling in [DeepSpeed](https://deepspeed.readthedocs.io/en/stable/zero3.html#memory-centric-tiling))
-`--with_tiling_linear`
-Memory-centric tiling (MCT) can split a param tensor of linear into pieces, and they do not need to be stored in contiguous memory space. This will help reduce chunk size. However, to achieve the best performance, you have to tune the in_splits/out_splits of the function's parameters.
-
 ## PatrickStar-related Optmizations
 
 1. Activation Offload.

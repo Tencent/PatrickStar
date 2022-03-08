@@ -75,17 +75,6 @@ def _add_general_opt_args(parser):
         action="store_true",
         help="using gradient checkpointing for memory saveing.",
     )
-    group.add_argument(
-        "--with_activation_offload",
-        dest="with_activation_offload",
-        action="store_true",
-        help="Use activation offloading.",
-    )
-    group.add_argument(
-        "--with_tiling_linear",
-        action="store_true",
-        help="Use linear tiling.",
-    )
     return parser
 
 
@@ -127,7 +116,6 @@ def _add_test_config_args(parser):
         default="BERT",
         help="The type of the backbone of the model.",
     )
-    group.add_argument("--with_lightseq", action="store_true", help="use lightseq")
     return parser
 
 

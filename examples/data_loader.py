@@ -36,7 +36,6 @@ def get_bert_data_loader(
     total_samples,
     sequence_length,
     device,
-    data_type=torch.float,
     is_distrbuted=False,
 ):
     train_data = torch.randint(
