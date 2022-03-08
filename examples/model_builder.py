@@ -11,9 +11,6 @@
 # permissions and limitations under the License.
 # See the AUTHORS file for names of contributors.
 
-from packaging import version
-
-import transformers
 from transformers import BertConfig, GPT2Config
 from transformers import BertForSequenceClassification, GPT2ForSequenceClassification
 
@@ -224,7 +221,6 @@ def build_transformer_model(args):
 
     if args.model_type.upper() == "BERT":
         config = BertConfig(
-            gradient_checkpointing=args.use_ckp,
             hidden_size=hidden_dim,
             intermediate_size=hidden_dim * 4,
             num_attention_heads=num_head,
@@ -233,7 +229,6 @@ def build_transformer_model(args):
         )
     elif args.model_type.upper() == "GPT":
         config = GPT2Config(
-            gradient_checkpointing=args.use_ckp,
             hidden_size=hidden_dim,
             intermediate_size=hidden_dim * 4,
             num_attention_heads=num_head,
@@ -250,11 +245,7 @@ def build_transformer_model(args):
         # Need to set pad_token_id for batch size > 1.
         if args.model_type.upper() == "GPT":
             model.config.pad_token_id = model.config.eos_token_id
-
-        if args.use_ckp and version.parse(transformers.__version__) >= version.parse(
-            "4.11.0"
-        ):
-            model.gradient_checkpointing_enable()
+        model.gradient_checkpointing_enable()
         return model
 
     return model_func, sequence_length

@@ -24,28 +24,16 @@ from patrickstar.utils import logger, get_world_size, get_rank, Metronome
 class PatrickStarClient:
     r"""The client for managing chunks."""
 
-    def __init__(self, local_rank, chunk_size, config=None):
+    def __init__(self, local_rank, chunk_size, config={}):
+        assert config is not None
         self.device = torch.device(f"cuda:{local_rank}")
 
         self.module = None
 
-        default_tracer_config = {
-            "use_async_mem_monitor": True,
-            "warmup_gpu_chunk_mem_ratio": 0.1,
-            "overall_gpu_mem_ratio": 0.8,
-            "overall_cpu_mem_ratio": 0.8,
-            "margin_use_ratio": 0.8,
-        }
-        if config is not None:
-            tracer_config = config.get("mem_tracer", None)
-            for k, v in default_tracer_config.items():
-                if k not in tracer_config:
-                    tracer_config[k] = v
-        else:
-            tracer_config = default_tracer_config
-
         self.metronome = Metronome()
-        self.mem_tracer = RuntimeMemTracer(local_rank, self.metronome, tracer_config)
+        self.mem_tracer = RuntimeMemTracer(
+            local_rank, self.metronome, config.get("mem_tracer", {})
+        )
         self.eviction_policy = LRUEvictionPolicy(
             local_rank, self.metronome, self.mem_tracer
         )

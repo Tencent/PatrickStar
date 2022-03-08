@@ -18,19 +18,41 @@ import torch
 import numpy as np
 from apex import amp
 
-from data_loader import get_bert_data_loader
 from patrickstar.runtime import initialize_engine
 from patrickstar.utils import see_memory_usage, get_world_size, global_timer
 from patrickstar.utils.logging import log_dist, logger
 from patrickstar.utils.model_size_calculator import get_ps_model_size
 from model_builder import build_transformer_model
 from parse_args import parse_args
-from ps_config import get_patrickstar_config
+from config import get_patrickstar_config
+
+
+def get_bert_data_loader(
+    batch_size,
+    total_samples,
+    sequence_length,
+    device,
+):
+    train_data = torch.randint(
+        low=0,
+        high=1000,
+        size=(total_samples, sequence_length),
+        device=device,
+        dtype=torch.long,
+    )
+    train_label = torch.randint(
+        low=0, high=2, size=(total_samples,), device=device, dtype=torch.long
+    )
+    train_dataset = torch.utils.data.TensorDataset(train_data, train_label)
+    sampler = torch.utils.data.distributed.DistributedSampler(train_dataset)
+    train_loader = torch.utils.data.DataLoader(
+        train_dataset, batch_size=batch_size, sampler=sampler
+    )
+    return train_loader
 
 
 def test_transformer_model_helper(
     args,
-    is_ckp: bool,
     dist_plan: str,
     num_steps,
 ):
@@ -42,16 +64,17 @@ def test_transformer_model_helper(
     torch.cuda.empty_cache()
     device = torch.device(f"cuda:{rank}")
 
-    lr = 0.1
+    lr = 0.001
     betas = (0.9, 0.999)
     eps = 1e-6
     weight_decay = 0
 
+    config = get_patrickstar_config(
+        args, lr=lr, betas=betas, eps=eps, weight_decay=weight_decay
+    )
+
     model_func, sequence_length = build_transformer_model(args)
     if dist_plan == "patrickstar":
-        config = get_patrickstar_config(
-            args, lr=lr, betas=betas, eps=eps, weight_decay=weight_decay
-        )
         model, optimizer = initialize_engine(
             model_func=model_func, local_rank=rank, config=config
         )
@@ -69,7 +92,7 @@ def test_transformer_model_helper(
             optimizer,
             opt_level="O2",
             loss_scale="dynamic",
-            max_loss_scale=2 ** 16,
+            max_loss_scale=config["fp16"]["init_scale"],
         )
         model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[rank])
 
@@ -78,9 +101,7 @@ def test_transformer_model_helper(
     total_macs = model_numel * args.batch_size * sequence_length * 2 * 4
     log_dist(f"Total MACs: {total_macs / 1024 ** 4} TFlops")
 
-    see_memory_usage(
-        f"After model init. using {dist_plan}, gradient checkpoint: {is_ckp}"
-    )
+    see_memory_usage(f"After model init. using {dist_plan}")
 
     # load data, here we generate random data for benchmarking.
     data_loader = get_bert_data_loader(
@@ -88,7 +109,6 @@ def test_transformer_model_helper(
         total_samples=10000,
         sequence_length=sequence_length,
         device=device,
-        is_distrbuted=True,
     )
 
     loss_res = []
@@ -103,7 +123,6 @@ def test_transformer_model_helper(
 
         # You may need to empty_cache for really large models.
         torch.cuda.empty_cache()
-        log_dist(f"Start Step {n} with {dist_plan}...")
         step_start_time = time.time()
 
         if dist_plan == "patrickstar":
@@ -143,19 +162,14 @@ def test_transformer_model_helper(
                     f"{total_macs / 1e12 / step_elapse} Tflops Per GPU "
                     f"{args.batch_size * world_size/step_elapse} SamplesPerSec"
                 )
-
-        log_dist(f"End Step {n} with {dist_plan}.\n")
     return loss_res
 
 
 if __name__ == "__main__":
     args = parse_args()
-    use_ckp = args.use_ckp
-    dist_plan = args.dist_plan
     res_check = args.res_check
 
-    # You could set the logger level to INFO to view more runtime
-    # information.
+    # You could set the logger level to INFO to view more log.
     logger.setLevel(logging.INFO)
     if not torch.distributed.is_initialized():
         torch.distributed.init_process_group(backend="nccl")
@@ -166,14 +180,12 @@ if __name__ == "__main__":
         torch.manual_seed(0)
         loss_list = test_transformer_model_helper(
             args=args,
-            is_ckp=use_ckp,
-            dist_plan=dist_plan,
+            dist_plan="patrickstar",
             num_steps=5,
         )
         print("*" * 20 + " LOSS " + "*" * 20)
         print(f"{loss_list}")
-
-    if res_check:
+    else:
         logging.warning(
             "Running to check result. This will use Bert model and batch size is 2."
         )
@@ -185,7 +197,6 @@ if __name__ == "__main__":
         torch.manual_seed(0)
         torch_res_list = test_transformer_model_helper(
             args=args,
-            is_ckp=use_ckp,
             dist_plan="apex",
             num_steps=NUM_STEPS,
         )
@@ -196,7 +207,6 @@ if __name__ == "__main__":
         torch.manual_seed(0)
         ps_res_list = test_transformer_model_helper(
             args=args,
-            is_ckp=use_ckp,
             dist_plan="patrickstar",
             num_steps=NUM_STEPS,
         )

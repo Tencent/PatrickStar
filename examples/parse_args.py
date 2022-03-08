@@ -32,32 +32,9 @@ def _add_patrick_star_args(parser):
         "weight intialization.",
     )
     group.add_argument(
-        "--init_loss_scale_power",
-        type=float,
-        default=10,
-        help="initial loss scale power",
-    )
-    group.add_argument(
         "--with_async_mem_monitor",
         action="store_true",
         help="Use async memory monitor.",
-    )
-    group.add_argument(
-        "--slog_file",
-        type=str,
-        default="./slog_file/tmp.txt",
-        help="The file to record chunk size serach log.",
-    )
-    return parser
-
-
-def _add_general_opt_args(parser):
-    group = parser.add_argument_group(title="test_bert")
-    group.add_argument(
-        "--use_ckp",
-        dest="use_ckp",
-        action="store_true",
-        help="using gradient checkpointing for memory saveing.",
     )
     return parser
 
@@ -78,12 +55,6 @@ def _add_test_config_args(parser):
         dest="res_check",
         action="store_true",
         help="check results correctness of checkpointing.",
-    )
-    group.add_argument(
-        "--dist_plan",
-        type=str,
-        default="torch",
-        help="Distributed Plan [torch, patrickstar]",
     )
     group.add_argument(
         "--model_name", type=str, default="GPTsmall", help="The model name."
@@ -115,7 +86,6 @@ def parse_args():
     parser = argparse.ArgumentParser(description="PatrickStar Arguments")
     parser = _add_patrick_star_args(parser)
     parser = _add_test_config_args(parser)
-    parser = _add_general_opt_args(parser)
     args = parser.parse_args()
     args.rank = int(os.getenv("RANK", "0"))
     args.world_size = int(os.getenv("WORLD_SIZE", "1"))

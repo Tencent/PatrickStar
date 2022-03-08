@@ -34,23 +34,3 @@ Check the accuracy of PatrickStar with Bert:
 ```bash
 bash RES_CHECK=1 run_transformers.sh
 ```
-
-### MoE support
-
-PatrickStar also support training MoE models. In the `examples/moe` directory, run:
-
-```bash
-python -m torch.distributed.launch --nproc_per_node=4 huggingface_bert_moe.py
-```
-
-Note that you need to install [FastMoE](https://github.com/laekov/fastmoe) before running this example.
-
-
-### Search the best chunk size
-
-Chunk size (CS) is an important hyperparameter for patrickstar.
-Although you can set an CS value empirically by run your training task serveral times. We provide an systemic way to find a CS with less memory footprint. Using the following command to search the chunk size.
-
-```
- env CS_SEARCH=1 bash run_transformers.sh
-```

@@ -16,8 +16,6 @@ def get_patrickstar_config(
     args, lr=0.001, betas=(0.9, 0.999), eps=1e-6, weight_decay=0
 ):
     config = {
-        # The same format as optimizer config of DeepSpeed
-        # https://www.deepspeed.ai/docs/config-json/#optimizer-parameters
         "optimizer": {
             "type": "Adam",
             "params": {
@@ -26,6 +24,10 @@ def get_patrickstar_config(
                 "eps": eps,
                 "weight_decay": weight_decay,
             },
+        },
+        "fp16": {
+            "loss_scale": "dynamic",
+            "init_scale": 2 ** 12,
         },
         "chunk_size": args.chunk_size,
         "release_after_init": args.release_after_init,

@@ -54,7 +54,7 @@ def initialize_engine(model_func, local_rank, config=None, client=None):
         client = PatrickStarClient(
             local_rank=local_rank,
             chunk_size=chunk_size,
-            config=config.get("client", None),
+            config=config.get("client", {}),
         )
 
         start_time = time.time()

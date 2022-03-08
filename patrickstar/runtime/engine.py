@@ -13,10 +13,9 @@
 
 import torch
 
-from patrickstar.core.const import ChunkState, TensorState, ParamType, TrainingStage
+from patrickstar.core.const import ChunkState, TensorState, TrainingStage
 from patrickstar.core.hook import reduce_grad, setup_patrickstar_hooks
-from patrickstar.core.parameter import register_param
-from patrickstar.fp16 import DynamicLossScaler
+from patrickstar.fp16 import DynamicLossScaler, LossScaler
 from patrickstar.ops import FP16Adam
 from patrickstar.runtime.checkpoint import state_dict, load_state_dict
 from patrickstar.utils import log_dist, global_timer
@@ -25,57 +24,44 @@ from patrickstar.utils import log_dist, global_timer
 class PatrickStarEngine(torch.nn.Module):
     r"""patrickStar engine for training."""
 
-    def __init__(self, model, client, config):
+    def __init__(self, model, client, config={}):
         super(PatrickStarEngine, self).__init__()
         self.module = model
         self.module.train()
 
         self.client = client
 
-        # default parameter for adam.
-        default_optim_config = {
-            "type": "Adam",
-            "params": {
-                "lr": 0.01,
-                "betas": (0.9, 0.999),
-                "eps": 1e-8,
-                "weight_decay": 0,
-            },
-        }
-
-        if config is not None:
-            # Optimizer configuration
-            optim_config = config.get("optimizer", default_optim_config)
-            optim_type = optim_config.get("type", default_optim_config["type"])
-            if optim_type != "Adam":
-                raise ValueError(
-                    f"Only support Adam and AdamW at the moment. "
-                    f"Get optimizer type {optim_type}"
-                )
-            optim_params = optim_config.get("params", default_optim_config["params"])
-            for key, val in default_optim_config["params"].items():
-                if key not in optim_params:
-                    optim_params[key] = val
+        # Loss scaler configuration
+        if "fp16" not in config:
+            self.loss_scaler = None
         else:
-            optim_type = default_optim_config["type"]
-            optim_params = default_optim_config["params"]
+            loss_scale_config = config["fp16"]
+            assert "loss_scale" in loss_scale_config
+            if loss_scale_config["loss_scale"] == "dynamic":
+                self.loss_scaler = DynamicLossScaler(
+                    init_scale=loss_scale_config.get("init_scale", 2 ** 16),
+                )
+            else:
+                self.loss_scaler = LossScaler(loss_scale_config["loss_scale"])
 
-        self.loss_scaler = DynamicLossScaler()
-
-        params = list(self.parameters())
-        if len(params) == 0:
-            dummy = torch.nn.Parameter(torch.empty([1]), requires_grad=False)
-            register_param(dummy, ParamType.TORCH_BASED, "dummy")
-            params = [dummy]
+        # Optimizer configuration
+        optim_config = config.get("optimizer", {})
+        optim_type = optim_config.get("type", "Adam")
+        if optim_type != "Adam":
+            raise ValueError(
+                f"Only support Adam and AdamW at the moment. "
+                f"Get optimizer type {optim_type}"
+            )
+        optim_params = optim_config.get("params", {})
 
         self.optimizer = FP16Adam(
             self.client,
-            params,
+            self.parameters(),
             self.loss_scaler,
-            lr=optim_params["lr"],
-            betas=optim_params["betas"],
-            eps=optim_params["eps"],
-            weight_decay=optim_params["weight_decay"],
+            lr=optim_params.get("lr", 0.01),
+            betas=optim_params.get("betas", (0.9, 0.999)),
+            eps=optim_params.get("eps", 1e-8),
+            weight_decay=optim_params.get("weight_decay", 0),
         )
 
         self.client.optimizer = self.optimizer

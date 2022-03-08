@@ -3,9 +3,6 @@ Optimizations are divided into PatrickStar-related ones and general ones.
 General Optimizations can be applied to any PyTorch-based framework.
 
 ## General Optimizations
-1. Activation Checkpoing (a.k.a gradient checkpointing in [PyTorch](https://pytorch.org/docs/stable/checkpoint.html))
-`--use_ckp`
-Make sure this option is open for large model training. It can primarily save activation memory footprint at the cost of recomputing.
 
 1. Activation Offloading
 `--with_activation_offload`
@@ -36,14 +33,11 @@ We provide ways to adjust the CPU and GPU memory usage quota for the memory trac
 
 `overall_cpu_mem_ratio`: the available cpu mem size / real cpu mem capacity. Turn up the value if you meet cpu or gpu OOM during iteration.
 
-`margin_use_ratio`: Space to host optimizer states in GPU / the rest GPU space excluding the peak chunk-used space after warmup FWD+BWD.
-
 ```
 "mem_tracer": {
                     "use_async_mem_monitor": args.with_async_mem_monitor,
                     "warmup_gpu_chunk_mem_ratio": 0.1,
                     "overall_gpu_mem_ratio": 0.8,
                     "overall_cpu_mem_ratio": 0.8,
-                    "margin_use_ratio": 0.8,
                 },
 ```

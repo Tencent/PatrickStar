@@ -92,9 +92,8 @@ class RuntimeMemTracer:
         self.cpu_chunk_used_mem_pinned = 0
 
         assert config is not None
-        self.overall_gpu_mem_ratio = config.get("overall_gpu_mem_ratio", 0.8)
-        self.overall_cpu_mem_ratio = config.get("overall_cpu_mem_ratio", 0.8)
-        self._margin_use_ratio = config.get("margin_use_ratio", 0.8)
+        self.overall_gpu_mem_ratio = config.get("overall_gpu_mem_ratio", 0.9)
+        self.overall_cpu_mem_ratio = config.get("overall_cpu_mem_ratio", 0.9)
         self.warmup_gpu_chunk_mem_ratio = config.get("warmup_gpu_chunk_mem_ratio", 0.1)
         self.use_async_mem_monitor = config.get("use_async_mem_monitor", False)
         if self.use_async_mem_monitor:
@@ -183,7 +182,6 @@ class RuntimeMemTracer:
         # Therefore clean the stats collected.
         if self.metronome.is_warmup:
             self.memory_stats = []
-        log_dist("Reset Memory Statistics")
 
     def remaining_chunk_mem(self, device_type):
         """
@@ -192,13 +190,6 @@ class RuntimeMemTracer:
         """
         available_mem = self.available_chunk_mem(device_type)
         chunk_mem = self.chunk_used_mem[device_type]
-        if device_type == "cuda":
-            print(
-                "available_mem:",
-                available_mem / 1024 ** 2,
-                "chunk_mem:",
-                chunk_mem / 1024 ** 2,
-            )
         return available_mem - chunk_mem
 
     def available_chunk_mem(self, device_type):
