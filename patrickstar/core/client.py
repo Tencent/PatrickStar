@@ -179,7 +179,7 @@ class PatrickStarClient:
         for chunk_id in comm_group.elements:
             self.chunk_list[chunk_id].unpin()
 
-    def access_dist(self, param, compute_device, *, grad):
+    def access_dist(self, param, compute_device):
         r"""Attach data to param.data, fetch from remote if chunk is released."""
         if param.ps_attr.is_torch_based():
             return
@@ -191,9 +191,9 @@ class PatrickStarClient:
                 compute_device,
             )
 
-        self.access(param, compute_device, grad=grad)
+        self.access(param, compute_device)
 
-    def access(self, param, compute_device, *, grad):
+    def access(self, param, compute_device):
         r"""Attach tensor to param.data."""
         if param.ps_attr.is_torch_based():
             return
@@ -212,13 +212,18 @@ class PatrickStarClient:
         param.data = chunk.payload.narrow(0, start_offset, numel).view(shape)
         param.ps_attr.state = TensorState.COMPUTE
 
-        if grad:
-            grad_chunk = self.chunk_list.grad_chunks[chunk_id]
-            self.chunk_list.access_chunk(grad_chunk, compute_device)
-            grad_chunk.num_in_compute += 1
-            param.grad = grad_chunk.payload.narrow(0, start_offset, numel).view(shape)
+    def get_grad(self, param, compute_device):
+        info = param.ps_attr.info
+        numel = param.ps_attr.numel
+        shape = param.ps_attr.shape
+        start_offset = info.start_offset
+        chunk_id = info.chunk_id
 
-    def release(self, param, *, grad):
+        grad_chunk = self.chunk_list.grad_chunks[chunk_id]
+        self.chunk_list.access_chunk(grad_chunk, compute_device)
+        return grad_chunk.payload.narrow(0, start_offset, numel).view(shape)
+
+    def release(self, param):
         r"""Release the param in standalone environment.
 
         This means the param can be move to other device.
@@ -226,18 +231,13 @@ class PatrickStarClient:
         if param.ps_attr.is_torch_based():
             return
 
-        chunk_id = param.ps_attr.info.chunk_id
-        chunk = self.chunk_list[chunk_id]
-        if grad:
-            grad_chunk = self.chunk_list.grad_chunks[chunk_id]
-        assert chunk.get_state() != TensorState.RELEASED
-        if param.ps_attr.state == TensorState.COMPUTE:
-            chunk.num_in_compute -= 1
-            if grad:
-                grad_chunk.num_in_compute -= 1
-        param.ps_attr.state = TensorState.HOLD
         # NOTE(jiaruifang) device must be the same as the origin param.
         # Or it will affect hook of param.grad_fn.next_functions[0][0].
         param.data = torch.tensor([], dtype=param.ps_attr.dtype, device=param.device)
-        if grad:
-            param.grad = None
+
+        chunk_id = param.ps_attr.info.chunk_id
+        chunk = self.chunk_list[chunk_id]
+        assert chunk.get_state() != ChunkState.RELEASED
+        if param.ps_attr.state == TensorState.COMPUTE:
+            chunk.num_in_compute -= 1
+        param.ps_attr.state = TensorState.HOLD

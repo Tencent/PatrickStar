@@ -74,7 +74,7 @@ class ChunkEvictionPolicyBase(ABC):
                 return mom
         return total_mom + access_mom_list[0]
 
-    def prepare_device(self, chunks, required_room, target_device):
+    def prepare_device(self, chunk_list, required_room, target_device):
         remaining_chunk_mem_size = self.memory_tracer.remaining_chunk_mem(
             target_device.type
         )
@@ -83,15 +83,16 @@ class ChunkEvictionPolicyBase(ABC):
         if required_room <= 0:
             return
 
-        moved_list = self.derive_eviction_list(chunks, required_room, target_device)
+        chunks_to_move = self.derive_eviction_list(
+            chunk_list, required_room, target_device
+        )
 
         if target_device.type == "cuda":
             new_device = torch.device("cpu:0")
         else:
             new_device = torch.device(f"cuda:{self.local_rank}")
 
-        for chunk_id in moved_list:
-            chunk = chunks[chunk_id]
+        for chunk in chunks_to_move:
             assert chunk.get_device() != new_device
             chunk.move(new_device)
 
@@ -101,18 +102,17 @@ class ChunkEvictionPolicyBase(ABC):
 
 
 class LRUEvictionPolicy(ChunkEvictionPolicyBase):
-    def derive_eviction_list(self, chunks, need_bytes, target_device):
+    def derive_eviction_list(self, chunk_list, need_bytes, target_device):
         """
         Evict the chunk latest to be accessed on the current device.
         """
-        movable_chunk_info = []
+        chunks_to_move = []
+        moved_bytes = 0
         q = PriorityQueue()
-        for chunk_id, chunk in enumerate(chunks):
+        for chunk_id, chunk in enumerate(chunk_list.chunks):
             if (
-                chunk.get_device() is not None
+                chunk.get_state() == ChunkState.HOLD
                 and chunk.get_device().type == target_device.type
-                and chunk.get_state() != ChunkState.COMPUTE
-                and chunk.get_state() != ChunkState.RELEASED
                 and not chunk.is_pin()
             ):
                 # The next moment when this chunk was accessed.
@@ -120,15 +120,22 @@ class LRUEvictionPolicy(ChunkEvictionPolicyBase):
                 # Order by `next_mom`s, from large to small
                 # and by chunk_ids if `next_mom` are the same (only happens during warmup).
                 q.put((-next_mom, chunk_id))
-                movable_chunk_info.append(f"{next_mom}_{chunk_id}")
             # TODO(jiaruifang) Do not release `FREE` chunks immediately for reuse.
             # assert chunk.get_state() != ChunkState.FREE
-        moved_list = []
-        moved_bytes = 0
         while not q.empty():
             next_mom, chunk_id = q.get()
-            moved_bytes += chunks[chunk_id].get_payload_space()
-            moved_list.append(chunk_id)
+            chunk = chunk_list.chunks[chunk_id]
+            moved_bytes += chunk.get_payload_space()
+            chunks_to_move.append(chunk)
+            # move grad chunk together with data chunk
+            grad_chunk = chunk_list.grad_chunks[chunk_id]
+            if (
+                grad_chunk.get_state() == ChunkState.HOLD
+                and grad_chunk.get_device().type == target_device.type
+            ):
+                moved_bytes += grad_chunk.get_payload_space()
+                chunks_to_move.append(grad_chunk)
+
             if moved_bytes >= need_bytes:
                 break
 
@@ -136,7 +143,6 @@ class LRUEvictionPolicy(ChunkEvictionPolicyBase):
         if moved_bytes < need_bytes:
             logger.warning(
                 f"device {target_device} still needs {need_bytes / 1e6} MB, "
-                f"but there is not enough space on it, only {moved_bytes / 1e6} MB available. "
-                f"movable_chunk_info {movable_chunk_info}",
+                f"but there is not enough space on it, only {moved_bytes / 1e6} MB available."
             )
-        return moved_list
+        return chunks_to_move

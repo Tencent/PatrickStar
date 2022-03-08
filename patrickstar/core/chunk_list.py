@@ -75,7 +75,7 @@ class ChunkList:
         self.chunks.append(chunk)
         grad_chunk = Chunk(
             capacity=self.chunk_size,
-            chunk_id=chunk_id + 1000,
+            chunk_id=chunk_id,
             memory_tracer=self.memory_tracer,
             local_rank=self.local_rank,
         )
@@ -93,7 +93,7 @@ class ChunkList:
             self.try_allocate_payload(chunk, compute_device)
         elif chunk.get_device().type != compute_device.type:
             self.chunk_eviction_policy.prepare_device(
-                self.chunks, chunk.get_chunk_space(), compute_device
+                self, chunk.get_chunk_space(), compute_device
             )
             chunk.move(compute_device)
         assert chunk.get_device().type == compute_device.type
@@ -105,6 +105,6 @@ class ChunkList:
         If it dose not work, we second free up all chunks not in used on the target device.
         """
         self.chunk_eviction_policy.prepare_device(
-            self.chunks, chunk.get_chunk_space(), compute_device
+            self, chunk.get_chunk_space(), compute_device
         )
         chunk.allocate_payload(compute_device)

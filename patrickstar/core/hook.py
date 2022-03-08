@@ -84,21 +84,21 @@ class PostBackwardFunction(torch.autograd.Function):
         return (None, None) + args
 
 
-def load_params(module, client, name, *, grad):
+def load_params(module, client, name):
     flag = False
     for _, param in module.named_parameters(recurse=False):
         if param.ps_attr.is_chunk_based():
-            client.access_dist(param, client.device, grad=grad)
+            client.access_dist(param, client.device)
             flag = True
     if flag:
         client.mem_tracer.trace()
 
 
 # release submodule
-def unload_params(module, client, name, *, grad):
+def unload_params(module, client, name):
     for param in module.parameters(recurse=False):
         if param.ps_attr.is_chunk_based():
-            client.release(param, grad=grad)
+            client.release(param)
 
 
 def reduce_grad(param, client):
@@ -132,12 +132,16 @@ def reduce_grad(param, client):
             )
             param.grad /= world_size
         global_timer.finish_profile("HOOK_torch_allreduce")
+    if param.ps_attr.is_chunk_based():
+        grad = client.get_grad(param, torch.device("cpu:0"))
+        grad.copy_(param.grad)
+        param.grad = None
 
 
 def post_module_backward_function(module, client, name):
     for param in module.parameters(recurse=False):
         reduce_grad(param, client)
-    unload_params(module, client, name, grad=True)
+    unload_params(module, client, name)
 
 
 def _register_hooks_recursively(module, client, name=""):
@@ -156,15 +160,15 @@ def _register_hooks_recursively(module, client, name=""):
         return
 
     def _pre_forward_module_hook(module, *args):
-        load_params(module, client, name, grad=False)
+        load_params(module, client, name)
 
     def _post_forward_module_hook(module, *args):
-        unload_params(module, client, name, grad=False)
+        unload_params(module, client, name)
 
     # The hook can modify the output
     def _pre_backward_module_hook(module, inputs, output):
         def _run_before_backward_function(sub_module):
-            load_params(sub_module, client, name, grad=True)
+            load_params(sub_module, client, name)
 
         return _apply_to_tensors_only(
             module, PreBackwardFunction, _run_before_backward_function, output

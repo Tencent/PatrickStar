@@ -166,7 +166,7 @@ class PatrickStarEngine(torch.nn.Module):
             if param.ps_attr.is_torch_based():
                 continue
             if param.ps_attr.state == TensorState.COMPUTE:
-                self.client.release(param, grad=True)
+                self.client.release(param)
                 flag = True
         if flag:
             self.client.mem_tracer.trace()
@@ -193,7 +193,10 @@ class PatrickStarEngine(torch.nn.Module):
 
         for group in self.optimizer.param_groups:
             for p in group["params"]:
-                self.optimizer.client.access(p, torch.device("cpu:0"), grad=True)
+                # p.data = ...
+                self.client.access(p, torch.device("cpu:0"))
+                # p.grad = ...
+                p.grad = self.client.get_grad(p, torch.device("cpu:0"))
 
         if scaler is not None:
             scaler.step(self.optimizer)
@@ -201,7 +204,9 @@ class PatrickStarEngine(torch.nn.Module):
             self.optimizer.step()
         for group in self.optimizer.param_groups:
             for p in group["params"]:
-                self.optimizer.client.release(p, grad=True)
+                self.client.release(p)
+                p.grad = None
+
         global_timer.finish_profile("ADAM")
 
     def zero_grad(self):

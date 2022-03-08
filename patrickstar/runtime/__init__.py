@@ -74,16 +74,14 @@ def initialize_engine(model_func, local_rank, config=None, client=None):
         )
 
         start_time = time.time()
-        log_dist("begin initialize the model parameters...")
+        log_dist("Begin initializing model...")
         with PSPreProcessCtx(
             client=client,
             release_after_init=release_after_init,
         ):
             model = model_func()
         end_time = time.time()
-        log_dist(
-            f"finished initialized the model parameters... {end_time  - start_time} s"
-        )
+        log_dist(f"Finish initializing model in {end_time  - start_time} s")
 
     engine = PatrickStarEngine(model=model, client=client, config=config)
     client.start_mem_tracer()

@@ -149,15 +149,10 @@ class RuntimeMemTracer:
 
     def trace(self):
         """Record the memory usage of the moment and increase moment counter."""
-        if torch.distributed.is_initialized():
-            rank = self.local_rank
-        else:
-            rank = 0
-        gpu_device = torch.device(f"cuda:{rank}")
-        cpu_device = torch.device("cpu:0")
-        gpu_used = get_sys_memory_used(gpu_device)
-
         if self.metronome.is_warmup:
+            gpu_device = torch.device(f"cuda:{self.local_rank}")
+            cpu_device = torch.device("cpu:0")
+            gpu_used = get_sys_memory_used(gpu_device)
             # Get peak memory between cur tracing and the prev tracing
             if self.use_async_mem_monitor:
                 max_mem_period = self.async_mem_monitor.finish()
@@ -248,14 +243,6 @@ class RuntimeMemTracer:
                     logger.debug(f"GPU available_chunk_mem is {ava_mem / 1e6} MB")
                     return ava_mem
                 else:
-                    # TODO(jiaruifang) using a guessed number -- 1/3 of the GPU
-                    # mem is used for chunk.
-                    print(
-                        "warmup gpu: ",
-                        self.overall_gpu_mem
-                        * self.warmup_gpu_chunk_mem_ratio
-                        / 1024 ** 2,
-                    )
                     return self.overall_gpu_mem * self.warmup_gpu_chunk_mem_ratio
 
         if device_type == "cpu":

@@ -198,9 +198,9 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
                     if not self.not_init:
                         if is_registered(param):
                             init_data = param.data
-                            self.client.access(param, torch.device("cpu:0"), grad=False)
+                            self.client.access(param, torch.device("cpu:0"))
                             param.data.copy_(init_data)
-                            self.client.release(param, grad=False)
+                            self.client.release(param)
             else:
                 for param in chunk.params:
                     assert not self.client.is_local_param(param)

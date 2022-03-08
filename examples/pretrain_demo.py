@@ -211,7 +211,7 @@ if __name__ == "__main__":
             is_ckp=use_ckp,
             is_fp16=use_fp16,
             dist_plan=dist_plan,
-            num_steps=3,
+            num_steps=5,
         )
         print("*" * 20 + " LOSS " + "*" * 20)
         print(f"{loss_list}")

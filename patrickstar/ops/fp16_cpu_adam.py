@@ -287,9 +287,7 @@ class FP16Adam(torch.optim.Optimizer):
             for k, v in old_packed_state[idx].items():
                 if isinstance(v, torch.nn.Parameter):
                     packed_state[idx][k] = (
-                        self.client.access(v, torch.device("cpu:0"), grad=False)
-                        .clone()
-                        .detach()
+                        self.client.access(v, torch.device("cpu:0")).clone().detach()
                     )
                 else:
                     packed_state[idx][k] = v
@@ -329,8 +327,8 @@ class FP16Adam(torch.optim.Optimizer):
             assert len(saved_single_state) == len(single_state)
             for k, v in single_state.items():
                 if isinstance(v, torch.nn.Parameter):
-                    self.client.access(v, torch.device("cpu:0"), grad=False)
+                    self.client.access(v, torch.device("cpu:0"))
                     v.data.copy_(saved_single_state[k])
-                    self.client.release(v, grad=False)
+                    self.client.release(v)
                 else:
                     single_state[k] = saved_single_state[k]
