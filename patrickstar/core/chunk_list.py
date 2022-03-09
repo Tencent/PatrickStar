@@ -41,7 +41,7 @@ class ChunkList:
     def __getitem__(self, chunk_id):
         return self.chunks[chunk_id]
 
-    def new_chunk(self):
+    def new_chunk(self, is_dummy=False):
         r"""Create a param chunk as well as its grad chunk and fp32 chunk.
 
         Note that the payload of chunks are not allocated.
@@ -52,6 +52,7 @@ class ChunkList:
             capacity=self.chunk_size,
             chunk_id=chunk_id,
             memtracer=self.memtracer,
+            is_dummy=is_dummy,
         )
         self.chunks.append(chunk)
         grad_chunk = Chunk(
@@ -59,6 +60,7 @@ class ChunkList:
             capacity=self.chunk_size,
             chunk_id=chunk_id,
             memtracer=self.memtracer,
+            is_dummy=is_dummy,
         )
         self.grad_chunks.append(grad_chunk)
         fp32_chunk = Chunk(
@@ -66,6 +68,7 @@ class ChunkList:
             capacity=self.chunk_size,
             chunk_id=chunk_id,
             memtracer=self.memtracer,
+            is_dummy=is_dummy,
         )
         self.fp32_chunks.append(fp32_chunk)
         return chunk

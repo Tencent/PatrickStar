@@ -44,7 +44,8 @@ class CommInfo:
         world_size = get_world_size()
         group_id = chunk_id // world_size
         self.group = get_comm_group(group_id)
-        self.group.elements.append(chunk_id)
+        if chunk_id not in self.group.elements:
+            self.group.elements.append(chunk_id)
         self.offset = chunk_id % world_size
 
     @property

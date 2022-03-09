@@ -24,7 +24,7 @@ python huggingface_bert.py
 The following command will run a model with 4B params:
 
 ```bash
-env MODEL_NAME=GPT2_4B RES_CHECK=0 DIST_PLAN="patrickstar" bash run_transformers.sh
+MODEL_NAME=GPT2_4B bash run_transformers.sh
 ```
 
 For the available `MODEL_NAME`, please check `pretrain_demo.py`.
@@ -32,5 +32,5 @@ For the available `MODEL_NAME`, please check `pretrain_demo.py`.
 Check the accuracy of PatrickStar with Bert:
 
 ```bash
-bash RES_CHECK=1 run_transformers.sh
+RES_CHECK=1 bash run_transformers.sh
 ```

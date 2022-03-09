@@ -11,9 +11,10 @@
 # permissions and limitations under the License.
 # See the AUTHORS file for names of contributors.
 
+from patrickstar.core.parameter import register_param
 import torch
 
-from patrickstar.core.const import ChunkState, TensorState
+from patrickstar.core.const import ChunkState, ParamType, TensorState
 from patrickstar.core.hook import reduce_grad, setup_patrickstar_hooks
 from patrickstar.fp16 import DynamicLossScaler, LossScaler
 from patrickstar.ops import FP16Adam
@@ -54,9 +55,20 @@ class PatrickStarEngine(torch.nn.Module):
             )
         optim_params = optim_config.get("params", {})
 
+        params = []
+        for param in self.module.parameters():
+            if param.ps_attr.is_local():
+                params.append(param)
+        # Some worker may have 0 chunks when the model is small.
+        if len(params) == 0:
+            param = torch.nn.Parameter(
+                torch.tensor([], dtype=torch.float), requires_grad=False
+            )
+            register_param(param, ParamType.TORCH_BASED, "placeholder")
+            params.append(param)
         self.optimizer = FP16Adam(
             self.client,
-            self.parameters(),
+            params,
             self.loss_scaler,
             lr=optim_params.get("lr", 0.01),
             betas=optim_params.get("betas", (0.9, 0.999)),
@@ -88,15 +100,6 @@ class PatrickStarEngine(torch.nn.Module):
         self.client.memtracer.metronome.reset()
         for chunk in self.client.chunk_list.chunks:
             chunk.unused = 0
-
-    def parameters(self, recurse: bool = True):
-        for _, param in self.named_parameters(recurse=recurse):
-            yield param
-
-    def named_parameters(self, prefix: str = "", recurse: bool = True):
-        for name, param in self.module.named_parameters(prefix, recurse):
-            if param.ps_attr.is_local():
-                yield name, param
 
     def forward(self, *inputs, **kwargs):
         r"""Execute forward propagation
@@ -153,22 +156,24 @@ class PatrickStarEngine(torch.nn.Module):
 
         for group in self.optimizer.param_groups:
             for p in group["params"]:
-                # NOTE(zilinzhu) when assigning grad, the type and shape of
-                # p.data should be the same as p.grad, that's why we
-                # need to access the fp16 param data first.
-                self.client.access(p, torch.device("cpu:0"))
-                p.grad = self.client.get_grad(p)
-                p.data = self.client.get_fp32(p)
+                if p.ps_attr.is_chunk_based():
+                    # NOTE(zilinzhu) when assigning grad, the type and shape of
+                    # p.data should be the same as p.grad, that's why we
+                    # need to access the fp16 param data first.
+                    self.client.access(p, torch.device("cpu:0"))
+                    p.grad = self.client.get_grad(p)
+                    p.data = self.client.get_fp32(p)
 
         self.optimizer.step()
         for group in self.optimizer.param_groups:
             for p in group["params"]:
-                self.client.release(p)
-                p.grad = None
+                if p.ps_attr.is_chunk_based():
+                    self.client.release(p)
+                    p.grad = None
         # initialize fp16 params with fp32 params.
         for i in range(len(self.client.chunk_list)):
             chunk = self.client.chunk_list.chunks[i]
-            if chunk.is_local():
+            if chunk.is_local() and not chunk.is_dummy:
                 fp32_chunk = self.client.chunk_list.fp32_chunks[i]
                 chunk.payload.copy_(fp32_chunk.payload)
 

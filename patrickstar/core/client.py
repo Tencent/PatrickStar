@@ -56,10 +56,10 @@ class PatrickStarClient:
 
     def new_dummy_chunk(self):
         r"""Append a dummy chunk to the corresponding chunk_list"""
-        chunk = self.chunk_list.new_chunk()
+        chunk = self.chunk_list.new_chunk(is_dummy=True)
 
         dummy = torch.nn.Parameter(
-            torch.tensor([], dtype=torch.half), requires_grad=False
+            torch.tensor([], dtype=torch.float), requires_grad=False
         )
         # Add a dummy param to dummy chunk, so that the chunk can be set in HOLD state.
         register_param(dummy, ParamType.CHUNK_BASED, "dummy")
@@ -127,8 +127,6 @@ class PatrickStarClient:
                 self.chunk_list.try_allocate_payload(chunk, compute_device)
                 chunk.pin()
                 chunk.num_in_compute = 0
-                for param in chunk.params:
-                    param.ps_attr.state = TensorState.HOLD
 
             allgather_payload_buff.append(chunk.payload)
 

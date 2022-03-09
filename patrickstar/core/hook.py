@@ -117,7 +117,7 @@ def reduce_grad(param, client):
             )
             param.grad /= world_size
         global_timer.finish_profile("HOOK_torch_allreduce")
-    if param.ps_attr.is_chunk_based():
+    if param.ps_attr.is_chunk_based() and param.ps_attr.is_local():
         grad = client.get_grad(param)
         grad.copy_(param.grad)
         param.grad = None

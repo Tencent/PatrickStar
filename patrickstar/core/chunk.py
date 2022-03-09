@@ -26,6 +26,7 @@ class Chunk:
         capacity,
         chunk_id,
         memtracer,
+        is_dummy=False,
     ):
         self.dtype = dtype
         self.chunk_id = chunk_id
@@ -33,6 +34,7 @@ class Chunk:
         # as payload can be None.
         self.capacity = capacity
         self.memtracer = memtracer
+        self.is_dummy = is_dummy
 
         self.payload = None
 
@@ -116,6 +118,7 @@ class Chunk:
             self.payload.is_pinned(),
         )
         self.state = ChunkState.HOLD
+        self.num_in_compute = 0
         for param in self.params:
             param.ps_attr.state = TensorState.HOLD
 

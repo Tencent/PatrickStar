@@ -57,25 +57,6 @@ class FP16Adam(torch.optim.Optimizer):
         self.loss_scaler = loss_scaler
         self.has_overflow = False
 
-        # Eager state initialization, different from Pytorch
-        for group in self.param_groups:
-            for p in group["params"]:
-                state = self.state[p]
-                self.state[p]["betas"] = group["betas"]
-                self.state[p]["lr"] = group["lr"]
-                self.state[p]["weight_decay"] = group["weight_decay"]
-                self.state[p]["eps"] = group["eps"]
-
-                state["step"] = 0
-
-                # Only create the local optimizer state params.
-                state["exp_avg"] = torch.zeros(
-                    p.ps_attr.shape, device=torch.device("cpu:0")
-                )
-                state["exp_avg_sq"] = torch.zeros(
-                    p.ps_attr.shape, device=torch.device("cpu:0")
-                )
-
         self.opt_id = FP16Adam.optimizer_id
         FP16Adam.optimizer_id = FP16Adam.optimizer_id + 1
         try:
@@ -256,8 +237,18 @@ class FP16Adam(torch.optim.Optimizer):
                         )
                     grads.append(p.grad)
 
-                    # update the steps for each param group update
                     state = self.state[p]
+                    # Lazy state initialization
+                    if len(state) == 0:
+                        state["step"] = 0
+                        # Exponential moving average of gradient values
+                        state["exp_avg"] = torch.zeros(
+                            p.ps_attr.shape, device=torch.device("cpu:0")
+                        )
+                        # Exponential moving average of squared gradient values
+                        state["exp_avg_sq"] = torch.zeros(
+                            p.ps_attr.shape, device=torch.device("cpu:0")
+                        )
 
                     exp_avgs.append(state["exp_avg"])
                     exp_avg_sqs.append(state["exp_avg_sq"])
