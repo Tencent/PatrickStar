@@ -18,8 +18,8 @@ from apex import amp
 from transformers import BertConfig, BertForSequenceClassification
 
 from common import distributed_test
-from examples.data_loader import get_bert_data_loader
-from patrickstar.runtime import initialize_engine
+from dataloader import get_bert_data_loader
+from patrickstar.runtime import initialize
 
 
 def bert_model(
@@ -51,8 +51,6 @@ def bert_model(
     eps = 1e-6
     weight_decay = 0
 
-    # 如果要测试溢出情况的对比，可以将 initial_scale_power 设为 20
-    # 但是注意，apex 的 LossScaler 的默认初始值最大为 2**16，所以需要手动在 apex 中修改
     initial_scale_power = 16
 
     if method == "patrickstar":
@@ -73,12 +71,13 @@ def bert_model(
                     "use_hybrid_adam": True,
                 },
             },
+            "fp16": {"loss_scale": "dynamic", "init_scale": 2 ** initial_scale_power},
             "default_chunk_size": 32 * 1024 * 1024,
             "release_after_init": False,
             "use_cpu_embedding": True,
         }
 
-        model, optimizer = initialize_engine(
+        model, optimizer = initialize(
             model_func=model_func, local_rank=rank, config=config
         )
     else:

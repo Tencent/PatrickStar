@@ -4,14 +4,14 @@ Here are some instructions for making better use of PatrickStar.
 
 ### Create model with `intialize_engine`
 
-To create model and optimizer of PatrickStar, you will use the `initialize_engine` API:
+To create model and optimizer of PatrickStar, you will use the `initialize` API:
 
 ```python
-from patrickstar.runtime import initialize_engine
+from patrickstar.runtime import initialize
 
 ...
 
-model, optimizer = initialize_engine(
+model, optimizer = initialize(
     model_func=model_func,
     local_rank=local_rank,
     config=config

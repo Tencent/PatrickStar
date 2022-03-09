@@ -11,36 +11,23 @@
 # permissions and limitations under the License.
 # See the AUTHORS file for names of contributors.
 
-from patrickstar.core.const import TrainingStage
-
 
 class Metronome:
     """
     A metronome for memory stats sampling.
-    Use two indicators to tell us where the training is now
-    One is moment, indicates the moment of one iteration.
-    The other is training stage, indicates FWD/BWD/ADAM and is this iteration is
-    a warmup iteration.
-
-    It also contain the training stage information.
+    Use the moment counter as timestamp.
+    `moment` is reset at the start of each iteration.
     """
 
     def __init__(self):
         self.moment = 0
         self.total_moment = None
-        self.training_stage = TrainingStage.UNSTART
         self.is_warmup = False
 
     def tiktac(self):
-        """
-        The function should be called right before and after computing of an operator.
-        """
         self.moment += 1
 
     def reset(self):
-        """
-        The function is called after a trainig iteration is finished.
-        """
         self.total_moment = self.moment
         self.moment = 0
 

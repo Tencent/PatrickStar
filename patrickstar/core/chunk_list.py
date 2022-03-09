@@ -15,77 +15,63 @@ import torch
 
 from patrickstar.core.chunk import Chunk
 from patrickstar.core.const import ChunkState
-from patrickstar.core.eviction_policy import ChunkEvictionPolicyBase
-from patrickstar.core.memtracer import RuntimeMemTracer
 
 
 class ChunkList:
-    r"""Manage the entities of all chunks.
-
-    There are 4 kinds of chunk list:
-        param fp16, param fp32, momentum, variance
-    All of them are managed by one instance of this class.
-    """
-
     def __init__(
         self,
-        local_rank: int,
-        memory_tracer: RuntimeMemTracer,
-        chunk_eviction_policy: ChunkEvictionPolicyBase,
-        chunk_size: int,
+        chunk_size,
+        memtracer,
+        chunk_eviction_policy,
     ):
-        self.chunks = []
-        self.grad_chunks = []
-        self.fp32_chunks = []
         self.chunk_size = chunk_size
+        # list of param.data chunks
+        self.chunks = []
+        # list of param.grad chunks, always on CPU
+        self.grad_chunks = []
+        # list of fp32 param.data backup, always on CPU
+        self.fp32_chunks = []
 
-        self.local_rank = local_rank
         self.chunk_eviction_policy = chunk_eviction_policy
-        self.memory_tracer = memory_tracer
+        self.memtracer = memtracer
 
     def __len__(self):
         return len(self.chunks)
 
     def __getitem__(self, chunk_id):
-        r"""Search a chunk by id."""
         return self.chunks[chunk_id]
 
     def new_chunk(self):
-        r"""Create a chunk without initializing its memory."""
+        r"""Create a param chunk as well as its grad chunk and fp32 chunk.
+
+        Note that the payload of chunks are not allocated.
+        """
         chunk_id = len(self.chunks)
         chunk = Chunk(
             dtype=torch.half,
             capacity=self.chunk_size,
             chunk_id=chunk_id,
-            memory_tracer=self.memory_tracer,
-            local_rank=self.local_rank,
+            memtracer=self.memtracer,
         )
         self.chunks.append(chunk)
         grad_chunk = Chunk(
             dtype=torch.half,
             capacity=self.chunk_size,
             chunk_id=chunk_id,
-            memory_tracer=self.memory_tracer,
-            local_rank=self.local_rank,
+            memtracer=self.memtracer,
         )
         self.grad_chunks.append(grad_chunk)
         fp32_chunk = Chunk(
             dtype=torch.float,
             capacity=self.chunk_size,
             chunk_id=chunk_id,
-            memory_tracer=self.memory_tracer,
-            local_rank=self.local_rank,
+            memtracer=self.memtracer,
         )
         self.fp32_chunks.append(fp32_chunk)
         return chunk
 
     def access_chunk(self, chunk, compute_device):
-        r"""Prepare the memory of chunk to `compute_device` with `chunk_id`.
-
-        Args:
-            chunk_id: int.
-            compute_device: :class:`torch.device`.
-        """
+        r"""Move or allocate `chunk` to `compute_device`."""
         if chunk.get_state() == ChunkState.RELEASED:
             self.try_allocate_payload(chunk, compute_device)
         elif chunk.get_device().type != compute_device.type:
@@ -96,11 +82,7 @@ class ChunkList:
         assert chunk.get_device().type == compute_device.type
 
     def try_allocate_payload(self, chunk, compute_device):
-        r"""
-        Try our best to allocate payload for chunk.
-        First free up chunk size space on the target device.
-        If it dose not work, we second free up all chunks not in used on the target device.
-        """
+        r"""Allocate payload of `chunk`."""
         self.chunk_eviction_policy.prepare_device(
             self, chunk.get_chunk_space(), compute_device
         )

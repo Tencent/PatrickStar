@@ -15,7 +15,7 @@ import argparse
 import os
 
 
-def _add_patrick_star_args(parser):
+def add_patrickstar_args(parser):
     group = parser.add_argument_group(title="patrickstar")
     group.add_argument(
         "--chunk_size",
@@ -31,15 +31,10 @@ def _add_patrick_star_args(parser):
         "but may fix some errors relate to checkpoint loading or"
         "weight intialization.",
     )
-    group.add_argument(
-        "--with_async_mem_monitor",
-        action="store_true",
-        help="Use async memory monitor.",
-    )
     return parser
 
 
-def _add_test_config_args(parser):
+def add_test_config_args(parser):
     group = parser.add_argument_group(title="test_config")
     group.add_argument(
         "--batch_size", type=int, default=32, help="Batch size of input."
@@ -68,7 +63,7 @@ def _add_test_config_args(parser):
     return parser
 
 
-def _print_args(args):
+def print_args(args):
     """Print arguments."""
     if args.rank == 0:
         print("------------------- arguments -------------------", flush=True)
@@ -84,10 +79,10 @@ def _print_args(args):
 def parse_args():
     """Parse all arguments."""
     parser = argparse.ArgumentParser(description="PatrickStar Arguments")
-    parser = _add_patrick_star_args(parser)
-    parser = _add_test_config_args(parser)
+    parser = add_patrickstar_args(parser)
+    parser = add_test_config_args(parser)
     args = parser.parse_args()
     args.rank = int(os.getenv("RANK", "0"))
     args.world_size = int(os.getenv("WORLD_SIZE", "1"))
-    _print_args(args)
+    print_args(args)
     return args

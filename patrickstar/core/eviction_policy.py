@@ -21,11 +21,11 @@ from patrickstar.utils import logger
 
 
 class ChunkEvictionPolicyBase(ABC):
-    def __init__(self, local_rank, metronome, memory_tracer):
+    def __init__(self, local_rank, metronome, memtracer):
         self.local_rank = local_rank
         self.chunk_access_dict = {}
         self.metronome = metronome
-        self.memory_tracer = memory_tracer
+        self.memtracer = memtracer
 
     def trace_access(self, chunk_id, device):
         """
@@ -59,7 +59,7 @@ class ChunkEvictionPolicyBase(ABC):
         return total_mom + access_mom_list[0]
 
     def prepare_device(self, chunk_list, required_room, target_device):
-        remaining_chunk_mem_size = self.memory_tracer.remaining_chunk_mem(
+        remaining_chunk_mem_size = self.memtracer.remaining_chunk_mem(
             target_device.type
         )
         required_room -= remaining_chunk_mem_size
@@ -67,7 +67,7 @@ class ChunkEvictionPolicyBase(ABC):
         if required_room <= 0:
             return
 
-        chunks_to_move = self.derive_eviction_list(
+        chunks_to_move = self.derive_chunks_to_move(
             chunk_list, required_room, target_device
         )
 
@@ -81,12 +81,12 @@ class ChunkEvictionPolicyBase(ABC):
             chunk.move(new_device)
 
     @abstractmethod
-    def derive_eviction_list(self, chunks, required_room, target_device):
-        raise NotImplementedError("derive_eviction_list is not Implemented")
+    def derive_chunks_to_move(self, chunks, required_room, target_device):
+        raise NotImplementedError("derive_chunks_to_move is not Implemented")
 
 
 class LRUEvictionPolicy(ChunkEvictionPolicyBase):
-    def derive_eviction_list(self, chunk_list, need_bytes, target_device):
+    def derive_chunks_to_move(self, chunk_list, need_bytes, target_device):
         """
         Evict the chunk latest to be accessed on the current device.
         """
@@ -97,15 +97,14 @@ class LRUEvictionPolicy(ChunkEvictionPolicyBase):
             if (
                 chunk.get_state() == ChunkState.HOLD
                 and chunk.get_device().type == target_device.type
-                and not chunk.is_pin()
+                and not chunk.is_pinned()
             ):
                 # The next moment when this chunk was accessed.
                 next_mom = self.next_access_moment(chunk_id, target_device)
                 # Order by `next_mom`s, from large to small
                 # and by chunk_ids if `next_mom` are the same (only happens during warmup).
                 q.put((-next_mom, chunk_id))
-            # TODO(jiaruifang) Do not release `FREE` chunks immediately for reuse.
-            # assert chunk.get_state() != ChunkState.FREE
+
         while not q.empty():
             next_mom, chunk_id = q.get()
             chunk = chunk_list.chunks[chunk_id]

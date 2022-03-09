@@ -14,7 +14,7 @@
 from .chunk import Chunk
 from .chunk_list import ChunkList
 from .client import PatrickStarClient
-from .const import ChunkState, TensorState, TrainingStage
+from .const import ChunkState, TensorState
 from .hook import setup_patrickstar_hooks
 from .parameter import PSParameter, register_param, is_registered, ParamType
-from .preprocess import PSPreProcessCtx, torch_scope
+from .preprocess import PSPreProcessCtx

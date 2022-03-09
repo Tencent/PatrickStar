@@ -14,8 +14,7 @@
 import time
 import torch
 
-# from .logging import logger
-from .singleton_meta import SingletonMeta
+from patrickstar.utils.helper import SingletonMeta
 
 
 class GlobalTimer(metaclass=SingletonMeta):

@@ -15,7 +15,7 @@ import torch
 from torch.utils.data import DataLoader
 from transformers import BertForSequenceClassification
 
-from patrickstar.runtime import initialize_engine
+from patrickstar.runtime import initialize
 from patrickstar.utils import get_rank
 
 from imdb_dataset import get_dataset
@@ -53,9 +53,7 @@ config = {
     "release_after_init": False,
 }
 
-model, optim = initialize_engine(
-    model_func=model_func, local_rank=get_rank(), config=config
-)
+model, optim = initialize(model_func=model_func, local_rank=get_rank(), config=config)
 
 train_loader = DataLoader(train_dataset, batch_size=16, shuffle=True)
 

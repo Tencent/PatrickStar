@@ -22,7 +22,7 @@ from patrickstar.utils import logger, log_dist
 DEFAULT_CHUNK_SIZE = 32 * 1024 * 1024
 
 
-def initialize_engine(model_func, local_rank, config=None, client=None):
+def initialize(model_func, local_rank, config=None, client=None):
     """Initialize the PatrickStar Engine.
     Arguments:
         model_func: Required: nn.module class before apply any wrappers
@@ -36,7 +36,7 @@ def initialize_engine(model_func, local_rank, config=None, client=None):
     """
     if isinstance(model_func, torch.nn.Module):
         logger.debug(
-            "Passing nn.Module into initialize_engine. "
+            "Passing nn.Module into initialize. "
             "Make sure you have intialized the model within PSPreProcessCtx"
         )
         assert client is not None, "Must pass the client when passing a nn.Module."
@@ -68,5 +68,5 @@ def initialize_engine(model_func, local_rank, config=None, client=None):
         log_dist(f"Finish initializing model in {end_time  - start_time} s")
 
     engine = PatrickStarEngine(model=model, client=client, config=config)
-    client.start_mem_tracer()
+    client.start_memtracer()
     return (engine, engine.optimizer)

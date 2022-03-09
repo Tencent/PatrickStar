@@ -13,9 +13,9 @@
 
 import logging
 import sys
-from rich.logging import RichHandler
 
-import torch.distributed as dist
+import torch
+from rich.logging import RichHandler
 
 
 class LoggerFactory:
@@ -44,25 +44,8 @@ logger = LoggerFactory.create_logger(name="PatrickStar", level=logging.WARNING)
 
 
 def log_dist(message, ranks=[0], level=logging.INFO):
-    """Log message when one of following condition meets
-    + not dist.is_initialized()
-    + dist.get_rank() in ranks if ranks is not None or ranks = [-1]
-    Args:
-        message (str)
-        ranks (list)
-        level (int)
-    """
-    should_log = not dist.is_initialized()
-    ranks = ranks or []
-    my_rank = dist.get_rank() if dist.is_initialized() else -1
-    if ranks and not should_log:
-        should_log = ranks[0] == -1
-        should_log = should_log or (my_rank in set(ranks))
-    if should_log:
-        final_message = "[Rank {}] {}".format(my_rank, message)
-        logger.log(level, final_message)
-
-
-def print_rank(message, rank=0, debug=False, force=False):
-    if (not dist.is_initialized() or dist.get_rank() == rank) and (debug or force):
-        logger.info(message)
+    if not torch.distributed.is_initialized():
+        return
+    rank = torch.distributed.get_rank()
+    if rank in ranks:
+        logger.log(level, "[Rank {}] {}".format(rank, message))

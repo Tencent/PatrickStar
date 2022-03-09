@@ -13,7 +13,7 @@
 
 from .core import PatrickStarClient
 from .ops import FP16Adam
-from .runtime import initialize_engine
+from .runtime import initialize
 from .utils import global_timer
 from .utils import see_memory_usage
 from .utils.model_size_calculator import get_ps_model_size, estimate_bert_mac

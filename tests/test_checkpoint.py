@@ -18,8 +18,8 @@ import torch
 from transformers import BertConfig, BertForSequenceClassification
 
 from common import distributed_test
-from examples.data_loader import get_bert_data_loader
-from patrickstar.runtime import initialize_engine
+from dataloader import get_bert_data_loader
+from patrickstar.runtime import initialize
 from patrickstar.utils import logger
 
 logger.setLevel(logging.WARNING)
@@ -76,9 +76,7 @@ def bert_model(
         "use_cpu_embedding": True,
     }
 
-    model, optimizer = initialize_engine(
-        model_func=model_func, local_rank=rank, config=config
-    )
+    model, optimizer = initialize(model_func=model_func, local_rank=rank, config=config)
 
     data_loader = get_bert_data_loader(
         batch_size=batch_size,

@@ -15,7 +15,6 @@ import time
 
 import torch
 
-from patrickstar.core.const import TrainingStage
 from patrickstar.utils import (
     log_dist,
     get_sys_memory_info,
@@ -95,7 +94,8 @@ class RuntimeMemTracer:
         self.overall_gpu_mem_ratio = config.get("overall_gpu_mem_ratio", 0.9)
         self.overall_cpu_mem_ratio = config.get("overall_cpu_mem_ratio", 0.9)
         self.warmup_gpu_chunk_mem_ratio = config.get("warmup_gpu_chunk_mem_ratio", 0.1)
-        self.use_async_mem_monitor = config.get("use_async_mem_monitor", False)
+        # TODO(zilinzhu) Check if AsyncMemoryMonitor is necessary.
+        self.use_async_mem_monitor = True
         if self.use_async_mem_monitor:
             self.async_mem_monitor = AsyncMemoryMonitor()
 
@@ -122,12 +122,10 @@ class RuntimeMemTracer:
         self.chunk_size = chunk_size
         if self.use_async_mem_monitor:
             self.async_mem_monitor.start()
-        log_dist("**** Memory Tracer started ****")
 
     def end(self):
         if self.use_async_mem_monitor:
             self.async_mem_monitor.finish()
-        log_dist("**** Memory Tracer ended ****")
 
     def trace(self):
         """Record the memory usage of the moment and increase moment counter."""
@@ -194,7 +192,7 @@ class RuntimeMemTracer:
 
     def available_chunk_mem(self, device_type):
         r"""The amount of memory on device_type that can be used for chunks.
-        A.k.a chunkale memory.
+
         This includes the used memory that has been allocated for chunks
         and the remaining memory.
 
@@ -205,31 +203,21 @@ class RuntimeMemTracer:
         After warmup, it is the minimal value of available mem of the
         current moment and next moment.
         """
-        # If the training is not started, ava chunk mem is the overall system mem.
-        if self.metronome.training_stage == TrainingStage.UNSTART:
-            if device_type == "cpu":
-                return self.overall_cpu_mem
-            elif device_type == "cuda":
-                return self.overall_gpu_mem
-
-        # If it is warmup stage, chunk can used gpu_ratio * overall_gpu
-        # chunk can used all cpu.
-        if self.metronome.is_warmup:
-            if device_type == "cpu":
-                return self.overall_cpu_mem
-            elif device_type == "cuda":
-                return self.overall_gpu_mem * self.warmup_gpu_chunk_mem_ratio
-
         if device_type == "cpu":
-            local_world_size = get_local_world_size()
-            if self.metronome.training_stage != TrainingStage.ADAM:
-                return self.overall_cpu_mem - self.max_cpu_sys_used / local_world_size
-            else:
+            if self.metronome.is_warmup:
                 return self.overall_cpu_mem
+            else:
+                local_world_size = get_local_world_size()
+                return self.overall_cpu_mem - self.max_cpu_sys_used / local_world_size
+
         elif device_type == "cuda":
-            next_mom = self.metronome.next_moment()
-            cur_mom = self.metronome.moment
-            ava_mem = max(
-                self.memory_stats[next_mom].gpu_sys, self.memory_stats[cur_mom].gpu_sys
-            )
-            return (self.overall_gpu_mem - ava_mem) * 0.5
+            if self.metronome.is_warmup:
+                return self.overall_gpu_mem * self.warmup_gpu_chunk_mem_ratio
+            else:
+                next_mom = self.metronome.next_moment()
+                cur_mom = self.metronome.moment
+                ava_mem = max(
+                    self.memory_stats[next_mom].gpu_sys,
+                    self.memory_stats[cur_mom].gpu_sys,
+                )
+                return (self.overall_gpu_mem - ava_mem) * 0.5

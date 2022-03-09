@@ -32,13 +32,6 @@ class TensorState(Enum):
     HOLD = 2  # can be moved or be released.
 
 
-class TrainingStage(Enum):
-    UNSTART = 0
-    FWD = 1
-    BWD = 2
-    ADAM = 3
-
-
 class ParamType(Enum):
     CHUNK_BASED = 0
     TORCH_BASED = 1

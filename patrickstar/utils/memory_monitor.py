@@ -40,7 +40,6 @@ def see_memory_usage(message):
     if not get_rank() == 0:
         return
 
-    # python doesn't do real-time garbage collection so do it explicitly to get the correct RAM reports
     gc.collect()
 
     scale = 1024 ** 2

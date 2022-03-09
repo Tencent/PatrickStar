@@ -13,7 +13,7 @@
 
 import torch
 
-from patrickstar.core.const import ChunkState, TensorState, TrainingStage
+from patrickstar.core.const import ChunkState, TensorState
 from patrickstar.core.hook import reduce_grad, setup_patrickstar_hooks
 from patrickstar.fp16 import DynamicLossScaler, LossScaler
 from patrickstar.ops import FP16Adam
@@ -68,7 +68,6 @@ class PatrickStarEngine(torch.nn.Module):
         self.client.module = self.module
         setup_patrickstar_hooks(model, self.client)
 
-        # This need to be placed before the initialization of optimizer.
         self.move_torch_parts_to_gpu(self.module)
 
         self.iteration_cnt_ = 0
@@ -80,18 +79,13 @@ class PatrickStarEngine(torch.nn.Module):
         for buffer in model.buffers():
             buffer.data = buffer.data.to(self.client.device)
 
-        def move_param_to_gpu(module):
-            for param in module.parameters(recurse=False):
-                if param.ps_attr.is_torch_based():
-                    param.data = param.data.to(self.client.device)
-            for submodule in module.children():
-                move_param_to_gpu(submodule)
-
-        move_param_to_gpu(model)
+        for param in model.parameters():
+            if param.ps_attr.is_torch_based():
+                param.data = param.data.to(self.client.device)
 
     def _reset_before_forward(self):
-        self.client.mem_tracer.reset_memory_stats()
-        self.client.mem_tracer.metronome.reset()
+        self.client.memtracer.reset_memory_stats()
+        self.client.memtracer.metronome.reset()
         for chunk in self.client.chunk_list.chunks:
             chunk.unused = 0
 
@@ -116,11 +110,10 @@ class PatrickStarEngine(torch.nn.Module):
             self.client.set_warmup(True)
         if self.iteration_cnt_ == 1:
             self.client.set_warmup(False)
-            self.client.mem_tracer.end()
+            self.client.memtracer.end()
 
         global_timer.start_profile("FWD")
 
-        self.client.set_training_stage(TrainingStage.FWD)
         self._reset_before_forward()
 
         loss = self.module(*inputs, **kwargs)
@@ -138,7 +131,7 @@ class PatrickStarEngine(torch.nn.Module):
                 self.client.release(param)
                 flag = True
         if flag:
-            self.client.mem_tracer.trace()
+            self.client.memtracer.trace()
 
     def backward(self, loss):
         r"""Execute backward pass on the loss
@@ -146,7 +139,6 @@ class PatrickStarEngine(torch.nn.Module):
             loss: Torch tensor on which to execute backward propagation
         """
         global_timer.start_profile("BWD")
-        self.client.set_training_stage(TrainingStage.BWD)
 
         if self.loss_scaler is not None:
             self.loss_scaler.backward(loss)
@@ -158,21 +150,22 @@ class PatrickStarEngine(torch.nn.Module):
 
     def step(self):
         global_timer.start_profile("ADAM")
-        self.client.set_training_stage(TrainingStage.ADAM)
 
         for group in self.optimizer.param_groups:
             for p in group["params"]:
-                # p.data = ...
+                # NOTE(zilinzhu) when assigning grad, the type and shape of
+                # p.data should be the same as p.grad, that's why we
+                # need to access the fp16 param data first.
                 self.client.access(p, torch.device("cpu:0"))
-                # p.grad = ...
-                p.grad = self.client.get_grad(p, torch.device("cpu:0"))
-                p.data = self.client.get_fp32(p, torch.device("cpu:0"))
+                p.grad = self.client.get_grad(p)
+                p.data = self.client.get_fp32(p)
 
         self.optimizer.step()
         for group in self.optimizer.param_groups:
             for p in group["params"]:
                 self.client.release(p)
                 p.grad = None
+        # initialize fp16 params with fp32 params.
         for i in range(len(self.client.chunk_list)):
             chunk = self.client.chunk_list.chunks[i]
             if chunk.is_local():

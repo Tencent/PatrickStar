@@ -11,25 +11,12 @@
 # permissions and limitations under the License.
 # See the AUTHORS file for names of contributors.
 
-import contextlib
 import functools
 
 import torch
 
-from patrickstar.core import PatrickStarClient
 from patrickstar.core import register_param, is_registered, ParamType
-from patrickstar.manager import _runtime_config
-from patrickstar.utils import log_dist, get_rank, get_world_size
-
-
-@contextlib.contextmanager
-def torch_scope(do_allreduce=True):
-    r"""All parameters initialized in this scope will not be managed in chunks."""
-    _runtime_config.push()
-    _runtime_config.config["use_chunk"] = False
-    _runtime_config.config["do_allreduce"] = do_allreduce
-    yield
-    _runtime_config.pop()
+from patrickstar.utils import log_dist, get_world_size
 
 
 # Inserts _post_init_method at the end of init method
@@ -63,8 +50,6 @@ class InsertPostInitMethodToModuleSubClasses:
         # Replace .__init__() for future subclasses of torch.nn.Module
         torch.nn.modules.module.Module.__init_subclass__ = classmethod(_init_subclass)
 
-        self._pre_context_exec()
-
     def __exit__(self, exc_type, exc_value, traceback):
         def _disable_class(cls):
             cls.__init__ = cls._old_init
@@ -87,33 +72,16 @@ class InsertPostInitMethodToModuleSubClasses:
     def _post_init_method(self, module):
         pass
 
-    def _pre_context_exec(self):
-        pass
-
     def _post_context_exec(self):
         pass
 
 
 class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
-    """
-    A context to initialize model
-    """
-
-    def __init__(
-        self,
-        client: PatrickStarClient,
-        release_after_init=False,
-        not_init=False,
-    ):
-        self.rank = get_rank()
-        self.world_size = get_world_size()
+    def __init__(self, client, release_after_init=False):
         self.client = client
         self.param_idx = 0
 
         self.release_after_init = release_after_init
-
-        self.submodule_id = -1
-        self.not_init = not_init
 
     def _post_init_method(self, module):
         r"""The function to call at the end of the constructor of each nn.Module.
@@ -121,15 +89,6 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
         The main functionality is registering the params to chunks and
         remove the remote tensor if `release_after_init` is False.
         """
-        self.submodule_id += 1
-
-        if not _runtime_config.use_chunk:
-            for name, param in module.named_parameters(recurse=False):
-                name = f"{module.__class__.__name__}.{name}_{self.param_idx}"
-                self.param_idx += 1
-                register_param(param, ParamType.TORCH_BASED, name)
-            return
-
         params = []
         for name, param in module.named_parameters(recurse=False):
             name = f"{module.__class__.__name__}.{name}_{self.param_idx}"
@@ -172,16 +131,13 @@ class PSPreProcessCtx(InsertPostInitMethodToModuleSubClasses):
         for chunk in self.client.chunk_list.chunks:
             if chunk.is_local():
                 for param in chunk.params:
-                    if not self.not_init:
-                        if is_registered(param):
-                            init_data = param.data
-                            self.client.access(param, torch.device("cpu:0"))
-                            param.data.copy_(init_data)
-                            fp32_data = self.client.get_fp32(
-                                param, torch.device("cpu:0")
-                            )
-                            fp32_data.copy_(init_data)
-                            self.client.release(param)
+                    if is_registered(param):
+                        init_data = param.data
+                        self.client.access(param, torch.device("cpu:0"))
+                        param.data.copy_(init_data)
+                        fp32_data = self.client.get_fp32(param)
+                        fp32_data.copy_(init_data)
+                        self.client.release(param)
             else:
                 for param in chunk.params:
                     assert not self.client.is_local_param(param)

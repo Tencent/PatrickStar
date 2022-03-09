@@ -54,7 +54,7 @@ docker pull nvcr.io/nvidia/pytorch:21.06-py3
 PatrickStar is based on PyTorch, which makes it easy to migrate a pytorch project. Here is a example of PatrickStar:
 
 ```python
-from patrickstar.runtime import initialize_engine
+from patrickstar.runtime import initialize
 
 config = {
     "optimizer": {
@@ -68,45 +68,33 @@ config = {
     },
     "chunk_size": 64 * 1024 * 1024,
     "release_after_init": True,
-    "client": {
-        "mem_tracer": {
-            "use_async_mem_monitor": args.with_async_mem_monitor,
-        }
-    },
 }
 
 def model_func():
     # MyModel is a derived class for torch.nn.Module
     return MyModel(...)
 
-model, optimizer = initialize_engine(model_func=model_func, local_rank=0, config=config)
+model, optimizer = initialize(model_func=model_func, local_rank=0, config=config)
 
 ...
 
 for data in dataloader:
-    optimizer.zero_grad()
-
     loss = model(data)
     model.backward(loss)
-    optimizer.step()
+    model.step()
+    model.zero_grad()
 ```
-
-We use the same `config` format as [DeepSpeed configuration JSON](https://www.deepspeed.ai/docs/config-json/#optimizer-parameters), which mainly includes params of optimizer, loss scaler and some PatrickStar specific configuration.
 
 For some detail explanation of the above example, please check the guide [here](./GUIDE.md)
 
 For more examples, please check [here](./examples).
 
-A quick-start benchmark script is [here](./examples/run_transformers.sh). It is executed with random generated data, therefore you do not need to prepare the real data. It also demostrated all of the optimization techniques for patricksatr. For more optimization tricks runing the benchmark see [Optimization Options](./doc/optimization_options.md).
+A quick-start benchmark script is [here](./examples/run_transformers.sh). It is executed with random generated data, therefore you do not need to prepare the real data.
 
 
 ### Limitations
 
 1. PatrickStar currently is not evaluated on DNN with parameters shared in different layers. For example, be careful to use it with tie-weight. But you can still label the tied weight to be managed by PyTorch, and make the remaining layers managed by PatrickStar chunk-based memory management.
-
-2. PatrickStar currently does not support gradient accumulation since it reuses grad and param chunks by default, although it could be implemented as a no chunk reuse version.
-In our opinion, GA is a patch for CUDA OOM, and lowers the computing efficiency if setting the batch size as 1,2.
-PatrickStar has solved it very well; it surpasses DeepSpeed with GA significantly.
 
 ### License
 BSD 3-Clause License

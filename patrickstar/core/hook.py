@@ -55,15 +55,15 @@ class PostBackwardFunction(torch.autograd.Function):
         # NOTE(zilinzhu) the ref count for modules that will run
         # multiple times in one iteration.
         if output.requires_grad:
-            module.ds_grads_remaining += 1
+            module.ps_grads_remaining += 1
             ctx.pre_backward_function = pre_backward_function
         output = output.detach()
         return output
 
     @staticmethod
     def backward(ctx, *args):
-        ctx.module.ds_grads_remaining -= 1
-        if ctx.module.ds_grads_remaining == 0:
+        ctx.module.ps_grads_remaining -= 1
+        if ctx.module.ps_grads_remaining == 0:
             ctx.pre_backward_function(ctx.module)
         return (None, None) + args
 
@@ -75,7 +75,7 @@ def load_params(module, client, name):
             client.access_dist(param, client.device)
             flag = True
     if flag:
-        client.mem_tracer.trace()
+        client.memtracer.trace()
 
 
 # release submodule
@@ -118,7 +118,7 @@ def reduce_grad(param, client):
             param.grad /= world_size
         global_timer.finish_profile("HOOK_torch_allreduce")
     if param.ps_attr.is_chunk_based():
-        grad = client.get_grad(param, torch.device("cpu:0"))
+        grad = client.get_grad(param)
         grad.copy_(param.grad)
         param.grad = None
 
@@ -160,10 +160,10 @@ def _register_hooks_recursively(module, client, name=""):
         )
 
     def _post_backward_module_hook(module, inputs):
-        module.ds_grads_remaining = 0
+        module.ps_grads_remaining = 0
 
         def _run_after_backward_function(sub_module):
-            if sub_module.ds_grads_remaining == 0:
+            if sub_module.ps_grads_remaining == 0:
                 post_module_backward_function(sub_module, client, name)
 
         return _apply_to_tensors_only(

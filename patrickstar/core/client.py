@@ -31,27 +31,19 @@ class PatrickStarClient:
         self.module = None
 
         self.metronome = Metronome()
-        self.mem_tracer = RuntimeMemTracer(
-            local_rank, self.metronome, config.get("mem_tracer", {})
+        self.memtracer = RuntimeMemTracer(
+            local_rank, self.metronome, config.get("memtracer", {})
         )
         self.eviction_policy = LRUEvictionPolicy(
-            local_rank, self.metronome, self.mem_tracer
+            local_rank, self.metronome, self.memtracer
         )
 
         self.chunk_size = chunk_size
         self.chunk_list = ChunkList(
-            local_rank,
-            self.mem_tracer,
-            self.eviction_policy,
             self.chunk_size,
+            self.memtracer,
+            self.eviction_policy,
         )
-
-    # expose APIs from metrome ti client
-    def training_stage(self):
-        return self.metronome.training_stage
-
-    def set_training_stage(self, stage):
-        self.metronome.training_stage = stage
 
     def is_warmup(self):
         return self.metronome.is_warmup
@@ -59,8 +51,8 @@ class PatrickStarClient:
     def set_warmup(self, flag):
         self.metronome.is_warmup = flag
 
-    def start_mem_tracer(self):
-        self.mem_tracer.start(chunk_size=self.chunk_size)
+    def start_memtracer(self):
+        self.memtracer.start(chunk_size=self.chunk_size)
 
     def new_dummy_chunk(self):
         r"""Append a dummy chunk to the corresponding chunk_list"""
@@ -79,14 +71,16 @@ class PatrickStarClient:
 
         Append the whole list of param into the same chunk. If the last
         chunk doesn't fit, append a new chunk and try to insert params in it.
-
-        Args:
-            param_list: list of `torch.nn.Parameter`.
         """
         total_numel = 0
         for param in params:
             assert is_registered(param)
             total_numel += param.ps_attr.numel
+
+        if total_numel > self.chunk_size:
+            raise RuntimeError(
+                f"Overall size of params is larger than the chunk size {self.chunk_size}."
+            )
 
         if len(self.chunk_list) != 0:
             last_chunk = self.chunk_list[-1]
@@ -96,10 +90,6 @@ class PatrickStarClient:
                 return
 
         chunk = self.chunk_list.new_chunk()
-        if not chunk.can_fit(total_numel):
-            raise RuntimeError(
-                f"Overall size of params is larger than the chunk size {chunk.capacity}."
-            )
         for param in params:
             chunk.add_param(param)
         return
@@ -184,7 +174,7 @@ class PatrickStarClient:
         param.data = chunk.payload.narrow(0, start_offset, numel).view(shape)
         param.ps_attr.state = TensorState.COMPUTE
 
-    def get_grad(self, param, compute_device):
+    def get_grad(self, param):
         info = param.ps_attr.info
         numel = param.ps_attr.numel
         shape = param.ps_attr.shape
@@ -192,10 +182,11 @@ class PatrickStarClient:
         chunk_id = info.chunk_id
 
         grad_chunk = self.chunk_list.grad_chunks[chunk_id]
-        self.chunk_list.access_chunk(grad_chunk, compute_device)
+        # TODO(zilinzhu) Maybe move the grad chunks to GPU in the future.
+        self.chunk_list.access_chunk(grad_chunk, torch.device("cpu:0"))
         return grad_chunk.payload.narrow(0, start_offset, numel).view(shape)
 
-    def get_fp32(self, param, compute_device):
+    def get_fp32(self, param):
         info = param.ps_attr.info
         numel = param.ps_attr.numel
         shape = param.ps_attr.shape
@@ -203,7 +194,8 @@ class PatrickStarClient:
         chunk_id = info.chunk_id
 
         fp32_chunk = self.chunk_list.fp32_chunks[chunk_id]
-        self.chunk_list.access_chunk(fp32_chunk, compute_device)
+        # TODO(zilinzhu) Maybe move the fp32 chunks to GPU in the future.
+        self.chunk_list.access_chunk(fp32_chunk, torch.device("cpu:0"))
         return fp32_chunk.payload.narrow(0, start_offset, numel).view(shape)
 
     def release(self, param):

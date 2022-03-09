@@ -18,7 +18,7 @@ import torch
 import numpy as np
 from apex import amp
 
-from patrickstar.runtime import initialize_engine
+from patrickstar.runtime import initialize
 from patrickstar.utils import see_memory_usage, get_world_size, global_timer
 from patrickstar.utils.logging import log_dist, logger
 from patrickstar.utils.model_size_calculator import get_ps_model_size
@@ -75,7 +75,7 @@ def test_transformer_model_helper(
 
     model_func, sequence_length = build_transformer_model(args)
     if dist_plan == "patrickstar":
-        model, optimizer = initialize_engine(
+        model, optimizer = initialize(
             model_func=model_func, local_rank=rank, config=config
         )
     else:
