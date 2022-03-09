@@ -138,7 +138,7 @@ class TestAccess(unittest.TestCase):
             max_exp_avg_sq_diff < 1e-4, f"max_exp_avg_sq_diff {max_exp_avg_sq_diff}"
         )
 
-    @distributed_test(world_size=[1], backend="gloo", use_fake_dist=False)
+    @distributed_test(world_size=[1])
     def test_ds_adam(self):
         from patrickstar.ops.op_builder.cpu_adam import CPUAdamBuilder
 

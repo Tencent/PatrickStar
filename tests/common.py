@@ -21,7 +21,7 @@ from torch.multiprocessing import Process
 UNIT_WORKER_TIMEOUT = 120
 
 
-def distributed_test(world_size=2, backend="nccl", use_fake_dist=False):
+def distributed_test(world_size=2, backend="nccl"):
     r"""A decorator for executing a function (e.g., a unit test) in a distributed manner.
 
     This decorator manages the spawning and joining of processes, initialization of
@@ -51,12 +51,9 @@ def distributed_test(world_size=2, backend="nccl", use_fake_dist=False):
             os.environ["RANK"] = str(local_rank)
             os.environ["WORLD_SIZE"] = str(num_procs)
 
-            torch.distributed.init_process_group(backend=backend)
+            torch.distributed.init_process_group(backend="nccl")
             if torch.cuda.is_available():
-                if use_fake_dist:
-                    torch.cuda.set_device(0)
-                else:
-                    torch.cuda.set_device(local_rank)
+                torch.cuda.set_device(local_rank)
             run_func(*func_args, **func_kwargs)
 
         def dist_launcher(num_procs, *func_args, **func_kwargs):

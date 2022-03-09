@@ -25,12 +25,9 @@ def state_dict(module, client, destination=None, prefix="", keep_vars=False):
         for name, param in module._parameters.items():
             if param is not None:
                 if is_registered(param):
-                    attr_name = param.ps_attr.name
-                    if attr_name == "embedding_dummy" or attr_name.startswith("dummy_"):
-                        continue
-                    elif param.ps_attr.is_local():
+                    if param.ps_attr.is_local():
                         if param.ps_attr.is_chunk_based():
-                            ps_data = client.access_data(param, torch.device("cpu:0"))
+                            ps_data = client.get_fp32(param)
                             destination[prefix + name] = (
                                 ps_data if keep_vars else ps_data.detach()
                             )
@@ -110,7 +107,7 @@ def _load_from_state_dict(
                 and param.ps_attr.is_chunk_based()
             ):
                 if param.ps_attr.is_local():
-                    client.access(param, torch.device("cpu:0"))
+                    param.data = client.get_fp32(param)
                 else:
                     continue
 
@@ -142,6 +139,9 @@ def _load_from_state_dict(
                 and param.ps_attr.is_chunk_based()
             ):
                 if param.ps_attr.is_local():
+                    fp32_data = param.data
+                    client.access(param, torch.device("cpu:0"))
+                    param.data.copy_(fp32_data)
                     client.release(param)
 
         elif strict:

@@ -61,7 +61,6 @@ def test_transformer_model_helper(
     # Avoid gpu0 use more memory.
     # https://discuss.pytorch.org/t/extra-10gb-memory-on-gpu-0-in-ddp-tutorial/118113
     torch.cuda.set_device(rank)
-    torch.cuda.empty_cache()
     device = torch.device(f"cuda:{rank}")
 
     lr = 0.001
@@ -122,8 +121,8 @@ def test_transformer_model_helper(
             global_timer.start()
 
         # You may need to empty_cache for really large models.
-        torch.cuda.empty_cache()
-        step_start_time = time.time()
+        # torch.cuda.empty_cache()
+        step_start = time.time()
 
         if dist_plan == "patrickstar":
             output = model(input_ids=batch[0], labels=batch[1])
@@ -142,7 +141,7 @@ def test_transformer_model_helper(
         print(f"LOSS of step {n}: {loss.item()}")
         loss_res.append(loss.item())
 
-        step_elapse = time.time() - step_start_time
+        step_elapse = time.time() - step_start
 
         if args.rank == 0:
             world_size = get_world_size()
@@ -215,11 +214,10 @@ if __name__ == "__main__":
         print(f"apex O2: {torch_res_list}")
         print(f"patrickstar: {ps_res_list}")
 
-        def diff(array):
-            dtype = np.float16
-            return list(
-                np.array(ps_res_list, dtype=dtype) - np.array(array, dtype=dtype)
-            )
+        def diff(a, b, dtype):
+            np_a = np.array(a, dtype=dtype)
+            np_b = np.array(b, dtype=dtype)
+            return list(np_a - np_b)
 
         print("-" * 20 + " DIFF " + "-" * 20)
-        print(f"vs torch: {diff(torch_res_list)}")
+        print(f"vs torch: {diff(ps_res_list, torch_res_list, np.float16)}")

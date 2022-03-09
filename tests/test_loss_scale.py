@@ -14,6 +14,7 @@
 import unittest
 
 import torch
+import numpy as np
 from apex import amp
 from transformers import BertConfig, BertForSequenceClassification
 
@@ -24,12 +25,12 @@ from patrickstar.runtime import initialize
 
 def bert_model(
     method,
-    batch_size=32,
-    hidden_dim=768,
-    sequence_length=512,
-    num_layer=12,
-    num_head=12,
-    stop_step=10,
+    batch_size,
+    hidden_dim,
+    sequence_length,
+    num_layer,
+    num_head,
+    num_step,
 ):
     # Avoid gpu0 use more memory.
     # https://discuss.pytorch.org/t/extra-10gb-memory-on-gpu-0-in-ddp-tutorial/118113
@@ -46,7 +47,7 @@ def bert_model(
         num_hidden_layers=num_layer,
     )
 
-    lr = 0.001
+    lr = 0.01
     betas = (0.9, 0.999)
     eps = 1e-6
     weight_decay = 0
@@ -68,13 +69,11 @@ def bert_model(
                     "betas": betas,
                     "eps": eps,
                     "weight_decay": weight_decay,
-                    "use_hybrid_adam": True,
                 },
             },
             "fp16": {"loss_scale": "dynamic", "init_scale": 2 ** initial_scale_power},
             "default_chunk_size": 32 * 1024 * 1024,
             "release_after_init": False,
-            "use_cpu_embedding": True,
         }
 
         model, optimizer = initialize(
@@ -88,23 +87,14 @@ def bert_model(
             model.parameters(), lr=lr, betas=betas, eps=eps, weight_decay=weight_decay
         )
 
-        if method == "apex":
-            model, optimizer = amp.initialize(
-                model,
-                optimizer,
-                opt_level="O2",
-                loss_scale="dynamic",
-                max_loss_scale=2 ** initial_scale_power,
-            )
-        else:
-            scaler = torch.cuda.amp.GradScaler(
-                init_scale=2 ** initial_scale_power,
-                growth_factor=2,
-                backoff_factor=0.5,
-                growth_interval=1000,
-            )
+        model, optimizer = amp.initialize(
+            model,
+            optimizer,
+            opt_level="O2",
+            loss_scale="dynamic",
+            max_loss_scale=2 ** initial_scale_power,
+        )
 
-        # DDP 不能要求模型部分在cpu部分在gpu
         model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[rank])
 
     data_loader = get_bert_data_loader(
@@ -112,22 +102,17 @@ def bert_model(
         total_samples=10000,
         sequence_length=sequence_length,
         device=device,
-        is_distrbuted=True,
     )
 
     loss_list = []
     scale_list = []
     for n, batch in enumerate(data_loader):
-        if n == stop_step:
-            break
-
-        optimizer.zero_grad()
-
         if method == "patrickstar":
             output = model(input_ids=batch[0], labels=batch[1])
             loss = output[0]
             model.backward(loss)
-            optimizer.step()
+            model.step()
+            model.zero_grad()
             scale_list.append(optimizer.loss_scaler.loss_scale)
         elif method == "apex":
             output = model(input_ids=batch[0], labels=batch[1])
@@ -135,19 +120,12 @@ def bert_model(
             with amp.scale_loss(loss, optimizer) as scaled_loss:
                 scaled_loss.backward()
             optimizer.step()
+            optimizer.zero_grad()
             scale_list.append(amp._amp_state.loss_scalers[0]._loss_scale)
-        else:
-            with torch.cuda.amp.autocast():
-                output = model(input_ids=batch[0], labels=batch[1])
-            loss = output[0]
-            scaler.scale(loss).backward()
-            scaler.step(optimizer)
-            scaler.update()
-            scale_list.append(scaler.get_scale())
 
         loss_list.append(loss.item())
 
-        if n == stop_step:
+        if n == num_step:
             break
 
     return loss_list, scale_list
@@ -157,7 +135,7 @@ class TestLossScaleContext(unittest.TestCase):
     def setUp(self):
         pass
 
-    @distributed_test(world_size=[1], backend="gloo", use_fake_dist=False)
+    @distributed_test(world_size=[1])
     def test_loss_scale(self):
         # 0.11B
         hidden_dim = 768
@@ -174,21 +152,9 @@ class TestLossScaleContext(unittest.TestCase):
         # - torch amp is similar to apex O1, which uses more fp32, so its non-overflow loss scale
         #   may be larger.
         # - apex O2 is using basically the same mixed precision training strategy as PatrickStar.
-        stop_step = 10
-        torch.manual_seed(0)
-        torch_res_list, torch_scale_list = bert_model(
-            method="torch",
-            hidden_dim=hidden_dim,
-            batch_size=batch_size,
-            sequence_length=sequence_length,
-            num_layer=num_layer,
-            num_head=num_head,
-            stop_step=stop_step,
-        )
+        num_step = 10
 
         torch.cuda.empty_cache()
-        print("*" * 50)
-
         torch.manual_seed(0)
         apex_res_list, apex_scale_list = bert_model(
             method="apex",
@@ -197,12 +163,12 @@ class TestLossScaleContext(unittest.TestCase):
             sequence_length=sequence_length,
             num_layer=num_layer,
             num_head=num_head,
-            stop_step=stop_step,
+            num_step=num_step,
         )
 
-        torch.cuda.empty_cache()
         print("*" * 50)
 
+        torch.cuda.empty_cache()
         torch.manual_seed(0)
         ps_res_list, ps_scale_list = bert_model(
             method="patrickstar",
@@ -211,18 +177,17 @@ class TestLossScaleContext(unittest.TestCase):
             sequence_length=sequence_length,
             num_layer=num_layer,
             num_head=num_head,
-            stop_step=stop_step,
+            num_step=num_step,
         )
 
-        print("loss:")
-        print("torch amp:\t", torch_res_list)
-        print("apex O2:\t", apex_res_list)
-        print("patrickstar:\t", ps_res_list)
+        def diff(a, b, dtype):
+            np_a = np.array(a, dtype=dtype)
+            np_b = np.array(b, dtype=dtype)
+            return list(np_a - np_b)
+
+        print("loss diff:\t", diff(ps_res_list, apex_res_list, np.float16))
         print("")
-        print("loss scale:")
-        print("torch scale:\t", torch_scale_list)
-        print("apex scale:\t", apex_scale_list)
-        print("patrickstar:\t", ps_scale_list)
+        print("loss scale diff:\t", diff(ps_scale_list, apex_scale_list, float))
 
 
 if __name__ == "__main__":
