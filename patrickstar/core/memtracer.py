@@ -21,39 +21,43 @@ from patrickstar.utils import (
     get_sys_memory_used,
     get_local_world_size,
 )
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures.thread import ThreadPoolExecutor
+from concurrent.futures import Future
+from typing import Optional
 
 
 class AsyncMemoryMonitor:
-    def __init__(self, power=3):
-        """
-        An Async Mem Monitor runing during computing.
-        Sampling GPU memory usage of the current GPU dev
-        at interval of 1/(10**power) sec.
-        """
-        self.keep_measuring = False
-        self.executor = ThreadPoolExecutor(max_workers=1)
-        self.monitor_thread = None
-        self.interval = 1 / (10 ** power)
+    """
+    An Async Mem Monitor running during computing.
+    Sampling GPU memory usage of the current GPU device at interval sec,
+    and returns the maximum memory usage.
 
-    def set_interval(self, power: int):
-        self.interval = 1 / (10 ** power)
+    Args:
+        interval(float): The interval in second to record memory
+    """
+
+    def __init__(self, interval: float = 1e-3):
+        self._keep_measuring = False
+        self._thread = ThreadPoolExecutor(max_workers=1)
+        self._max_usage_future = None  # type: Optional[Future]
+        self.interval = interval
 
     def start(self):
-        self.keep_measuring = True
-        self.monitor_thread = self.executor.submit(self._measure_usage)
+        self._keep_measuring = True
+        self._max_usage_future = self._thread.submit(self._measure_usage)
 
-    def finish(self):
-        if self.keep_measuring is False:
+    def finish(self) -> int:
+        """
+        Returns max memory usage duration monitor
+        """
+        if not self._keep_measuring:
             return 0
-        self.keep_measuring = False
-        max_usage = self.monitor_thread.result()
-        self.monitor_thread = None
-        return max_usage
+        self._keep_measuring = False
+        return self._max_usage_future.result()
 
-    def _measure_usage(self):
+    def _measure_usage(self) -> float:
         max_usage = 0
-        while self.keep_measuring:
+        while self._keep_measuring:
             max_usage = max(
                 max_usage,
                 get_sys_memory_used(
@@ -61,7 +65,6 @@ class AsyncMemoryMonitor:
                 ),
             )
             time.sleep(self.interval)
-
         return max_usage
 
 
