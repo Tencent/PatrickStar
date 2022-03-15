@@ -1,5 +1,5 @@
 #!/bin/bash
-set -e
+set -xe
 cd "$(dirname "$0")"
 
 export GPU_NUM=${GPU_NUM:-1}
@@ -52,6 +52,6 @@ env OMP_NUM_THREADS="${TNUM}" python -m torch.distributed.launch \
     --batch_size="${BS}" \
     --model_name="${MODEL_NAME}" \
     --model_type="${MODEL_TYPE}" \
-    "${RES_CHECK_FLAG}" \
-    "${RELEASE_AFTER_INIT_FLAG}" \
+    ${RES_CHECK_FLAG} \
+    ${RELEASE_AFTER_INIT_FLAG} \
     2>&1 | tee "${LOG_DIR}/${LOG_FILE}"
