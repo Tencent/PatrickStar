@@ -1,3 +1,8 @@
 *__pycache__*
 *DS_Store*
+/examples/logs_GPT2small/
 .idea
+/.eggs/
+/build/
+/dist/
+/patrickstar.egg-info/
