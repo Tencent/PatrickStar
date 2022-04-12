@@ -2,7 +2,7 @@ cd $(dirname $0)
 
 export GPU_NUM=${GPU_NUM:-1}
 # Chunk Size in MB
-export CS=${CS:-64}
+export CS=${CS:-256}
 # Batch Size
 export BS=${BS:-16}
 # Embedding on CPU
@@ -10,7 +10,8 @@ export CPU_EBD=${CPU_EBD:-0}
 # Release remote chunks after init
 export RELEASE_AFTER_INIT=${RELEASE_AFTER_INIT:-0}
 export MODEL_NAME=${MODEL_NAME:-"GPT2small"}
-export MODEL_TYPE=${MODEL_TYPE:-"BERT"}
+# BERT or GPT
+export MODEL_TYPE=${MODEL_TYPE:-"GPT"}
 # distributed plan patrickstar or torch
 export DIST_PLAN=${DIST_PLAN:-"patrickstar"}
 # check results of patrickstar and torch, which disable

@@ -3,3 +3,5 @@ pytest
 psutil
 ninja
 rich
+transformers==4.18.0
+scipy
