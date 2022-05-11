@@ -112,7 +112,7 @@ A quick-start benchmark script is [here](./examples/run_transformers.sh). It is 
 
 ### Limitations
 
-1. PatrickStar currently is not evaluated on DNN with parameters shared in different layers. For example, be careful to use it with tie-weight. But you can still label the tied weight to be managed by PyTorch, and make the remaining layers managed by PatrickStar chunk-based memory management.
+~~1. PatrickStar currently is not evaluated on DNN with parameters shared in different layers. For example, be careful to use it with tie-weight. But you can still label the tied weight to be managed by PyTorch, and make the remaining layers managed by PatrickStar chunk-based memory management.~~
 
 2. PatrickStar currently does not support gradient accumulation since it reuses grad and param chunks by default, although it could be implemented as a no chunk reuse version.
 In our opinion, GA is a patch for CUDA OOM, and lowers the computing efficiency if setting the batch size as 1,2.
