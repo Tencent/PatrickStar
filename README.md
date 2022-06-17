@@ -6,30 +6,30 @@
 See [CHANGE_LOG.md](./CHANGE_LOG.md).
 
 ### Meeting PatrickStar
-Pre-Trained Models (PTM) are becoming the hotspot of both NLP research and industry application. However, the training of PTMs requires enormous hardware resources, which makes it only accessible to small portion of people in the AI community. Now, **PatrickStar will make PTM training available to everyone!**
+Pre-Trained Models (PTM) are becoming the hotspot of both NLP research and industry application. However, the training of PTMs requires enormous hardware resources, making it only accessible to a small portion of people in the AI community. Now, **PatrickStar will make PTM training available to everyone!**
 
-Out of memory error (OOM) is the nightmare of every engineer training PTMs. To prevent such error, we often have to introduce more GPUs to store the model params. PatrickStar brings a better solution for such problem. With the **heterogeneous training** (DeepSpeed Zero Stage 3 also uses it), PatrickStar could make full use of both the CPU and GPU memory, so that you could use fewer GPUs to train larger models.
+Out-of-memory error (OOM) is the nightmare of every engineer training PTMs. We often have to introduce more GPUs to store the model params to prevent such errors. PatrickStar brings a better solution for such problem. With the **heterogeneous training** (DeepSpeed Zero Stage 3 also uses it), PatrickStar could fully use both the CPU and GPU memory so that you could use fewer GPUs to train larger models.
 
 ### System Design
-The idea of Patrick is like this. The non-model data (mainly activations) varies during training, but the current heterogenous training solutions are **statically** spliting the model data to CPU and GPU. To make better use of the GPU, PatrickStar proposes a **dynamic** memory scheduling with the help of a chunk-based memory management module. The memory management of PatrickStar supports offloading everything but the current computing part of the model to CPU to save GPU. In addition, chunk-based memory management is efficient for collective communication when scaling to multiple GPU.
+The idea of Patrick is like this. The non-model data (mainly activations) varies during training, but the current heterogeneous training solutions are **statically** splitting the model data to CPU and GPU. To better use the GPU, PatrickStar proposes a **dynamic** memory scheduling with the help of a chunk-based memory management module. The memory management of PatrickStar supports offloading everything but the current computing part of the model to the CPU to save GPU. In addition, chunk-based memory management is efficient for collective communication when scaling to multiple GPUs.
 See the paper and [this doc](./INSIDE.md) for the idea behind PatrickStar.
 
 ### Results
-In experiment, Patrickstar v0.4.3 is able to train a **18 Billion**(18B) param model with 8xTesla V100 GPU and 240GB GPU memory in WeChat datacenter node, whose network topology is like [this](./doc/yard_network_fabric.md). PatrickStar is over twice as large as the DeepSpeed. And the performance of PatrickStar is better for models of the same size as well. The pstar is PatrickStar v0.4.3. The deeps indicates performance of DeepSpeed v0.4.3 using the official example [DeepSpeed example](https://github.com/microsoft/DeepSpeedExamples/blob/master/Megatron-LM-v1.1.5-ZeRO3/examples/ds_pretrain_gpt2-zero3.sh) zero3 stage with activation optimzations openning by default.
+In experiment, Patrickstar v0.4.3 is able to train a **18 Billion**(18B) param model with 8xTesla V100 GPU and 240GB GPU memory in WeChat datacenter node, whose network topology is like [this](./doc/yard_network_fabric.md). PatrickStar is over twice as large as DeepSpeed. And the performance of PatrickStar is better for models of the same size as well. The pstar is PatrickStar v0.4.3. The deeps indicates performance of DeepSpeed v0.4.3 using the official example [DeepSpeed example](https://github.com/microsoft/DeepSpeedExamples/blob/master/Megatron-LM-v1.1.5-ZeRO3/examples/ds_pretrain_gpt2-zero3.sh) zero3 stage with activation optimizations opening by default.
 
 ![alt perf](./doc/mgpu_scalability.png "performance testing result")
 
-We also evaluated PatrickStar v0.4.3 on a single node of A100 SuperPod. It is able to train 68B model on 8xA100 with 1TB CPU memory, which is over 6x larger than DeepSpeed v0.5.7. Besides the model scale, PatrickStar is way more efficient than DeepSpeed. The benchmark scripts are in [here](./examples/benchmark).
+We also evaluated PatrickStar v0.4.3 on a single node of A100 SuperPod. It can train 68B model on 8xA100 with 1TB CPU memory, which is over 6x larger than DeepSpeed v0.5.7. Besides the model scale, PatrickStar is way more efficient than DeepSpeed. The benchmark scripts are in [here](./examples/benchmark).
 
 ![alt perf](./doc/one_node_perf_a100.png "performance testing result on SuperNode")
 
-Detail benchmark results on WeChat AI data center as well as NVIDIA SuperPod are posted on this [Google Doc](https://docs.google.com/spreadsheets/d/136CWc_jA_2zC4h1r-6dzD4PrOvp6aw6uCDchEyQv6sE/edit?usp=sharing).
+Detailed benchmark results on the WeChat AI data center and NVIDIA SuperPod are posted on this [Google Doc](https://docs.google.com/spreadsheets/d/136CWc_jA_2zC4h1r-6dzD4PrOvp6aw6uCDchEyQv6sE/edit?usp=sharing).
 
 
-Scale PatrickStar to multiple machine (node) on SuperPod.
-We succeed to train a GPT3-175B on 32 GPU. As far as we known, it is the first work
-to run GPT3 on such small GPU cluster.
-Microsoft used 10,000 V100 to pertrain GPT3.
+Scale PatrickStar to multiple machines (node) on SuperPod.
+We succeed in training a GPT3-175B on 32 GPU. As far as we know, it is the first work
+to run GPT3 on such a small GPU cluster.
+Microsoft used 10,000 V100 to pertain GPT3.
 Now you can finetune it or even pretrain your own one on 32 A100 GPU, amazing!
 
 ![alt perf](./doc/m_node_superpod.png "performance testing result on multiple Node of  SuperNode")
@@ -51,7 +51,7 @@ docker pull nvcr.io/nvidia/pytorch:21.06-py3
 ```
 
 ### Usage
-PatrickStar is based on PyTorch, which makes it easy to migrate a pytorch project. Here is a example of PatrickStar:
+PatrickStar is based on PyTorch, making it easy to migrate a pytorch project. Here is an example of PatrickStar:
 
 ```python
 from patrickstar.runtime import initialize_engine
@@ -101,22 +101,14 @@ for data in dataloader:
     optimizer.step()
 ```
 
-We use the same `config` format as [DeepSpeed configuration JSON](https://www.deepspeed.ai/docs/config-json/#optimizer-parameters), which mainly includes params of optimizer, loss scaler and some PatrickStar specific configuration.
+We use the same `config` format as [DeepSpeed configuration JSON](https://www.deepspeed.ai/docs/config-json/#optimizer-parameters), which mainly includes params of optimizer, loss scaler, and some PatrickStar-specific configuration.
 
-For some detail explanation of the above example, please check the guide [here](./GUIDE.md)
+For a detail explanation of the above example, please check the guide [here](./GUIDE.md)
 
 For more examples, please check [here](./examples).
 
-A quick-start benchmark script is [here](./examples/run_transformers.sh). It is executed with random generated data, therefore you do not need to prepare the real data. It also demostrated all of the optimization techniques for patricksatr. For more optimization tricks runing the benchmark see [Optimization Options](./doc/optimization_options.md).
+A quick-start benchmark script is [here](./examples/run_transformers.sh). It is executed with randomly generated data; therefore you do not need to prepare the real data. It also demonstrated all of the optimization techniques for patrickstar. For more optimization tricks running the benchmark see [Optimization Options](./doc/optimization_options.md).
 
-
-### Limitations
-
-~~1. PatrickStar currently is not evaluated on DNN with parameters shared in different layers. For example, be careful to use it with tie-weight. But you can still label the tied weight to be managed by PyTorch, and make the remaining layers managed by PatrickStar chunk-based memory management.~~
-
-2. PatrickStar currently does not support gradient accumulation since it reuses grad and param chunks by default, although it could be implemented as a no chunk reuse version.
-In our opinion, GA is a patch for CUDA OOM, and lowers the computing efficiency if setting the batch size as 1,2.
-PatrickStar has solved it very well; it surpasses DeepSpeed with GA significantly.
 
 ### License
 BSD 3-Clause License
