@@ -121,6 +121,16 @@ BSD 3-Clause License
   journal={arXiv preprint arXiv:2108.05818},
   year={2021}
 }
+@article{fang2022parallel,
+  title={Parallel Training of Pre-Trained Models via Chunk-Based Dynamic Memory Management},
+  author={Fang, Jiarui and Zhu, Zilin and Li, Shenggui and Su, Hui and Yu, Yang and Zhou, Jie and You, Yang},
+  journal={IEEE Transactions on Parallel and Distributed Systems},
+  volume={34},
+  number={1},
+  pages={304--315},
+  year={2022},
+  publisher={IEEE}
+}
 ```
 
 ### Contact Us
