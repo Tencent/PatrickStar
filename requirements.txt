@@ -1,7 +1,7 @@
-torch>=1.5.0
+torch
 pytest
 psutil
 ninja
 rich
-transformers==4.18.0
+transformers
 scipy
